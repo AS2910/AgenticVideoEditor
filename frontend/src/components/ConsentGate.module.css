@@ -1,0 +1,20 @@
+.overlay {
+  position: fixed; inset: 0;
+  display: grid; place-items: center;
+  background: rgba(5, 8, 12, 0.9);
+}
+.modal {
+  width: min(480px, 90vw);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 32px;
+}
+.title { margin: 0 0 20px; font-size: 20px; }
+.consent { display: flex; gap: 12px; align-items: flex-start; color: var(--text); margin-bottom: 24px; }
+.continue {
+  width: 100%; padding: 12px;
+  background: var(--electric); color: white; border: none; border-radius: 8px;
+  box-shadow: 0 0 20px rgba(46, 107, 255, 0.4);
+}
+.continue:disabled { background: var(--border); color: var(--muted); box-shadow: none; cursor: not-allowed; }
