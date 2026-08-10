@@ -1,0 +1,14 @@
+.bar { display: flex; align-items: center; gap: 12px; }
+.export {
+  padding: 10px 20px; background: transparent; color: var(--cyan);
+  border: 1px solid var(--cyan); border-radius: 8px;
+  box-shadow: 0 0 12px rgba(34, 211, 238, 0.3);
+  transition: box-shadow 150ms ease;
+}
+.export:hover { box-shadow: 0 0 20px rgba(34, 211, 238, 0.55); }
+.strip {
+  flex: 1; height: 20px; display: flex;
+  border-radius: 6px; overflow: hidden; border: 1px solid var(--border);
+}
+.original { background: var(--surface); }
+.edited { background: var(--cyan); box-shadow: inset 0 0 12px rgba(34, 211, 238, 0.6); }
