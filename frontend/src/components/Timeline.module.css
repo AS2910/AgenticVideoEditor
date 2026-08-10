@@ -1,0 +1,29 @@
+.timeline { padding: 8px 0; }
+.track {
+  position: relative; height: 56px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+}
+.word {
+  position: absolute; top: 8px; height: 40px;
+  background: transparent; color: var(--text);
+  border: 1px solid var(--border); border-radius: 6px;
+  font-size: 12px; white-space: nowrap; overflow: hidden;
+  transition: border-color 150ms ease, box-shadow 150ms ease;
+}
+.word:hover {
+  border-color: var(--cyan);
+  box-shadow: 0 0 10px rgba(34, 211, 238, 0.35);
+}
+.selection {
+  position: absolute; top: 0; height: 100%;
+  background: rgba(34, 211, 238, 0.18);
+  border: 1px solid var(--cyan);
+  box-shadow: 0 0 18px rgba(34, 211, 238, 0.5);
+  pointer-events: none; border-radius: 6px;
+  transition: left 200ms ease, width 200ms ease;
+}
+.playhead {
+  position: absolute; top: -4px; height: calc(100% + 8px); width: 2px;
+  background: var(--electric); box-shadow: 0 0 10px var(--electric);
+  pointer-events: none;
+}
