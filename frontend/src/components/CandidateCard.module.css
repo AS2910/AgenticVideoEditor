@@ -1,0 +1,54 @@
+.card {
+  background: var(--bg); border: 1px solid var(--border); border-radius: 12px;
+  padding: 16px; display: flex; flex-direction: column; gap: 12px;
+}
+.newText { font-size: 18px; font-weight: 600; }
+.badge {
+  align-self: flex-start; color: var(--pass);
+  border: 1px solid var(--pass); border-radius: 999px;
+  padding: 2px 10px; font-size: 12px;
+  box-shadow: 0 0 12px rgba(34, 211, 238, 0.4);
+  animation: pulse 2.4s ease-in-out infinite;
+}
+@keyframes pulse {
+  0%, 100% { box-shadow: 0 0 12px rgba(34, 211, 238, 0.4); }
+  50%      { box-shadow: 0 0 20px rgba(34, 211, 238, 0.7); }
+}
+.badgeFail {
+  align-self: flex-start; color: var(--warn);
+  border: 1px solid var(--warn); border-radius: 999px;
+  padding: 2px 10px; font-size: 12px;
+}
+.metrics { display: flex; flex-direction: column; gap: 8px; }
+.metric {
+  display: grid; grid-template-columns: 120px 1fr 40px; gap: 8px;
+  align-items: center; font-size: 12px;
+}
+.metricLabel { color: var(--muted); }
+.barTrack { height: 8px; background: var(--surface); border-radius: 4px; overflow: hidden; }
+.barFillOk {
+  height: 100%; background: var(--cyan);
+  box-shadow: 0 0 10px var(--cyan);
+  transition: width 400ms ease;
+}
+.barFillWarn {
+  height: 100%; background: var(--warn);
+  box-shadow: 0 0 10px var(--warn);
+  transition: width 400ms ease;
+}
+.metricValue { text-align: right; color: var(--text); }
+.warnings { margin: 0; padding-left: 18px; color: var(--warn); font-size: 12px; }
+.actions { display: flex; gap: 8px; }
+.approve {
+  flex: 1; padding: 10px; background: var(--electric); color: white;
+  border: none; border-radius: 8px;
+  box-shadow: 0 0 16px rgba(46, 107, 255, 0.4);
+  transition: box-shadow 150ms ease;
+}
+.approve:not(:disabled):hover { box-shadow: 0 0 24px rgba(46, 107, 255, 0.65); }
+.approve:disabled { background: var(--border); color: var(--muted); box-shadow: none; cursor: not-allowed; }
+.tryAgain {
+  padding: 10px 16px; background: transparent; color: var(--text);
+  border: 1px solid var(--border); border-radius: 8px;
+}
+.tryAgain:hover { border-color: var(--muted); }
