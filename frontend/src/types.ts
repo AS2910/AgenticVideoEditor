@@ -63,7 +63,8 @@ export interface Segment {
   artifact: MediaArtifact | null
 }
 
-export interface ExportManifest { segments: Segment[] }
+/** `render` is the finished MP4, stored like any other artifact. */
+export interface ExportManifest { segments: Segment[]; render: MediaArtifact }
 
 export interface EditRequest {
   prompt: string

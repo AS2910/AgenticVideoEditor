@@ -13,7 +13,7 @@ from app.domain.models import (
 )
 from app.domain.transcript import snap_to_word_boundaries
 from app.config import load_settings
-from app.media import ingest
+from app.media import ffmpeg, ingest
 from app.adapters.mock import MockLipSyncAdapter
 from app.adapters.openai_whisper import TranscriptionError
 from app.adapters.selection import select_continuity, select_transcriber, select_voice
@@ -23,6 +23,7 @@ from app.orchestrator.pipeline import run_edit
 from app.store.repository import ProjectRepository
 from app.store.artifacts import ArtifactStore
 from app.render.renderer import render
+from app.render.compose import compose
 from app.jobs.store import JobStore, Job
 from app.jobs.runner import JobRunner
 
@@ -313,7 +314,16 @@ def export_project(project_id: str) -> dict:
     if record is None:
         raise HTTPException(status_code=404, detail="project not found")
     manifest = render(record.source, repo.list_edits(project_id))
+    # Synchronous: the video is stream-copied and only the audio re-encoded,
+    # so even a 3-minute source renders in seconds.
+    with tempfile.TemporaryDirectory() as tmp:
+        path = compose(record.source, manifest.segments, Path(tmp) / "export.mp4")
+        rendered = artifacts.put_file(
+            project_id, path, kind="video", container="mp4",
+            duration=ffmpeg.duration_of(path),
+        )
     return {
+        "render": _artifact_dict(rendered),
         "segments": [
             {
                 "start": s.start,

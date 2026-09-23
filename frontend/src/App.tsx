@@ -34,6 +34,7 @@ export default function App() {
   const [generating, setGenerating] = useState(false)
   const [progress, setProgress] = useState<{ value: number; step: string } | null>(null)
   const [segments, setSegments] = useState<Segment[]>([])
+  const [download, setDownload] = useState<{ url: string; filename: string } | null>(null)
   const [error, setError] = useState<string | null>(null)
   const previewToken = useRef(0)
 
@@ -117,6 +118,7 @@ export default function App() {
     try {
       await approveEdit(projectId, candidate.candidate_id)
       setCandidate(null)
+      setDownload(null) // the last render no longer includes every approved edit
     } catch (e) {
       // Never silently drop the candidate — leave it on screen to iterate on.
       if (e instanceof ApiError && e.status === 422) {
@@ -133,6 +135,11 @@ export default function App() {
     try {
       const manifest = await exportProject(projectId)
       setSegments(manifest.segments)
+      const stem = (project?.filename ?? 'video').replace(/\.[^.]+$/, '')
+      setDownload({
+        url: artifactUrl(projectId, manifest.render.sha256),
+        filename: `${stem}-edited.mp4`,
+      })
     } catch {
       setError('Export failed.')
     }
@@ -175,7 +182,7 @@ export default function App() {
           currentTime={currentTime}
           onSelect={setSelection}
         />
-        <ExportBar segments={segments} onExport={runExport} />
+        <ExportBar segments={segments} onExport={runExport} download={download} />
         {error && <div className={styles.error}>{error}</div>}
       </div>
       <div className={styles.right}>

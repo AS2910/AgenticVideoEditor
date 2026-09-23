@@ -195,9 +195,16 @@ def test_a_take_that_cannot_be_fitted_is_skipped_on_regeneration(store):
     assert candidate.continuity.prosody == 0.9
 
 
-def test_a_first_take_that_cannot_be_fitted_fails_the_edit(store):
+def test_a_first_take_that_cannot_be_fitted_is_regenerated(store):
+    # Take lengths vary per call, so the next take may well fit.
+    candidate, voice, _ = regenerate(store, [SpanMismatch(2.0, 0.9), 0.9])
+    assert voice.calls == 2
+    assert candidate.continuity.prosody == 0.9
+
+
+def test_the_edit_fails_only_when_no_take_fits(store):
     with pytest.raises(SpanMismatch):
-        regenerate(store, [SpanMismatch(2.0, 0.9)])
+        regenerate(store, [SpanMismatch(2.0, 0.9)] * 3)
 
 
 def test_lip_sync_runs_once_on_the_winning_audio(store):

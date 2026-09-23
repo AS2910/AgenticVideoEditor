@@ -116,8 +116,25 @@ def test_fit_duration_lands_on_the_target(tmp_path, target):
     assert ffmpeg.duration_of(path) == pytest.approx(target, rel=0.02)
 
 
-@pytest.mark.parametrize("target", [0.5, 2.0])
+def test_a_slightly_short_line_is_slowed_then_centred_in_silence(tmp_path):
+    # 1.0 s of speech into 1.4 s: slowed to the 0.8 floor (1.25 s), then
+    # 0.075 s of silence either side.
+    src, _ = ffmpeg.generate_tone(tmp_path / "in.wav", 1.0, 440)
+    path, duration = ffmpeg.fit_duration(src, tmp_path / "out.wav", 1.4)
+    assert duration == pytest.approx(1.4, abs=0.01)
+    import wave
+    import numpy as np
+    with wave.open(str(path), "rb") as w:
+        rate = w.getframerate()
+        x = np.frombuffer(w.readframes(w.getnframes()), dtype="<i2").astype(float)
+    lead, middle, tail = x[: int(0.06 * rate)], x[int(0.3 * rate):int(1.1 * rate)], x[-int(0.06 * rate):]
+    assert np.max(np.abs(lead)) == 0 and np.max(np.abs(tail)) == 0
+    assert np.sqrt(np.mean(middle ** 2)) > 1000
+
+
+@pytest.mark.parametrize("target", [0.5, 3.0])
 def test_fit_duration_refuses_a_stretch_that_would_sound_wrong(tmp_path, target):
+    # 0.5: would need 2x speed-up. 3.0: even slowed, speech fills under 60%.
     src, _ = ffmpeg.generate_tone(tmp_path / "in.wav", 1.0, 440)
     with pytest.raises(ffmpeg.SpanMismatch) as err:
         ffmpeg.fit_duration(src, tmp_path / "out.wav", target)

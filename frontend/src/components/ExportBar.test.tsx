@@ -23,6 +23,21 @@ describe('ExportBar', () => {
     expect(onExport).toHaveBeenCalledOnce()
   })
 
+  it('offers the rendered MP4 as a download once there is one', () => {
+    render(
+      <ExportBar segments={SEGMENTS} onExport={() => {}}
+        download={{ url: '/api/projects/p1/artifacts/abc', filename: 'ad-edited.mp4' }} />,
+    )
+    const link = screen.getByRole('link', { name: /download mp4/i })
+    expect(link).toHaveAttribute('href', '/api/projects/p1/artifacts/abc')
+    expect(link).toHaveAttribute('download', 'ad-edited.mp4')
+  })
+
+  it('offers no download before an export has run', () => {
+    render(<ExportBar segments={[]} onExport={() => {}} />)
+    expect(screen.queryByRole('link', { name: /download/i })).not.toBeInTheDocument()
+  })
+
   it('renders no strip before an export has run', () => {
     render(<ExportBar segments={[]} onExport={() => {}} />)
     expect(screen.queryAllByTestId('segment')).toHaveLength(0)

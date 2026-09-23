@@ -1,7 +1,7 @@
 # Real Pipeline — Phased Roadmap
 
 **Date:** 2026-09-22
-**Status:** Phases 0–4a and 6a done and clean (2026-09-23). Phases 4b and 5 moved to the **Backlog** — both are blocked on vendor access, not on code.
+**Status:** Phases 0–4a, 6a and 7 done and clean (2026-09-23). Phases 4b and 5 moved to the **Backlog** — both are blocked on vendor access, not on code.
 **Supersedes nothing.** Builds on `2026-07-14-walking-skeleton.md` and `2026-07-17-voltage-frontend.md`.
 
 **Goal:** turn the mocked walking skeleton into a system that ingests a real video, produces a real re-voiced and lip-synced segment, verifies continuity with real signal analysis, and exports a real playable file — honoring the v1 design spec end-to-end.
@@ -144,10 +144,13 @@ Grouped into three milestones. Each milestone is independently useful — you ca
   - Calibrate thresholds against a labeled good/bad set (spec §9); the current flat 0.8 is a placeholder
   - **Exit:** scores are measured, not asserted; a deliberately bad edit reliably fails.
 
-- [ ] **Phase 7 · Real ffmpeg render**
-  - Manifest → actual composited MP4: concat, audio crossfades at splices, loudness normalization across boundaries
-  - Downloadable export from the UI
-  - **Exit:** you download a video file that plays and sounds seamless.
+- [x] **Phase 7 · Real ffmpeg render** — **done 2026-09-23** (plan: `2026-09-23-phase-7-real-render.md`)
+  - `app/render/compose.py`: source audio decoded at 48 kHz in its own channel layout; each edited span replaced by its edit's (already level-matched) audio with 20 ms equal-power crossfades inside the span; muxed as H.264 (stream-copied when the source is H.264, re-encoded otherwise) + AAC, `+faststart`
+  - **Video in edited spans is the original footage** — lip-sync is backlogged and the mock frames are a flat colour; `use_generated_frames` is the switch for Phase 5
+  - Fixed: overlapping approvals now resolve last-write-wins (the manifest used to emit both); a partly-overwritten edit contributes the right part of its audio
+  - Fixed on the way (found live): a take slightly *shorter* than the selection was refused; it is now slowed ≤0.8× and centred in silence, and an unfittable take is regenerated rather than failing the job
+  - Export returns the render; the UI offers "Download MP4", cleared when a new edit is approved
+  - **Exit met:** 287 backend + 62 frontend tests. Live: sample → "30% off" (prosody 0.97) → approve → export → a 2.300 s H.264/AAC MP4 that Whisper transcribes as **"Get 30% off today only."**; seam discontinuities 0.036/0.046 vs 0.198 for ordinary speech.
 
 - [ ] **Phase 8 · Real intent parsing**
   - Replace the regex planner with transcript-aware LLM intent parsing — handles "make it sound more urgent", "drop the price mention", not just `change "X" to "Y"`

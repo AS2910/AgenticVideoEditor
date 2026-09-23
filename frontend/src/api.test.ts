@@ -137,7 +137,7 @@ describe('api client', () => {
   })
 
   it('exportProject posts to the export route', async () => {
-    const f = mockFetch(200, { segments: [] })
+    const f = mockFetch(200, { segments: [], render: null })
     vi.stubGlobal('fetch', f)
     await exportProject('p1')
     expect(f.mock.calls[0][0]).toBe('/api/projects/p1/export')

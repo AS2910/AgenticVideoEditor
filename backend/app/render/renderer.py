@@ -9,6 +9,10 @@ class RenderSegment:
     kind: str   # "original" | "edited"
     ref: str    # source filename for originals, artifact sha256 for edited spans
     artifact: MediaArtifact | None = None  # the media backing this span
+    # The approved edit that owns an edited span. A span can be only part of
+    # its edit (a later approval took the rest), so the compositor needs the
+    # edit itself to find where in the edit's audio this span begins.
+    edit: ApprovedEdit | None = None
 
 
 @dataclass(frozen=True)
@@ -19,24 +23,36 @@ class RenderManifest:
 def render(source: Source, edits: list[ApprovedEdit]) -> RenderManifest:
     """Composite the immutable source with approved edits into a segment list.
 
-    Edited spans replace their region; original footage fills every gap.
-    Real ffmpeg compositing replaces this in a later plan.
+    `edits` is in approval order, and the edit stack is last-write-wins: a
+    later approval owns any span it overlaps, and an earlier edit keeps only
+    what is left of it. Original footage fills every gap. The segments tile
+    [0, duration] exactly.
     """
-    ordered = sorted(edits, key=lambda e: e.plan.selection.start)
-    segments: list[RenderSegment] = []
-    cursor = 0.0
-    # Overlapping edits are the caller's responsibility to prevent. If two edits
-    # overlap, the later-starting one's span wins and a zero/negative gap is skipped.
-    for e in ordered:
-        sel = e.plan.selection
-        if sel.start > cursor:
+    # Each piece is (start, end, owning edit or None for original footage).
+    pieces: list[tuple[float, float, ApprovedEdit | None]] = [(0.0, source.duration, None)]
+    for e in edits:
+        start = max(0.0, e.plan.selection.start)
+        end = min(source.duration, e.plan.selection.end)
+        if end <= start:
+            continue
+        kept: list[tuple[float, float, ApprovedEdit | None]] = []
+        for a, b, owner in pieces:
+            if b <= start or a >= end:
+                kept.append((a, b, owner))
+                continue
+            if a < start:
+                kept.append((a, start, owner))
+            if b > end:
+                kept.append((end, b, owner))
+        kept.append((start, end, e))
+        pieces = sorted(kept, key=lambda p: p[0])
+
+    segments = []
+    for a, b, owner in pieces:
+        if owner is None:
+            segments.append(RenderSegment(a, b, "original", source.filename, source.media))
+        else:
             segments.append(
-                RenderSegment(cursor, sel.start, "original", source.filename, source.media)
+                RenderSegment(a, b, "edited", owner.frames.sha256, owner.frames, owner)
             )
-        segments.append(RenderSegment(sel.start, sel.end, "edited", e.frames.sha256, e.frames))
-        cursor = max(cursor, sel.end)
-    if cursor < source.duration:
-        segments.append(
-            RenderSegment(cursor, source.duration, "original", source.filename, source.media)
-        )
     return RenderManifest(segments=tuple(segments))

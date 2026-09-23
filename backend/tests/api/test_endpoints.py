@@ -508,3 +508,36 @@ def test_health_reports_the_continuity_engine(client, monkeypatch):
     import app.api.main as main
     monkeypatch.setattr(main, "continuity_label", "measured:prosody,audio_integration")
     assert client.get("/health").json()["continuity"] == "measured:prosody,audio_integration"
+
+
+# ── real render (Phase 7) ────────────────────────────────────────────────────
+
+def test_export_renders_a_real_mp4_you_can_download(client, project):
+    candidate = preview(client)
+    client.post("/projects/p1/edits", json={"candidate_id": candidate["candidate_id"]})
+
+    body = client.post("/projects/p1/export").json()
+    rendered = body["render"]
+    assert rendered["kind"] == "video" and rendered["container"] == "mp4"
+    assert rendered["duration"] == pytest.approx(project["duration"], abs=0.05)
+
+    download = client.get(f"/projects/p1/artifacts/{rendered['sha256']}")
+    assert download.status_code == 200
+    assert download.headers["content-type"] == "video/mp4"
+
+
+def test_export_with_no_edits_still_renders_a_clean_copy(client, project):
+    rendered = client.post("/projects/p1/export").json()["render"]
+    assert rendered["duration"] == pytest.approx(project["duration"], abs=0.05)
+
+
+def test_re_approving_a_span_exports_one_edit_not_two(client, project):
+    first = preview(client)
+    client.post("/projects/p1/edits", json={"candidate_id": first["candidate_id"]})
+    second = preview(client, prompt='change "20% off" to "40% off"')
+    client.post("/projects/p1/edits", json={"candidate_id": second["candidate_id"]})
+
+    segments = client.post("/projects/p1/export").json()["segments"]
+    edited = [s for s in segments if s["kind"] == "edited"]
+    assert len(edited) == 1
+    assert edited[0]["ref"] == second["frames"]["sha256"]

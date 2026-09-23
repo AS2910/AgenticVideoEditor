@@ -38,6 +38,10 @@ class FFmpegNotInstalled(FFmpegError):
 # Beyond this it audibly sounds rushed or dragged, so the edit is refused.
 MIN_TEMPO = 0.8
 MAX_TEMPO = 1.25
+# A line shorter than the selection is slowed by at most MIN_TEMPO and the rest
+# padded with silence, split both sides — a short pause sounds natural where
+# over-stretched speech does not. Below this share of the span it is refused.
+MIN_SPEECH_SHARE = 0.6
 
 
 class SpanMismatch(NonRetryableError):
@@ -171,21 +175,28 @@ def pcm_to_wav(
 def fit_duration(
     source: str | Path, dest: str | Path, target: float,
 ) -> tuple[Path, float]:
-    """Time-stretch speech to exactly `target` seconds, pitch unchanged.
+    """Fit speech to exactly `target` seconds, pitch unchanged.
 
-    Raises SpanMismatch when that needs a tempo outside [MIN_TEMPO, MAX_TEMPO].
-    `apad` + `-t` make the length exact rather than approximately right, so
-    the spliced audio covers the selection and nothing past it.
+    Too long: sped up by at most MAX_TEMPO, else SpanMismatch.
+    Too short: slowed by at most MIN_TEMPO, then centred in silence — refused
+    only if the speech would fill less than MIN_SPEECH_SHARE of the span.
+    `-t` makes the length exact rather than approximately right, so the
+    spliced audio covers the selection and nothing past it.
     """
     natural = duration_of(source)
     tempo = natural / target
-    if not MIN_TEMPO <= tempo <= MAX_TEMPO:
+    if tempo > MAX_TEMPO:
         raise SpanMismatch(natural, target)
+    tempo = max(tempo, MIN_TEMPO)
+    speech = natural / tempo
+    if speech < MIN_SPEECH_SHARE * target:
+        raise SpanMismatch(natural, target)
+    lead_ms = int((target - speech) / 2 * 1000)
     dest = Path(dest)
     dest.parent.mkdir(parents=True, exist_ok=True)
     _run(FFMPEG, [
         "-y", "-loglevel", "error", *_BITEXACT_IN, "-i", str(source),
-        "-af", f"atempo={tempo:.6f},apad", "-t", f"{target:.3f}",
+        "-af", f"atempo={tempo:.6f},adelay={lead_ms}:all=1,apad", "-t", f"{target:.3f}",
         "-c:a", "pcm_s16le", *_BITEXACT_OUT, str(dest),
     ])
     return dest, duration_of(dest)

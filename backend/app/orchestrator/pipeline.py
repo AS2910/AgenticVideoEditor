@@ -61,6 +61,7 @@ def run_edit(
     best: Assessment | None = None
     made = 0
     notes: list[str] = []
+    unfitted: SpanMismatch | None = None
 
     for take in range(1, takes + 1):
         span = 0.6 / takes
@@ -74,10 +75,11 @@ def run_edit(
                 raise
             notes.append("Stopped regenerating: the voice budget is used up.")
             break
-        except SpanMismatch:
-            if best is None:
-                raise
-            made += 1  # a paid take, just one that could not be used
+        except SpanMismatch as exc:
+            # Take lengths vary per call, so another take may fit. Paid all
+            # the same, so it still counts as a take.
+            unfitted = exc
+            made += 1
             continue
         made += 1
 
@@ -87,6 +89,10 @@ def run_edit(
             best = assessed
         if assessed.report.passed:
             break
+
+    if best is None:
+        # No take fitted the selection (or budget ran out before any did).
+        raise unfitted or RuntimeError("no take was generated")
 
     report(0.75, "Matching mouth movement")
     frames = lipsync.sync(source, plan, best.audio)

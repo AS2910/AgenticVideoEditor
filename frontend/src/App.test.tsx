@@ -35,6 +35,8 @@ const CANDIDATE = {
   continuity: PASSING_CONTINUITY,
 }
 
+const RENDER = { kind: 'video', sha256: 'r'.repeat(64), duration: 2.3, container: 'mp4' }
+
 const SEGMENTS = [
   { start: 0, end: 0.4, kind: 'original', ref: 'sample-ad.mp4', artifact: null },
   { start: 0.4, end: 0.9, kind: 'edited', ref: FRAMES.sha256, artifact: FRAMES },
@@ -76,7 +78,7 @@ function routeFetch(approveStatus = 200, job: unknown = JOB_DONE) {
       }
       return ok({ edit_id: 'e1', continuity: PASSING_CONTINUITY })
     }
-    if (url.endsWith('/export')) return ok({ segments: SEGMENTS })
+    if (url.endsWith('/export')) return ok({ segments: SEGMENTS, render: RENDER })
     if (url.endsWith('/projects')) return ok(PROJECT)
     // The sample clip is fetched from /public, then uploaded like any file.
     if (url.endsWith('/sample-ad.mp4')) {
@@ -117,6 +119,9 @@ describe('App full journey', () => {
 
     await user.click(screen.getByRole('button', { name: /export/i }))
     await waitFor(() => expect(screen.getAllByTestId('segment')).toHaveLength(3))
+    const link = screen.getByRole('link', { name: /download mp4/i })
+    expect(link).toHaveAttribute('href', `/api/projects/p1/artifacts/${'r'.repeat(64)}`)
+    expect(link).toHaveAttribute('download', 'sample-ad-edited.mp4')
   })
 
   it('shows the job step and progress while generation runs', async () => {
