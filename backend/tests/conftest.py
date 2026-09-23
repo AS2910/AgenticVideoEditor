@@ -17,6 +17,10 @@ os.environ["AVE_DATA_DIR"] = _ARTIFACT_DIR
 # setdefault, so this wins over `backend/.env` and keeps the suite on the mock
 # transcriber: no network, no spend, no dependence on whose machine it runs on.
 os.environ["OPENAI_API_KEY"] = ""
+# Same for the paid voice vendor, and dry-run off so tests see the real
+# adapter-selection logic rather than whatever the developer's shell set.
+os.environ["ELEVENLABS_API_KEY"] = ""
+os.environ["AVE_DRY_RUN"] = ""
 
 
 @pytest.fixture(scope="session", autouse=True)

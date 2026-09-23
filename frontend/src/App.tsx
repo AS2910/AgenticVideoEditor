@@ -197,6 +197,7 @@ export default function App() {
               candidate={candidate}
               onApprove={approve}
               onTryAgain={() => setCandidate(null)}
+              projectId={project.project_id}
             />
           )}
         </ChatPanel>

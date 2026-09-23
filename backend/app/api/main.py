@@ -14,8 +14,10 @@ from app.domain.models import (
 from app.domain.transcript import snap_to_word_boundaries
 from app.config import load_settings
 from app.media import ingest
-from app.adapters.mock import MockTranscriptionAdapter, MockVoiceAdapter, MockLipSyncAdapter
-from app.adapters.openai_whisper import WhisperTranscriptionAdapter, TranscriptionError
+from app.adapters.mock import MockLipSyncAdapter
+from app.adapters.openai_whisper import TranscriptionError
+from app.adapters.selection import select_transcriber, select_voice
+from app.budget import VoiceBudget, BudgetExceeded
 from app.continuity.engine import ContinuityEngine
 from app.orchestrator.planner import build_edit_plan
 from app.orchestrator.pipeline import run_edit
@@ -35,14 +37,11 @@ settings = load_settings()
 # Wiring (module-level singletons for this in-memory slice).
 repo = ProjectRepository()
 artifacts = ArtifactStore(settings.data_dir / "artifacts")
-# Real transcription when a key is configured; the deterministic mock otherwise,
-# so the app still runs offline and free with no credentials.
-transcriber = (
-    WhisperTranscriptionAdapter(settings.openai_api_key)
-    if settings.has_openai
-    else MockTranscriptionAdapter()
-)
-voice = MockVoiceAdapter(artifacts)
+# Real vendors when a key is configured, the deterministic mocks otherwise, and
+# the mocks always under AVE_DRY_RUN — so the app runs offline and free.
+budget = VoiceBudget(ceiling=settings.voice_budget_chars)
+transcriber, transcriber_label = select_transcriber(settings)
+voice, voice_label = select_voice(settings, artifacts, budget)
 lipsync = MockLipSyncAdapter(artifacts)
 continuity = ContinuityEngine()
 jobs = JobStore()
@@ -53,8 +52,8 @@ runner = JobRunner(jobs)
 def health() -> dict:
     """Which capabilities are real in this process — handy when a key is missing."""
     return {
-        "transcription": "openai:whisper-1" if settings.has_openai else "mock",
-        "voice": "mock",
+        "transcription": transcriber_label,
+        "voice": voice_label,
         "lipsync": "mock",
         "continuity": "mock",
     }
@@ -250,12 +249,22 @@ def preview_edit(project_id: str, req: EditRequest) -> dict:
 
     selection = snap_to_word_boundaries(record.transcript, Selection(req.start, req.end))
     plan = build_edit_plan(req.prompt, selection, req.voice_profile_id)
+    # Refuse an unaffordable edit here, before a job exists, rather than as a
+    # failed job. The adapter still charges per attempt inside the job, so
+    # retries stay capped too.
+    cost = voice.cost_of(plan)
+    if not budget.can_afford(project_id, cost):
+        raise HTTPException(
+            status_code=402,
+            detail=str(BudgetExceeded(cost, budget.remaining(project_id))),
+        )
     candidate_id = repo.next_candidate_id(project_id)
     job = jobs.create("preview", project_id)
 
     def work(report) -> dict:
         candidate = run_edit(
             candidate_id, plan, record.source, voice, lipsync, continuity, report,
+            transcript=record.transcript,
         )
         # Retained so approval commits this exact candidate rather than
         # re-running generation, which real vendors would not reproduce

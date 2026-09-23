@@ -100,10 +100,19 @@ def test_upload_without_an_audio_track_is_rejected(client, sample_video_without_
 
 
 def test_health_reports_which_capabilities_are_real(client):
-    # The suite blanks OPENAI_API_KEY, so this process is on the mock.
+    # The suite blanks both vendor keys, so this process is on the mocks.
     body = client.get("/health").json()
     assert body["transcription"] == "mock"
     assert body["voice"] == "mock"
+
+
+def test_health_reports_the_voice_label_the_process_selected(client, monkeypatch):
+    import app.api.main as main
+    monkeypatch.setattr(main, "voice_label", "elevenlabs:eleven_multilingual_v2:stock")
+    monkeypatch.setattr(main, "transcriber_label", "dry-run")
+    body = client.get("/health").json()
+    assert body["voice"] == "elevenlabs:eleven_multilingual_v2:stock"
+    assert body["transcription"] == "dry-run"
 
 
 def test_upload_of_a_non_media_file_is_rejected(client, tmp_path):
@@ -293,7 +302,12 @@ def test_a_vendor_failure_retries_then_fails_the_job_cleanly(client, project, mo
     from app.adapters.base import VendorError
 
     class BrokenVoice:
-        def synthesize(self, source, plan):
+        identity = "mock"
+
+        def cost_of(self, plan):
+            return 0
+
+        def synthesize(self, source, plan, transcript=None):
             raise VendorError("vendor is down")
 
     monkeypatch.setattr(main, "voice", BrokenVoice())
@@ -314,7 +328,12 @@ def test_the_api_stays_usable_after_a_failed_job(client, project, monkeypatch):
     from app.adapters.base import VendorError
 
     class BrokenVoice:
-        def synthesize(self, source, plan):
+        identity = "mock"
+
+        def cost_of(self, plan):
+            return 0
+
+        def synthesize(self, source, plan, transcript=None):
             raise VendorError("down")
 
     monkeypatch.setattr(main, "voice", BrokenVoice())
@@ -390,3 +409,70 @@ def test_approve_unknown_candidate_is_404(client, project):
 
 def test_export_unknown_project_is_404(client):
     assert client.post("/projects/nope/export").status_code == 404
+
+
+# ── voice budget (Phase 4a) ──────────────────────────────────────────────────
+
+class PricedVoice:
+    """The mock voice with a price tag, standing in for a paid vendor."""
+
+    identity = "stock"
+
+    def __init__(self, inner, price):
+        self._inner, self._price = inner, price
+        self.calls = 0
+
+    def cost_of(self, plan):
+        return self._price
+
+    def synthesize(self, source, plan, transcript=None):
+        self.calls += 1
+        return self._inner.synthesize(source, plan, transcript)
+
+
+def test_an_edit_the_project_cannot_afford_is_refused_before_any_job(client, project, monkeypatch):
+    import app.api.main as main
+    from app.budget import VoiceBudget
+    voice = PricedVoice(main.voice, price=50)
+    monkeypatch.setattr(main, "voice", voice)
+    monkeypatch.setattr(main, "budget", VoiceBudget(ceiling=10))
+
+    resp = client.post("/projects/p1/edits/preview", json=PREVIEW)
+
+    assert resp.status_code == 402
+    assert "10 remain" in resp.json()["detail"]
+    assert jobs.get("j1") is None      # no job was created
+    assert voice.calls == 0            # and nothing was generated
+
+
+def test_an_affordable_paid_edit_goes_ahead_and_is_labelled_stock(client, project, monkeypatch):
+    import app.api.main as main
+    from app.budget import VoiceBudget
+    from app.orchestrator.pipeline import STOCK_VOICE_WARNING
+    monkeypatch.setattr(main, "voice", PricedVoice(main.voice, price=5))
+    monkeypatch.setattr(main, "budget", VoiceBudget(ceiling=10))
+
+    candidate = preview(client)
+
+    assert STOCK_VOICE_WARNING in candidate["continuity"]["warnings"]
+
+
+def test_a_refusal_inside_the_job_reaches_the_user_verbatim(client, project, monkeypatch):
+    import app.api.main as main
+    from app.media.ffmpeg import SpanMismatch
+
+    class TooLong:
+        identity = "stock"
+
+        def cost_of(self, plan):
+            return 0
+
+        def synthesize(self, source, plan, transcript=None):
+            raise SpanMismatch(natural=2.0, target=0.5)
+
+    monkeypatch.setattr(main, "voice", TooLong())
+    job = await_job(client, start_preview(client)["job_id"])
+
+    assert job["status"] == "failed"
+    assert job["attempts"] == 1
+    assert "widen the selection" in job["error"]

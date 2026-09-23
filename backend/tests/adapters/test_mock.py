@@ -92,3 +92,9 @@ def test_degenerate_selection_still_encodes(store):
     artifact = MockVoiceAdapter(store).synthesize(SOURCE, plan_with(span=(1.0, 1.0)))
     assert Path(artifact.path).is_file()
     assert artifact.duration > 0
+
+
+def test_the_mock_voice_is_free_and_says_so(store):
+    voice = MockVoiceAdapter(store)
+    assert voice.identity == "mock"
+    assert voice.cost_of(PLAN) == 0

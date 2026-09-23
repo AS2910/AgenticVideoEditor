@@ -25,14 +25,32 @@ const FAILING: Candidate = {
 
 describe('CandidateCard', () => {
   it('reports the real generated media backing the candidate', () => {
-    render(<CandidateCard candidate={PASSING} onApprove={() => {}} onTryAgain={() => {}} />)
+    render(<CandidateCard candidate={PASSING} onApprove={() => {}} onTryAgain={() => {}} projectId="p1" />)
     const media = screen.getByTestId('candidate-media')
     expect(media).toHaveTextContent('0.90s generated')
     expect(media).toHaveTextContent('WAV + MP4')
   })
 
+  it('plays the generated audio straight from the artifact store', () => {
+    render(<CandidateCard candidate={PASSING} onApprove={() => {}} onTryAgain={() => {}} projectId="p1" />)
+    const player = screen.getByTestId('candidate-audio')
+    expect(player.tagName).toBe('AUDIO')
+    expect(player).toHaveAttribute('src', `/api/projects/p1/artifacts/${'a'.repeat(64)}`)
+    expect(player).toHaveAttribute('controls')
+  })
+
+  it('shows the stock-voice label the backend attaches', () => {
+    const stock: Candidate = {
+      ...PASSING,
+      continuity: { ...PASSING.continuity, warnings: ["Stock voice — this is not the speaker's voice yet."] },
+    }
+    render(<CandidateCard candidate={stock} onApprove={() => {}} onTryAgain={() => {}} projectId="p1" />)
+    expect(screen.getByText(/not the speaker's voice/i)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /approve/i })).toBeEnabled()
+  })
+
   it('shows the new text, the pass badge, and all four metrics', () => {
-    render(<CandidateCard candidate={PASSING} onApprove={() => {}} onTryAgain={() => {}} />)
+    render(<CandidateCard candidate={PASSING} onApprove={() => {}} onTryAgain={() => {}} projectId="p1" />)
     expect(screen.getByText('30% off')).toBeInTheDocument()
     expect(screen.getByText(/continuity checked/i)).toBeInTheDocument()
     expect(screen.getByText(/voice identity/i)).toBeInTheDocument()
@@ -42,7 +60,7 @@ describe('CandidateCard', () => {
   })
 
   it('renders the four scores to two decimal places', () => {
-    render(<CandidateCard candidate={PASSING} onApprove={() => {}} onTryAgain={() => {}} />)
+    render(<CandidateCard candidate={PASSING} onApprove={() => {}} onTryAgain={() => {}} projectId="p1" />)
     for (const v of ['0.95', '0.92', '0.97', '0.94']) {
       expect(screen.getByText(v)).toBeInTheDocument()
     }
@@ -50,20 +68,20 @@ describe('CandidateCard', () => {
 
   it('fires onApprove when passing and Approve is clicked', async () => {
     const onApprove = vi.fn()
-    render(<CandidateCard candidate={PASSING} onApprove={onApprove} onTryAgain={() => {}} />)
+    render(<CandidateCard candidate={PASSING} onApprove={onApprove} onTryAgain={() => {}} projectId="p1" />)
     await userEvent.click(screen.getByRole('button', { name: /approve/i }))
     expect(onApprove).toHaveBeenCalledOnce()
   })
 
   it('fires onTryAgain when Try again is clicked', async () => {
     const onTryAgain = vi.fn()
-    render(<CandidateCard candidate={PASSING} onApprove={() => {}} onTryAgain={onTryAgain} />)
+    render(<CandidateCard candidate={PASSING} onApprove={() => {}} onTryAgain={onTryAgain} projectId="p1" />)
     await userEvent.click(screen.getByRole('button', { name: /try again/i }))
     expect(onTryAgain).toHaveBeenCalledOnce()
   })
 
   it('disables Approve and surfaces warnings when continuity fails', () => {
-    render(<CandidateCard candidate={FAILING} onApprove={() => {}} onTryAgain={() => {}} />)
+    render(<CandidateCard candidate={FAILING} onApprove={() => {}} onTryAgain={() => {}} projectId="p1" />)
     expect(screen.getByRole('button', { name: /approve/i })).toBeDisabled()
     expect(screen.getByText(/low voice identity/i)).toBeInTheDocument()
     expect(screen.getByText(/below threshold/i)).toBeInTheDocument()
@@ -71,7 +89,7 @@ describe('CandidateCard', () => {
   })
 
   it('marks only the below-threshold metric as warning', () => {
-    render(<CandidateCard candidate={FAILING} onApprove={() => {}} onTryAgain={() => {}} />)
+    render(<CandidateCard candidate={FAILING} onApprove={() => {}} onTryAgain={() => {}} projectId="p1" />)
     const bars = screen.getAllByTestId('metric-bar')
     expect(bars).toHaveLength(4)
     const warned = bars.filter((b) => b.getAttribute('data-ok') === 'false')

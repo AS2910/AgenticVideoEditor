@@ -11,6 +11,7 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import Callable
 
 from app.adapters.base import VendorError
+from app.errors import NonRetryableError
 from app.jobs.store import Job, JobStore
 
 log = logging.getLogger(__name__)
@@ -88,6 +89,11 @@ class JobRunner:
                 sleep=self._sleep,
                 on_attempt=count,
             )
+        except NonRetryableError as exc:
+            # Written for the user (widen the selection, raise the budget...),
+            # so it is shown as-is rather than as a generic failure.
+            log.warning("job %s refused: %s", job_id, exc)
+            self.jobs.update(job_id, status="failed", step="Failed", error=str(exc))
         except VendorError as exc:
             log.warning("job %s failed: %s", job_id, exc)
             self.jobs.update(

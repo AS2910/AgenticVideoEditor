@@ -43,3 +43,49 @@ def test_audio_and_frames_cover_the_same_span(store):
     plan = EditPlan(Selection(0.4, 1.3), "30% off", "speaker-1")
     candidate = run(store, plan)
     assert candidate.audio.duration == pytest.approx(candidate.frames.duration, abs=0.05)
+
+
+# --- Phase 4a: honest labelling, transcript context -------------------------
+
+from app.domain.models import Transcript, Word  # noqa: E402
+from app.orchestrator.pipeline import STOCK_VOICE_WARNING  # noqa: E402
+
+
+class RecordingVoice(MockVoiceAdapter):
+    """The mock voice, but claiming a given identity and recording its inputs."""
+
+    def __init__(self, store, identity):
+        super().__init__(store)
+        self.identity = identity
+        self.transcripts = []
+
+    def synthesize(self, source, plan, transcript=None):
+        self.transcripts.append(transcript)
+        return super().synthesize(source, plan, transcript)
+
+
+def run_with(store, voice, transcript=None):
+    plan = EditPlan(Selection(0.4, 1.3), "30% off", "speaker-1")
+    return run_edit(
+        "c1", plan, SOURCE, voice, MockLipSyncAdapter(store), ContinuityEngine(),
+        transcript=transcript,
+    )
+
+
+def test_a_stock_voice_is_labelled_as_not_the_speaker(store):
+    candidate = run_with(store, RecordingVoice(store, "stock"))
+    assert STOCK_VOICE_WARNING in candidate.continuity.warnings
+    # Still approvable, or 4a could never be exercised end to end.
+    assert candidate.continuity.passed is True
+
+
+def test_a_mock_voice_is_not_labelled(store):
+    candidate = run_with(store, RecordingVoice(store, "mock"))
+    assert STOCK_VOICE_WARNING not in candidate.continuity.warnings
+
+
+def test_the_transcript_reaches_the_voice_for_context(store):
+    transcript = Transcript(words=(Word("Get", 0.0, 0.4),))
+    voice = RecordingVoice(store, "mock")
+    run_with(store, voice, transcript)
+    assert voice.transcripts == [transcript]

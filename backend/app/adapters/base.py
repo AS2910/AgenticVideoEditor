@@ -17,12 +17,24 @@ class TranscriptionAdapter(Protocol):
 
 
 class VoiceAdapter(Protocol):
-    def synthesize(self, source: Source, plan: EditPlan) -> MediaArtifact:
+    # Whose voice this produces: "mock" (a tone), "stock" (a real voice that is
+    # not the speaker's), or "clone" (the speaker's). The pipeline labels
+    # candidates by it, so a stock voice is never passed off as the speaker.
+    identity: str
+
+    def cost_of(self, plan: EditPlan) -> int:
+        """Budget units one attempt at `plan` will charge. 0 for free adapters."""
+        ...
+
+    def synthesize(
+        self, source: Source, plan: EditPlan, transcript: Transcript | None = None,
+    ) -> MediaArtifact:
         """Generate speech for `plan.new_text` and return the stored audio.
 
         Takes the whole plan rather than loose text so an implementation can use
-        the selected span for duration and prosody matching, and `source` so the
-        artifact lands under the right project.
+        the selected span for duration and prosody matching, `source` so the
+        artifact lands under the right project, and `transcript` so the words
+        either side of the edit can condition its delivery.
         """
         ...
 

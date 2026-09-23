@@ -1,4 +1,5 @@
 import type { Candidate, ContinuityReport } from '../types'
+import { artifactUrl } from '../api'
 import styles from './CandidateCard.module.css'
 
 // Fixed order, mirroring the backend's continuity engine.
@@ -15,16 +16,25 @@ interface CandidateCardProps {
   candidate: Candidate
   onApprove: () => void
   onTryAgain: () => void
+  projectId: string
 }
 
-export function CandidateCard({ candidate, onApprove, onTryAgain }: CandidateCardProps) {
+export function CandidateCard({ candidate, onApprove, onTryAgain, projectId }: CandidateCardProps) {
   const c = candidate.continuity
   return (
     <div className={styles.card}>
       <div className={styles.newText}>{candidate.plan.new_text}</div>
 
-      {/* Real generated media now exists server-side; it is not playable here
-          until the artifact-serving endpoint lands. */}
+      {/* The generated line, playable. The frames stay unplayed until lip-sync
+          is real (Phase 5): today they are a flat colour. */}
+      <audio
+        data-testid="candidate-audio"
+        className={styles.audio}
+        controls
+        preload="auto"
+        src={artifactUrl(projectId, candidate.audio.sha256)}
+      />
+
       <div className={styles.media} data-testid="candidate-media">
         {candidate.frames.duration.toFixed(2)}s generated ·{' '}
         {candidate.audio.container.toUpperCase()} + {candidate.frames.container.toUpperCase()}

@@ -10,7 +10,10 @@ import json
 import os
 import shutil
 import subprocess
+import wave
 from pathlib import Path
+
+from app.errors import NonRetryableError
 
 FFMPEG = os.environ.get("AVE_FFMPEG_BIN", "ffmpeg")
 FFPROBE = os.environ.get("AVE_FFPROBE_BIN", "ffprobe")
@@ -29,6 +32,25 @@ class FFmpegError(RuntimeError):
 
 class FFmpegNotInstalled(FFmpegError):
     """The binary is not on PATH."""
+
+
+# How far generated speech may be sped up or slowed down to fill a selection.
+# Beyond this it audibly sounds rushed or dragged, so the edit is refused.
+MIN_TEMPO = 0.8
+MAX_TEMPO = 1.25
+
+
+class SpanMismatch(NonRetryableError):
+    """Generated speech is too long or too short to fit the selection."""
+
+    def __init__(self, natural: float, target: float) -> None:
+        self.natural = natural
+        self.target = target
+        if natural > target:
+            advice = "The new line is too long for the selection — widen the selection or shorten the line."
+        else:
+            advice = "The new line is too short for the selection — narrow the selection or lengthen the line."
+        super().__init__(f"{advice} (needs {natural:.2f}s, selection is {target:.2f}s)")
 
 
 def available() -> bool:
@@ -125,6 +147,61 @@ def generate_solid_video(
         "-y", "-loglevel", "error", *_BITEXACT_IN,
         "-f", "lavfi", "-i", f"color=c={color}:s={size}:r={fps}",
         "-t", f"{duration:.3f}", "-c:v", "libx264", "-pix_fmt", "yuv420p",
+        *_BITEXACT_OUT, str(dest),
+    ])
+    return dest, duration_of(dest)
+
+
+def pcm_to_wav(
+    pcm: bytes, dest: str | Path, sample_rate: int,
+) -> tuple[Path, float]:
+    """Wrap raw little-endian s16 mono samples (a vendor response) as a WAV."""
+    if not pcm:
+        raise FFmpegError("no audio samples to write")
+    dest = Path(dest)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    with wave.open(str(dest), "wb") as out:
+        out.setnchannels(1)
+        out.setsampwidth(2)
+        out.setframerate(sample_rate)
+        out.writeframes(pcm)
+    return dest, duration_of(dest)
+
+
+def fit_duration(
+    source: str | Path, dest: str | Path, target: float,
+) -> tuple[Path, float]:
+    """Time-stretch speech to exactly `target` seconds, pitch unchanged.
+
+    Raises SpanMismatch when that needs a tempo outside [MIN_TEMPO, MAX_TEMPO].
+    `apad` + `-t` make the length exact rather than approximately right, so
+    the spliced audio covers the selection and nothing past it.
+    """
+    natural = duration_of(source)
+    tempo = natural / target
+    if not MIN_TEMPO <= tempo <= MAX_TEMPO:
+        raise SpanMismatch(natural, target)
+    dest = Path(dest)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    _run(FFMPEG, [
+        "-y", "-loglevel", "error", *_BITEXACT_IN, "-i", str(source),
+        "-af", f"atempo={tempo:.6f},apad", "-t", f"{target:.3f}",
+        "-c:a", "pcm_s16le", *_BITEXACT_OUT, str(dest),
+    ])
+    return dest, duration_of(dest)
+
+
+def extract_segment(
+    source: str | Path, dest: str | Path, start: float, end: float,
+    sample_rate: int = 16000,
+) -> tuple[Path, float]:
+    """Cut [start, end) out of any media file as a mono WAV."""
+    dest = Path(dest)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    _run(FFMPEG, [
+        "-y", "-loglevel", "error", *_BITEXACT_IN, "-i", str(source),
+        "-ss", f"{start:.3f}", "-t", f"{end - start:.3f}",
+        "-vn", "-ac", "1", "-ar", str(sample_rate), "-c:a", "pcm_s16le",
         *_BITEXACT_OUT, str(dest),
     ])
     return dest, duration_of(dest)

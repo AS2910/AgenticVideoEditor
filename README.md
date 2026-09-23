@@ -4,7 +4,7 @@ Select a moment in an existing video, describe in plain English how the **spoken
 
 The differentiator is **continuity**: splicing an AI clip into footage is easy; making it *belong* — matching voice identity, prosody, audio levels, and mouth motion — is the hard part. This repo is the agentic orchestration layer plus the continuity engine, built over swappable third-party generation models.
 
-**Current state:** upload your own video and edit what is actually said in it. The backend ingests a real file, measures it with ffprobe, stores it immutably, serves it back with range requests, and **transcribes it for real** with OpenAI `whisper-1` — so the timeline shows your words at your timings. Generation runs as a **background job** the UI polls for progress, with retries on vendor failure. Voice and lip-sync are still mocked, but they encode **actual WAV and MP4 files** into a content-addressed artifact store. The *interaction*, the *source media*, the *transcript* and the *pipeline* are real; the *voice and the mouth* are not yet.
+**Current state:** upload your own video and edit what is actually said in it. The backend ingests a real file, measures it with ffprobe, stores it immutably, serves it back with range requests, and **transcribes it for real** with OpenAI `whisper-1` — so the timeline shows your words at your timings. Generation runs as a **background job** the UI polls for progress, with retries on vendor failure. The new line is **spoken for real** by ElevenLabs, fitted to the selection's length, and playable on the candidate card — but in a *stock* voice, not the speaker's (the account's free tier cannot clone). Lip-sync is still mocked (a flat-colour MP4). Every paid call is metered against a per-project budget, and `AVE_DRY_RUN=1` switches all vendors off. The *interaction*, *source media*, *transcript*, *pipeline* and *voice* are real; the *speaker's identity* and the *mouth* are not yet.
 
 - `backend/` — Python 3.11 + FastAPI. Domain core, adapters, continuity engine, orchestrator, background job runner, in-memory project store, content-addressed artifact store, ffmpeg wrapper + ingest validation, renderer, HTTP API.
 - `frontend/` — React 19 + Vite + TypeScript. The Voltage editor, calling the backend through a dev-server proxy.
@@ -23,14 +23,21 @@ ffmpeg (with ffprobe) must be on `PATH` — the backend encodes, probes and demu
 brew install ffmpeg
 ```
 
-Transcription calls OpenAI. Put a key in `backend/.env` (git-ignored):
+Transcription calls OpenAI and speech calls ElevenLabs. Put keys in `backend/.env` (git-ignored):
 
 ```sh
-echo 'OPENAI_API_KEY=sk-...' > backend/.env
+OPENAI_API_KEY=sk-...
+ELEVENLABS_API_KEY=sk_...
+# optional
+ELEVENLABS_MODEL=eleven_multilingual_v2   # eleven_flash_v2_5 bills half
+ELEVENLABS_VOICE_ID=EXAVITQu4vr4xnSDxMaL  # premade "Sarah"
+AVE_VOICE_BUDGET_CHARS=2000               # per-project ElevenLabs ceiling
+AVE_DRY_RUN=1                             # never call a paid vendor
 ```
 
-Without a key the app still runs: it falls back to the deterministic mock
-transcriber, offline and free. `GET /health` reports which adapters are live.
+Without a key the app still runs: each missing vendor falls back to its
+deterministic mock, offline and free, and `AVE_DRY_RUN=1` forces every one onto
+its mock whatever keys exist. `GET /health` reports which adapters are live.
 
 Two terminals. The backend must be up first — the front end proxies to it.
 
@@ -73,15 +80,15 @@ To see the continuity *failure* path, the voice profile has to be `unknown`, whi
 Both suites are offline and deterministic. No running server required.
 
 ```sh
-cd backend && .venv/bin/python -m pytest      # 142 tests
-cd frontend && npm test                        # 56 tests, 11 files
+cd backend && .venv/bin/python -m pytest      # 215 tests
+cd frontend && npm test                        # 58 tests, 11 files
 ```
 
 Backend tests write their media to a temp dir, never to `backend/var/`. Tests that
 encode media skip themselves if ffmpeg is absent. **No test ever calls a vendor:**
-the suite blanks `OPENAI_API_KEY`, so it always runs on the mock transcriber, and
-the parsing tests replay `tests/fixtures/whisper-verbose-json.json` — a response
-genuinely recorded from `whisper-1`.
+the suite blanks `OPENAI_API_KEY` and `ELEVENLABS_API_KEY`, so it always runs on
+the mocks, and the vendor tests replay responses genuinely recorded from the real
+APIs: `tests/fixtures/whisper-verbose-json.json` and `tests/fixtures/elevenlabs-tts.pcm`.
 
 ---
 
@@ -93,8 +100,9 @@ Four synchronous endpoints, all `POST`:
 | --- | --- | --- | --- |
 | `/health` | GET | — | which adapters are real in this process |
 | `/projects` | POST | `multipart` `file=` | uploads a video; probes it; transcribes it; → `project_id`, `duration`, source `media`, word-level `transcript`. `422` with a reason if it is not a readable video, has no video track, has no audio track, or exceeds the 180s cap; `502` if transcription fails. |
+| `/projects/{id}/consent` | POST | — | records consent for a project uploaded without it; idempotent, the first timestamp stands |
 | `/projects/{id}/artifacts/{sha256}` | GET | — | serves stored media by content address, with range requests |
-| `/projects/{id}/edits/preview` | POST | `{prompt, start, end, voice_profile_id}` | **`202`** — starts generation and returns a job to poll. Does not block. |
+| `/projects/{id}/edits/preview` | POST | `{prompt, start, end, voice_profile_id}` | **`202`** — starts generation and returns a job to poll. Does not block. `403` without consent; `402` if the project's voice budget cannot cover the edit (no job is created). |
 | `/jobs/{job_id}` | GET | — | job state: `status`, `progress`, `step`, `attempts`. On success `result` is the candidate (`candidate_id`, plan, `audio`/`frames` artifacts, continuity report), which is retained server-side. |
 | `/projects/{id}/edits` | POST | `{candidate_id}` | approves that exact candidate; `404` if unknown, `422` if continuity failed |
 | `/projects/{id}/export` | POST | — | ordered segment manifest of `original` / `edited` spans, each carrying the artifact it resolves to |
@@ -129,12 +137,14 @@ These are deliberate and documented, not oversights:
   The voice depends on the machine's TTS, so the output is not byte-stable across
   macOS versions. It is a placeholder, not a fixture.
 - **The generated media is real but meaningless.** The mock voice adapter encodes a sine tone; the mock lip-sync adapter encodes a flat colour. Both are real, decodable files of the right length, keyed to their inputs so different prompts yield different media — they just are not speech or faces. Real vendors slot in behind the same adapter interfaces.
-- **A candidate still has no playable preview.** Its media *is* now servable — `/projects/{id}/artifacts/{sha}` will hand it over — but the UI does not wire a preview player to it, because a tone over a flat colour is nothing worth watching. That lands when the generated media is real.
+- **The voice is real but it is not the speaker.** ElevenLabs free tier refuses voice cloning, so the new line is spoken by a premade voice. Every such candidate carries the warning *"Stock voice — this is not the speaker's voice yet."* Phase 4b swaps in a clone once the plan is upgraded; the reference-audio extraction it needs is already built.
+- **Speech is time-fitted, within limits.** The generated line is sped up or slowed to exactly fill the selection, but only within 0.8–1.25×. Beyond that the job fails once with a message to widen or narrow the selection — ElevenLabs' output length varies per call, so a borderline edit can land either side. Note the paid call has already been made and charged by then.
+- **The candidate card plays audio only.** The generated frames are still a flat colour until lip-sync is real (Phase 5).
 - **Continuity scores are still asserted, not measured.** `continuity/engine.py` returns fixed numbers and only reacts to `voice_profile_id == "unknown"`. This is the product's stated differentiator and the least real part of it.
 - **Consent is a checkbox attestation, not verification.** The backend records it per project (at upload, or later via `POST /projects/{id}/consent`) and refuses generation with a 403 without it — but it trusts the uploader's word. There is no way to withdraw it yet: by design, withdrawing means deleting the project, and there is no delete endpoint until persistence (Phase 9). A server restart is the only reset.
 - **Project metadata is in-memory; artifacts are on disk.** Restarting the server loses every project but leaves its media in `backend/var/artifacts/`, orphaned. A failed transcription orphans an upload the same way. Persistence (Phase 9) closes the mismatch; until then `rm -rf backend/var` is a safe reset.
 - **Ingest is still synchronous.** Generation runs as a background job, but upload+transcription does not: a 3-minute upload blocks the request for as long as Whisper takes. Whisper is seconds, so this is liveable; lip-sync would not have been, which is why generation went first.
-- **Nothing meters vendor spend.** No budget ceiling, no dry-run mode. That lands with the first paid generation vendor, not before.
+- **The voice budget is in memory.** It is per project and resets when the server restarts, like everything else until Phase 9. It meters ElevenLabs only; Whisper is not metered (dry-run does switch it off).
 - **Jobs live in memory and are never evicted.** They accumulate for the life of the process and vanish on restart, along with everything else.
 
 ## Not built yet

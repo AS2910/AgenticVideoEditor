@@ -1,7 +1,7 @@
 # Real Pipeline — Phased Roadmap
 
 **Date:** 2026-09-22
-**Status:** In progress — Phases 0–3.5 done; next is Phase 4
+**Status:** In progress — Phases 0–4a done; 4b waits on a paid ElevenLabs plan, Phase 5 needs a lip-sync vendor
 **Supersedes nothing.** Builds on `2026-07-14-walking-skeleton.md` and `2026-07-17-voltage-frontend.md`.
 
 **Goal:** turn the mocked walking skeleton into a system that ingests a real video, produces a real re-voiced and lip-synced segment, verifies continuity with real signal analysis, and exports a real playable file — honoring the v1 design spec end-to-end.
@@ -108,11 +108,20 @@ Grouped into three milestones. Each milestone is independently useful — you ca
   - **Exit met:** 142 backend + 56 frontend tests pass. Verified live against a running server: upload without consent → preview 403 → grant → re-grant keeps the same timestamp → preview 202, job succeeded; upload with consent is recorded directly; unknown project → 404.
   - **Not in scope:** revocation (withdrawing consent means deleting the project — arrives with persistence, Phase 9), and any verification that the attestation is true.
 
-- [ ] **Phase 4 · Real voice (ElevenLabs)**
-  - Extract the speaker's clean reference audio from the source; voice clone; TTS `new_text` → real WAV artifact
-  - Prosody conditioning from the span being replaced
-  - Cost guardrail: per-project budget cap + dry-run mode (every call now costs money)
-  - **Exit:** the edited span is genuinely the speaker's voice saying the new words.
+- [ ] **Phase 4 · Real voice (ElevenLabs)** — split in two: the account is on the free tier, which refuses voice cloning
+  - [x] **4a · Stock voice** — **done 2026-09-23** (plan: `2026-09-23-phase-4a-real-voice-stock.md`)
+    - `app/adapters/elevenlabs.py` — real TTS (`eleven_multilingual_v2`, premade voice Sarah) with the words either side of the selection as `previous_text`/`next_text` prosody context (free: only `text` is billed)
+    - Output time-fitted to the selection with `atempo`, bounded to 0.8–1.25×; outside that the job fails once with "widen the selection", never retried
+    - Cost guardrail: `app/budget.py` per-project character ceiling (`AVE_VOICE_BUDGET_CHARS`, default 2000), charged before every attempt including retries; unaffordable edits get **402** before any job exists. `AVE_DRY_RUN=1` forces every paid vendor (Whisper too) onto its mock
+    - Only 429/5xx/network errors retry; bad key, exhausted quota, bad request fail once with their own message (`NonRetryableError`)
+    - Candidates in a stock voice carry the warning *"Stock voice — this is not the speaker's voice yet."*; still approvable
+    - `app/media/reference.py` extracts the speaker's speech outside the selection, ready for 4b
+    - Candidate card plays the generated audio
+    - **Exit met:** 215 backend + 58 frontend tests. Verified live: sample → `change "20% off" to "30% off"` → 0.96 s WAV for a 0.96 s selection, which Whisper transcribes as "30% off."; served as `206 audio/wav` through the frontend proxy; approved and exported. Budget of 5 → 402 with no spend; dry-run → full flow, no spend. Phase total ≈ 25 ElevenLabs characters.
+    - **Not verified:** listening in a real browser — the Chrome extension was not connected. Intelligibility was checked by transcription, not by ear.
+  - [ ] **4b · Speaker's own voice** *(needs a paid plan with instant voice cloning)*
+    - Clone from `extract_reference_audio`; pin its minimum length against the vendor (placeholder 10 s; ElevenLabs asks for ~1 min)
+    - **Exit:** the edited span is genuinely the speaker's voice saying the new words.
 
 - [ ] **Phase 5 · Real lip-sync** *(vendor TBD — see open decisions)*
   - Face detection on the source (the missing half of spec §5.1)
@@ -169,7 +178,7 @@ Grouped into three milestones. Each milestone is independently useful — you ca
 - ~~ffmpeg / ffprobe: not installed~~ — **resolved**, ffmpeg 9.0.2 installed via Homebrew.
 - Backend venv is Python 3.11.15 (system `python3` is 3.9.6 — always use `backend/.venv/bin/python`).
 - Node v22.20.0, frontend deps installed, Vite 8 binds `localhost` only (not `127.0.0.1`).
-- OpenAI key configured in `backend/.env` (git-ignored, `0600`). ElevenLabs and a lip-sync vendor still needed for Phases 4–5.
+- OpenAI and ElevenLabs keys configured in `backend/.env` (git-ignored, `0600`). ElevenLabs account is **free tier** — no cloning (Phase 4b). A lip-sync vendor is still needed for Phase 5.
 
 ---
 

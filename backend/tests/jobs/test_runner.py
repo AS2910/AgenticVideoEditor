@@ -145,3 +145,34 @@ def test_an_unexpected_bug_fails_the_job_without_killing_the_worker(runner):
     second = store.create("preview", "p1")
     job_runner.submit(second, lambda report: {"ok": True})
     assert await_job(store, second.job_id).status == "succeeded"
+
+
+# ── non-retryable failures (Phase 4a) ────────────────────────────────────────
+
+def test_a_non_retryable_failure_runs_once_and_shows_its_own_message(runner):
+    from app.errors import NonRetryableError
+    store, job_runner = runner
+    job = store.create("preview", "p1")
+    tries = []
+
+    def work(report):
+        tries.append(1)
+        raise NonRetryableError("Widen the selection.")
+
+    job_runner.submit(job, work)
+    finished = await_job(store, job.job_id)
+
+    assert finished.status == "failed"
+    assert finished.error == "Widen the selection."
+    assert finished.attempts == 1
+    assert len(tries) == 1
+
+
+def test_the_phase_4a_refusals_are_all_non_retryable():
+    from app.errors import NonRetryableError
+    from app.budget import BudgetExceeded
+    from app.media.ffmpeg import SpanMismatch
+    from app.adapters.elevenlabs import VoiceConfigError
+    for kind in (BudgetExceeded, SpanMismatch, VoiceConfigError):
+        assert issubclass(kind, NonRetryableError)
+        assert not issubclass(kind, VendorError)

@@ -49,10 +49,17 @@ class MockTranscriptionAdapter:
 class MockVoiceAdapter:
     """Real WAV, as long as the selected span, pitched by the text being spoken."""
 
+    identity = "mock"
+
     def __init__(self, store: ArtifactStore) -> None:
         self._store = store
 
-    def synthesize(self, source: Source, plan: EditPlan) -> MediaArtifact:
+    def cost_of(self, plan: EditPlan) -> int:
+        return 0
+
+    def synthesize(
+        self, source: Source, plan: EditPlan, transcript: Transcript | None = None,
+    ) -> MediaArtifact:
         seed = _digest(plan.voice_profile_id, plan.new_text)
         frequency = 200 + int(seed[:4], 16) % 600  # 200–800 Hz, stable per input
         with tempfile.TemporaryDirectory() as tmp:
