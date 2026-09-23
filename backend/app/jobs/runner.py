@@ -100,7 +100,7 @@ class JobRunner:
                 job_id, status="failed", step="Failed",
                 error="Generation failed after several attempts. Try again.",
             )
-        except Exception as exc:  # noqa: BLE001 - a job must never kill the worker
+        except Exception:  # noqa: BLE001 - a job must never kill the worker
             log.exception("job %s crashed", job_id)
             self.jobs.update(
                 job_id, status="failed", step="Failed", error="Something went wrong."

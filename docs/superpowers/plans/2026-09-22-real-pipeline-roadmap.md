@@ -1,7 +1,7 @@
 # Real Pipeline — Phased Roadmap
 
 **Date:** 2026-09-22
-**Status:** In progress — Phases 0–4a done; 4b waits on a paid ElevenLabs plan, Phase 5 needs a lip-sync vendor
+**Status:** Phases 0–4a done and clean (2026-09-23). Phases 4b and 5 moved to the **Backlog** — both are blocked on vendor access, not on code.
 **Supersedes nothing.** Builds on `2026-07-14-walking-skeleton.md` and `2026-07-17-voltage-frontend.md`.
 
 **Goal:** turn the mocked walking skeleton into a system that ingests a real video, produces a real re-voiced and lip-synced segment, verifies continuity with real signal analysis, and exports a real playable file — honoring the v1 design spec end-to-end.
@@ -119,14 +119,9 @@ Grouped into three milestones. Each milestone is independently useful — you ca
     - Candidate card plays the generated audio
     - **Exit met:** 215 backend + 58 frontend tests. Verified live: sample → `change "20% off" to "30% off"` → 0.96 s WAV for a 0.96 s selection, which Whisper transcribes as "30% off."; served as `206 audio/wav` through the frontend proxy; approved and exported. Budget of 5 → 402 with no spend; dry-run → full flow, no spend. Phase total ≈ 25 ElevenLabs characters.
     - **Not verified:** listening in a real browser — the Chrome extension was not connected. Intelligibility was checked by transcription, not by ear.
-  - [ ] **4b · Speaker's own voice** *(needs a paid plan with instant voice cloning)*
-    - Clone from `extract_reference_audio`; pin its minimum length against the vendor (placeholder 10 s; ElevenLabs asks for ~1 min)
-    - **Exit:** the edited span is genuinely the speaker's voice saying the new words.
+  - **4b · Speaker's own voice** → moved to the [Backlog](#backlog).
 
-- [ ] **Phase 5 · Real lip-sync** *(vendor TBD — see open decisions)*
-  - Face detection on the source (the missing half of spec §5.1)
-  - Vendor adapter → real frames artifact for the affected range
-  - **Exit:** mouth motion matches the new audio.
+- **Phase 5 · Real lip-sync** → moved to the [Backlog](#backlog).
 
 ### Milestone C — the differentiator, and shipping it
 
@@ -151,6 +146,24 @@ Grouped into three milestones. Each milestone is independently useful — you ca
 
 - [ ] **Phase 9 · Durability & hardening**
   - SQLite persistence replacing the in-memory store; multi-project; auth; cost tracking and quotas.
+
+---
+
+## Backlog
+
+Parked 2026-09-23. Each is blocked on vendor access, not on code; nothing in the codebase is waiting half-built for them. Pick one up by writing its phase plan, as for every other phase.
+
+- [ ] **Phase 4b · Speaker's own voice** — *unblocked by:* an ElevenLabs plan with instant voice cloning (the current key is free tier: `can_use_instant_voice_cloning: false`).
+  - Clone from `app/media/reference.py`'s `extract_reference_audio` (built in 4a); pin its minimum length against the vendor (placeholder 10 s; ElevenLabs asks for ~1 min)
+  - The adapter reports `identity = "clone"`, which drops the stock-voice warning; voice-clone type is open decision 3
+  - **Exit:** the edited span is genuinely the speaker's voice saying the new words.
+- [ ] **Phase 5 · Real lip-sync** — *unblocked by:* a lip-sync vendor key (open decision 1).
+  - Vendor spike first: same 10-second clip through each candidate, compare output and price
+  - Face detection on the source (the missing half of spec §5.1)
+  - Vendor adapter → real frames artifact for the affected range; settle open decision 4
+  - **Exit:** mouth motion matches the new audio.
+
+**Impact of parking them on Milestone C:** Phase 6's voice-identity and lip-sync checks are only meaningful once 4b and 5 land. Its prosody and audio-integration checks, and Phases 7–9, do not depend on either.
 
 ---
 

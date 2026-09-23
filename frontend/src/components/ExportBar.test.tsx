@@ -2,12 +2,17 @@ import { describe, it, expect, vi } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { ExportBar } from './ExportBar'
-import type { Segment } from '../types'
+import type { MediaArtifact, Segment } from '../types'
+
+// Every span resolves to the artifact it is composited from: originals to the
+// source, edits to their generated frames.
+const SOURCE: MediaArtifact = { kind: 'video', sha256: 's'.repeat(64), duration: 3, container: 'mp4' }
+const FRAMES: MediaArtifact = { kind: 'video', sha256: 'f'.repeat(64), duration: 0.9, container: 'mp4' }
 
 const SEGMENTS: Segment[] = [
-  { start: 0, end: 0.4, kind: 'original', ref: 'ad.mp4' },
-  { start: 0.4, end: 1.3, kind: 'edited', ref: 'frames://e1' },
-  { start: 1.3, end: 3, kind: 'original', ref: 'ad.mp4' },
+  { start: 0, end: 0.4, kind: 'original', ref: 'ad.mp4', artifact: SOURCE },
+  { start: 0.4, end: 1.3, kind: 'edited', ref: FRAMES.sha256, artifact: FRAMES },
+  { start: 1.3, end: 3, kind: 'original', ref: 'ad.mp4', artifact: SOURCE },
 ]
 
 describe('ExportBar', () => {

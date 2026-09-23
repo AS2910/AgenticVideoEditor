@@ -7,6 +7,7 @@ it here keeps generated media out of the real `backend/var/` tree.
 import os
 import shutil
 import tempfile
+from pathlib import Path
 
 import pytest
 
@@ -36,7 +37,7 @@ def store(tmp_path):
     return ArtifactStore(tmp_path / "artifacts")
 
 
-def _mux(video: "Path", audio: "Path", dest: "Path") -> "Path":
+def _mux(video: Path, audio: Path, dest: Path) -> Path:
     from app.media import ffmpeg
     ffmpeg._run(ffmpeg.FFMPEG, [
         "-y", "-loglevel", "error", "-i", str(video), "-i", str(audio),

@@ -66,7 +66,7 @@ describe('api client', () => {
 
     function queuedFetch(bodies: unknown[]) {
       let i = 0
-      return vi.fn(async () => {
+      return vi.fn(async (_url: string, _init?: RequestInit) => {
         const body = bodies[Math.min(i++, bodies.length - 1)]
         return { ok: true, status: 200, json: async () => body, text: async () => '' } as Response
       })

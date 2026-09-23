@@ -94,7 +94,7 @@ APIs: `tests/fixtures/whisper-verbose-json.json` and `tests/fixtures/elevenlabs-
 
 ## The API
 
-Four synchronous endpoints, all `POST`:
+Generation is asynchronous (preview returns a job to poll); everything else answers directly:
 
 | Endpoint | Method | Body | Does |
 | --- | --- | --- | --- |
@@ -149,4 +149,4 @@ These are deliberate and documented, not oversights:
 
 ## Not built yet
 
-Deferred by design: real voice and lip-sync vendors behind the adapter interfaces, real ffmpeg compositing on export, multi-project persistence, and auth. See `docs/superpowers/plans/2026-09-22-real-pipeline-roadmap.md` for the phased route through them. Product-level, v1 is dialogue changes only — visual detail swap (Phase 2), pacing/filler edits, multi-speaker crosstalk, and non-English are all out of scope.
+Deferred by design: the speaker's own cloned voice (Phase 4b) and real lip-sync (Phase 5) — both in the roadmap's backlog, blocked on vendor access — plus real continuity measurement, real ffmpeg compositing on export, multi-project persistence, and auth. See `docs/superpowers/plans/2026-09-22-real-pipeline-roadmap.md` for the phased route through them. Product-level, v1 is dialogue changes only — visual detail swap (Phase 2), pacing/filler edits, multi-speaker crosstalk, and non-English are all out of scope.

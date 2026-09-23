@@ -8,7 +8,7 @@ threads at the same time.
 from __future__ import annotations
 
 import threading
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, replace
 from typing import Literal
 
 JobStatus = Literal["queued", "running", "succeeded", "failed"]

@@ -62,7 +62,7 @@ const JOB_FAILED = {
 /** Routes by URL. `approveStatus` forces the 422 branch; `job` overrides the
  *  polled job so a test can exercise the failure path. */
 function routeFetch(approveStatus = 200, job: unknown = JOB_DONE) {
-  return vi.fn(async (url: string) => {
+  return vi.fn(async (url: string, _init?: RequestInit) => {
     if (url.includes('/jobs/')) return ok(job)
     if (url.endsWith('/edits/preview')) return ok(JOB_ACCEPTED)
     if (url.endsWith('/edits')) {
@@ -162,7 +162,9 @@ describe('App full journey', () => {
     await reachEditor(user)
 
     const upload = f.mock.calls.find(([url]) => String(url).endsWith('/projects'))
-    expect((upload![1].body as FormData).get('consent')).toBe('true')
+    expect(upload).toBeDefined()
+    const body = upload?.[1]?.body as FormData
+    expect(body.get('consent')).toBe('true')
   })
 
   it('surfaces the backend refusal if generation is attempted without consent', async () => {
