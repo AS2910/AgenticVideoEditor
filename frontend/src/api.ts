@@ -1,5 +1,5 @@
 import type {
-  Project, Candidate, ApprovedResult, ExportManifest, EditRequest,
+  Project, ApprovedResult, ExportManifest, EditRequest, Job,
 } from './types'
 
 const BASE = '/api'
@@ -14,26 +14,93 @@ export class ApiError extends Error {
   }
 }
 
+/** Pulls FastAPI's `{detail: "..."}` out of an error body so rejection
+ *  reasons ("That file has no video track.") reach the user intact. */
+async function failure(res: Response): Promise<never> {
+  const raw = await res.text()
+  let message = raw
+  try {
+    const parsed = JSON.parse(raw)
+    if (typeof parsed?.detail === 'string') message = parsed.detail
+  } catch {
+    // Not JSON — use the raw body.
+  }
+  throw new ApiError(res.status, message)
+}
+
 async function post<T>(path: string, body?: unknown): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: body === undefined ? undefined : JSON.stringify(body),
   })
-  if (!res.ok) {
-    throw new ApiError(res.status, await res.text())
-  }
+  if (!res.ok) return failure(res)
   return (await res.json()) as T
 }
 
-export const createProject = (filename: string, duration: number) =>
-  post<Project>('/projects', { filename, duration })
+/**
+ * Uploads the real video. No Content-Type header — the browser sets the
+ * multipart boundary itself.
+ *
+ * `consent` records the uploader's confirmation that they may edit and clone
+ * this speaker. The backend refuses to generate without it.
+ */
+export async function createProject(file: File, consent: boolean): Promise<Project> {
+  const body = new FormData()
+  body.append('file', file)
+  body.append('consent', String(consent))
+  const res = await fetch(`${BASE}/projects`, { method: 'POST', body })
+  if (!res.ok) return failure(res)
+  return (await res.json()) as Project
+}
 
+/** URL the browser can play a stored artifact from; supports range requests. */
+export const artifactUrl = (projectId: string, sha256: string) =>
+  `${BASE}/projects/${projectId}/artifacts/${sha256}`
+
+/** Starts generation. Returns the accepted job; poll it for the candidate. */
 export const previewEdit = (id: string, req: EditRequest) =>
-  post<Candidate>(`/projects/${id}/edits/preview`, req)
+  post<Job>(`/projects/${id}/edits/preview`, req)
 
-export const approveEdit = (id: string, req: EditRequest) =>
-  post<ApprovedResult>(`/projects/${id}/edits`, req)
+export async function getJob(jobId: string): Promise<Job> {
+  const res = await fetch(`${BASE}/jobs/${jobId}`)
+  if (!res.ok) return failure(res)
+  return (await res.json()) as Job
+}
+
+export class PollCancelled extends Error {}
+
+/**
+ * Polls a job until it finishes. `onUpdate` fires on every tick so the UI can
+ * show progress; `shouldStop` lets a newer request abandon an older poll.
+ */
+export async function pollJob(
+  jobId: string,
+  { onUpdate, shouldStop, intervalMs = 300, timeoutMs = 300_000 }: {
+    onUpdate?: (job: Job) => void
+    shouldStop?: () => boolean
+    intervalMs?: number
+    timeoutMs?: number
+  } = {},
+): Promise<Job> {
+  const deadline = Date.now() + timeoutMs
+  for (;;) {
+    if (shouldStop?.()) throw new PollCancelled('superseded')
+    const job = await getJob(jobId)
+    onUpdate?.(job)
+    if (job.status === 'succeeded' || job.status === 'failed') return job
+    if (Date.now() > deadline) throw new Error('Generation timed out.')
+    await new Promise((resolve) => setTimeout(resolve, intervalMs))
+  }
+}
+
+/**
+ * Approves one previously previewed candidate by id. The backend commits the
+ * exact media that preview produced rather than regenerating it — which real
+ * vendors would not reproduce byte-for-byte.
+ */
+export const approveEdit = (id: string, candidateId: string) =>
+  post<ApprovedResult>(`/projects/${id}/edits`, { candidate_id: candidateId })
 
 export const exportProject = (id: string) =>
   post<ExportManifest>(`/projects/${id}/export`)

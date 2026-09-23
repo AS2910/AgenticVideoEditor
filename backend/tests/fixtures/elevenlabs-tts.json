@@ -1,0 +1,10 @@
+{
+  "recorded": "2026-09-23",
+  "endpoint": "POST /v1/text-to-speech/EXAVITQu4vr4xnSDxMaL?output_format=pcm_24000",
+  "request": {"text": "30% off", "model_id": "eleven_multilingual_v2", "previous_text": "Get", "next_text": "today only."},
+  "status": 200,
+  "headers": {"content-type": "audio/pcm", "character-cost": "7"},
+  "sample_rate": 24000,
+  "duration_seconds": 0.789458,
+  "whisper_heard": "30% off."
+}

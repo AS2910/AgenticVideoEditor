@@ -6,11 +6,19 @@ dependencies = [
     "fastapi>=0.110",
     "pydantic>=2.6",
     "uvicorn>=0.29",
+    "python-multipart>=0.0.9",  # multipart/form-data uploads
+    "httpx>=0.27",              # vendor HTTP calls (OpenAI, ElevenLabs)
+    "numpy>=2.0",               # continuity signal analysis, audio splicing
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8.0", "httpx>=0.27"]
+dev = ["pytest>=8.0"]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
 testpaths = ["tests"]
+
+# Only `app` is the package. Without this, setuptools' flat-layout discovery
+# also finds `tests/` and the `var/` artifact store and refuses to build.
+[tool.setuptools.packages.find]
+include = ["app*"]

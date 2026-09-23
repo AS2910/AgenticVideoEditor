@@ -7,3 +7,19 @@
   box-shadow: 0 0 20px rgba(46, 107, 255, 0.4);
 }
 .load:disabled { background: var(--border); color: var(--muted); box-shadow: none; }
+/* The real input is driven by the styled button above it. Kept interactive
+   rather than `pointer-events: none` so assistive tech and tests can reach it. */
+.fileInput {
+  position: absolute; width: 1px; height: 1px;
+  opacity: 0; overflow: hidden;
+}
+.sample {
+  background: none; border: none; color: var(--muted);
+  font-size: 13px; text-decoration: underline; cursor: pointer; padding: 0;
+}
+.sample:disabled { color: var(--border); cursor: default; }
+.hint { color: var(--muted); font-size: 12px; margin: 0; }
+.error {
+  color: var(--warn); font-size: 13px; max-width: 320px; text-align: center;
+  border: 1px solid var(--warn); border-radius: 8px; padding: 8px 12px;
+}

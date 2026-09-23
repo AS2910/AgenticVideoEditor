@@ -9,8 +9,18 @@
   padding: 8px 12px; font-size: 13px;
 }
 .generating {
-  align-self: flex-start; color: var(--muted); font-size: 13px;
+  align-self: stretch; color: var(--muted); font-size: 13px;
   padding: 8px 12px; border: 1px dashed var(--border); border-radius: 8px;
+  display: flex; flex-direction: column; gap: 8px;
+}
+.generatingStep { color: var(--muted); }
+.progressTrack {
+  height: 6px; background: var(--surface); border-radius: 3px; overflow: hidden;
+}
+.progressFill {
+  height: 100%; background: var(--electric);
+  box-shadow: 0 0 10px var(--electric);
+  transition: width 300ms ease;
 }
 
 @media (max-width: 900px) {
