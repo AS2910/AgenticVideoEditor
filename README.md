@@ -4,7 +4,7 @@ Select a moment in an existing video, describe in plain English how the **spoken
 
 The differentiator is **continuity**: splicing an AI clip into footage is easy; making it *belong* — matching voice identity, prosody, audio levels, and mouth motion — is the hard part. This repo is the agentic orchestration layer plus the continuity engine, built over swappable third-party generation models.
 
-**Current state:** upload your own video and edit what is actually said in it. The backend ingests a real file, measures it with ffprobe, stores it immutably, serves it back with range requests, and **transcribes it for real** with OpenAI `whisper-1` — so the timeline shows your words at your timings. Generation runs as a **background job** the UI polls for progress, with retries on vendor failure. The new line is **spoken for real** by ElevenLabs, fitted to the selection's length, and playable on the candidate card — but in a *stock* voice, not the speaker's (the account's free tier cannot clone). Lip-sync is still mocked (a flat-colour MP4). Every paid call is metered against a per-project budget, and `AVE_DRY_RUN=1` switches all vendors off. The *interaction*, *source media*, *transcript*, *pipeline* and *voice* are real; the *speaker's identity* and the *mouth* are not yet.
+**Current state:** upload your own video and edit what is actually said in it. The backend ingests a real file, measures it with ffprobe, stores it immutably, serves it back with range requests, and **transcribes it for real** with OpenAI `whisper-1` — so the timeline shows your words at your timings. Generation runs as a **background job** the UI polls for progress, with retries on vendor failure. The new line is **spoken for real** by ElevenLabs, fitted to the selection's length, and playable on the candidate card — but in a *stock* voice, not the speaker's (the account's free tier cannot clone). Lip-sync is still mocked (a flat-colour MP4). Prosody and audio integration are **measured** from the audio, levels and room tone are corrected automatically, and a take that fails is regenerated within a cap. Every paid call is metered against a per-project budget, and `AVE_DRY_RUN=1` switches all vendors off. The *interaction*, *source media*, *transcript*, *pipeline* and *voice* are real; the *speaker's identity* and the *mouth* are not yet.
 
 - `backend/` — Python 3.11 + FastAPI. Domain core, adapters, continuity engine, orchestrator, background job runner, in-memory project store, content-addressed artifact store, ffmpeg wrapper + ingest validation, renderer, HTTP API.
 - `frontend/` — React 19 + Vite + TypeScript. The Voltage editor, calling the backend through a dev-server proxy.
@@ -32,6 +32,7 @@ ELEVENLABS_API_KEY=sk_...
 ELEVENLABS_MODEL=eleven_multilingual_v2   # eleven_flash_v2_5 bills half
 ELEVENLABS_VOICE_ID=EXAVITQu4vr4xnSDxMaL  # premade "Sarah"
 AVE_VOICE_BUDGET_CHARS=2000               # per-project ElevenLabs ceiling
+AVE_MAX_REGENERATIONS=2                   # extra paid takes when continuity fails
 AVE_DRY_RUN=1                             # never call a paid vendor
 ```
 
@@ -80,8 +81,8 @@ To see the continuity *failure* path, the voice profile has to be `unknown`, whi
 Both suites are offline and deterministic. No running server required.
 
 ```sh
-cd backend && .venv/bin/python -m pytest      # 215 tests
-cd frontend && npm test                        # 58 tests, 11 files
+cd backend && .venv/bin/python -m pytest      # 269 tests
+cd frontend && npm test                        # 60 tests, 11 files
 ```
 
 Backend tests write their media to a temp dir, never to `backend/var/`. Tests that
@@ -140,7 +141,7 @@ These are deliberate and documented, not oversights:
 - **The voice is real but it is not the speaker.** ElevenLabs free tier refuses voice cloning, so the new line is spoken by a premade voice. Every such candidate carries the warning *"Stock voice — this is not the speaker's voice yet."* Phase 4b swaps in a clone once the plan is upgraded; the reference-audio extraction it needs is already built.
 - **Speech is time-fitted, within limits.** The generated line is sped up or slowed to exactly fill the selection, but only within 0.8–1.25×. Beyond that the job fails once with a message to widen or narrow the selection — ElevenLabs' output length varies per call, so a borderline edit can land either side. Note the paid call has already been made and charged by then.
 - **The candidate card plays audio only.** The generated frames are still a flat colour until lip-sync is real (Phase 5).
-- **Continuity scores are still asserted, not measured.** `continuity/engine.py` returns fixed numbers and only reacts to `voice_profile_id == "unknown"`. This is the product's stated differentiator and the least real part of it.
+- **Half the continuity scorecard is measured.** With a real voice, prosody (pitch register against the surrounding speech) and audio integration (level and clarity) are measured from the audio, after automatic level and room-tone correction; a failing take is regenerated up to `AVE_MAX_REGENERATIONS` times (default 2 — each one a paid call, charged to the budget). Voice identity and lip-sync read "not measured yet" until Phases 4b and 5. Offline and in dry-run the scores are the mock engine's, tagged *simulated*. Thresholds were calibrated on one clip — expect to tune them on real footage.
 - **Consent is a checkbox attestation, not verification.** The backend records it per project (at upload, or later via `POST /projects/{id}/consent`) and refuses generation with a 403 without it — but it trusts the uploader's word. There is no way to withdraw it yet: by design, withdrawing means deleting the project, and there is no delete endpoint until persistence (Phase 9). A server restart is the only reset.
 - **Project metadata is in-memory; artifacts are on disk.** Restarting the server loses every project but leaves its media in `backend/var/artifacts/`, orphaned. A failed transcription orphans an upload the same way. Persistence (Phase 9) closes the mismatch; until then `rm -rf backend/var` is a safe reset.
 - **Ingest is still synchronous.** Generation runs as a background job, but upload+transcription does not: a 3-minute upload blocks the request for as long as Whisper takes. Whisper is seconds, so this is liveable; lip-sync would not have been, which is why generation went first.

@@ -1,5 +1,19 @@
 from dataclasses import dataclass
-from app.domain.models import EditPlan, ContinuityReport, MediaArtifact
+from app.domain.models import (
+    EditPlan, ContinuityReport, MediaArtifact, Source, Transcript,
+)
+
+
+@dataclass(frozen=True)
+class Assessment:
+    """A continuity verdict, plus the audio it applies to.
+
+    The audio can differ from what was generated: an engine that auto-corrects
+    (level, room tone) hands back the corrected artifact, and that is what the
+    candidate must carry.
+    """
+    report: ContinuityReport
+    audio: MediaArtifact
 
 # Metric keys, in a fixed order, paired with a human label for warnings.
 _METRICS = (
@@ -37,11 +51,25 @@ def _mock_probe(plan: EditPlan) -> dict[str, float]:
 
 
 class ContinuityEngine:
+    """The mock engine: simulated scores, used when the voice is a mock too.
+
+    Measuring a sine tone's "prosody" would be meaningless, so offline and
+    dry-run keep this — and the report says none of it was measured.
+    """
+
+    measures: tuple[str, ...] = ()
+
     def __init__(self, thresholds: ContinuityThresholds | None = None) -> None:
         self.thresholds = thresholds or ContinuityThresholds()
 
+    def assess(
+        self, source: Source, transcript: Transcript | None, plan: EditPlan,
+        audio: MediaArtifact,
+    ) -> Assessment:
+        return Assessment(self.evaluate(plan, audio), audio)
+
     def evaluate(
-        self, plan: EditPlan, audio: MediaArtifact, frames: MediaArtifact,
+        self, plan: EditPlan, audio: MediaArtifact, frames: MediaArtifact | None = None,
     ) -> ContinuityReport:
         # Phase 6 replaces `_mock_probe` with real signal analysis over these
         # two artifacts — speaker embeddings, F0/energy, LUFS, AV-sync.

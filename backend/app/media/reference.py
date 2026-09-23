@@ -23,7 +23,8 @@ MIN_REFERENCE_SECONDS = 10.0
 _JOIN_GAP = 0.25
 
 
-def _runs(transcript: Transcript, exclude: Selection | None) -> list[tuple[float, float]]:
+def speech_runs(transcript: Transcript, exclude: Selection | None) -> list[tuple[float, float]]:
+    """Spans of speech to cut, never crossing into `exclude`."""
     runs: list[tuple[float, float]] = []
     for word in transcript.words:
         if exclude and word.end > exclude.start and word.start < exclude.end:
@@ -46,7 +47,7 @@ def extract_reference_audio(
     min_seconds: float = MIN_REFERENCE_SECONDS,
 ) -> MediaArtifact | None:
     """Store the speaker's speech outside `exclude` as one WAV, or None if too short."""
-    runs = _runs(transcript, exclude)
+    runs = speech_runs(transcript, exclude)
     if sum(end - start for start, end in runs) < min_seconds:
         return None
 

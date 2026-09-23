@@ -63,12 +63,17 @@ class MediaArtifact:
 
 @dataclass(frozen=True)
 class ContinuityReport:
-    voice_match: float
-    prosody: float
-    audio_integration: float
-    lip_sync: float
+    # A score is None when it cannot be measured yet (no clone, no real
+    # lip-sync) — never a made-up number standing in for one.
+    voice_match: float | None
+    prosody: float | None
+    audio_integration: float | None
+    lip_sync: float | None
     passed: bool
     warnings: tuple[str, ...]
+    # Which of the four scores were measured from the media. The rest are
+    # either None or simulated by the mock engine.
+    measured: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)

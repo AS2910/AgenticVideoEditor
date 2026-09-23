@@ -4,7 +4,9 @@ from pathlib import Path
 from app.adapters.elevenlabs import ElevenLabsVoiceAdapter
 from app.adapters.mock import MockVoiceAdapter, MockTranscriptionAdapter
 from app.adapters.openai_whisper import WhisperTranscriptionAdapter
-from app.adapters.selection import select_voice, select_transcriber
+from app.adapters.selection import select_continuity, select_voice, select_transcriber
+from app.continuity.engine import ContinuityEngine
+from app.continuity.measured import MeasuredContinuityEngine
 from app.budget import VoiceBudget
 from app.config import Settings
 
@@ -42,3 +44,15 @@ def test_transcription_follows_the_same_rules():
     assert isinstance(live, WhisperTranscriptionAdapter) and label == "openai:whisper-1"
     dry, label = select_transcriber(settings(openai_api_key="sk-x", dry_run=True))
     assert isinstance(dry, MockTranscriptionAdapter) and label == "dry-run"
+
+
+def test_a_real_voice_gets_measured_continuity(store):
+    engine, label = select_continuity("stock", store)
+    assert isinstance(engine, MeasuredContinuityEngine)
+    assert label == "measured:prosody,audio_integration"
+
+
+def test_a_mock_voice_keeps_the_mock_engine(store):
+    engine, label = select_continuity("mock", store)
+    assert isinstance(engine, ContinuityEngine)
+    assert label == "mock"

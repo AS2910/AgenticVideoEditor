@@ -1,7 +1,7 @@
 # Real Pipeline — Phased Roadmap
 
 **Date:** 2026-09-22
-**Status:** Phases 0–4a done and clean (2026-09-23). Phases 4b and 5 moved to the **Backlog** — both are blocked on vendor access, not on code.
+**Status:** Phases 0–4a and 6a done and clean (2026-09-23). Phases 4b and 5 moved to the **Backlog** — both are blocked on vendor access, not on code.
 **Supersedes nothing.** Builds on `2026-07-14-walking-skeleton.md` and `2026-07-17-voltage-frontend.md`.
 
 **Goal:** turn the mocked walking skeleton into a system that ingests a real video, produces a real re-voiced and lip-synced segment, verifies continuity with real signal analysis, and exports a real playable file — honoring the v1 design spec end-to-end.
@@ -126,6 +126,16 @@ Grouped into three milestones. Each milestone is independently useful — you ca
 ### Milestone C — the differentiator, and shipping it
 
 - [ ] **Phase 6 · Real continuity engine** *(the moat — spec §6)*
+  - [x] **6a · Prosody + audio integration, measured** — **done 2026-09-23** (plan: `2026-09-23-phase-6a-measured-continuity.md`)
+    - `app/continuity/signals.py` (numpy): speech level, noise floor, autocorrelation pitch; `app/continuity/measured.py`: the engine
+    - **Prosody** = pitch register vs. the speaker's words within 3 s either side (4 semitones = the 0.8 line). **Audio integration** = level (after correction) and clarity. Speaking rate is deliberately *not* scored: word counts on a ~1 s span are too coarse — the original line fails against its own context — and the fit to the original span already holds the rate.
+    - **Auto-correct before preview:** level matched to the context (±12 dB max); the source's own room tone laid under studio-silent TTS when the room is audible. Room tone is taken only from genuinely quiet frames — Whisper's dropped `%` leaves speech in what looks like a gap, which was being mixed in as "room tone" until calibration caught it.
+    - **Auto-retry:** a failing take is regenerated up to `AVE_MAX_REGENERATIONS` (default 2), each charged to the budget; best take kept; budget exhaustion or an unfittable retake keeps the best so far. Lip-sync runs once, on the winning audio.
+    - Unmeasurable scores are `null`, shown as "not measured yet"; mock-engine numbers are tagged "simulated". Only measured scores gate approval.
+    - **Calibrated** against a labelled set from the sample ad (`tests/continuity/test_calibration.py`): good = the speaker's own line (0.98) and the real ElevenLabs take (0.98); bad = ±6 semitones (0.73 / 0.67) and noise-drowned (integration 0.61). All separate at 0.8.
+    - **Exit met:** 269 backend + 60 frontend tests. Live: Sarah → prosody 0.88, integration 1.00, passes; a deep male voice (George) → "Pitch is −8.7 semitones off", regenerated 2×, correctly fails.
+    - Limits: the labelled set is one clip and synthetic bad cases — a start, not the spec §9 corpus. Measured only when the voice is real; offline/dry-run stays on the mock engine.
+  - [ ] **6b** *(after 4b / 5 — see Backlog)* — voice identity and lip-sync accuracy
   - **voice identity** — speaker-embedding cosine similarity, generated vs. original (ECAPA-TDNN / resemblyzer)
   - **prosody & energy** — F0 contour, energy, and speaking-rate delta against neighboring speech
   - **audio integration** — LUFS/peak/noise-floor match to adjacent audio + micro-crossfades at seams (auto-applied per spec)

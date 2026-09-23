@@ -48,11 +48,23 @@ export function CandidateCard({ candidate, onApprove, onTryAgain, projectId }: C
 
       <div className={styles.metrics}>
         {METRICS.map(({ key, label }) => {
-          const value = c[key] as number
+          const value = c[key] as number | null
+          if (value === null) {
+            return (
+              <div key={key} className={styles.metric}>
+                <span className={styles.metricLabel}>{label}</span>
+                <span className={styles.unmeasured}>not measured yet</span>
+              </div>
+            )
+          }
           const ok = value >= THRESHOLD
+          const simulated = !c.measured.includes(key)
           return (
             <div key={key} className={styles.metric}>
-              <span className={styles.metricLabel}>{label}</span>
+              <span className={styles.metricLabel}>
+                {label}
+                {simulated && <span className={styles.simulated}> · simulated</span>}
+              </span>
               <div className={styles.barTrack}>
                 <div
                   data-testid="metric-bar"

@@ -1,13 +1,17 @@
 export interface Word { text: string; start: number; end: number }
 export interface Selection { start: number; end: number }
 
+/** A score is null when it cannot be measured yet (no voice clone, no real
+ *  lip-sync). `measured` names the scores taken from the media itself; any
+ *  other number is simulated by the offline mock engine. */
 export interface ContinuityReport {
-  voice_match: number
-  prosody: number
-  audio_integration: number
-  lip_sync: number
+  voice_match: number | null
+  prosody: number | null
+  audio_integration: number | null
+  lip_sync: number | null
   passed: boolean
   warnings: string[]
+  measured: string[]
 }
 
 export interface EditPlan {

@@ -35,6 +35,8 @@ def load_dotenv(path: Path = ENV_FILE) -> None:
 DEFAULT_ELEVENLABS_MODEL = "eleven_multilingual_v2"
 DEFAULT_ELEVENLABS_VOICE_ID = "EXAVITQu4vr4xnSDxMaL"
 DEFAULT_VOICE_BUDGET_CHARS = 2000
+# Extra paid takes allowed when a take fails continuity (spec §6 auto-retry).
+DEFAULT_MAX_REGENERATIONS = 2
 
 _TRUTHY = {"1", "true", "yes", "on"}
 
@@ -51,6 +53,7 @@ class Settings:
     voice_budget_chars: int = DEFAULT_VOICE_BUDGET_CHARS
     # When set, no paid generation vendor is ever called, whatever keys exist.
     dry_run: bool = False
+    max_regenerations: int = DEFAULT_MAX_REGENERATIONS
 
     @property
     def has_openai(self) -> bool:
@@ -61,15 +64,16 @@ class Settings:
         return bool(self.elevenlabs_api_key)
 
 
-def _budget(raw: str | None) -> int:
+def _whole_number(name: str, default: int) -> int:
+    raw = os.environ.get(name)
     if raw is None or raw == "":
-        return DEFAULT_VOICE_BUDGET_CHARS
+        return default
     try:
         value = int(raw)
     except ValueError:
         value = -1
     if value < 0:
-        raise ValueError(f"AVE_VOICE_BUDGET_CHARS must be a whole number >= 0, got {raw!r}")
+        raise ValueError(f"{name} must be a whole number >= 0, got {raw!r}")
     return value
 
 
@@ -81,6 +85,7 @@ def load_settings() -> Settings:
         elevenlabs_api_key=os.environ.get("ELEVENLABS_API_KEY") or None,
         elevenlabs_model=os.environ.get("ELEVENLABS_MODEL") or DEFAULT_ELEVENLABS_MODEL,
         elevenlabs_voice_id=os.environ.get("ELEVENLABS_VOICE_ID") or DEFAULT_ELEVENLABS_VOICE_ID,
-        voice_budget_chars=_budget(os.environ.get("AVE_VOICE_BUDGET_CHARS")),
+        voice_budget_chars=_whole_number("AVE_VOICE_BUDGET_CHARS", DEFAULT_VOICE_BUDGET_CHARS),
         dry_run=os.environ.get("AVE_DRY_RUN", "").strip().lower() in _TRUTHY,
+        max_regenerations=_whole_number("AVE_MAX_REGENERATIONS", DEFAULT_MAX_REGENERATIONS),
     )

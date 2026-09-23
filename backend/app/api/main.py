@@ -16,9 +16,8 @@ from app.config import load_settings
 from app.media import ingest
 from app.adapters.mock import MockLipSyncAdapter
 from app.adapters.openai_whisper import TranscriptionError
-from app.adapters.selection import select_transcriber, select_voice
+from app.adapters.selection import select_continuity, select_transcriber, select_voice
 from app.budget import VoiceBudget, BudgetExceeded
-from app.continuity.engine import ContinuityEngine
 from app.orchestrator.planner import build_edit_plan
 from app.orchestrator.pipeline import run_edit
 from app.store.repository import ProjectRepository
@@ -43,7 +42,7 @@ budget = VoiceBudget(ceiling=settings.voice_budget_chars)
 transcriber, transcriber_label = select_transcriber(settings)
 voice, voice_label = select_voice(settings, artifacts, budget)
 lipsync = MockLipSyncAdapter(artifacts)
-continuity = ContinuityEngine()
+continuity, continuity_label = select_continuity(voice.identity, artifacts)
 jobs = JobStore()
 runner = JobRunner(jobs)
 
@@ -55,7 +54,7 @@ def health() -> dict:
         "transcription": transcriber_label,
         "voice": voice_label,
         "lipsync": "mock",
-        "continuity": "mock",
+        "continuity": continuity_label,
     }
 
 
@@ -82,6 +81,7 @@ def _continuity_dict(report: ContinuityReport) -> dict:
         "lip_sync": report.lip_sync,
         "passed": report.passed,
         "warnings": list(report.warnings),
+        "measured": list(report.measured),
     }
 
 
@@ -265,6 +265,7 @@ def preview_edit(project_id: str, req: EditRequest) -> dict:
         candidate = run_edit(
             candidate_id, plan, record.source, voice, lipsync, continuity, report,
             transcript=record.transcript,
+            max_regenerations=settings.max_regenerations,
         )
         # Retained so approval commits this exact candidate rather than
         # re-running generation, which real vendors would not reproduce

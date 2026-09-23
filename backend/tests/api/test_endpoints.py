@@ -476,3 +476,35 @@ def test_a_refusal_inside_the_job_reaches_the_user_verbatim(client, project, mon
     assert job["status"] == "failed"
     assert job["attempts"] == 1
     assert "widen the selection" in job["error"]
+
+
+# ── measured continuity over the wire (Phase 6a) ─────────────────────────────
+
+def test_unmeasured_scores_arrive_as_null_with_the_measured_list(client, project, monkeypatch):
+    import app.api.main as main
+    from app.continuity.engine import Assessment
+    from app.domain.models import ContinuityReport
+
+    class Measured:
+        def assess(self, source, transcript, plan, audio):
+            return Assessment(ContinuityReport(
+                voice_match=None, prosody=0.97, audio_integration=0.99, lip_sync=None,
+                passed=True, warnings=(), measured=("prosody", "audio_integration"),
+            ), audio)
+
+    monkeypatch.setattr(main, "continuity", Measured())
+    continuity = preview(client)["continuity"]
+
+    assert continuity["voice_match"] is None and continuity["lip_sync"] is None
+    assert continuity["prosody"] == 0.97
+    assert continuity["measured"] == ["prosody", "audio_integration"]
+
+
+def test_the_mock_engine_says_nothing_was_measured(client, project):
+    assert preview(client)["continuity"]["measured"] == []
+
+
+def test_health_reports_the_continuity_engine(client, monkeypatch):
+    import app.api.main as main
+    monkeypatch.setattr(main, "continuity_label", "measured:prosody,audio_integration")
+    assert client.get("/health").json()["continuity"] == "measured:prosody,audio_integration"

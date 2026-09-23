@@ -39,6 +39,8 @@
   transition: width 400ms ease;
 }
 .metricValue { text-align: right; color: var(--text); }
+.unmeasured { grid-column: 2 / 4; color: var(--muted); font-style: italic; }
+.simulated { color: var(--muted); font-size: 10px; }
 .warnings { margin: 0; padding-left: 18px; color: var(--warn); font-size: 12px; }
 .actions { display: flex; gap: 8px; }
 .approve {

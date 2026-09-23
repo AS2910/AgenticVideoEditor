@@ -11,7 +11,7 @@ const PASSING: Candidate = {
   frames: { kind: 'video', sha256: 'f'.repeat(64), duration: 0.9, container: 'mp4' },
   continuity: {
     voice_match: 0.95, prosody: 0.92, audio_integration: 0.97, lip_sync: 0.94,
-    passed: true, warnings: [],
+    passed: true, warnings: [], measured: [],
   },
 }
 
@@ -19,7 +19,7 @@ const FAILING: Candidate = {
   ...PASSING,
   continuity: {
     voice_match: 0.4, prosody: 0.92, audio_integration: 0.97, lip_sync: 0.94,
-    passed: false, warnings: ['Low voice identity (0.40)'],
+    passed: false, warnings: ['Low voice identity (0.40)'], measured: [],
   },
 }
 
@@ -47,6 +47,26 @@ describe('CandidateCard', () => {
     render(<CandidateCard candidate={stock} onApprove={() => {}} onTryAgain={() => {}} projectId="p1" />)
     expect(screen.getByText(/not the speaker's voice/i)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /approve/i })).toBeEnabled()
+  })
+
+  it('says which scores were measured and which cannot be yet', () => {
+    const measured: Candidate = {
+      ...PASSING,
+      continuity: {
+        voice_match: null, prosody: 0.97, audio_integration: 0.99, lip_sync: null,
+        passed: true, warnings: [], measured: ['prosody', 'audio_integration'],
+      },
+    }
+    render(<CandidateCard candidate={measured} onApprove={() => {}} onTryAgain={() => {}} projectId="p1" />)
+    expect(screen.getAllByText(/not measured yet/i)).toHaveLength(2)
+    expect(screen.getAllByTestId('metric-bar')).toHaveLength(2)
+    expect(screen.getByText('0.97')).toBeInTheDocument()
+    expect(screen.queryByText(/simulated/i)).not.toBeInTheDocument()
+  })
+
+  it('tags made-up mock scores as simulated', () => {
+    render(<CandidateCard candidate={PASSING} onApprove={() => {}} onTryAgain={() => {}} projectId="p1" />)
+    expect(screen.getAllByText(/simulated/i)).toHaveLength(4)
   })
 
   it('shows the new text, the pass badge, and all four metrics', () => {

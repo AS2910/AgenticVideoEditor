@@ -109,3 +109,19 @@ def test_dry_run_flag(monkeypatch, value, expected):
 def test_dry_run_is_off_by_default(monkeypatch):
     monkeypatch.delenv("AVE_DRY_RUN", raising=False)
     assert config.load_settings().dry_run is False
+
+
+def test_regenerations_default_to_two(monkeypatch):
+    monkeypatch.delenv("AVE_MAX_REGENERATIONS", raising=False)
+    assert config.load_settings().max_regenerations == 2
+
+
+def test_regenerations_can_be_turned_off(monkeypatch):
+    monkeypatch.setenv("AVE_MAX_REGENERATIONS", "0")
+    assert config.load_settings().max_regenerations == 0
+
+
+def test_regenerations_reject_nonsense(monkeypatch):
+    monkeypatch.setenv("AVE_MAX_REGENERATIONS", "-3")
+    with pytest.raises(ValueError, match="AVE_MAX_REGENERATIONS"):
+        config.load_settings()

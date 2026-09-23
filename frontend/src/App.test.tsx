@@ -21,7 +21,7 @@ const PROJECT = {
 
 const PASSING_CONTINUITY = {
   voice_match: 0.95, prosody: 0.92, audio_integration: 0.97, lip_sync: 0.94,
-  passed: true, warnings: [] as string[],
+  passed: true, warnings: [] as string[], measured: [] as string[],
 }
 
 const AUDIO = { kind: 'audio', sha256: 'a'.repeat(64), duration: 0.5, container: 'wav' }

@@ -12,6 +12,8 @@ from app.adapters.mock import MockTranscriptionAdapter, MockVoiceAdapter
 from app.adapters.openai_whisper import MODEL as WHISPER_MODEL, WhisperTranscriptionAdapter
 from app.budget import VoiceBudget
 from app.config import Settings
+from app.continuity.engine import ContinuityEngine
+from app.continuity.measured import MeasuredContinuityEngine
 from app.store.artifacts import ArtifactStore
 
 
@@ -33,3 +35,16 @@ def select_voice(settings: Settings, store: ArtifactStore, budget: VoiceBudget):
         )
         return adapter, f"elevenlabs:{settings.elevenlabs_model}:{adapter.identity}"
     return MockVoiceAdapter(store), "mock"
+
+
+def select_continuity(voice_identity: str, store: ArtifactStore):
+    """Measure continuity whenever the voice is real.
+
+    A mock voice is a sine tone: measuring its "prosody" would only ever say
+    "not speech". So a mock voice keeps the mock engine, whose report says
+    nothing was measured.
+    """
+    if voice_identity == "mock":
+        return ContinuityEngine(), "mock"
+    engine = MeasuredContinuityEngine(store)
+    return engine, "measured:" + ",".join(engine.measures)
