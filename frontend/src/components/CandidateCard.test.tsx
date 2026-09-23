@@ -5,9 +5,10 @@ import { CandidateCard } from './CandidateCard'
 import type { Candidate } from '../types'
 
 const PASSING: Candidate = {
+  candidate_id: 'c1',
   plan: { selection: { start: 0.4, end: 1.3 }, new_text: '30% off', voice_profile_id: 'speaker-1' },
-  audio_ref: 'audio://x',
-  frames_ref: 'frames://x',
+  audio: { kind: 'audio', sha256: 'a'.repeat(64), duration: 0.9, container: 'wav' },
+  frames: { kind: 'video', sha256: 'f'.repeat(64), duration: 0.9, container: 'mp4' },
   continuity: {
     voice_match: 0.95, prosody: 0.92, audio_integration: 0.97, lip_sync: 0.94,
     passed: true, warnings: [],
@@ -23,6 +24,13 @@ const FAILING: Candidate = {
 }
 
 describe('CandidateCard', () => {
+  it('reports the real generated media backing the candidate', () => {
+    render(<CandidateCard candidate={PASSING} onApprove={() => {}} onTryAgain={() => {}} />)
+    const media = screen.getByTestId('candidate-media')
+    expect(media).toHaveTextContent('0.90s generated')
+    expect(media).toHaveTextContent('WAV + MP4')
+  })
+
   it('shows the new text, the pass badge, and all four metrics', () => {
     render(<CandidateCard candidate={PASSING} onApprove={() => {}} onTryAgain={() => {}} />)
     expect(screen.getByText('30% off')).toBeInTheDocument()

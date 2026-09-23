@@ -112,7 +112,7 @@ for i in 0..<frameCount {
     ctx.setFillColor(cyan)
     ctx.fill(CGRect(x: barX, y: barY, width: barW * CGFloat(t / duration), height: 6))
 
-    let label = line("SAMPLE — placeholder clip, no real audio", smallFont, muted)
+    let label = line("SAMPLE — placeholder picture, spoken audio", smallFont, muted)
     ctx.textPosition = CGPoint(x: (CGFloat(W) - width(label)) / 2, y: barY - 46)
     CTLineDraw(label, ctx)
 

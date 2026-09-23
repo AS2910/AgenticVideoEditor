@@ -35,3 +35,6 @@ pnpm-debug.log*
 .env
 .env.local
 .env.*.local
+
+# Generated media (content-addressed artifact store)
+backend/var/

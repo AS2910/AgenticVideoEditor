@@ -3,6 +3,7 @@
   padding: 16px; display: flex; flex-direction: column; gap: 12px;
 }
 .newText { font-size: 18px; font-weight: 600; }
+.media { font-size: 11px; color: var(--muted); letter-spacing: 0.02em; }
 .badge {
   align-self: flex-start; color: var(--pass);
   border: 1px solid var(--pass); border-radius: 999px;

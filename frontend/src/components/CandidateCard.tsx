@@ -23,6 +23,13 @@ export function CandidateCard({ candidate, onApprove, onTryAgain }: CandidateCar
     <div className={styles.card}>
       <div className={styles.newText}>{candidate.plan.new_text}</div>
 
+      {/* Real generated media now exists server-side; it is not playable here
+          until the artifact-serving endpoint lands. */}
+      <div className={styles.media} data-testid="candidate-media">
+        {candidate.frames.duration.toFixed(2)}s generated ·{' '}
+        {candidate.audio.container.toUpperCase()} + {candidate.frames.container.toUpperCase()}
+      </div>
+
       {c.passed ? (
         <div className={styles.badge}>✓ Continuity checked</div>
       ) : (

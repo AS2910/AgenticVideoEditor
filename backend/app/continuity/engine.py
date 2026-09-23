@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from app.domain.models import EditPlan, ContinuityReport
+from app.domain.models import EditPlan, ContinuityReport, MediaArtifact
 
 # Metric keys, in a fixed order, paired with a human label for warnings.
 _METRICS = (
@@ -40,7 +40,11 @@ class ContinuityEngine:
     def __init__(self, thresholds: ContinuityThresholds | None = None) -> None:
         self.thresholds = thresholds or ContinuityThresholds()
 
-    def evaluate(self, plan: EditPlan, audio_ref: str, frames_ref: str) -> ContinuityReport:
+    def evaluate(
+        self, plan: EditPlan, audio: MediaArtifact, frames: MediaArtifact,
+    ) -> ContinuityReport:
+        # Phase 6 replaces `_mock_probe` with real signal analysis over these
+        # two artifacts — speaker embeddings, F0/energy, LUFS, AV-sync.
         metrics = _mock_probe(plan)
         warnings: list[str] = []
         for key, label in _METRICS:

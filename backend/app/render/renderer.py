@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from app.domain.models import Source, ApprovedEdit
+from app.domain.models import Source, ApprovedEdit, MediaArtifact
 
 
 @dataclass(frozen=True)
@@ -7,7 +7,8 @@ class RenderSegment:
     start: float
     end: float
     kind: str   # "original" | "edited"
-    ref: str    # source filename for originals, frames_ref for edited spans
+    ref: str    # source filename for originals, artifact sha256 for edited spans
+    artifact: MediaArtifact | None = None  # the media backing this span
 
 
 @dataclass(frozen=True)
@@ -29,9 +30,13 @@ def render(source: Source, edits: list[ApprovedEdit]) -> RenderManifest:
     for e in ordered:
         sel = e.plan.selection
         if sel.start > cursor:
-            segments.append(RenderSegment(cursor, sel.start, "original", source.filename))
-        segments.append(RenderSegment(sel.start, sel.end, "edited", e.frames_ref))
+            segments.append(
+                RenderSegment(cursor, sel.start, "original", source.filename, source.media)
+            )
+        segments.append(RenderSegment(sel.start, sel.end, "edited", e.frames.sha256, e.frames))
         cursor = max(cursor, sel.end)
     if cursor < source.duration:
-        segments.append(RenderSegment(cursor, source.duration, "original", source.filename))
+        segments.append(
+            RenderSegment(cursor, source.duration, "original", source.filename, source.media)
+        )
     return RenderManifest(segments=tuple(segments))
