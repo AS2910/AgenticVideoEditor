@@ -99,8 +99,12 @@ export async function pollJob(
  * exact media that preview produced rather than regenerating it — which real
  * vendors would not reproduce byte-for-byte.
  */
-export const approveEdit = (id: string, candidateId: string) =>
-  post<ApprovedResult>(`/projects/${id}/edits`, { candidate_id: candidateId })
+export const approveEdit = (id: string, candidateId: string, override = false) =>
+  post<ApprovedResult>(
+    `/projects/${id}/edits`,
+    // `override` approves a candidate that failed continuity, for trials.
+    override ? { candidate_id: candidateId, override: true } : { candidate_id: candidateId },
+  )
 
 export const exportProject = (id: string) =>
   post<ExportManifest>(`/projects/${id}/export`)

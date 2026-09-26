@@ -7,6 +7,7 @@ label `/health` reports.
 """
 from __future__ import annotations
 
+from app.adapters.claude_intent import MODEL as CLAUDE_MODEL, ClaudeInterpreter
 from app.adapters.elevenlabs import ElevenLabsVoiceAdapter
 from app.adapters.mock import MockTranscriptionAdapter, MockVoiceAdapter
 from app.adapters.openai_whisper import MODEL as WHISPER_MODEL, WhisperTranscriptionAdapter
@@ -14,6 +15,7 @@ from app.budget import VoiceBudget
 from app.config import Settings
 from app.continuity.engine import ContinuityEngine
 from app.continuity.measured import MeasuredContinuityEngine
+from app.orchestrator.intent import RuleInterpreter
 from app.store.artifacts import ArtifactStore
 
 
@@ -48,3 +50,12 @@ def select_continuity(voice_identity: str, store: ArtifactStore):
         return ContinuityEngine(), "mock"
     engine = MeasuredContinuityEngine(store)
     return engine, "measured:" + ",".join(engine.measures)
+
+
+def select_interpreter(settings: Settings):
+    if settings.dry_run:
+        return RuleInterpreter(), "dry-run"
+    if settings.has_anthropic:
+        interpreter = ClaudeInterpreter(settings.anthropic_api_key, settings.anthropic_workspace_id)
+        return interpreter, f"anthropic:{CLAUDE_MODEL}"
+    return RuleInterpreter(), "rules"

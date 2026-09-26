@@ -3,9 +3,12 @@
   aspect-ratio: 16 / 9; border-radius: var(--radius); overflow: hidden;
   background: linear-gradient(135deg, #0d1a2b, #0a0e14);
   border: 1px solid var(--border);
-  display: grid; place-items: center;
+  position: relative;
 }
-.video { width: 100%; height: 100%; object-fit: cover; }
+/* Pinned to the stage rather than sized by percentage: `height: 100%` does not
+   resolve against an aspect-ratio box, which let a portrait video grow to its
+   natural height and be clipped to its middle. */
+.video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; background: #000; }
 .controls { display: flex; gap: 12px; align-items: center; }
 .play {
   padding: 8px 18px; border-radius: 8px; border: 1px solid var(--border);

@@ -14,10 +14,15 @@ export interface ContinuityReport {
   measured: string[]
 }
 
+export type Fit = 'start' | 'stretch'
+export type Mix = 'replace' | 'layer' | 'concatenate'
+
 export interface EditPlan {
   selection: Selection
   new_text: string
   voice_profile_id: string
+  fit?: Fit | null
+  mix?: Mix
 }
 
 /** A real media file held by the backend, addressed by the hash of its bytes. */
@@ -29,6 +34,7 @@ export interface MediaArtifact {
 }
 
 export interface Candidate {
+  type?: 'candidate'
   candidate_id: string
   plan: EditPlan
   audio: MediaArtifact
@@ -63,15 +69,46 @@ export interface Segment {
   artifact: MediaArtifact | null
 }
 
+/** A line added after a point in the video: the frame there is held while
+ *  it plays, so the export is longer than the source. */
+export interface Insert { at: number; duration: number; artifact: MediaArtifact }
+
 /** `render` is the finished MP4, stored like any other artifact. */
-export interface ExportManifest { segments: Segment[]; render: MediaArtifact }
+export interface ExportManifest { segments: Segment[]; render: MediaArtifact; inserts?: Insert[] }
+
+export interface ChatMessage { role: 'user' | 'assistant'; text: string }
 
 export interface EditRequest {
   prompt: string
   start: number
   end: number
   voice_profile_id: string
+  /** Set when answering a question: the line already read from the prompt. */
+  text?: string
+  fit?: Fit
+  mix?: Mix
+  history?: ChatMessage[]
 }
+
+export interface QuestionOption {
+  label: string
+  fit: Fit | null
+  mix: Mix | null
+  /** Shown with the option, e.g. a stretch far outside natural speech. */
+  warning: string | null
+}
+
+/** Asked instead of refusing an edit: how to mix, or how to fit the line. */
+export interface Question {
+  type: 'question'
+  question: string
+  text: string
+  mix: Mix | null
+  options: QuestionOption[]
+}
+
+/** A chat answer instead of an edit — e.g. a request the editor can't do. */
+export interface Reply { type: 'reply'; text: string }
 
 export type JobStatus = 'queued' | 'running' | 'succeeded' | 'failed'
 
@@ -85,6 +122,6 @@ export interface Job {
   progress: number   // 0–1
   step: string       // human-readable, shown while waiting
   attempts: number
-  result: Candidate | null
+  result: Candidate | Question | Reply | null
   error: string | null
 }

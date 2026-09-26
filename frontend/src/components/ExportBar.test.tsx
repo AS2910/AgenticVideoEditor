@@ -60,3 +60,17 @@ describe('ExportBar', () => {
     expect(second.style.width).toBe('30%')
   })
 })
+
+describe('ExportBar inserts', () => {
+  it('says how many lines were added and for how long', () => {
+    const artifact = { kind: 'audio' as const, sha256: 'a'.repeat(64), duration: 0.74, container: 'wav' }
+    render(
+      <ExportBar
+        segments={[]}
+        onExport={() => {}}
+        inserts={[{ at: 5.9, duration: 0.74, artifact }]}
+      />,
+    )
+    expect(screen.getByTestId('inserts')).toHaveTextContent('+1 added line, holding the frame for 0.74s')
+  })
+})

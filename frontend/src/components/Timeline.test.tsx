@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { render, screen, fireEvent } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { Timeline } from './Timeline'
 import type { Word } from '../types'
@@ -56,5 +56,54 @@ describe('Timeline', () => {
     expect(region.style.width).toMatch(/^39\.13/)
     // playhead at the midpoint
     expect(screen.getByTestId('playhead').style.left).toBe('50%')
+  })
+
+  it('extends the selection to a shift-clicked word', async () => {
+    const onSelect = vi.fn()
+    render(
+      <Timeline
+        words={WORDS}
+        duration={2.3}
+        selection={{ start: 0.4, end: 0.9 }}
+        currentTime={0}
+        onSelect={onSelect}
+      />,
+    )
+    const user = userEvent.setup()
+    await user.keyboard('{Shift>}')
+    await user.click(screen.getByText('off'))
+    expect(onSelect).toHaveBeenLastCalledWith({ start: 0.4, end: 1.3 })
+  })
+
+  it('selects the words a drag passes over, snapped to word edges', () => {
+    const onSelect = vi.fn()
+    const { container } = render(
+      <Timeline words={WORDS} duration={2.3} selection={null} currentTime={0} onSelect={onSelect} />,
+    )
+    const track = container.querySelector('[class*="track"]') as HTMLElement
+    // 230px wide track from x=0, so 1px = 0.01 s
+    track.getBoundingClientRect = () =>
+      ({ left: 0, width: 230, top: 0, height: 56, right: 230, bottom: 56 }) as DOMRect
+    fireEvent.pointerDown(track, { button: 0, clientX: 50 }) // 0.5 s, inside '20%'
+    fireEvent.pointerMove(window, { clientX: 100 }) // 1.0 s, inside 'off'
+    fireEvent.pointerUp(window, { clientX: 100 })
+    expect(onSelect).toHaveBeenLastCalledWith({ start: 0.4, end: 1.3 })
+  })
+
+  it('treats a press without movement as a click, not a drag', () => {
+    const onSelect = vi.fn()
+    const { container } = render(
+      <Timeline words={WORDS} duration={2.3} selection={null} currentTime={0} onSelect={onSelect} />,
+    )
+    const track = container.querySelector('[class*="track"]') as HTMLElement
+    fireEvent.pointerDown(track, { button: 0, clientX: 50 })
+    fireEvent.pointerMove(window, { clientX: 51 })
+    fireEvent.pointerUp(window, { clientX: 51 })
+    expect(onSelect).not.toHaveBeenCalled()
+  })
+
+  it('says so when the video has no speech', () => {
+    render(<Timeline words={[]} duration={8} selection={null} currentTime={0} onSelect={() => {}} />)
+    expect(screen.getByText(/No speech found/)).toBeInTheDocument()
   })
 })

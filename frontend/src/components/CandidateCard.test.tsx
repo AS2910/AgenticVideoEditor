@@ -115,4 +115,26 @@ describe('CandidateCard', () => {
     const warned = bars.filter((b) => b.getAttribute('data-ok') === 'false')
     expect(warned).toHaveLength(1)
   })
+
+  it('offers Approve anyway when continuity fails, and reports it', async () => {
+    const onApproveAnyway = vi.fn()
+    render(
+      <CandidateCard
+        candidate={FAILING} onApprove={() => {}} onApproveAnyway={onApproveAnyway}
+        onTryAgain={() => {}} projectId="p1"
+      />,
+    )
+    await userEvent.click(screen.getByRole('button', { name: /approve anyway/i }))
+    expect(onApproveAnyway).toHaveBeenCalledOnce()
+  })
+
+  it('never offers Approve anyway when continuity passed', () => {
+    render(
+      <CandidateCard
+        candidate={PASSING} onApprove={() => {}} onApproveAnyway={() => {}}
+        onTryAgain={() => {}} projectId="p1"
+      />,
+    )
+    expect(screen.queryByRole('button', { name: /approve anyway/i })).not.toBeInTheDocument()
+  })
 })

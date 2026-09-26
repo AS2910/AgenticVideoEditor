@@ -1,7 +1,7 @@
 # Real Pipeline — Phased Roadmap
 
 **Date:** 2026-09-22
-**Status:** Phases 0–4a, 6a and 7 done and clean (2026-09-23). Phases 4b and 5 moved to the **Backlog** — both are blocked on vendor access, not on code.
+**Status:** Phases 0–4a, 6a, 7 and 8 done and clean (8 on 2026-09-26). Phases 4b and 5 moved to the **Backlog** — both are blocked on vendor access, not on code.
 **Supersedes nothing.** Builds on `2026-07-14-walking-skeleton.md` and `2026-07-17-voltage-frontend.md`.
 
 **Goal:** turn the mocked walking skeleton into a system that ingests a real video, produces a real re-voiced and lip-synced segment, verifies continuity with real signal analysis, and exports a real playable file — honoring the v1 design spec end-to-end.
@@ -152,10 +152,11 @@ Grouped into three milestones. Each milestone is independently useful — you ca
   - Export returns the render; the UI offers "Download MP4", cleared when a new edit is approved
   - **Exit met:** 287 backend + 62 frontend tests. Live: sample → "30% off" (prosody 0.97) → approve → export → a 2.300 s H.264/AAC MP4 that Whisper transcribes as **"Get 30% off today only."**; seam discontinuities 0.036/0.046 vs 0.198 for ordinary speech.
 
-- [ ] **Phase 8 · Real intent parsing**
-  - Replace the regex planner with transcript-aware LLM intent parsing — handles "make it sound more urgent", "drop the price mention", not just `change "X" to "Y"`
-  - Preserve chat context across the iterate loop (spec §5.8)
-  - Model selection pinned at implementation time against current model docs.
+- [x] **Phase 8 · Real intent parsing** — **done 2026-09-26** (plan: `2026-09-26-phase-8-intent-and-placement.md`)
+  - Claude (`claude-opus-5`, effort low, structured output) reads free-form requests with the selection's words and the chat so far (spec §5.8); non-speech requests get a plain chat reply. The regex survives as the offline `RuleInterpreter`.
+  - **Asks instead of refusing:** a line that doesn't fit is placed as the user chooses — *start at the selection* or *stretch* (any amount, warned outside 0.8–1.25×); over a speech-free selection, *replace*, *layer* or *concatenate* (frame held while the line plays; the video grows). The take that prompted the question is reused, so asking costs nothing.
+  - **Exit met:** 330 backend + 74 frontend tests at the time. Live on a speech-free portrait clip: "Add the line "Thirsty Thirsty"" → mix question → fit question → layered at 2.1–3.5 s with the music intact; "after this bit" read as concatenate → export 8.00 → 9.11 s, frame held; "make the background white" → a reply.
+  - **Follow-ups from hands-on testing (same day):** player unmuted and wired to its slider/playhead; approving renders at once and plays the edit (Edited / Original toggle); "Approve anyway" for trials (explicit `override`, recorded on the edit); Whisper's zero-length words no longer crash the continuity check. 333 backend + 85 frontend tests.
 
 - [ ] **Phase 9 · Durability & hardening**
   - SQLite persistence replacing the in-memory store; multi-project; auth; cost tracking and quotas.

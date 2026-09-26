@@ -26,3 +26,9 @@
 @media (max-width: 900px) {
   .app { grid-template-columns: 1fr; height: auto; }
 }
+.versions { display: flex; gap: 6px; align-self: flex-start; }
+.version, .versionOn {
+  padding: 4px 12px; border-radius: 999px; font-size: 12px;
+  border: 1px solid var(--border); background: var(--surface); color: var(--muted);
+}
+.versionOn { color: var(--text); border-color: var(--cyan); box-shadow: 0 0 10px rgba(34, 211, 238, 0.35); }

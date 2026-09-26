@@ -11,6 +11,11 @@
   background: var(--electric); color: white;
   padding: 8px 12px; border-radius: 12px;
 }
+.reply {
+  align-self: flex-start; max-width: 85%;
+  background: var(--bg); color: var(--text); border: 1px solid var(--border);
+  padding: 8px 12px; border-radius: 12px;
+}
 .composer { display: flex; gap: 8px; padding: 12px; border-top: 1px solid var(--border); }
 .input {
   flex: 1; padding: 10px;

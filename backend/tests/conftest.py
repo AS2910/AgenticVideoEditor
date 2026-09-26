@@ -21,6 +21,7 @@ os.environ["OPENAI_API_KEY"] = ""
 # Same for the paid voice vendor, and dry-run off so tests see the real
 # adapter-selection logic rather than whatever the developer's shell set.
 os.environ["ELEVENLABS_API_KEY"] = ""
+os.environ["ANTHROPIC_API_KEY"] = ""
 os.environ["AVE_DRY_RUN"] = ""
 
 

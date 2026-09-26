@@ -1,0 +1,17 @@
+.card {
+  background: var(--bg); border: 1px solid var(--border); border-radius: 12px;
+  padding: 16px; display: flex; flex-direction: column; gap: 12px;
+}
+.line { font-size: 16px; font-weight: 600; }
+.options { display: flex; flex-direction: column; gap: 8px; }
+.option {
+  display: flex; flex-direction: column; gap: 4px; text-align: left;
+  padding: 10px 12px; border-radius: 8px;
+  background: var(--surface); color: var(--text); border: 1px solid var(--border);
+  transition: border-color 150ms ease, box-shadow 150ms ease;
+}
+.option:hover {
+  border-color: var(--cyan);
+  box-shadow: 0 0 10px rgba(34, 211, 238, 0.35);
+}
+.warning { color: var(--warn); font-size: 12px; }

@@ -2,6 +2,7 @@
 .track {
   position: relative; height: 56px;
   background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+  cursor: text; user-select: none; touch-action: none;
 }
 .word {
   position: absolute; top: 8px; height: 40px;
@@ -27,3 +28,8 @@
   background: var(--electric); box-shadow: 0 0 10px var(--electric);
   pointer-events: none;
 }
+.empty {
+  position: absolute; inset: 0; display: grid; place-items: center;
+  color: var(--muted); font-size: 13px; pointer-events: none;
+}
+.hint { margin-top: 6px; color: var(--muted); font-size: 12px; }

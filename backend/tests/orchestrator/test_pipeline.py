@@ -189,22 +189,17 @@ def test_no_budget_for_the_first_take_is_still_an_error(store):
         regenerate(store, [BudgetExceeded(7, 3)])
 
 
-def test_a_take_that_cannot_be_fitted_is_skipped_on_regeneration(store):
+def test_a_retake_that_cannot_be_fitted_is_skipped(store):
     candidate, voice, _ = regenerate(store, [0.5, SpanMismatch(2.0, 0.9), 0.9])
     assert voice.calls == 3
     assert candidate.continuity.prosody == 0.9
 
 
-def test_a_first_take_that_cannot_be_fitted_is_regenerated(store):
-    # Take lengths vary per call, so the next take may well fit.
-    candidate, voice, _ = regenerate(store, [SpanMismatch(2.0, 0.9), 0.9])
-    assert voice.calls == 2
-    assert candidate.continuity.prosody == 0.9
-
-
-def test_the_edit_fails_only_when_no_take_fits(store):
+def test_a_first_take_that_cannot_be_fitted_is_not_regenerated(store):
+    # Phase 8: the user is asked how to place it, rather than paying for more
+    # takes that may not fit either.
     with pytest.raises(SpanMismatch):
-        regenerate(store, [SpanMismatch(2.0, 0.9)] * 3)
+        regenerate(store, [SpanMismatch(2.0, 0.9), 0.9])
 
 
 def test_lip_sync_runs_once_on_the_winning_audio(store):
@@ -221,3 +216,29 @@ def test_a_mock_voice_is_never_regenerated(store):
     )
     assert candidate.continuity.passed is False
     assert not any("Regenerated" in w for w in candidate.continuity.warnings)
+
+
+# --- Phase 8: a line allowed to run past the selection ----------------------
+
+class LongVoice(MockVoiceAdapter):
+    """Speaks a 1.5 s line whatever the selection."""
+
+    def synthesize(self, source, plan, transcript=None):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            path, duration = ffmpeg.generate_tone(Path(tmp) / "v.wav", 1.5, 300)
+            return self._store.put_file(source.project_id, path, kind="audio",
+                                        container="wav", duration=duration)
+
+
+def test_a_line_running_past_the_selection_grows_the_edit(store):
+    plan = EditPlan(Selection(0.4, 1.3), "30% off", "speaker-1", fit="start")
+    candidate = run_edit("c1", plan, SOURCE, LongVoice(store), MockLipSyncAdapter(store), ContinuityEngine())
+    assert candidate.plan.selection.start == 0.4
+    assert candidate.plan.selection.end == pytest.approx(1.9, abs=0.02)
+
+
+def test_an_insert_keeps_its_selection(store):
+    plan = EditPlan(Selection(0.4, 1.3), "30% off", "speaker-1", mix="concatenate")
+    candidate = run_edit("c1", plan, SOURCE, LongVoice(store), MockLipSyncAdapter(store), ContinuityEngine())
+    assert candidate.plan.selection == Selection(0.4, 1.3)

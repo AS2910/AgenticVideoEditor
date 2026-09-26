@@ -7,18 +7,24 @@ from fastapi import FastAPI, HTTPException, File, Form, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
+from typing import Literal
+
 from app.domain.models import (
     Source, Selection, ContinuityReport, EditCandidate, ApprovedEdit, MediaArtifact,
-    Consent,
+    Consent, EditPlan, Intent,
 )
 from app.domain.transcript import snap_to_word_boundaries
 from app.config import load_settings
 from app.media import ffmpeg, ingest
 from app.adapters.mock import MockLipSyncAdapter
 from app.adapters.openai_whisper import TranscriptionError
-from app.adapters.selection import select_continuity, select_transcriber, select_voice
+from app.adapters.selection import (
+    select_continuity, select_interpreter, select_transcriber, select_voice,
+)
 from app.budget import VoiceBudget, BudgetExceeded
-from app.orchestrator.planner import build_edit_plan
+from app.orchestrator.intent import Turn, edit_context
+from app.orchestrator.questions import fit_question, mix_question
+from app.media.ffmpeg import SpanMismatch
 from app.orchestrator.pipeline import run_edit
 from app.store.repository import ProjectRepository
 from app.store.artifacts import ArtifactStore
@@ -44,6 +50,7 @@ transcriber, transcriber_label = select_transcriber(settings)
 voice, voice_label = select_voice(settings, artifacts, budget)
 lipsync = MockLipSyncAdapter(artifacts)
 continuity, continuity_label = select_continuity(voice.identity, artifacts)
+interpreter, interpreter_label = select_interpreter(settings)
 jobs = JobStore()
 runner = JobRunner(jobs)
 
@@ -56,6 +63,7 @@ def health() -> dict:
         "voice": voice_label,
         "lipsync": "mock",
         "continuity": continuity_label,
+        "intent": interpreter_label,
     }
 
 
@@ -63,15 +71,30 @@ _MEDIA_TYPES = {"mp4": "video/mp4", "mov": "video/quicktime", "webm": "video/web
                 "wav": "audio/wav", "m4a": "audio/mp4"}
 
 
+class ChatTurn(BaseModel):
+    role: Literal["user", "assistant"]
+    text: str
+
+
 class EditRequest(BaseModel):
     prompt: str
     start: float
     end: float
     voice_profile_id: str = "speaker-1"
+    # Set when answering a question: the line already read from the prompt,
+    # so it is not read again (and cannot come back different).
+    text: str | None = None
+    fit: Literal["start", "stretch"] | None = None
+    mix: Literal["replace", "layer", "concatenate"] | None = None
+    # The chat so far, oldest first, so follow-ups can be understood.
+    history: list[ChatTurn] = []
 
 
 class ApproveRequest(BaseModel):
     candidate_id: str
+    # Approve even though continuity failed. Explicit, per approval, and
+    # recorded on the edit — never a default.
+    override: bool = False
 
 
 def _continuity_dict(report: ContinuityReport) -> dict:
@@ -103,6 +126,7 @@ def _artifact_dict(artifact: MediaArtifact) -> dict:
 
 def _candidate_dict(candidate: EditCandidate) -> dict:
     return {
+        "type": "candidate",
         "candidate_id": candidate.candidate_id,
         "plan": {
             "selection": {
@@ -111,6 +135,8 @@ def _candidate_dict(candidate: EditCandidate) -> dict:
             },
             "new_text": candidate.plan.new_text,
             "voice_profile_id": candidate.plan.voice_profile_id,
+            "fit": candidate.plan.fit,
+            "mix": candidate.plan.mix,
         },
         "audio": _artifact_dict(candidate.audio),
         "frames": _artifact_dict(candidate.frames),
@@ -249,25 +275,43 @@ def preview_edit(project_id: str, req: EditRequest) -> dict:
         raise HTTPException(status_code=403, detail=CONSENT_REQUIRED)
 
     selection = snap_to_word_boundaries(record.transcript, Selection(req.start, req.end))
-    plan = build_edit_plan(req.prompt, selection, req.voice_profile_id)
-    # Refuse an unaffordable edit here, before a job exists, rather than as a
-    # failed job. The adapter still charges per attempt inside the job, so
-    # retries stay capped too.
-    cost = voice.cost_of(plan)
-    if not budget.can_afford(project_id, cost):
-        raise HTTPException(
-            status_code=402,
-            detail=str(BudgetExceeded(cost, budget.remaining(project_id))),
-        )
+    context = edit_context(record.transcript, selection, record.source.duration)
+    history = [Turn(t.role, t.text) for t in req.history]
     candidate_id = repo.next_candidate_id(project_id)
     job = jobs.create("preview", project_id)
 
     def work(report) -> dict:
-        candidate = run_edit(
-            candidate_id, plan, record.source, voice, lipsync, continuity, report,
-            transcript=record.transcript,
-            max_regenerations=settings.max_regenerations,
-        )
+        if req.text is not None:
+            intent = Intent(action="speak", new_text=req.text)
+        else:
+            report(0.02, "Reading your request")
+            intent = interpreter.interpret(req.prompt, history, context)
+        if intent.action != "speak":
+            return {"type": "reply", "text": intent.reply}
+
+        # Replacing speech is the obvious reading of an edit over words; over
+        # music or silence it is not, so the user is asked.
+        mix = req.mix or intent.mix or ("replace" if context.has_speech else None)
+        if mix is None:
+            return mix_question(intent.new_text, context)
+
+        plan = EditPlan(selection, intent.new_text, req.voice_profile_id, fit=req.fit, mix=mix)
+        cost = voice.cost_of(plan)
+        if not budget.can_afford(project_id, cost):
+            raise BudgetExceeded(cost, budget.remaining(project_id))
+        try:
+            candidate = run_edit(
+                candidate_id, plan, record.source, voice, lipsync, continuity, report,
+                transcript=record.transcript,
+                max_regenerations=settings.max_regenerations,
+            )
+        except SpanMismatch as exc:
+            if plan.fit is not None:
+                raise
+            return fit_question(
+                plan.new_text, mix, exc.natural, exc.target,
+                selection.start, record.source.duration,
+            )
         # Retained so approval commits this exact candidate rather than
         # re-running generation, which real vendors would not reproduce
         # byte-for-byte.
@@ -291,7 +335,8 @@ def approve_edit(project_id: str, req: ApproveRequest) -> dict:
     candidate = repo.get_candidate(project_id, req.candidate_id)
     if candidate is None:
         raise HTTPException(status_code=404, detail="candidate not found")
-    if not candidate.continuity.passed:
+    overridden = not candidate.continuity.passed
+    if overridden and not req.override:
         raise HTTPException(status_code=422, detail="continuity check failed")
     edit_id = f"e{len(repo.list_edits(project_id)) + 1}"
     repo.append_edit(project_id, ApprovedEdit(
@@ -300,10 +345,12 @@ def approve_edit(project_id: str, req: ApproveRequest) -> dict:
         plan=candidate.plan,
         audio=candidate.audio,
         frames=candidate.frames,
+        overridden=overridden,
     ))
     return {
         "edit_id": edit_id,
         "candidate_id": candidate.candidate_id,
+        "overridden": overridden,
         "continuity": _continuity_dict(candidate.continuity),
     }
 
@@ -317,7 +364,10 @@ def export_project(project_id: str) -> dict:
     # Synchronous: the video is stream-copied and only the audio re-encoded,
     # so even a 3-minute source renders in seconds.
     with tempfile.TemporaryDirectory() as tmp:
-        path = compose(record.source, manifest.segments, Path(tmp) / "export.mp4")
+        path = compose(
+            record.source, manifest.segments, Path(tmp) / "export.mp4",
+            inserts=manifest.inserts,
+        )
         rendered = artifacts.put_file(
             project_id, path, kind="video", container="mp4",
             duration=ffmpeg.duration_of(path),
@@ -333,5 +383,9 @@ def export_project(project_id: str) -> dict:
                 "artifact": _artifact_dict(s.artifact) if s.artifact else None,
             }
             for s in manifest.segments
+        ],
+        "inserts": [
+            {"at": i.at, "duration": i.duration, "artifact": _artifact_dict(i.edit.audio)}
+            for i in manifest.inserts
         ],
     }

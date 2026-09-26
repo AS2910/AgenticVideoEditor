@@ -71,3 +71,12 @@ def test_too_little_speech_returns_none(store, loud_middle):
 def test_without_an_exclusion_every_word_counts(store, loud_middle):
     artifact = extract_reference_audio(loud_middle, WORDS, store, min_seconds=0.5)
     assert artifact.duration == pytest.approx(2.97, abs=0.05)
+
+
+def test_a_word_whisper_gave_no_length_is_not_a_run():
+    # Whisper returns some words with start == end; a zero-length run would be
+    # cut as an empty file and crash whatever reads it.
+    from app.domain.models import Transcript, Word
+    from app.media.reference import speech_runs
+    words = Transcript(words=(Word("Done", 14.52, 14.52), Word("hello", 20.0, 20.4)))
+    assert speech_runs(words, None) == [(20.0, 20.4)]

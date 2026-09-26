@@ -214,3 +214,26 @@ def test_the_key_never_leaks_into_an_error(store, monkeypatch):
 def test_cost_of_is_the_billed_characters_for_the_new_line(store):
     assert adapter(store).cost_of(PLAN) == 7
     assert adapter(store, model="eleven_flash_v2_5").cost_of(PLAN) == 4
+
+
+# --- Phase 8: placement, and the take held for a question --------------------
+
+@needs_ffmpeg
+def test_a_take_that_did_not_fit_is_reused_when_the_user_answers(store):
+    from dataclasses import replace
+    post = FakePost()
+    budget = VoiceBudget(ceiling=1000)
+    voice = adapter(store, post=post, budget=budget)
+    wide = EditPlan(Selection(0.0, 3.87), "30% off", "speaker-1")
+    with pytest.raises(ffmpeg.SpanMismatch):
+        voice.synthesize(SOURCE, wide, TRANSCRIPT)
+    spent = budget.spent("p1")
+
+    artifact = voice.synthesize(SOURCE, replace(wide, fit="stretch"), TRANSCRIPT)
+
+    assert len(post.calls) == 1              # the answer did not call the vendor
+    assert budget.spent("p1") == spent       # nor pay again
+    assert artifact.duration == pytest.approx(3.87, abs=0.02)
+    # A later take is a fresh one.
+    voice.synthesize(SOURCE, replace(wide, fit="stretch"), TRANSCRIPT)
+    assert len(post.calls) == 2

@@ -148,4 +148,14 @@ describe('api client', () => {
     await expect(approveEdit('p1', 'c1')).rejects.toMatchObject({ status: 422 })
     await expect(approveEdit('p1', 'c1')).rejects.toBeInstanceOf(ApiError)
   })
+
+  it('approveEdit sends override only when asked', async () => {
+    const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) =>
+      ({ ok: true, status: 200, json: async () => ({}) }) as Response)
+    vi.stubGlobal('fetch', fetchMock)
+    await approveEdit('p1', 'c1', true)
+    expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toEqual({
+      candidate_id: 'c1', override: true,
+    })
+  })
 })

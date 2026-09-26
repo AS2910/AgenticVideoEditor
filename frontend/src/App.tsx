@@ -5,17 +5,25 @@ import { Player } from './components/Player'
 import { Timeline } from './components/Timeline'
 import { ChatPanel } from './components/ChatPanel'
 import { CandidateCard } from './components/CandidateCard'
+import { QuestionCard } from './components/QuestionCard'
 import { ExportBar } from './components/ExportBar'
 import {
   createProject, previewEdit, approveEdit, exportProject, artifactUrl,
   pollJob, PollCancelled, ApiError,
 } from './api'
-import type { Word, Selection, Candidate, Segment, Project } from './types'
+import type {
+  Word, Selection, Candidate, Segment, Project, ChatMessage, Question, QuestionOption,
+  Fit, Mix, Insert,
+} from './types'
+import { sourceTime } from './timeline/selection'
 import styles from './App.module.css'
 
 /** Bundled demo clip, uploaded through the same path as any other file. */
 const SAMPLE_URL = '/sample-ad.mp4'
 const VOICE = 'speaker-1'
+
+/** An answer to a question: the line already read, and the choices so far. */
+interface Answer { text: string; fit?: Fit; mix?: Mix }
 
 type Stage = 'consent' | 'load' | 'editor'
 
@@ -29,12 +37,21 @@ export default function App() {
   const [transcript, setTranscript] = useState<Word[]>([])
   const [selection, setSelection] = useState<Selection | null>(null)
   const [currentTime, setCurrentTime] = useState(0)
-  const [messages, setMessages] = useState<string[]>([])
+  const [messages, setMessages] = useState<ChatMessage[]>([])
   const [candidate, setCandidate] = useState<Candidate | null>(null)
+  // The open question, with the request it is about — answering re-sends that
+  // request for the same selection, plus the choice.
+  const [question, setQuestion] = useState<
+    { question: Question; prompt: string; selection: Selection } | null
+  >(null)
   const [generating, setGenerating] = useState(false)
   const [progress, setProgress] = useState<{ value: number; step: string } | null>(null)
   const [segments, setSegments] = useState<Segment[]>([])
+  const [inserts, setInserts] = useState<Insert[]>([])
   const [download, setDownload] = useState<{ url: string; filename: string } | null>(null)
+  // The latest render of the approved edits, and which version the player shows.
+  const [rendered, setRendered] = useState<{ url: string; duration: number } | null>(null)
+  const [view, setView] = useState<'original' | 'edited'>('original')
   const [error, setError] = useState<string | null>(null)
   const previewToken = useRef(0)
 
@@ -69,10 +86,19 @@ export default function App() {
     }
   }
 
-  const runPreview = async (prompt: string) => {
-    if (!projectId || !selection) return
-    setMessages((m) => [...m, prompt])
+  const say = (message: ChatMessage) => setMessages((m) => [...m, message])
+
+  const runPreview = async (
+    prompt: string,
+    answer?: Answer,
+    at: Selection | null = selection,
+    shown: string = prompt,
+  ) => {
+    if (!projectId || !at) return
+    const history = messages
+    say({ role: 'user', text: shown })
     setCandidate(null)
+    setQuestion(null)
     setError(null)
     setGenerating(true)
     setProgress({ value: 0, step: 'Queued' })
@@ -85,9 +111,11 @@ export default function App() {
     try {
       const job = await previewEdit(projectId, {
         prompt,
-        start: selection.start,
-        end: selection.end,
+        start: at.start,
+        end: at.end,
         voice_profile_id: VOICE,
+        history,
+        ...answer,
       })
       const finished = await pollJob(job.job_id, {
         shouldStop: superseded,
@@ -95,12 +123,22 @@ export default function App() {
       })
       if (superseded()) return
 
-      if (finished.status === 'failed' || !finished.result) {
+      const result = finished.result
+      if (finished.status === 'failed' || !result) {
         setError(finished.error ?? 'Preview failed. Try again.')
         return
       }
-      setSelection(finished.result.plan.selection) // the backend's snapped range
-      setCandidate(finished.result)
+      if (result.type === 'reply') {
+        say({ role: 'assistant', text: result.text })
+        return
+      }
+      if (result.type === 'question') {
+        say({ role: 'assistant', text: result.question })
+        setQuestion({ question: result, prompt, selection: at })
+        return
+      }
+      setSelection(result.plan.selection) // the backend's snapped range
+      setCandidate(result)
     } catch (e) {
       if (e instanceof PollCancelled) return
       setError(e instanceof ApiError ? e.message : 'Preview failed. Try again.')
@@ -112,13 +150,25 @@ export default function App() {
     }
   }
 
-  const approve = async () => {
+  const answer = (option: QuestionOption) => {
+    if (!question) return
+    const { question: q, prompt, selection: at } = question
+    void runPreview(prompt, {
+      text: q.text,
+      mix: option.mix ?? q.mix ?? undefined,
+      fit: option.fit ?? undefined,
+    }, at, option.label)
+  }
+
+  const approve = async (override = false) => {
     if (!projectId || !candidate) return
     setError(null)
     try {
-      await approveEdit(projectId, candidate.candidate_id)
+      await approveEdit(projectId, candidate.candidate_id, override)
       setCandidate(null)
       setDownload(null) // the last render no longer includes every approved edit
+      // Render straight away, so pressing Play hears the edit.
+      if (await runExport()) setView('edited')
     } catch (e) {
       // Never silently drop the candidate — leave it on screen to iterate on.
       if (e instanceof ApiError && e.status === 422) {
@@ -129,19 +179,22 @@ export default function App() {
     }
   }
 
-  const runExport = async () => {
-    if (!projectId) return
+  /** Renders the approved edits; true when the render is ready to play. */
+  const runExport = async (): Promise<boolean> => {
+    if (!projectId) return false
     setError(null)
     try {
       const manifest = await exportProject(projectId)
       setSegments(manifest.segments)
+      setInserts(manifest.inserts ?? [])
       const stem = (project?.filename ?? 'video').replace(/\.[^.]+$/, '')
-      setDownload({
-        url: artifactUrl(projectId, manifest.render.sha256),
-        filename: `${stem}-edited.mp4`,
-      })
+      const url = artifactUrl(projectId, manifest.render.sha256)
+      setDownload({ url, filename: `${stem}-edited.mp4` })
+      setRendered({ url, duration: manifest.render.duration })
+      return true
     } catch {
       setError('Export failed.')
+      return false
     }
   }
 
@@ -166,27 +219,44 @@ export default function App() {
     )
   }
 
+  const showEdited = view === 'edited' && rendered !== null
+
   return (
     <div className={styles.app}>
       <div className={styles.left}>
         <Player
-          src={artifactUrl(project.project_id, project.media.sha256)}
-          duration={project.duration}
+          src={showEdited ? rendered.url : artifactUrl(project.project_id, project.media.sha256)}
+          duration={showEdited ? rendered.duration : project.duration}
           currentTime={currentTime}
           onSeek={setCurrentTime}
+          onTimeUpdate={setCurrentTime}
         />
+        {rendered && (
+          <div className={styles.versions} role="group" aria-label="Version">
+            {(['edited', 'original'] as const).map((v) => (
+              <button
+                key={v}
+                className={view === v ? styles.versionOn : styles.version}
+                aria-pressed={view === v}
+                onClick={() => { setView(v); setCurrentTime(0) }}
+              >
+                {v === 'edited' ? 'Edited' : 'Original'}
+              </button>
+            ))}
+          </div>
+        )}
         <Timeline
           words={transcript}
           duration={project.duration}
           selection={selection}
-          currentTime={currentTime}
+          currentTime={showEdited ? sourceTime(currentTime, inserts) : currentTime}
           onSelect={setSelection}
         />
-        <ExportBar segments={segments} onExport={runExport} download={download} />
+        <ExportBar segments={segments} inserts={inserts} onExport={() => void runExport()} download={download} />
         {error && <div className={styles.error}>{error}</div>}
       </div>
       <div className={styles.right}>
-        <ChatPanel messages={messages} canSubmit={selection !== null} onSubmit={runPreview}>
+        <ChatPanel messages={messages} canSubmit={selection !== null} onSubmit={(p) => void runPreview(p)}>
           {generating && (
             <div className={styles.generating} data-testid="generating">
               <div className={styles.generatingStep}>{progress?.step ?? 'Queued'}</div>
@@ -199,10 +269,12 @@ export default function App() {
               </div>
             </div>
           )}
+          {question && <QuestionCard question={question.question} onChoose={answer} />}
           {candidate && (
             <CandidateCard
               candidate={candidate}
-              onApprove={approve}
+              onApprove={() => void approve()}
+              onApproveAnyway={() => void approve(true)}
               onTryAgain={() => setCandidate(null)}
               projectId={project.project_id}
             />

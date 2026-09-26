@@ -254,3 +254,97 @@ describe('App full journey', () => {
     })
   })
 })
+
+describe('App conversation (Phase 8)', () => {
+  /** Serves the given job results in turn, recording each preview request. */
+  function conversation(results: unknown[]) {
+    const bodies: Record<string, unknown>[] = []
+    let turn = -1
+    const base = routeFetch()
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.endsWith('/edits/preview')) {
+        turn += 1
+        bodies.push(JSON.parse(String(init?.body)))
+        return ok(JOB_ACCEPTED)
+      }
+      if (url.includes('/jobs/')) return ok({ ...JOB_DONE, result: results[turn] })
+      return base(url, init)
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    return bodies
+  }
+
+  it('shows a reply for a request the editor cannot do', async () => {
+    conversation([{ type: 'reply', text: 'This editor only changes spoken dialogue.' }])
+    const user = userEvent.setup()
+    render(<App />)
+    await reachEditor(user)
+
+    await user.click(screen.getByText('20%'))
+    await user.type(screen.getByRole('textbox'), 'make the background white{Enter}')
+
+    await waitFor(() =>
+      expect(screen.getByText('This editor only changes spoken dialogue.')).toBeInTheDocument())
+    expect(screen.queryByRole('button', { name: /approve/i })).not.toBeInTheDocument()
+  })
+
+  it('asks how to place the line, then re-sends the request with the choice', async () => {
+    const question = {
+      type: 'question',
+      question: 'The line is 0.30s but the selection is 0.50s. How should it fill the selection?',
+      text: '30% off',
+      mix: 'layer',
+      options: [
+        { label: "Start at the selection's start", fit: 'start', mix: null, warning: null },
+        { label: 'Slow it down to fill', fit: 'stretch', mix: null, warning: 'It will sound dragged.' },
+      ],
+    }
+    const bodies = conversation([question, CANDIDATE])
+    const user = userEvent.setup()
+    render(<App />)
+    await reachEditor(user)
+
+    await user.click(screen.getByText('20%'))
+    await user.type(screen.getByRole('textbox'), 'say 30% off{Enter}')
+    await waitFor(() => expect(screen.getByText(question.question)).toBeInTheDocument())
+    expect(screen.getByText('It will sound dragged.')).toBeInTheDocument()
+
+    await user.click(screen.getByText('Slow it down to fill'))
+
+    await waitFor(() => expect(screen.getByText(/continuity checked/i)).toBeInTheDocument())
+    expect(bodies[1]).toMatchObject({
+      prompt: 'say 30% off', text: '30% off', fit: 'stretch', mix: 'layer', start: 0.4, end: 0.9,
+    })
+    // The conversation so far travels with the answer.
+    expect(bodies[1].history).toEqual([
+      { role: 'user', text: 'say 30% off' },
+      { role: 'assistant', text: question.question },
+    ])
+    // The choice shows in the chat as the user's reply.
+    expect(screen.getAllByText('Slow it down to fill').length).toBeGreaterThan(0)
+  })
+})
+
+describe('App playback after approval', () => {
+  it('renders the approved edit and plays it, with the original a click away', async () => {
+    const fetchMock = routeFetch()
+    vi.stubGlobal('fetch', fetchMock)
+    const user = userEvent.setup()
+    const { container } = render(<App />)
+    await reachEditor(user)
+
+    await user.click(screen.getByText('20%'))
+    await user.type(screen.getByRole('textbox'), 'change "20% off" to "30% off"{Enter}')
+    await waitFor(() => expect(screen.getByText(/continuity checked/i)).toBeInTheDocument())
+    await user.click(screen.getByRole('button', { name: /approve/i }))
+
+    const video = () => container.querySelector('video') as HTMLVideoElement
+    const renderUrl = `/api/projects/p1/artifacts/${'r'.repeat(64)}`
+    await waitFor(() => expect(video().getAttribute('src')).toBe(renderUrl))
+    expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith('/export'))).toBe(true)
+    expect(screen.getByRole('button', { name: 'Edited' })).toHaveAttribute('aria-pressed', 'true')
+
+    await user.click(screen.getByRole('button', { name: 'Original' }))
+    expect(video().getAttribute('src')).toBe(`/api/projects/p1/artifacts/${'s'.repeat(64)}`)
+  })
+})

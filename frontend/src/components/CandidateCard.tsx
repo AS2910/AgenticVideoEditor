@@ -15,11 +15,15 @@ const THRESHOLD = 0.8
 interface CandidateCardProps {
   candidate: Candidate
   onApprove: () => void
+  /** Approve despite failed continuity — offered only when it failed. */
+  onApproveAnyway?: () => void
   onTryAgain: () => void
   projectId: string
 }
 
-export function CandidateCard({ candidate, onApprove, onTryAgain, projectId }: CandidateCardProps) {
+export function CandidateCard({
+  candidate, onApprove, onApproveAnyway, onTryAgain, projectId,
+}: CandidateCardProps) {
   const c = candidate.continuity
   return (
     <div className={styles.card}>
@@ -86,9 +90,19 @@ export function CandidateCard({ candidate, onApprove, onTryAgain, projectId }: C
       )}
 
       <div className={styles.actions}>
-        <button className={styles.approve} onClick={onApprove} disabled={!c.passed}>
-          Approve
-        </button>
+        {c.passed || !onApproveAnyway ? (
+          <button className={styles.approve} onClick={onApprove} disabled={!c.passed}>
+            Approve
+          </button>
+        ) : (
+          <button
+            className={styles.approveAnyway}
+            onClick={onApproveAnyway}
+            title="Approve for a trial even though the continuity check failed"
+          >
+            Approve anyway
+          </button>
+        )}
         <button className={styles.tryAgain} onClick={onTryAgain}>Try again</button>
       </div>
     </div>

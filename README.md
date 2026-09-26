@@ -4,7 +4,7 @@ Select a moment in an existing video, describe in plain English how the **spoken
 
 The differentiator is **continuity**: splicing an AI clip into footage is easy; making it *belong* — matching voice identity, prosody, audio levels, and mouth motion — is the hard part. This repo is the agentic orchestration layer plus the continuity engine, built over swappable third-party generation models.
 
-**Current state:** upload your own video and edit what is actually said in it. The backend ingests a real file, measures it with ffprobe, stores it immutably, serves it back with range requests, and **transcribes it for real** with OpenAI `whisper-1` — so the timeline shows your words at your timings. Generation runs as a **background job** the UI polls for progress, with retries on vendor failure. The new line is **spoken for real** by ElevenLabs, fitted to the selection's length, and playable on the candidate card — but in a *stock* voice, not the speaker's (the account's free tier cannot clone). Export renders a real MP4 with the new line spliced in — over the original video, since lip-sync is still mocked. Prosody and audio integration are **measured** from the audio, levels and room tone are corrected automatically, and a take that fails is regenerated within a cap. Every paid call is metered against a per-project budget, and `AVE_DRY_RUN=1` switches all vendors off. The *interaction*, *source media*, *transcript*, *pipeline* and *voice* are real; the *speaker's identity* and the *mouth* are not yet.
+**Current state:** upload your own video and edit what is actually said in it. The backend ingests a real file, measures it with ffprobe, stores it immutably, serves it back with range requests, and **transcribes it for real** with OpenAI `whisper-1` — so the timeline shows your words at your timings; click, shift-click or drag across them to select. Requests are **free-form**: Claude reads what you type ("add the line "Thirsty!" over the music", "make it 30%"), answers in the chat when a request isn't about speech, and when a line doesn't fit the selection — or the selection holds no speech — the editor **asks** how to place it (start at the selection or stretch it; replace, layer over, or add after the sound there) rather than refusing. Generation runs as a **background job** the UI polls for progress, with retries on vendor failure. The new line is **spoken for real** by ElevenLabs, fitted to the selection's length, and playable on the candidate card — but in a *stock* voice, not the speaker's (the account's free tier cannot clone). Approving renders straight away and the player switches to the edited version (an Edited / Original toggle compares them); a candidate that fails continuity can still be approved on purpose ("Approve anyway") for trials. Export renders a real MP4 with the new line spliced in — over the original video, since lip-sync is still mocked. Prosody and audio integration are **measured** from the audio, levels and room tone are corrected automatically, and a take that fails continuity is regenerated within a cap. Every paid call is metered against a per-project budget, and `AVE_DRY_RUN=1` switches all vendors off. The *interaction*, *source media*, *transcript*, *pipeline* and *voice* are real; the *speaker's identity* and the *mouth* are not yet.
 
 - `backend/` — Python 3.11 + FastAPI. Domain core, adapters, continuity engine, orchestrator, background job runner, in-memory project store, content-addressed artifact store, ffmpeg wrapper + ingest validation, renderer, HTTP API.
 - `frontend/` — React 19 + Vite + TypeScript. The Voltage editor, calling the backend through a dev-server proxy.
@@ -23,11 +23,14 @@ ffmpeg (with ffprobe) must be on `PATH` — the backend encodes, probes and demu
 brew install ffmpeg
 ```
 
-Transcription calls OpenAI and speech calls ElevenLabs. Put keys in `backend/.env` (git-ignored):
+Transcription calls OpenAI, speech calls ElevenLabs, and Claude reads free-form
+edit requests. Put keys in `backend/.env` (git-ignored):
 
 ```sh
 OPENAI_API_KEY=sk-...
 ELEVENLABS_API_KEY=sk_...
+ANTHROPIC_API_KEY=sk-ant-...
+ANTHROPIC_WORKSPACE_ID=wrkspc_...         # needed when the key is not workspace-scoped
 # optional
 ELEVENLABS_MODEL=eleven_multilingual_v2   # eleven_flash_v2_5 bills half
 ELEVENLABS_VOICE_ID=EXAVITQu4vr4xnSDxMaL  # premade "Sarah"
@@ -81,8 +84,8 @@ To see the continuity *failure* path, the voice profile has to be `unknown`, whi
 Both suites are offline and deterministic. No running server required.
 
 ```sh
-cd backend && .venv/bin/python -m pytest      # 287 tests
-cd frontend && npm test                        # 62 tests, 11 files
+cd backend && .venv/bin/python -m pytest      # 333 tests
+cd frontend && npm test                        # 85 tests, 12 files
 ```
 
 Backend tests write their media to a temp dir, never to `backend/var/`. Tests that
@@ -103,10 +106,10 @@ Generation is asynchronous (preview returns a job to poll); everything else answ
 | `/projects` | POST | `multipart` `file=` | uploads a video; probes it; transcribes it; → `project_id`, `duration`, source `media`, word-level `transcript`. `422` with a reason if it is not a readable video, has no video track, has no audio track, or exceeds the 180s cap; `502` if transcription fails. |
 | `/projects/{id}/consent` | POST | — | records consent for a project uploaded without it; idempotent, the first timestamp stands |
 | `/projects/{id}/artifacts/{sha256}` | GET | — | serves stored media by content address, with range requests |
-| `/projects/{id}/edits/preview` | POST | `{prompt, start, end, voice_profile_id}` | **`202`** — starts generation and returns a job to poll. Does not block. `403` without consent; `402` if the project's voice budget cannot cover the edit (no job is created). |
+| `/projects/{id}/edits/preview` | POST | `{prompt, start, end, voice_profile_id, history?, text?, fit?, mix?}` | **`202`** — starts a job to poll. Does not block. `403` without consent. The request is read (Claude, or the offline quoted-text rule) inside the job; the job's `result` is tagged by `type`: a `candidate`; a `reply` (a request the editor can't do, or a clarifying question); or a `question` with `options` — how to mix the line with the sound (`replace` / `layer` / `concatenate`), or how to fit it (`start` / `stretch`). Answer by re-sending with `text` and the chosen `fit` / `mix`. A job the project's voice budget cannot cover fails with the reason. |
 | `/jobs/{job_id}` | GET | — | job state: `status`, `progress`, `step`, `attempts`. On success `result` is the candidate (`candidate_id`, plan, `audio`/`frames` artifacts, continuity report), which is retained server-side. |
-| `/projects/{id}/edits` | POST | `{candidate_id}` | approves that exact candidate; `404` if unknown, `422` if continuity failed |
-| `/projects/{id}/export` | POST | — | renders the edited video and returns it as `render` (an MP4 artifact, downloadable from the artifacts endpoint), plus the ordered `original` / `edited` segment manifest. A later approval on an overlapping span replaces the earlier one. |
+| `/projects/{id}/edits` | POST | `{candidate_id, override?}` | approves that exact candidate; `404` if unknown, `422` if continuity failed — unless `override: true`, which approves it for a trial and records the edit as `overridden` |
+| `/projects/{id}/export` | POST | — | renders the edited video and returns it as `render` (an MP4 artifact, downloadable from the artifacts endpoint), plus the ordered `original` / `edited` segment manifest and any `inserts` (concatenated lines: the frame is held while they play, so the export is longer). A later approval on an overlapping span replaces the earlier one. |
 
 Artifacts are returned as content addresses (`sha256`, `duration`, `container`) — never
 filesystem paths. Approval commits the media the preview produced rather than

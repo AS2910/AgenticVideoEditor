@@ -54,6 +54,13 @@ class Settings:
     # When set, no paid generation vendor is ever called, whatever keys exist.
     dry_run: bool = False
     max_regenerations: int = DEFAULT_MAX_REGENERATIONS
+    anthropic_api_key: str | None = None
+    # Required when the key is not scoped to a workspace (the API says so).
+    anthropic_workspace_id: str | None = None
+
+    @property
+    def has_anthropic(self) -> bool:
+        return bool(self.anthropic_api_key)
 
     @property
     def has_openai(self) -> bool:
@@ -88,4 +95,6 @@ def load_settings() -> Settings:
         voice_budget_chars=_whole_number("AVE_VOICE_BUDGET_CHARS", DEFAULT_VOICE_BUDGET_CHARS),
         dry_run=os.environ.get("AVE_DRY_RUN", "").strip().lower() in _TRUTHY,
         max_regenerations=_whole_number("AVE_MAX_REGENERATIONS", DEFAULT_MAX_REGENERATIONS),
+        anthropic_api_key=os.environ.get("ANTHROPIC_API_KEY") or None,
+        anthropic_workspace_id=os.environ.get("ANTHROPIC_WORKSPACE_ID") or None,
     )

@@ -1,9 +1,10 @@
 import { useState } from 'react'
 import type { ReactNode } from 'react'
+import type { ChatMessage } from '../types'
 import styles from './ChatPanel.module.css'
 
 interface ChatPanelProps {
-  messages: string[]
+  messages: ChatMessage[]
   canSubmit: boolean
   onSubmit: (prompt: string) => void
   children?: ReactNode
@@ -23,7 +24,7 @@ export function ChatPanel({ messages, canSubmit, onSubmit, children }: ChatPanel
     <div className={styles.panel}>
       <div className={styles.messages}>
         {messages.map((m, i) => (
-          <div key={i} className={styles.message}>{m}</div>
+          <div key={i} className={m.role === 'user' ? styles.message : styles.reply}>{m.text}</div>
         ))}
         {children}
       </div>
@@ -31,7 +32,7 @@ export function ChatPanel({ messages, canSubmit, onSubmit, children }: ChatPanel
         <input
           className={styles.input}
           type="text"
-          placeholder='e.g. change "20% off" to "30% off"'
+          placeholder='e.g. change "20% off" to "30% off", or add the line "Thirsty!"'
           value={prompt}
           onChange={(e) => setPrompt(e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Enter') submit() }}

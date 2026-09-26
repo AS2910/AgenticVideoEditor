@@ -16,8 +16,19 @@ class RenderSegment:
 
 
 @dataclass(frozen=True)
+class RenderInsert:
+    """A line added *after* a point in the source (mix "concatenate"): the
+    frame at `at` is held for the line's length. Source time stops meanwhile,
+    so the export is longer than the source by every insert's duration."""
+    at: float
+    duration: float
+    edit: ApprovedEdit
+
+
+@dataclass(frozen=True)
 class RenderManifest:
     segments: tuple[RenderSegment, ...]
+    inserts: tuple[RenderInsert, ...] = ()
 
 
 def render(source: Source, edits: list[ApprovedEdit]) -> RenderManifest:
@@ -27,7 +38,16 @@ def render(source: Source, edits: list[ApprovedEdit]) -> RenderManifest:
     later approval owns any span it overlaps, and an earlier edit keeps only
     what is left of it. Original footage fills every gap. The segments tile
     [0, duration] exactly.
+
+    Concatenated edits take no span of the source; they become inserts, in
+    time order (approval order at the same point).
     """
+    inserts = sorted(
+        (RenderInsert(min(e.plan.selection.end, source.duration), e.audio.duration, e)
+         for e in edits if e.plan.mix == "concatenate"),
+        key=lambda i: i.at,
+    )
+    edits = [e for e in edits if e.plan.mix != "concatenate"]
     # Each piece is (start, end, owning edit or None for original footage).
     pieces: list[tuple[float, float, ApprovedEdit | None]] = [(0.0, source.duration, None)]
     for e in edits:
@@ -55,4 +75,4 @@ def render(source: Source, edits: list[ApprovedEdit]) -> RenderManifest:
             segments.append(
                 RenderSegment(a, b, "edited", owner.frames.sha256, owner.frames, owner)
             )
-    return RenderManifest(segments=tuple(segments))
+    return RenderManifest(segments=tuple(segments), inserts=tuple(inserts))

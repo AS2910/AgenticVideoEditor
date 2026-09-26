@@ -11,6 +11,7 @@ refused by eleven_v3, and only `text` is billed — the context is free.
 """
 from __future__ import annotations
 
+import json
 import math
 import tempfile
 from pathlib import Path
@@ -138,6 +139,10 @@ class ElevenLabsVoiceAdapter:
         self._voice_id = voice_id
         self._post = post
         self._timeout = timeout
+        # A paid take that did not fit its selection, kept so that when the
+        # user answers how to place it, that same take is used — the question
+        # costs nothing, and they hear the line they were asked about.
+        self._held: dict[str, bytes] = {}
 
     def cost_of(self, plan: EditPlan) -> int:
         return billed_characters(plan.new_text, self._model)
@@ -145,18 +150,26 @@ class ElevenLabsVoiceAdapter:
     def synthesize(
         self, source: Source, plan: EditPlan, transcript: Transcript | None = None,
     ) -> MediaArtifact:
-        # Charged per attempt, before the call: a retry is real spend.
-        self._budget.charge(source.project_id, self.cost_of(plan))
-
         body = to_request(plan, transcript, self._model)
-        status, audio, text = self._post(self._voice_id, body, self._api_key, self._timeout)
-        if status != 200:
-            _raise_for(status, text.replace(self._api_key, "***"))
+        key = f"{source.project_id}|{self._voice_id}|{json.dumps(body, sort_keys=True)}"
+        audio = self._held.pop(key, None)
+        if audio is None:
+            # Charged per attempt, before the call: a retry is real spend.
+            self._budget.charge(source.project_id, self.cost_of(plan))
+            status, audio, text = self._post(self._voice_id, body, self._api_key, self._timeout)
+            if status != 200:
+                _raise_for(status, text.replace(self._api_key, "***"))
 
         target = plan.selection.end - plan.selection.start
         with tempfile.TemporaryDirectory() as tmp:
             raw, _ = ffmpeg.pcm_to_wav(audio, Path(tmp) / "raw.wav", SAMPLE_RATE)
-            fitted, duration = ffmpeg.fit_duration(raw, Path(tmp) / "voice.wav", target)
+            try:
+                placed, duration = ffmpeg.place(
+                    raw, Path(tmp) / "voice.wav", target, plan.fit, plan.mix,
+                )
+            except ffmpeg.SpanMismatch:
+                self._held[key] = audio
+                raise
             return self._store.put_file(
-                source.project_id, fitted, kind="audio", container="wav", duration=duration,
+                source.project_id, placed, kind="audio", container="wav", duration=duration,
             )

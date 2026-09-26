@@ -403,6 +403,27 @@ def test_approve_rejected_when_continuity_fails(client, project):
     assert resp.json()["detail"] == "continuity check failed"
 
 
+def test_a_failing_candidate_can_be_approved_on_purpose_and_is_marked(client, project):
+    candidate = preview(client, voice_profile_id="unknown")
+
+    resp = client.post(
+        "/projects/p1/edits", json={"candidate_id": candidate["candidate_id"], "override": True},
+    )
+
+    assert resp.status_code == 200
+    assert resp.json()["overridden"] is True
+    import app.api.main as main
+    assert main.repo.list_edits("p1")[-1].overridden is True
+
+
+def test_a_passing_candidate_is_not_marked_overridden(client, project):
+    candidate = preview(client)
+    resp = client.post(
+        "/projects/p1/edits", json={"candidate_id": candidate["candidate_id"], "override": True},
+    )
+    assert resp.json()["overridden"] is False
+
+
 def test_approve_unknown_candidate_is_404(client, project):
     assert client.post("/projects/p1/edits", json={"candidate_id": "c99"}).status_code == 404
 
@@ -430,19 +451,22 @@ class PricedVoice:
         return self._inner.synthesize(source, plan, transcript)
 
 
-def test_an_edit_the_project_cannot_afford_is_refused_before_any_job(client, project, monkeypatch):
+def test_an_edit_the_project_cannot_afford_is_refused_before_any_generation(client, project, monkeypatch):
+    # The price is only known once the request has been read (Phase 8), which
+    # happens inside the job — so the refusal is the job's, and nothing is
+    # generated or retried.
     import app.api.main as main
     from app.budget import VoiceBudget
     voice = PricedVoice(main.voice, price=50)
     monkeypatch.setattr(main, "voice", voice)
     monkeypatch.setattr(main, "budget", VoiceBudget(ceiling=10))
 
-    resp = client.post("/projects/p1/edits/preview", json=PREVIEW)
+    job = await_job(client, start_preview(client)["job_id"])
 
-    assert resp.status_code == 402
-    assert "10 remain" in resp.json()["detail"]
-    assert jobs.get("j1") is None      # no job was created
-    assert voice.calls == 0            # and nothing was generated
+    assert job["status"] == "failed"
+    assert job["attempts"] == 1
+    assert "10 remain" in job["error"]
+    assert voice.calls == 0
 
 
 def test_an_affordable_paid_edit_goes_ahead_and_is_labelled_stock(client, project, monkeypatch):
@@ -457,25 +481,126 @@ def test_an_affordable_paid_edit_goes_ahead_and_is_labelled_stock(client, projec
     assert STOCK_VOICE_WARNING in candidate["continuity"]["warnings"]
 
 
-def test_a_refusal_inside_the_job_reaches_the_user_verbatim(client, project, monkeypatch):
+class Unfitted:
+    """A voice whose line is `natural` seconds against any selection."""
+
+    identity = "stock"
+
+    def __init__(self, natural):
+        self.natural = natural
+        self.plans = []
+
+    def cost_of(self, plan):
+        return 0
+
+    def synthesize(self, source, plan, transcript=None):
+        from app.media.ffmpeg import SpanMismatch
+        self.plans.append(plan)
+        raise SpanMismatch(natural=self.natural, target=plan.selection.end - plan.selection.start)
+
+
+def test_a_line_too_long_for_the_selection_becomes_a_question(client, project, monkeypatch):
     import app.api.main as main
-    from app.media.ffmpeg import SpanMismatch
+    voice = Unfitted(natural=2.0)
+    monkeypatch.setattr(main, "voice", voice)
 
-    class TooLong:
-        identity = "stock"
-
-        def cost_of(self, plan):
-            return 0
-
-        def synthesize(self, source, plan, transcript=None):
-            raise SpanMismatch(natural=2.0, target=0.5)
-
-    monkeypatch.setattr(main, "voice", TooLong())
     job = await_job(client, start_preview(client)["job_id"])
 
-    assert job["status"] == "failed"
-    assert job["attempts"] == 1
-    assert "widen the selection" in job["error"]
+    assert job["status"] == "succeeded"
+    q = job["result"]
+    assert q["type"] == "question"
+    assert q["text"] == "30% off" and q["mix"] == "replace"
+    assert [o["fit"] for o in q["options"]] == ["stretch"]  # no room to run past the end
+    assert "rushed" in q["options"][0]["warning"]
+    assert len(voice.plans) == 1
+
+
+def test_a_line_too_short_offers_start_or_stretch(client, project, monkeypatch):
+    import app.api.main as main
+    monkeypatch.setattr(main, "voice", Unfitted(natural=0.2))
+
+    q = await_job(client, start_preview(client)["job_id"])["result"]
+
+    assert [o["fit"] for o in q["options"]] == ["start", "stretch"]
+    assert "silence" in q["options"][0]["label"]
+    assert "dragged" in q["options"][1]["warning"]
+
+
+def test_an_answer_carries_the_choice_and_skips_reading_the_request(client, project, monkeypatch):
+    import app.api.main as main
+    voice = Unfitted(natural=0.2)
+    monkeypatch.setattr(main, "voice", voice)
+
+    job = await_job(client, start_preview(
+        client, prompt="anything", text="Thirsty", fit="stretch", mix="layer",
+    )["job_id"])
+
+    assert job["status"] == "failed"        # the fake cannot place it either way
+    plan = voice.plans[0]
+    assert (plan.new_text, plan.fit, plan.mix) == ("Thirsty", "stretch", "layer")
+
+
+class Reads:
+    """An interpreter returning a fixed Intent, recording what it was given."""
+
+    def __init__(self, intent):
+        self.intent = intent
+        self.seen = []
+
+    def interpret(self, prompt, history, context):
+        self.seen.append((prompt, history, context))
+        return self.intent
+
+
+def test_a_request_the_editor_cannot_do_gets_a_reply(client, project, monkeypatch):
+    import app.api.main as main
+    from app.domain.models import Intent
+    monkeypatch.setattr(main, "interpreter", Reads(Intent("unsupported", reply="Speech only.")))
+
+    job = await_job(client, start_preview(client, prompt="make the background white")["job_id"])
+
+    assert job["status"] == "succeeded"
+    assert job["result"] == {"type": "reply", "text": "Speech only."}
+
+
+def test_the_chat_so_far_reaches_the_interpreter(client, project, monkeypatch):
+    import app.api.main as main
+    from app.domain.models import Intent
+    reader = Reads(Intent("speak", new_text="30% off"))
+    monkeypatch.setattr(main, "interpreter", reader)
+
+    preview(client, history=[{"role": "user", "text": "hi"}, {"role": "assistant", "text": "Hello."}])
+
+    _, history, context = reader.seen[0]
+    assert [(t.role, t.text) for t in history] == [("user", "hi"), ("assistant", "Hello.")]
+    assert context.selected == "20% off"
+
+
+def test_an_edit_over_no_speech_asks_how_to_mix(client, project, monkeypatch):
+    import app.api.main as main
+    from app.domain.models import Intent, Transcript
+    reader = Reads(Intent("speak", new_text="Thirsty"))
+    monkeypatch.setattr(main, "interpreter", reader)
+    record = main.repo.get("p1")
+    monkeypatch.setattr(record, "transcript", Transcript(words=()))
+
+    q = await_job(client, start_preview(client)["job_id"])["result"]
+
+    assert q["type"] == "question"
+    assert [o["mix"] for o in q["options"]] == ["replace", "layer", "concatenate"]
+
+
+def test_the_mix_named_in_the_request_is_not_asked_about(client, project, monkeypatch):
+    import app.api.main as main
+    from app.domain.models import Intent, Transcript
+    monkeypatch.setattr(main, "interpreter", Reads(Intent("speak", new_text="30% off", mix="layer")))
+    record = main.repo.get("p1")
+    monkeypatch.setattr(record, "transcript", Transcript(words=()))
+
+    candidate = preview(client)
+
+    assert candidate["type"] == "candidate"
+    assert candidate["plan"]["mix"] == "layer"
 
 
 # ── measured continuity over the wire (Phase 6a) ─────────────────────────────

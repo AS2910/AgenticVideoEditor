@@ -192,7 +192,8 @@ class MeasuredContinuityEngine:
         # Without context speech there is no level to call "quiet" against, so
         # no room tone: unfiltered gaps can hold speech (see `quiet_part`).
         room = None
-        if context_level is not None:
+        # A layered line plays over the original sound, room and all.
+        if context_level is not None and plan.mix != "layer":
             room = _concat(src, gap_spans(transcript, source.duration), rate=rate)
         if room is not None:
             room = quiet_part(room, rate, context_level - ROOM_BELOW_SPEECH_DB)

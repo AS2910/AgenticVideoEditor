@@ -8,7 +8,11 @@ new words. `use_generated_frames` is where Phase 5 switches that on.
 Audio is decoded at 48 kHz in the source's own channel layout, each edited
 span is replaced by its edit's audio, and every seam gets a short equal-power
 crossfade *inside* the span — so everything outside an edit stays exactly the
-source's audio.
+source's audio. A layered edit is mixed over the span instead of replacing it.
+
+Concatenated edits are inserts: the video holds the frame at the insert point
+while the line plays, then carries on. Holding frames means re-encoding the
+video, so an export with inserts is not stream-copied.
 """
 from __future__ import annotations
 
@@ -21,7 +25,7 @@ import numpy as np
 
 from app.domain.models import Source
 from app.media import ffmpeg
-from app.render.renderer import RenderSegment
+from app.render.renderer import RenderInsert, RenderSegment
 
 OUT_RATE = 48000
 CROSSFADE = 0.02     # seconds per seam
@@ -90,9 +94,75 @@ def splice(base: np.ndarray, segments: Sequence[RenderSegment]) -> np.ndarray:
             ramp = np.sin(np.linspace(0, np.pi / 2, fade, dtype=np.float32))
             new[:fade] = ramp
             new[-fade:] = ramp[::-1]
-        old = np.sqrt(np.maximum(0.0, 1.0 - new ** 2))  # equal power
-        out[i0:i1] = base[i0:i1] * old[:, None] + piece * new[:, None]
+        if edit.plan.mix == "layer":
+            # The original keeps playing; only the line fades in and out.
+            out[i0:i1] = base[i0:i1] + piece * new[:, None]
+        else:
+            old = np.sqrt(np.maximum(0.0, 1.0 - new ** 2))  # equal power
+            out[i0:i1] = base[i0:i1] * old[:, None] + piece * new[:, None]
     return out
+
+
+def _holds(inserts: Sequence[RenderInsert], duration: float) -> list[tuple[float, float]]:
+    """(point, seconds held) per distinct insert point, in time order."""
+    held: dict[float, float] = {}
+    for ins in inserts:
+        at = round(min(max(ins.at, 0.0), duration), 3)
+        held[at] = held.get(at, 0.0) + ins.duration
+    return sorted(held.items())
+
+
+def insert_audio(
+    base: np.ndarray, inserts: Sequence[RenderInsert], duration: float,
+) -> np.ndarray:
+    """`base` with each insert's line added at its point, pushing the rest later."""
+    if not inserts:
+        return base
+    channels = base.shape[1]
+    lines: dict[float, list[np.ndarray]] = {}
+    for ins in inserts:
+        at = round(min(max(ins.at, 0.0), duration), 3)
+        line = decode(ins.edit.audio.path, channels=channels)
+        fade = min(round(CROSSFADE * OUT_RATE), len(line) // 2)
+        if fade:
+            ramp = np.sin(np.linspace(0, np.pi / 2, fade, dtype=np.float32))[:, None]
+            line = line.copy()
+            line[:fade] *= ramp
+            line[-fade:] *= ramp[::-1]
+        lines.setdefault(at, []).append(line)
+    parts, cursor = [], 0
+    for at in sorted(lines):
+        i = min(round(at * OUT_RATE), len(base))
+        parts.append(base[cursor:i])
+        parts.extend(lines[at])
+        cursor = i
+    parts.append(base[cursor:])
+    return np.concatenate(parts)
+
+
+def hold_filter(holds: list[tuple[float, float]], duration: float) -> str:
+    """A filter graph that cuts the video at each hold point and freezes the
+    frame there for the hold's length. Output label: [v]."""
+    duration = round(duration, 3)  # the same rounding as the hold points
+    points = [p for p, _ in holds if 0.0 < p < duration]
+    edges = [0.0, *points, duration]
+    pieces = list(zip(edges, edges[1:]))
+    pad_at = dict(holds)
+    chains = []
+    labels = [f"[s{i}]" for i in range(len(pieces))]
+    chains.append(f"[0:v]split={len(pieces)}{''.join(labels)}" if len(pieces) > 1
+                  else "[0:v]null[s0]")
+    for i, (a, b) in enumerate(pieces):
+        pads = []
+        if i == 0 and 0.0 in pad_at:
+            pads.append(f"start_mode=clone:start_duration={pad_at[0.0]:.3f}")
+        if b in pad_at and b > 0.0:
+            pads.append(f"stop_mode=clone:stop_duration={pad_at[b]:.3f}")
+        tpad = f",tpad={':'.join(pads)}" if pads else ""
+        chains.append(f"[s{i}]trim=start={a:.3f}:end={b:.3f},setpts=PTS-STARTPTS{tpad}[v{i}]")
+    joined = "".join(f"[v{i}]" for i in range(len(pieces)))
+    chains.append(f"{joined}concat=n={len(pieces)}:v=1:a=0[v]")
+    return ";".join(chains)
 
 
 def _video_codec(path: str | Path) -> str | None:
@@ -107,23 +177,29 @@ def compose(
     segments: Sequence[RenderSegment],
     dest: str | Path,
     use_generated_frames: bool = False,
+    inserts: Sequence[RenderInsert] = (),
 ) -> Path:
     """Write the edited video to `dest` (MP4, H.264 + AAC)."""
     if use_generated_frames:
         raise NotImplementedError("Compositing generated frames arrives with real lip-sync (Phase 5).")
     dest = Path(dest)
     dest.parent.mkdir(parents=True, exist_ok=True)
-    video_args = (
-        ["-c:v", "copy"] if _video_codec(source.media.path) in _COPYABLE_VIDEO
-        else ["-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "veryfast", "-crf", "18"]
-    )
+    reencode = ["-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "veryfast", "-crf", "18"]
+    if inserts:
+        video_map = ["-filter_complex", hold_filter(_holds(inserts, source.duration), source.duration),
+                     "-map", "[v]", *reencode]
+    elif _video_codec(source.media.path) in _COPYABLE_VIDEO:
+        video_map = ["-map", "0:v:0", "-c:v", "copy"]
+    else:
+        video_map = ["-map", "0:v:0", *reencode]
     with tempfile.TemporaryDirectory() as tmp:
         audio = Path(tmp) / "audio.wav"
-        _write(audio, splice(decode(source.media.path), segments))
+        spliced = splice(decode(source.media.path), segments)
+        _write(audio, insert_audio(spliced, inserts, source.duration))
         ffmpeg._run(ffmpeg.FFMPEG, [
             "-y", "-loglevel", "error", *ffmpeg._BITEXACT_IN,
             "-i", str(source.media.path), "-i", str(audio),
-            "-map", "0:v:0", "-map", "1:a:0", *video_args,
+            *video_map, "-map", "1:a:0",
             "-c:a", "aac", "-b:a", AUDIO_BITRATE,
             "-movflags", "+faststart", *ffmpeg._BITEXACT_OUT, str(dest),
         ])

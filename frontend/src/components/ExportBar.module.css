@@ -17,3 +17,4 @@
   border: 1px solid var(--border); border-radius: 8px; white-space: nowrap;
 }
 .download:hover { border-color: var(--cyan); }
+.inserts { color: var(--muted); font-size: 12px; }

@@ -27,11 +27,42 @@ class Selection:
     end: float
 
 
+# How a line that does not match the selection's length is placed in it.
+#   None      — automatic: stretched at most 0.8–1.25×, else the user is asked
+#   "start"   — at natural speed from the selection's start; a shorter line
+#               leaves the rest to `mix`, a longer one runs past the end
+#   "stretch" — slowed or sped up to fill the selection exactly, any amount
+FITS = ("start", "stretch")
+
+# How the line meets the original sound.
+#   "replace"     — the selection's audio is replaced
+#   "layer"       — the line plays over the selection's audio
+#   "concatenate" — the selection plays as it was, then the video holds its
+#                   last frame while the line plays; the video gets longer
+MIXES = ("replace", "layer", "concatenate")
+
+
 @dataclass(frozen=True)
 class EditPlan:
     selection: Selection
     new_text: str
     voice_profile_id: str
+    fit: str | None = None
+    mix: str = "replace"
+
+
+@dataclass(frozen=True)
+class Intent:
+    """What the user asked for, read from their words.
+
+    `speak` carries the line to say; `unsupported` and `clarify` carry a reply
+    for the chat instead. `mix` is None unless the request says how the line
+    should meet the original sound.
+    """
+    action: str               # "speak" | "unsupported" | "clarify"
+    new_text: str | None = None
+    mix: str | None = None
+    reply: str | None = None
 
 
 @dataclass(frozen=True)
@@ -92,3 +123,5 @@ class ApprovedEdit:
     plan: EditPlan
     audio: MediaArtifact
     frames: MediaArtifact
+    # Approved although continuity failed — the user chose to, for a trial.
+    overridden: bool = False
