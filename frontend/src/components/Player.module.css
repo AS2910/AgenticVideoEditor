@@ -1,17 +1,27 @@
-.player { display: flex; flex-direction: column; gap: 12px; }
+.player { display: flex; flex-direction: column; gap: 10px; }
+/* The monitor: neutral black surround so picture reads true. */
 .stage {
-  aspect-ratio: 16 / 9; border-radius: var(--radius); overflow: hidden;
-  background: linear-gradient(135deg, #0d1a2b, #0a0e14);
-  border: 1px solid var(--border);
-  position: relative;
+  aspect-ratio: 16 / 9; position: relative; overflow: hidden;
+  background: #000; border-radius: 4px;
 }
 /* Pinned to the stage rather than sized by percentage: `height: 100%` does not
    resolve against an aspect-ratio box, which let a portrait video grow to its
    natural height and be clipped to its middle. */
 .video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; background: #000; }
-.controls { display: flex; gap: 12px; align-items: center; }
+
+.controls { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; }
+.scrubber { order: -1; flex-basis: 100%; accent-color: var(--revision-on-dark); margin: 0; }
 .play {
-  padding: 8px 18px; border-radius: 8px; border: 1px solid var(--border);
-  background: var(--surface); color: var(--text);
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 5px 12px 5px 10px; border-radius: var(--radius);
+  background: var(--console-raised); color: var(--text); border: 1px solid var(--rule);
+  font-weight: 500;
 }
-.scrubber { flex: 1; accent-color: var(--electric); }
+.play:hover { border-color: var(--muted); }
+.playIcon {
+  width: 0; height: 0;
+  border-left: 9px solid currentColor; border-top: 5.5px solid transparent; border-bottom: 5.5px solid transparent;
+}
+.pauseIcon { width: 9px; height: 11px; border-left: 3px solid currentColor; border-right: 3px solid currentColor; }
+.timecode { font-size: 15px; letter-spacing: 0.01em; margin-right: auto; }
+.of { color: var(--muted); }

@@ -18,7 +18,7 @@ import {
 } from './api'
 import type {
   Word, Selection, Candidate, Segment, Project, ChatMessage, Question, QuestionOption,
-  Fit, Mix, Insert, ProjectSummary, Usage, Statement, Voice,
+  Fit, Mix, Insert, ProjectSummary, Usage, Statement, Voice, Revision,
 } from './types'
 import { renderTime, sourceTime } from './timeline/selection'
 import styles from './App.module.css'
@@ -65,6 +65,8 @@ export default function App() {
   const [voiceId, setVoiceId] = useState(DEFAULT_VOICE)
   const [seekRequest, setSeekRequest] = useState<{ time: number; id: number } | null>(null)
   const [detecting, setDetecting] = useState(false)
+  // Approved edits, shown as revisions in the script.
+  const [approved, setApproved] = useState<Revision[]>([])
   const previewToken = useRef(0)
 
   const refreshProjects = useCallback(async () => {
@@ -78,6 +80,15 @@ export default function App() {
   useEffect(() => {
     if (stage === 'load') void refreshProjects()
   }, [stage, refreshProjects])
+
+  // A reload keeps you in the project you had open: its id is the URL hash.
+  // Its consent was recorded when it was uploaded.
+  useEffect(() => {
+    const id = window.location.hash.slice(1)
+    if (/^p\d+$/.test(id)) void openProject(id)
+    // Only on first load.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   /** Back to a blank editor state, e.g. before opening another project. */
   const clearEditor = () => {
@@ -98,6 +109,7 @@ export default function App() {
     setView('original')
     setError(null)
     setUsage(null)
+    setApproved([])
   }
 
   const projectId = project?.project_id ?? null
@@ -133,6 +145,7 @@ export default function App() {
       setProject(loaded)
       setTranscript(loaded.transcript)
       setStage('editor')
+      window.location.hash = loaded.project_id
     } catch (e) {
       // The backend's rejection reason is the useful part — show it verbatim.
       setError(e instanceof ApiError ? e.message : 'Could not upload that video.')
@@ -278,6 +291,8 @@ export default function App() {
     setError(null)
     try {
       await approveEdit(projectId, candidate.candidate_id, override)
+      const { selection: at, new_text: text, mix = 'replace' } = candidate.plan
+      setApproved((a) => [...a, { start: at.start, end: at.end, text, mix }])
       setCandidate(null)
       setDownload(null) // the last render no longer includes every approved edit
       // Render straight away, so pressing Play hears the edit.
@@ -321,7 +336,11 @@ export default function App() {
       setProject(opened)
       setTranscript(opened.transcript)
       setMessages(opened.messages)
+      setApproved(opened.edits.map((e) => ({
+        start: e.selection.start, end: e.selection.end, text: e.new_text, mix: e.mix,
+      })))
       setStage('editor')
+      window.location.hash = opened.project_id
       // Approved edits are rendered again, so Play hears them straight away.
       if (opened.edits.length > 0 && await runExport(opened.project_id, opened.filename)) {
         setView('edited')
@@ -366,16 +385,25 @@ export default function App() {
   }
 
   const showEdited = view === 'edited' && rendered !== null
+  const speakers = project.speakers ?? []
+  const leave = () => {
+    clearEditor()
+    window.location.hash = ''
+    // Uploading again needs the rights confirmed in this session.
+    setStage(consented ? 'load' : 'consent')
+  }
 
   return (
     <div className={styles.app}>
-      <div className={styles.left}>
-        <div className={styles.topbar}>
-          <button className={styles.back} onClick={() => { clearEditor(); setStage('load') }}>
-            ← Projects
-          </button>
-          <span className={styles.filename}>{project.filename}</span>
-        </div>
+      <header className={styles.header}>
+        <button className={styles.back} onClick={leave}>← Projects</button>
+        <span className={styles.filename} title={project.filename}>{project.filename}</span>
+        <span className={styles.spacer} />
+        <SpendMeter usage={usage} />
+        <ExportBar segments={segments} inserts={inserts} onExport={() => void runExport()} download={download} />
+      </header>
+
+      <main className={styles.bay}>
         <Player
           src={showEdited ? rendered.url : artifactUrl(project.project_id, project.media.sha256)}
           duration={showEdited ? rendered.duration : project.duration}
@@ -383,21 +411,22 @@ export default function App() {
           onSeek={setCurrentTime}
           onTimeUpdate={setCurrentTime}
           seekRequest={seekRequest}
-        />
-        {rendered && (
-          <div className={styles.versions} role="group" aria-label="Version">
-            {(['edited', 'original'] as const).map((v) => (
-              <button
-                key={v}
-                className={view === v ? styles.versionOn : styles.version}
-                aria-pressed={view === v}
-                onClick={() => { setView(v); setCurrentTime(0) }}
-              >
-                {v === 'edited' ? 'Edited' : 'Original'}
-              </button>
-            ))}
-          </div>
-        )}
+        >
+          {rendered && (
+            <div className={styles.versions} role="group" aria-label="Version">
+              {(['edited', 'original'] as const).map((v) => (
+                <button
+                  key={v}
+                  className={view === v ? styles.versionOn : styles.version}
+                  aria-pressed={view === v}
+                  onClick={() => { setView(v); setCurrentTime(0) }}
+                >
+                  {v === 'edited' ? 'Edited' : 'Original'}
+                </button>
+              ))}
+            </div>
+          )}
+        </Player>
         <Timeline
           key={project.project_id}
           words={transcript}
@@ -406,29 +435,32 @@ export default function App() {
           currentTime={showEdited ? sourceTime(currentTime, inserts) : currentTime}
           onSelect={setSelection}
         />
-        <SpeakersBar
-          speakers={project.speakers ?? []}
-          voices={voices}
-          hasSpeech={transcript.length > 0}
-          detecting={detecting}
-          onDetect={() => void findSpeakers()}
-          onRename={(label, name) => void changeSpeaker(label, { name })}
-          onVoice={(label, voiceId) => void changeSpeaker(
-            label, voiceId ? { voice_id: voiceId } : { clear_voice: true })}
-        />
-        <TranscriptPanel
-          speakerNames={Object.fromEntries((project.speakers ?? []).map((sp) => [sp.label, sp.name]))}
-          statements={project.statements ?? []}
-          currentTime={showEdited ? sourceTime(currentTime, inserts) : currentTime}
-          disabled={generating}
-          onSeek={seekToStatement}
-          onEdit={editStatement}
-        />
-        <ExportBar segments={segments} inserts={inserts} onExport={() => void runExport()} download={download} />
-        <SpendMeter usage={usage} />
-        {error && <div className={styles.error}>{error}</div>}
-      </div>
-      <div className={styles.right}>
+        {error && <div className={styles.error} role="alert">{error}</div>}
+      </main>
+
+      <aside className={styles.desk}>
+        <section className={styles.script} aria-label="Script">
+          <SpeakersBar
+            speakers={speakers}
+            voices={voices}
+            hasSpeech={transcript.length > 0}
+            detecting={detecting}
+            onDetect={() => void findSpeakers()}
+            onRename={(label, name) => void changeSpeaker(label, { name })}
+            onVoice={(label, voiceId) => void changeSpeaker(
+              label, voiceId ? { voice_id: voiceId } : { clear_voice: true })}
+          />
+          <TranscriptPanel
+            speakerNames={Object.fromEntries(speakers.map((sp) => [sp.label, sp.name]))}
+            statements={project.statements ?? []}
+            revisions={approved}
+            selection={selection}
+            currentTime={showEdited ? sourceTime(currentTime, inserts) : currentTime}
+            disabled={generating}
+            onSeek={seekToStatement}
+            onEdit={editStatement}
+          />
+        </section>
         <ChatPanel
           messages={messages}
           canSubmit={selection !== null}
@@ -458,7 +490,7 @@ export default function App() {
             />
           )}
         </ChatPanel>
-      </div>
+      </aside>
     </div>
   )
 }

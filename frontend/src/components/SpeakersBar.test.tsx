@@ -37,13 +37,13 @@ describe('SpeakersBar', () => {
     expect(onRename).toHaveBeenCalledWith('A', 'Customer')
   })
 
-  it("sets a speaker's voice, or returns them to the chat's voice", async () => {
+  it("sets a speaker's voice, or returns them to the default voice", async () => {
     const onVoice = vi.fn()
     render(<SpeakersBar speakers={SPEAKERS} voices={VOICES} hasSpeech detecting={false}
       onDetect={noop} onRename={noop} onVoice={onVoice} />)
     await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Voice for Speaker A' }), 'nPczCjzI2devNBz1zQrb')
     expect(onVoice).toHaveBeenLastCalledWith('A', 'nPczCjzI2devNBz1zQrb')
-    await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Voice for Shopkeeper' }), "Chat's voice")
+    await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Voice for Shopkeeper' }), "Default voice")
     expect(onVoice).toHaveBeenLastCalledWith('B', null)
   })
 })

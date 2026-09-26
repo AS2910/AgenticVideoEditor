@@ -1,17 +1,11 @@
-.card {
-  background: var(--bg); border: 1px solid var(--border); border-radius: 12px;
-  padding: 16px; display: flex; flex-direction: column; gap: 12px;
-}
-.line { font-size: 16px; font-weight: 600; }
-.options { display: flex; flex-direction: column; gap: 8px; }
+/* A question back from the editor: the line in question, and the ways forward. */
+.card { display: flex; flex-direction: column; gap: 8px; }
+.line { font-family: var(--script); font-size: 15px; color: var(--text); }
+.options { display: flex; flex-direction: column; gap: 6px; }
 .option {
-  display: flex; flex-direction: column; gap: 4px; text-align: left;
-  padding: 10px 12px; border-radius: 8px;
-  background: var(--surface); color: var(--text); border: 1px solid var(--border);
-  transition: border-color 150ms ease, box-shadow 150ms ease;
+  display: flex; flex-direction: column; gap: 2px; text-align: left;
+  padding: 8px 10px; border-radius: var(--radius);
+  background: var(--console-raised); color: var(--text); border: 1px solid var(--rule);
 }
-.option:hover {
-  border-color: var(--cyan);
-  box-shadow: 0 0 10px rgba(34, 211, 238, 0.35);
-}
-.warning { color: var(--warn); font-size: 12px; }
+.option:hover { border-color: var(--revision-on-dark); }
+.warning { color: var(--caution); font-size: 12px; }

@@ -45,7 +45,7 @@ export function CandidateCard({
       </div>
 
       {c.passed ? (
-        <div className={styles.badge}>✓ Continuity checked</div>
+        <div className={styles.badge}>Continuity checked</div>
       ) : (
         <div className={styles.badgeFail}>Continuity below threshold</div>
       )}

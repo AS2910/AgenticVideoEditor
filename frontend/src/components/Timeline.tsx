@@ -108,10 +108,13 @@ export function Timeline({ words, duration, selection, currentTime, onSelect }: 
             <div className={styles.empty}>No speech found in this video — there are no words to edit.</div>
           )}
 
-          {words.map((w) => (
+          {words.map((w, i) => (
             <button
               key={`${w.text}-${w.start}`}
               className={styles.word}
+              // Alternate words sit on two rows, so a label can run past its
+              // word's own (often very short) span without covering the next.
+              data-lane={i % 2}
               style={{ left: pct(w.start, duration), width: pct(w.end - w.start, duration) }}
               onClick={(e) => clickWord(e, w)}
             >

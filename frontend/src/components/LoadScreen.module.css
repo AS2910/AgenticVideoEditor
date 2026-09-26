@@ -1,25 +1,24 @@
-.screen { min-height: 100vh; display: grid; place-content: center; justify-items: center; gap: 16px; }
-.brand { font-size: 40px; font-weight: 700; color: var(--cyan); text-shadow: 0 0 24px rgba(34, 211, 238, 0.5); }
-.tagline { color: var(--muted); margin: 0; }
-.load {
-  margin-top: 8px; padding: 12px 28px;
-  background: var(--electric); color: white; border: none; border-radius: 8px;
-  box-shadow: 0 0 20px rgba(46, 107, 255, 0.4);
+.screen {
+  min-height: 100vh; display: grid; place-content: center; justify-items: start;
+  gap: 14px; padding: 48px 24px; width: min(520px, 100%); margin: 0 auto;
 }
-.load:disabled { background: var(--border); color: var(--muted); box-shadow: none; }
+.brand { font-size: 32px; font-weight: 600; letter-spacing: -0.01em; }
+.tagline { color: var(--muted); margin: 0 0 8px; font-size: 16px; }
+.load {
+  padding: 10px 22px; border: none; border-radius: var(--radius);
+  background: var(--revision); color: #fff; font-weight: 500;
+}
+.load:disabled { background: var(--console-raised); color: var(--muted); }
 /* The real input is driven by the styled button above it. Kept interactive
    rather than `pointer-events: none` so assistive tech and tests can reach it. */
-.fileInput {
-  position: absolute; width: 1px; height: 1px;
-  opacity: 0; overflow: hidden;
-}
+.fileInput { position: absolute; width: 1px; height: 1px; opacity: 0; overflow: hidden; }
 .sample {
-  background: none; border: none; color: var(--muted);
-  font-size: 13px; text-decoration: underline; cursor: pointer; padding: 0;
+  background: none; border: none; padding: 0;
+  color: var(--muted); font-size: 13px; text-decoration: underline;
 }
-.sample:disabled { color: var(--border); cursor: default; }
+.sample:disabled { color: var(--rule); }
 .hint { color: var(--muted); font-size: 12px; margin: 0; }
 .error {
-  color: var(--warn); font-size: 13px; max-width: 320px; text-align: center;
-  border: 1px solid var(--warn); border-radius: 8px; padding: 8px 12px;
+  color: var(--caution); font-size: 13px;
+  border-left: 3px solid var(--caution); padding: 6px 10px; background: var(--console);
 }

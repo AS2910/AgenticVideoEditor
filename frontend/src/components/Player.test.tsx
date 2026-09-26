@@ -44,3 +44,19 @@ describe('Player playback (Phase 8 fix)', () => {
     expect(onTimeUpdate).toHaveBeenCalledWith(2.25)
   })
 })
+
+describe('Player transport (redesign)', () => {
+  it('shows a timecode of position and length', () => {
+    render(<Player src="/a.mp4" duration={48.9} currentTime={7.54} onSeek={() => {}} />)
+    expect(screen.getByTestId('timecode')).toHaveTextContent('0:07.54 / 0:48.90')
+  })
+
+  it('carries extra controls in the transport row', () => {
+    render(
+      <Player src="/a.mp4" duration={8} currentTime={0} onSeek={() => {}}>
+        <button>Edited</button>
+      </Player>,
+    )
+    expect(screen.getByRole('button', { name: 'Edited' })).toBeInTheDocument()
+  })
+})

@@ -1,2 +1,2 @@
-.meter { color: var(--muted); font-size: 12px; }
-.near { color: var(--warn); font-size: 12px; }
+.meter { color: var(--muted); font-size: 12px; white-space: nowrap; }
+.near { color: var(--caution); font-size: 12px; white-space: nowrap; }

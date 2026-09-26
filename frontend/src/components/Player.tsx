@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import type { ReactNode } from 'react'
 import styles from './Player.module.css'
 
 interface PlayerProps {
@@ -11,9 +12,21 @@ interface PlayerProps {
   /** A seek asked for from outside (e.g. the transcript). `id` makes asking
    *  for the same time twice still move the video. */
   seekRequest?: { time: number; id: number } | null
+  /** Shown at the end of the transport row (e.g. the Edited / Original switch). */
+  children?: ReactNode
 }
 
-export function Player({ src, duration, currentTime, onSeek, onTimeUpdate, seekRequest }: PlayerProps) {
+/** m:ss.cc — hundredths, because edits land between words. */
+const timecode = (t: number) => {
+  const safe = Math.max(0, t)
+  const m = Math.floor(safe / 60)
+  const s = (safe - m * 60).toFixed(2).padStart(5, '0')
+  return `${m}:${s}`
+}
+
+export function Player({
+  src, duration, currentTime, onSeek, onTimeUpdate, seekRequest, children,
+}: PlayerProps) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const [playing, setPlaying] = useState(false)
   // The playing file's own length: an edit that adds a line makes the render
@@ -61,9 +74,14 @@ export function Player({ src, duration, currentTime, onSeek, onTimeUpdate, seekR
         />
       </div>
       <div className={styles.controls}>
-        <button className={styles.play} onClick={toggle}>
+        <button className={styles.play} onClick={toggle} aria-label={playing ? 'Pause' : 'Play'}>
+          <span aria-hidden="true" className={playing ? styles.pauseIcon : styles.playIcon} />
           {playing ? 'Pause' : 'Play'}
         </button>
+        <span className={styles.timecode} data-testid="timecode">
+          {timecode(currentTime)} <span className={styles.of}>/ {timecode(length)}</span>
+        </span>
+        {children}
         <input
           className={styles.scrubber}
           type="range"

@@ -17,7 +17,7 @@ export function LoadScreen({ onLoad, onLoadSample, loading, error, children }: L
   return (
     <div className={styles.screen}>
       <div className={styles.brand}>Voltage</div>
-      <p className={styles.tagline}>Edit what was already shot — seamlessly.</p>
+      <p className={styles.tagline}>Change what's said in a video you've already shot.</p>
 
       <input
         ref={inputRef}

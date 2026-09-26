@@ -23,7 +23,7 @@ export function ProjectList({ projects, onOpen, onDelete }: ProjectListProps) {
           <button className={styles.open} onClick={() => onOpen(p.project_id)}>
             <span className={styles.name}>{p.filename}</span>
             <span className={styles.meta}>
-              {p.duration.toFixed(1)}s · {p.edits} {p.edits === 1 ? 'edit' : 'edits'} · {when(p.created_at)}
+              {when(p.created_at)}, {p.duration.toFixed(1)} s, {p.edits} {p.edits === 1 ? 'edit' : 'edits'}
             </span>
           </button>
           {confirming === p.project_id ? (

@@ -13,7 +13,7 @@ interface SpeakersBarProps {
   onVoice: (label: string, voiceId: string | null) => void
 }
 
-// The chat's voice, for a speaker without one of their own.
+// The default voice (the dock's picker), for a speaker without one of their own.
 const CHAT_VOICE = ''
 
 /** Who speaks in the video, what to call them, and each one's voice. */
@@ -26,7 +26,7 @@ export function SpeakersBar({
     if (!hasSpeech) return null
     return (
       <div className={styles.bar}>
-        <span className={styles.caption}>Speakers not detected yet.</span>
+        <span className={styles.caption}>Who speaks each line isn't known yet.</span>
         <button className={styles.detect} onClick={onDetect} disabled={detecting}>
           {detecting ? 'Detecting…' : 'Detect speakers'}
         </button>
@@ -36,6 +36,7 @@ export function SpeakersBar({
 
   return (
     <div className={styles.bar} aria-label="Speakers">
+      <span className={styles.heading}>Cast</span>
       {speakers.map((s) => {
         const draft = drafts[s.label] ?? s.name
         const commit = () => {
@@ -60,7 +61,7 @@ export function SpeakersBar({
               value={s.voice_id ?? CHAT_VOICE}
               onChange={(e) => onVoice(s.label, e.target.value === CHAT_VOICE ? null : e.target.value)}
             >
-              <option value={CHAT_VOICE}>Chat's voice</option>
+              <option value={CHAT_VOICE}>Default voice</option>
               {voices.map((v) => (
                 <option key={v.voice_id} value={v.voice_id}>
                   {v.name}{v.gender ? ` (${v.gender})` : ''}

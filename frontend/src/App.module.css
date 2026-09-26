@@ -1,41 +1,71 @@
+/* Header across the top; the bay (monitor, timeline) and the desk (script,
+   direction) side by side beneath it. */
 .app {
-  display: grid; grid-template-columns: 1.4fr 1fr; gap: 20px;
-  padding: 20px; height: 100vh;
-}
-.left { display: flex; flex-direction: column; gap: 16px; min-width: 0; min-height: 0; overflow-y: auto; }
-.right { min-height: 0; }
-.error {
-  color: var(--warn); border: 1px solid var(--warn); border-radius: 8px;
-  padding: 8px 12px; font-size: 13px;
-}
-.generating {
-  align-self: stretch; color: var(--muted); font-size: 13px;
-  padding: 8px 12px; border: 1px dashed var(--border); border-radius: 8px;
-  display: flex; flex-direction: column; gap: 8px;
-}
-.generatingStep { color: var(--muted); }
-.progressTrack {
-  height: 6px; background: var(--surface); border-radius: 3px; overflow: hidden;
-}
-.progressFill {
-  height: 100%; background: var(--electric);
-  box-shadow: 0 0 10px var(--electric);
-  transition: width 300ms ease;
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(360px, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-areas: "header header" "bay desk";
+  height: 100vh;
 }
 
-@media (max-width: 900px) {
-  .app { grid-template-columns: 1fr; height: auto; }
+.header {
+  grid-area: header;
+  display: flex; align-items: center; gap: 16px;
+  padding: 10px 20px;
+  border-bottom: 1px solid var(--rule);
 }
-.versions { display: flex; gap: 6px; align-self: flex-start; }
-.version, .versionOn {
-  padding: 4px 12px; border-radius: 999px; font-size: 12px;
-  border: 1px solid var(--border); background: var(--surface); color: var(--muted);
-}
-.versionOn { color: var(--text); border-color: var(--cyan); box-shadow: 0 0 10px rgba(34, 211, 238, 0.35); }
-.topbar { display: flex; align-items: center; gap: 12px; }
 .back {
-  padding: 4px 12px; border-radius: 8px; font-size: 13px;
-  background: transparent; color: var(--muted); border: 1px solid var(--border);
+  padding: 4px 10px; border-radius: var(--radius);
+  background: transparent; color: var(--muted); border: 1px solid var(--rule);
+  font-size: 13px;
 }
-.back:hover { color: var(--text); border-color: var(--cyan); }
-.filename { color: var(--muted); font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.back:hover { color: var(--text); }
+.filename { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.spacer { flex: 1; }
+
+.bay {
+  grid-area: bay;
+  display: flex; flex-direction: column; gap: 14px;
+  padding: 18px 20px; min-height: 0; overflow-y: auto;
+}
+.bay > * { flex-shrink: 0; }
+
+.desk {
+  grid-area: desk;
+  display: flex; flex-direction: column; min-height: 0;
+  border-left: 1px solid var(--rule);
+  background: var(--console);
+}
+/* The one light surface: the script page. */
+.script {
+  flex: 1 1 60%; min-height: 0;
+  display: flex; flex-direction: column;
+  background: var(--paper); color: var(--ink);
+}
+
+.versions { display: inline-flex; border: 1px solid var(--rule); border-radius: var(--radius); overflow: hidden; }
+.version, .versionOn {
+  padding: 3px 10px; font-size: 12px; border: none;
+  background: transparent; color: var(--muted);
+}
+.versionOn { background: var(--console-raised); color: var(--text); }
+
+.error {
+  color: var(--caution); border-left: 3px solid var(--caution);
+  padding: 6px 10px; font-size: 13px; background: var(--console);
+}
+.generating { display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: var(--muted); }
+.generatingStep { color: var(--text); }
+.progressTrack { height: 3px; background: var(--rule); overflow: hidden; }
+.progressFill { height: 100%; background: var(--revision-on-dark); transition: width 300ms ease; }
+
+@media (max-width: 960px) {
+  .app {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto auto auto;
+    grid-template-areas: "header" "bay" "desk";
+    height: auto;
+  }
+  .desk { border-left: none; border-top: 1px solid var(--rule); }
+  .script { min-height: 420px; }
+}

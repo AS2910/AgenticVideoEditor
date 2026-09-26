@@ -2,6 +2,9 @@ export interface Word { text: string; start: number; end: number }
 /** A sentence as spoken, with punctuation — edited from the transcript panel. */
 export interface Statement { text: string; start: number; end: number; speaker?: string | null }
 
+/** An approved edit as the script shows it: the new words over a span. */
+export interface Revision { start: number; end: number; text: string; mix: Mix }
+
 /** A diarized speaker: what to call them, and the voice their new lines are
  *  spoken in (null = the chat's voice). */
 export interface Speaker { label: string; name: string; voice_id: string | null }

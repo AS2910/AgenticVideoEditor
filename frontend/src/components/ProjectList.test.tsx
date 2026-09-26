@@ -12,7 +12,7 @@ describe('ProjectList', () => {
   it('lists projects and opens one', async () => {
     const onOpen = vi.fn()
     render(<ProjectList projects={PROJECTS} onOpen={onOpen} onDelete={() => {}} />)
-    expect(screen.getByText(/1 edit ·/)).toBeInTheDocument()
+    expect(screen.getByText(/48\.9 s, 1 edit$/)).toBeInTheDocument()
     await userEvent.click(screen.getByText('crow.mp4'))
     expect(onOpen).toHaveBeenCalledWith('p1')
   })

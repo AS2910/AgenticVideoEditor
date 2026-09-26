@@ -1,20 +1,60 @@
+/* Editor theme — see docs/superpowers/specs/2026-09-26-editor-ui-redesign.md.
+   An edit bay (graphite, quiet) around one light surface: the script page. */
 :root {
-  --bg: #0A0E14;
-  --surface: #121721;
-  --border: #1E2733;
-  --electric: #2E6BFF;
-  --cyan: #22D3EE;
-  --text: #E6EDF3;
-  --muted: #8B98A9;
-  --warn: #F5A524;
-  --pass: #22D3EE;
-  --radius: 10px;
+  /* the bay */
+  --bay: #15161A;
+  --console: #1F2127;
+  --console-raised: #272A31;
+  --rule: #30333B;
+  --text: #E9E9E6;
+  --muted: #9B9DA4;
+
+  /* the script page */
+  --paper: #F3F4F1;
+  --ink: #1E1F24;
+  --ink-muted: #6B6D74;
+  --paper-rule: #DADBD6;
+
+  /* meaning */
+  --revision: #2E5BDB;        /* revised lines, approve, focus */
+  --revision-tint: #E3EBFB;   /* a revised line on the page */
+  --revision-on-dark: #7D9CF0;
+  --caution: #D9A441;         /* on the bay */
+  --caution-ink: #9A6412;     /* on the page */
+  --speaker-a: #0E8A7A;
+  --speaker-b: #B4467E;
+  --speaker-c: #6C5BBF;
+  --speaker-d: #8A6A12;
+
+  /* aliases the components grew up with */
+  --bg: var(--bay);
+  --surface: var(--console);
+  --border: var(--rule);
+  --electric: var(--revision);
+  --cyan: var(--revision-on-dark);
+  --warn: var(--caution);
+  --pass: var(--revision-on-dark);
+
+  --radius: 6px;
+  --ui: 'Instrument Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --script: 'Courier Prime', 'Courier New', Courier, monospace;
 }
 * { box-sizing: border-box; }
+html, body, #root { height: 100%; }
 body {
   margin: 0;
-  background: var(--bg);
+  background: var(--bay);
   color: var(--text);
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-family: var(--ui);
+  font-size: 14px;
+  line-height: 1.45;
+  font-variant-numeric: tabular-nums;
+  -webkit-font-smoothing: antialiased;
 }
-button { font: inherit; cursor: pointer; }
+button, input, select, textarea { font: inherit; color: inherit; }
+button { cursor: pointer; }
+button:disabled { cursor: default; }
+:focus-visible { outline: 2px solid var(--revision-on-dark); outline-offset: 2px; }
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { transition: none !important; animation: none !important; }
+}

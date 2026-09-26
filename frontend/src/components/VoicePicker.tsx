@@ -19,7 +19,7 @@ export function VoicePicker({ voices, value, onChange }: VoicePickerProps) {
   const current = voices.find((v) => v.voice_id === value)
   return (
     <label className={styles.picker}>
-      <span className={styles.caption}>Voice</span>
+      <span className={styles.caption}>Default voice</span>
       <select
         className={styles.select}
         value={value}

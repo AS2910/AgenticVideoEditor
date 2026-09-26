@@ -107,7 +107,10 @@ async function reachEditor(user: ReturnType<typeof userEvent.setup>) {
   await waitFor(() => expect(screen.getByText('20%')).toBeInTheDocument())
 }
 
-beforeEach(() => { vi.restoreAllMocks() })
+beforeEach(() => {
+  vi.restoreAllMocks()
+  window.location.hash = ''   // opening a project writes its id here
+})
 
 describe('App full journey', () => {
   it('runs consent → load → select → preview → approve → export', async () => {
@@ -124,7 +127,7 @@ describe('App full journey', () => {
 
     await waitFor(() => expect(screen.getByText('30% off')).toBeInTheDocument())
     expect(screen.getByText(/continuity checked/i)).toBeInTheDocument()
-    await waitFor(() => expect(screen.getByTestId('spend')).toHaveTextContent('voice 7 / 2,000'))
+    await waitFor(() => expect(screen.getByTestId('spend')).toHaveTextContent('7 of 2,000 voice characters'))
 
     await user.click(screen.getByRole('button', { name: /approve/i }))
     await waitFor(() => expect(screen.queryByText(/continuity checked/i)).not.toBeInTheDocument())
@@ -516,5 +519,21 @@ describe('App speakers (Phase 11)', () => {
     await user.selectOptions(screen.getByRole('combobox', { name: /voice for presenter/i }), 'nPczCjzI2devNBz1zQrb')
 
     expect(puts.map((p) => p.body)).toEqual([{ name: 'Presenter' }, { voice_id: 'nPczCjzI2devNBz1zQrb' }])
+  })
+})
+
+describe('App reopening from the URL (redesign)', () => {
+  it('opens the project named in the URL, skipping the upload screens', async () => {
+    const base = routeFetch()
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.endsWith('/projects/p1')) {
+        return ok({ ...PROJECT, created_at: '2026-09-26T08:00:00Z', edits: [], messages: [] })
+      }
+      return base(url, init)
+    }))
+    window.location.hash = 'p1'
+    render(<App />)
+    expect(await screen.findByText('Get 20% off today only.')).toBeInTheDocument()
+    expect(screen.queryByRole('checkbox')).not.toBeInTheDocument()
   })
 })
