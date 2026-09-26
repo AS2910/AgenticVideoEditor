@@ -52,3 +52,26 @@ def test_without_statements_words_are_grouped_at_pauses():
 def test_long_runs_are_split():
     words = tuple(Word(f"w{i}", i * 0.3, i * 0.3 + 0.25) for i in range(20))
     assert [len(s.text.split()) for s in statements_of(Transcript(words=words))] == [15, 5]
+
+
+# --- Phase 11: speakers --------------------------------------------------------
+
+from app.domain.transcript import assign_speakers, speaker_of  # noqa: E402
+
+SPOKEN = assign_speakers(
+    Transcript(words=(Word("Hi", 0.0, 0.4), Word("Sure", 1.0, 1.3), Word("sir", 1.3, 1.6))),
+    [("A", 0.0, 0.5), ("B", 0.9, 1.7)],
+)
+
+
+def test_a_selection_over_one_speaker_is_theirs():
+    assert speaker_of(SPOKEN, Selection(1.0, 1.6)) == "B"
+
+
+def test_a_selection_over_two_speakers_or_none_has_no_speaker():
+    assert speaker_of(SPOKEN, Selection(0.0, 1.6)) is None
+    assert speaker_of(SPOKEN, Selection(3.0, 4.0)) is None
+
+
+def test_grouped_statements_break_where_the_speaker_changes():
+    assert [(s.text, s.speaker) for s in statements_of(SPOKEN)] == [("Hi", "A"), ("Sure sir", "B")]

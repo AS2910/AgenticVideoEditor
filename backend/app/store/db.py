@@ -24,7 +24,8 @@ CREATE TABLE IF NOT EXISTS projects (
     source            TEXT NOT NULL,   -- JSON
     transcript        TEXT NOT NULL,   -- JSON
     consent_at        TEXT,
-    candidate_counter INTEGER NOT NULL DEFAULT 0
+    candidate_counter INTEGER NOT NULL DEFAULT 0,
+    speakers          TEXT NOT NULL DEFAULT '{}'   -- JSON: label -> {name, voice_id}
 );
 CREATE INDEX IF NOT EXISTS projects_by_owner ON projects (owner, created_at);
 CREATE TABLE IF NOT EXISTS candidates (
@@ -62,6 +63,12 @@ CREATE INDEX IF NOT EXISTS usage_by_project ON usage (project_id);
 
 PROJECT_TABLES = ("candidates", "edits", "messages", "usage")
 
+# Columns added after a table first shipped: (table, column, definition).
+# Applied to databases created before them; new databases get them from SCHEMA.
+MIGRATIONS = (
+    ("projects", "speakers", "TEXT NOT NULL DEFAULT '{}'"),   # Phase 11
+)
+
 
 class Database:
     def __init__(self, path: str | Path = ":memory:") -> None:
@@ -74,6 +81,10 @@ class Database:
             if path != ":memory:":
                 self._conn.execute("PRAGMA journal_mode=WAL")
             self._conn.executescript(SCHEMA)
+            for table, column, definition in MIGRATIONS:
+                have = {r["name"] for r in self._conn.execute(f"PRAGMA table_info({table})")}
+                if column not in have:
+                    self._conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
 
     @contextmanager
     def tx(self) -> Iterator[sqlite3.Connection]:

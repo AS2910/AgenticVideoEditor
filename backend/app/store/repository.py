@@ -33,6 +33,15 @@ class ProjectRecord:
 
 
 @dataclass(frozen=True)
+class Speaker:
+    """How the editor treats one diarized speaker: what to call them, and the
+    voice their new lines are spoken in (None = the chat's voice)."""
+    label: str                  # the diarization label, "A", "B", …
+    name: str
+    voice_id: str | None = None
+
+
+@dataclass(frozen=True)
 class Message:
     role: str   # "user" | "assistant"
     text: str
@@ -113,6 +122,50 @@ class ProjectRepository:
             for table in PROJECT_TABLES:
                 c.execute(f"DELETE FROM {table} WHERE project_id = ?", (project_id,))
         return gone > 0
+
+    def update_transcript(self, project_id: str, transcript: Transcript) -> None:
+        """Replace the transcript — only ever to add labels (speakers) to the
+        same words; the source itself is never touched."""
+        with self.db.tx() as c:
+            c.execute(
+                "UPDATE projects SET transcript = ? WHERE id = ?",
+                (json.dumps(codec.dump(transcript)), project_id),
+            )
+
+    # ── speakers ──
+
+    def speakers(self, project_id: str) -> list[Speaker]:
+        """Every speaker in the transcript, with any name and voice set for them."""
+        record = self.get(project_id)
+        if record is None:
+            return []
+        with self.db.tx() as c:
+            row = c.execute("SELECT speakers FROM projects WHERE id = ?", (project_id,)).fetchone()
+        saved = json.loads(row["speakers"] or "{}")
+        labels = sorted({w.speaker for w in record.transcript.words if w.speaker is not None})
+        return [
+            Speaker(label, saved.get(label, {}).get("name") or f"Speaker {label}",
+                    saved.get(label, {}).get("voice_id"))
+            for label in labels
+        ]
+
+    def set_speaker(
+        self, project_id: str, label: str, *, name: str | None = None,
+        voice_id: str | None = None, clear_voice: bool = False,
+    ) -> None:
+        with self.db.tx() as c:
+            row = c.execute("SELECT speakers FROM projects WHERE id = ?", (project_id,)).fetchone()
+            if row is None:
+                raise KeyError(project_id)
+            saved = json.loads(row["speakers"] or "{}")
+            entry = saved.setdefault(label, {})
+            if name is not None:
+                entry["name"] = name
+            if voice_id is not None:
+                entry["voice_id"] = voice_id
+            if clear_voice:
+                entry.pop("voice_id", None)
+            c.execute("UPDATE projects SET speakers = ? WHERE id = ?", (json.dumps(saved), project_id))
 
     # ── candidates ──
 

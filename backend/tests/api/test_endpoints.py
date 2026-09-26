@@ -806,3 +806,52 @@ def test_voices_are_listed_with_the_default(client):
     body = client.get("/voices").json()
     assert body["default"] == "mock"
     assert [v["voice_id"] for v in body["voices"]] == ["mock"]
+
+
+# ── speakers and their voices (Phase 11) ─────────────────────────────────────
+
+def detected(client):
+    resp = client.post("/projects/p1/speakers/detect")
+    assert resp.status_code == 200, resp.text
+    return resp.json()
+
+
+def test_speakers_can_be_detected_for_an_older_project(client, project):
+    assert project["speakers"] == []
+    body = detected(client)
+    assert body["speakers"] == [{"label": "A", "name": "Speaker A", "voice_id": None}]
+    assert {st["speaker"] for st in body["statements"]} == {"A"}
+
+
+def test_a_speaker_can_be_renamed_and_given_a_voice(client, project):
+    detected(client)
+    resp = client.put("/projects/p1/speakers/A", json={"name": "Shopkeeper", "voice_id": "nPczCjzI2devNBz1zQrb"})
+    assert resp.json()["speakers"] == [
+        {"label": "A", "name": "Shopkeeper", "voice_id": "nPczCjzI2devNBz1zQrb"}]
+    resp = client.put("/projects/p1/speakers/A", json={"clear_voice": True})
+    assert resp.json()["speakers"][0]["voice_id"] is None
+    assert resp.json()["speakers"][0]["name"] == "Shopkeeper"
+
+
+def test_an_unknown_speaker_is_404(client, project):
+    assert client.put("/projects/p1/speakers/Z", json={"name": "x"}).status_code == 404
+
+
+def test_a_speakers_line_is_spoken_in_their_voice(client, project):
+    detected(client)
+    client.put("/projects/p1/speakers/A", json={"voice_id": "nPczCjzI2devNBz1zQrb"})
+    candidate = preview(client)             # the selection is A's words
+    assert candidate["plan"]["voice_profile_id"] == "nPczCjzI2devNBz1zQrb"
+
+
+def test_without_a_speaker_voice_the_chats_voice_is_used(client, project):
+    detected(client)
+    candidate = preview(client, voice_profile_id="EXAVITQu4vr4xnSDxMaL")
+    assert candidate["plan"]["voice_profile_id"] == "EXAVITQu4vr4xnSDxMaL"
+
+
+def test_speaker_settings_survive_reopening(client, project):
+    detected(client)
+    client.put("/projects/p1/speakers/A", json={"name": "Shopkeeper"})
+    reopened = client.get("/projects/p1").json()
+    assert reopened["speakers"][0]["name"] == "Shopkeeper"

@@ -42,6 +42,10 @@ def _span(plan: EditPlan) -> float:
 
 
 class MockTranscriptionAdapter:
+    def diarize(self, source: Source) -> list[tuple[str, float, float]]:
+        """One speaker throughout — enough to exercise speaker features offline."""
+        return [("A", 0.0, source.duration)]
+
     def transcribe(self, source: Source) -> Transcript:
         return Transcript(
             words=_CANNED_WORDS, statements=(Statement("Get 20% off today only.", 0.0, 2.3),),

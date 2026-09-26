@@ -15,6 +15,11 @@ class VendorError(RuntimeError):
 class TranscriptionAdapter(Protocol):
     def transcribe(self, source: Source) -> Transcript: ...
 
+    def diarize(self, source: Source) -> list[tuple[str, float, float]]:
+        """Speaker turns (label, start, end), for projects transcribed before
+        speakers were detected."""
+        ...
+
 
 class VoiceAdapter(Protocol):
     # Whose voice this produces: "mock" (a tone), "stock" (a real voice that is

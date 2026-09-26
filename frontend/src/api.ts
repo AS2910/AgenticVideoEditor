@@ -1,5 +1,5 @@
 import type {
-  Project, ApprovedResult, ExportManifest, EditRequest, Job, ProjectSummary, ProjectDetail, Usage, Voice,
+  Project, ApprovedResult, ExportManifest, EditRequest, Job, ProjectSummary, ProjectDetail, Usage, Voice, Speaker,
 } from './types'
 
 const BASE = '/api'
@@ -68,6 +68,23 @@ export const listProjects = async () =>
 export const getProject = (id: string) => get<ProjectDetail>(`/projects/${id}`)
 
 export const listVoices = () => get<{ default: string; voices: Voice[] }>('/voices')
+
+/** Rename a speaker or set their voice; `voice_id: null` with `clear_voice`
+ *  returns them to the chat's voice. */
+export async function updateSpeaker(
+  id: string, label: string, change: { name?: string; voice_id?: string; clear_voice?: boolean },
+): Promise<Speaker[]> {
+  const res = await fetch(`${BASE}/projects/${id}/speakers/${label}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(change),
+  })
+  if (!res.ok) return failure(res)
+  return ((await res.json()) as { speakers: Speaker[] }).speakers
+}
+
+/** Finds who speaks when, for a project transcribed before speakers existed. */
+export const detectSpeakers = (id: string) => post<Project>(`/projects/${id}/speakers/detect`)
 
 export const getUsage = (id: string) => get<Usage>(`/projects/${id}/usage`)
 

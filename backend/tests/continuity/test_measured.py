@@ -155,3 +155,23 @@ def test_a_missing_transcript_is_treated_as_no_context(store, tmp_path):
     plan = EditPlan(Selection(1.2, 1.8), "new", "speaker-1")
     result = m.MeasuredContinuityEngine(store).assess(source, None, plan, _studio_line(tmp_path, store))
     assert result.report.measured == ()
+
+
+# --- Phase 11: the reference is the same speaker -------------------------------
+
+def test_context_is_only_the_edited_speakers_words():
+    from app.continuity.measured import context_spans
+    from app.domain.models import Selection, Transcript, Word
+    t = Transcript(words=(
+        Word("Hi", 0.0, 0.5, "A"), Word("want", 0.6, 1.0, "A"),
+        Word("Sure", 1.2, 1.5, "B"), Word("sir", 1.5, 1.8, "B"),
+        Word("thanks", 2.0, 2.4, "A"), Word("Done", 3.0, 3.3, "B"),
+    ))
+    assert context_spans(t, Selection(1.2, 1.8)) == [(3.0, 3.3)]
+
+
+def test_without_speakers_everyone_is_context():
+    from app.continuity.measured import context_spans
+    from app.domain.models import Selection, Transcript, Word
+    t = Transcript(words=(Word("Hi", 0.0, 0.5), Word("Sure", 1.2, 1.5), Word("ok", 2.0, 2.4)))
+    assert context_spans(t, Selection(1.2, 1.5)) == [(0.0, 0.5), (2.0, 2.4)]

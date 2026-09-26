@@ -1,9 +1,52 @@
+from dataclasses import replace
+from typing import Sequence
+
 from app.domain.models import Statement, Transcript, Selection
 
 # Grouping words into statements when Whisper gave none (projects transcribed
-# before Phase 10): a pause this long, or this many words, ends a statement.
+# before Phase 10): a pause this long, this many words, or a change of speaker
+# ends a statement.
 _STATEMENT_GAP = 0.6
 _STATEMENT_WORDS = 15
+
+
+def _overlap(a0: float, a1: float, b0: float, b1: float) -> float:
+    return max(0.0, min(a1, b1) - max(a0, b0))
+
+
+def _speaker_at(start: float, end: float, turns: Sequence[tuple[str, float, float]]) -> str | None:
+    """The speaker whose turn overlaps [start, end] most; the nearest turn for
+    a zero-length word (Whisper gives some)."""
+    if not turns:
+        return None
+    best = max(turns, key=lambda t: _overlap(start, end, t[1], t[2]))
+    if _overlap(start, end, best[1], best[2]) > 0:
+        return best[0]
+    mid = (start + end) / 2
+    return min(turns, key=lambda t: min(abs(mid - t[1]), abs(mid - t[2])))[0]
+
+
+def assign_speakers(transcript: Transcript, turns: Sequence[tuple[str, float, float]]) -> Transcript:
+    """Label every word and statement with the speaker of the diarized turn
+    (speaker, start, end) it overlaps most."""
+    if not turns:
+        return transcript
+    words = tuple(replace(w, speaker=_speaker_at(w.start, w.end, turns)) for w in transcript.words)
+    statements = tuple(
+        replace(s, speaker=_speaker_at(s.start, s.end, turns)) for s in transcript.statements
+    )
+    return Transcript(words=words, statements=statements)
+
+
+def speaker_of(transcript: Transcript, selection: Selection) -> str | None:
+    """The one speaker whose words the selection covers; None when it covers
+    no labelled speech, or more than one speaker."""
+    speakers = {
+        w.speaker for w in transcript.words
+        if w.end > selection.start and w.start < selection.end
+    }
+    speakers.discard(None)
+    return speakers.pop() if len(speakers) == 1 else None
 
 
 def statements_of(transcript: Transcript) -> tuple[Statement, ...]:
@@ -13,13 +56,19 @@ def statements_of(transcript: Transcript) -> tuple[Statement, ...]:
     groups: list[list] = []
     for word in transcript.words:
         if (not groups or word.start - groups[-1][-1].end >= _STATEMENT_GAP
-                or len(groups[-1]) >= _STATEMENT_WORDS):
+                or len(groups[-1]) >= _STATEMENT_WORDS
+                or word.speaker != groups[-1][-1].speaker):
             groups.append([word])
         else:
             groups[-1].append(word)
     return tuple(
-        Statement(" ".join(w.text for w in g), g[0].start, g[-1].end) for g in groups
+        Statement(" ".join(w.text for w in g), g[0].start, g[-1].end, _majority(g)) for g in groups
     )
+
+
+def _majority(words: list) -> str | None:
+    labels = [w.speaker for w in words if w.speaker is not None]
+    return max(set(labels), key=labels.count) if labels else None
 
 
 def snap_to_word_boundaries(transcript: Transcript, selection: Selection) -> Selection:

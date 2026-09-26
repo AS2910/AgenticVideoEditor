@@ -30,3 +30,11 @@
   padding: 6px 14px; border-radius: 6px; background: transparent; color: var(--muted);
   border: 1px solid var(--border);
 }
+.who {
+  display: inline-block; margin-right: 8px; padding: 0 6px; border-radius: 4px;
+  font-size: 11px; color: var(--bg); background: var(--muted); vertical-align: 1px;
+}
+.who[data-speaker="A"] { background: var(--cyan); }
+.who[data-speaker="B"] { background: #f59e0b; }
+.who[data-speaker="C"] { background: #a78bfa; }
+.who[data-speaker="D"] { background: #34d399; }

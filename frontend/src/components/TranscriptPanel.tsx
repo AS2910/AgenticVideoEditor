@@ -9,6 +9,8 @@ interface TranscriptPanelProps {
   disabled?: boolean
   onSeek: (statement: Statement) => void
   onEdit: (statement: Statement, text: string) => void
+  /** Display names by speaker label, when speakers are known. */
+  speakerNames?: Record<string, string>
 }
 
 const clock = (t: number) => {
@@ -19,7 +21,9 @@ const clock = (t: number) => {
 
 /** The transcript as statements. Click a time to jump there; click the text
  *  to rewrite it and preview the change. */
-export function TranscriptPanel({ statements, currentTime, disabled, onSeek, onEdit }: TranscriptPanelProps) {
+export function TranscriptPanel({
+  statements, currentTime, disabled, onSeek, onEdit, speakerNames = {},
+}: TranscriptPanelProps) {
   const [editing, setEditing] = useState<number | null>(null)
   const [draft, setDraft] = useState('')
   const box = useRef<HTMLTextAreaElement>(null)
@@ -74,6 +78,9 @@ export function TranscriptPanel({ statements, currentTime, disabled, onSeek, onE
               </div>
             ) : (
               <button className={styles.text} onClick={() => start(i)} title="Click to rewrite this line">
+                {s.speaker && speakerNames[s.speaker] && (
+                  <span className={styles.who} data-speaker={s.speaker}>{speakerNames[s.speaker]}</span>
+                )}
                 {s.text}
               </button>
             )}

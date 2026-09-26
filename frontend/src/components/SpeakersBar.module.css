@@ -1,0 +1,25 @@
+.bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.caption { color: var(--muted); font-size: 12px; }
+.detect {
+  padding: 4px 12px; border-radius: 8px; font-size: 12px;
+  background: transparent; color: var(--text); border: 1px solid var(--cyan);
+}
+.detect:disabled { color: var(--muted); border-color: var(--border); }
+.speaker {
+  display: flex; align-items: center; gap: 6px; padding: 4px 8px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+}
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex: none; }
+.dot[data-speaker="A"] { background: var(--cyan); }
+.dot[data-speaker="B"] { background: #f59e0b; }
+.dot[data-speaker="C"] { background: #a78bfa; }
+.dot[data-speaker="D"] { background: #34d399; }
+.name {
+  width: 110px; padding: 2px 4px; font-size: 13px;
+  background: transparent; color: var(--text); border: 1px solid transparent; border-radius: 4px;
+}
+.name:focus { outline: none; border-color: var(--electric); }
+.voice {
+  max-width: 160px; padding: 2px 4px; font-size: 12px; border-radius: 4px;
+  background: var(--bg); color: var(--text); border: 1px solid var(--border);
+}

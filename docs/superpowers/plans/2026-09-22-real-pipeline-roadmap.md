@@ -1,7 +1,7 @@
 # Real Pipeline — Phased Roadmap
 
 **Date:** 2026-09-22
-**Status:** Phases 0–4a, 6a, 7, 8 and 9 done and clean (8 and 9 on 2026-09-26; 9c is a design). Phase 10 (editing UX) done the same day. Phases 4b and 5 moved to the **Backlog** — both are blocked on vendor access, not on code.
+**Status:** Phases 0–4a, 6a, 7, 8 and 9 done and clean (8 and 9 on 2026-09-26; 9c is a design). Phases 10 (editing UX) and 11 (multiple voices) done the same day. Phases 4b and 5 moved to the **Backlog** — both are blocked on vendor access, not on code.
 **Supersedes nothing.** Builds on `2026-07-14-walking-skeleton.md` and `2026-07-17-voltage-frontend.md`.
 
 **Goal:** turn the mocked walking skeleton into a system that ingests a real video, produces a real re-voiced and lip-synced segment, verifies continuity with real signal analysis, and exports a real playable file — honoring the v1 design spec end-to-end.
@@ -171,8 +171,11 @@ Grouped into three milestones. Each milestone is independently useful — you ca
   - **Exit met:** 354 backend + 108 frontend tests. Live on the 49 s Bhaji Cam clip: 20 statements; the same statement rewritten in Sarah and in Brian.
   - **Found live — the case for multi-voice:** that clip has two speakers, and continuity compares the new line with *everyone* speaking nearby: Sarah measured +5.2 semitones, Brian −4.8 — the reference is a blend. Speaker labels (diarization) would let continuity compare against the same speaker only, and give each speaker a voice.
 
-- [ ] **Phase 11 · Multiple voices** *(proposed)*
-  - Speaker labels on statements (diarization); a voice per speaker; continuity measured against the same speaker's speech only.
+- [x] **Phase 11 · Multiple voices** — **done 2026-09-26** (plan: `2026-09-26-phase-11-multiple-voices.md`)
+  - **Diarization:** spiked OpenAI `gpt-4o-transcribe-diarize` vs ElevenLabs Scribe on the two-speaker clip — both exact; OpenAI chosen alongside Whisper to keep the free ElevenLabs credits for speech (Scribe is the single-call option if the plan is upgraded). Words and statements carry a speaker; diarization failing never fails an upload; older projects detect on demand.
+  - **A voice per speaker:** rename speakers, pick each one's voice; a line in one speaker's words uses theirs, else the chat's voice.
+  - **Continuity per speaker:** the pitch/level reference is the edited speaker's own words.
+  - **Exit met:** 368 backend + 113 frontend tests. Live on the Bhaji Cam clip: speakers A (customer) / B (shopkeeper) detected; the customer's line, blended-reference before → speaker-only now: Sarah 0.74 → 0.83, Brian 0.76 → **0.96**, both passing.
 
 ---
 

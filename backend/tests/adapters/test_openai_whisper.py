@@ -84,7 +84,7 @@ def test_transcribe_extracts_audio_and_parses_the_reply(tmp_path):
         seen["key"] = api_key
         return FIXTURE
 
-    adapter = WhisperTranscriptionAdapter("sk-test", post=fake_post)
+    adapter = WhisperTranscriptionAdapter("sk-test", post=fake_post, post_diarize=NO_TURNS)
     transcript = adapter.transcribe(make_source(media=_artifact_for(muxed)))
 
     assert [w.text for w in transcript.words][:2] == ["Get", "20"]
@@ -98,7 +98,7 @@ def test_a_source_without_audio_fails_with_a_clear_error(tmp_path):
         pytest.skip("ffmpeg not installed")
     silent, _ = ffmpeg.generate_solid_video(tmp_path / "silent.mp4", 1.0)
 
-    adapter = WhisperTranscriptionAdapter("sk-test", post=lambda *a: FIXTURE)
+    adapter = WhisperTranscriptionAdapter("sk-test", post=lambda *a: FIXTURE, post_diarize=NO_TURNS)
     with pytest.raises(TranscriptionError, match="extract audio"):
         adapter.transcribe(make_source(media=_artifact_for(silent)))
 
@@ -117,9 +117,78 @@ def test_vendor_failures_surface_as_transcription_errors(tmp_path):
     def boom(path, api_key, timeout):
         raise TranscriptionError("OpenAI transcription failed (429): rate limited")
 
-    adapter = WhisperTranscriptionAdapter("sk-test", post=boom)
+    adapter = WhisperTranscriptionAdapter("sk-test", post=boom, post_diarize=NO_TURNS)
     with pytest.raises(TranscriptionError, match="429"):
         adapter.transcribe(make_source(media=_artifact_for(muxed)))
+
+
+def NO_TURNS(path, api_key, timeout):
+    return {"segments": []}
+
+
+def _muxed(tmp_path):
+    video, _ = ffmpeg.generate_solid_video(tmp_path / "v.mp4", 1.0)
+    audio, _ = ffmpeg.generate_silence(tmp_path / "a.wav", 1.0)
+    muxed = tmp_path / "m.mp4"
+    ffmpeg._run(ffmpeg.FFMPEG, [
+        "-y", "-loglevel", "error", "-i", str(video), "-i", str(audio),
+        "-c:v", "copy", "-c:a", "aac", "-shortest", str(muxed),
+    ])
+    return muxed
+
+
+# --- Phase 11: speakers ---------------------------------------------------------
+
+TWO_SPEAKERS = {
+    "words": [
+        {"word": "Hi", "start": 5.2, "end": 5.5}, {"word": "there", "start": 5.5, "end": 6.9},
+        {"word": "Sure", "start": 9.38, "end": 9.6}, {"word": "sir", "start": 9.6, "end": 9.88},
+        {"word": "Done", "start": 14.52, "end": 14.52},   # zero-length, as Whisper gives
+    ],
+    "segments": [
+        {"text": " Hi there.", "start": 5.2, "end": 6.94},
+        {"text": " Sure, sir.", "start": 9.38, "end": 9.88},
+    ],
+}
+# Shaped like gpt-4o-transcribe-diarize's diarized_json, as seen in the spike.
+TURNS = {"segments": [
+    {"type": "transcript.text.segment", "id": "seg_0", "speaker": "A", "start": 5.5, "end": 6.9, "text": " Hi there."},
+    {"type": "transcript.text.segment", "id": "seg_1", "speaker": "B", "start": 9.2, "end": 10.7, "text": " Sure, sir."},
+    {"type": "transcript.text.segment", "id": "seg_2", "speaker": "B", "start": 14.15, "end": 14.5, "text": " Done,"},
+]}
+
+
+def test_words_and_statements_are_labelled_by_speaker(tmp_path):
+    if not ffmpeg.available():
+        pytest.skip("ffmpeg not installed")
+    adapter = WhisperTranscriptionAdapter(
+        "sk-test", post=lambda *a: TWO_SPEAKERS, post_diarize=lambda *a: TURNS,
+    )
+    t = adapter.transcribe(make_source(media=_artifact_for(_muxed(tmp_path))))
+    assert [(w.text, w.speaker) for w in t.words] == [
+        ("Hi", "A"), ("there", "A"), ("Sure", "B"), ("sir", "B"), ("Done", "B"),
+    ]
+    assert [s.speaker for s in t.statements] == ["A", "B"]
+
+
+def test_a_failed_diarization_keeps_the_words(tmp_path):
+    if not ffmpeg.available():
+        pytest.skip("ffmpeg not installed")
+
+    def down(path, api_key, timeout):
+        raise TranscriptionError("OpenAI diarization failed (500)")
+
+    adapter = WhisperTranscriptionAdapter("sk-test", post=lambda *a: TWO_SPEAKERS, post_diarize=down)
+    t = adapter.transcribe(make_source(media=_artifact_for(_muxed(tmp_path))))
+    assert len(t.words) == 5 and all(w.speaker is None for w in t.words)
+
+
+def test_to_turns_skips_unusable_segments():
+    from app.adapters.openai_whisper import to_turns
+    assert to_turns({"segments": [
+        {"speaker": "A", "start": 1.0, "end": 2.0}, {"speaker": "B", "start": 3.0, "end": 3.0},
+        {"start": 4.0, "end": 5.0},
+    ]}) == [("A", 1.0, 2.0)]
 
 
 def _artifact_for(path: Path):

@@ -15,7 +15,9 @@ from app.domain.models import (
     Source, Selection, ContinuityReport, EditCandidate, ApprovedEdit, MediaArtifact,
     Consent, EditPlan, Intent,
 )
-from app.domain.transcript import snap_to_word_boundaries, statements_of
+from app.domain.transcript import (
+    assign_speakers, snap_to_word_boundaries, speaker_of, statements_of,
+)
 from app.config import load_settings
 from app.media import ffmpeg, ingest
 from app.adapters.mock import MockLipSyncAdapter
@@ -29,7 +31,7 @@ from app.orchestrator.questions import fit_question, mix_question
 from app.media.ffmpeg import SpanMismatch
 from app.orchestrator.pipeline import run_edit
 from app.store.db import Database
-from app.usage import Ledger, WHISPER_USD_PER_MINUTE, claude_usd
+from app.usage import Ledger, SpendCeilingReached, WHISPER_USD_PER_MINUTE, claude_usd
 from app.store.repository import ProjectRecord, ProjectRepository, LOCAL_OWNER
 from app.store.artifacts import ArtifactStore
 from app.render.renderer import render
@@ -202,10 +204,25 @@ def _project_dict(record: ProjectRecord) -> dict:
             {"text": w.text, "start": w.start, "end": w.end} for w in record.transcript.words
         ],
         "statements": [
-            {"text": st.text, "start": st.start, "end": st.end}
+            {"text": st.text, "start": st.start, "end": st.end, "speaker": st.speaker}
             for st in statements_of(record.transcript)
         ],
+        "speakers": _speakers(source.project_id),
     }
+
+
+def _speakers(project_id: str) -> list[dict]:
+    return [
+        {"label": s.label, "name": s.name, "voice_id": s.voice_id}
+        for s in repo.speakers(project_id)
+    ]
+
+
+def _record_diarization(project_id: str, duration: float) -> None:
+    if transcriber_label.startswith("openai"):
+        minutes = duration / 60
+        ledger.record(project_id, "openai", "diarization", minutes, "minutes",
+                      minutes * WHISPER_USD_PER_MINUTE)
 
 
 @app.post("/projects")
@@ -252,6 +269,8 @@ async def create_project(
         minutes = source.duration / 60
         ledger.record(project_id, "openai", "transcription", minutes, "minutes",
                       minutes * WHISPER_USD_PER_MINUTE)
+    if any(w.speaker for w in transcript.words):
+        _record_diarization(project_id, source.duration)
     return _project_dict(repo.get(project_id))
 
 
@@ -315,6 +334,52 @@ def get_usage(project_id: str, owner: str = Depends(current_owner)) -> dict:
             for u in ledger.lines(project_id)
         ],
     }
+
+
+class SpeakerUpdate(BaseModel):
+    name: str | None = None
+    # A voice id to speak this speaker's new lines in; null returns them to
+    # the chat's voice. Omitted = unchanged.
+    voice_id: str | None = None
+    clear_voice: bool = False
+
+
+@app.get("/projects/{project_id}/speakers")
+def get_speakers(project_id: str, owner: str = Depends(current_owner)) -> dict:
+    _owned(project_id, owner)
+    return {"speakers": _speakers(project_id)}
+
+
+@app.put("/projects/{project_id}/speakers/{label}")
+def update_speaker(
+    project_id: str, label: str, req: SpeakerUpdate, owner: str = Depends(current_owner),
+) -> dict:
+    _owned(project_id, owner)
+    if label not in {s.label for s in repo.speakers(project_id)}:
+        raise HTTPException(status_code=404, detail="speaker not found")
+    name = req.name.strip() if req.name is not None else None
+    repo.set_speaker(project_id, label, name=name or None, voice_id=req.voice_id,
+                     clear_voice=req.clear_voice)
+    return {"speakers": _speakers(project_id)}
+
+
+@app.post("/projects/{project_id}/speakers/detect")
+def detect_speakers(project_id: str, owner: str = Depends(current_owner)) -> dict:
+    """Find who speaks when, for a project transcribed before Phase 11."""
+    record = _owned(project_id, owner)
+    if transcriber_label.startswith("openai"):
+        try:
+            ledger.ensure_can_spend(project_id)
+        except SpendCeilingReached as exc:
+            raise HTTPException(status_code=402, detail=str(exc)) from exc
+    try:
+        turns = transcriber.diarize(record.source)
+    except TranscriptionError as exc:
+        log.warning("diarization failed for %s: %s", project_id, exc)
+        raise HTTPException(status_code=502, detail="Could not detect speakers. Please try again.") from exc
+    _record_diarization(project_id, record.source.duration)
+    repo.update_transcript(project_id, assign_speakers(record.transcript, turns))
+    return _project_dict(repo.get(project_id))
 
 
 @app.delete("/projects/{project_id}", status_code=204)
@@ -413,7 +478,12 @@ def preview_edit(
         if mix is None:
             return _asked(mix_question(intent.new_text, context))
 
-        plan = EditPlan(selection, intent.new_text, req.voice_profile_id, fit=req.fit, mix=mix)
+        # A line in one speaker's words is spoken in that speaker's voice, if
+        # one is set; otherwise in the voice chosen in the chat.
+        speaker = speaker_of(record.transcript, selection)
+        voices = {s.label: s.voice_id for s in repo.speakers(project_id)}
+        voice_id = voices.get(speaker) or req.voice_profile_id
+        plan = EditPlan(selection, intent.new_text, voice_id, fit=req.fit, mix=mix)
         cost = voice.cost_of(plan)
         if not budget.can_afford(project_id, cost):
             raise BudgetExceeded(cost, budget.remaining(project_id))

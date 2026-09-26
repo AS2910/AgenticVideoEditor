@@ -484,3 +484,37 @@ describe('App editing by transcript and voice (Phase 10)', () => {
     expect(bodies[0].voice_profile_id).toBe('EXAVITQu4vr4xnSDxMaL')
   })
 })
+
+describe('App speakers (Phase 11)', () => {
+  it('detects speakers, then names them and gives one a voice', async () => {
+    const puts: { url: string; body: unknown }[] = []
+    const base = routeFetch()
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.endsWith('/speakers/detect')) {
+        return ok({ ...PROJECT,
+          statements: [{ text: 'Get 20% off today only.', start: 0, end: 2.3, speaker: 'A' }],
+          speakers: [{ label: 'A', name: 'Speaker A', voice_id: null }] })
+      }
+      if (url.includes('/speakers/')) {
+        const body = JSON.parse(String(init?.body))
+        puts.push({ url, body })
+        return ok({ speakers: [{ label: 'A', name: body.name ?? 'Speaker A', voice_id: body.voice_id ?? null }] })
+      }
+      return base(url, init)
+    }))
+    const user = userEvent.setup()
+    render(<App />)
+    await reachEditor(user)
+    await screen.findByRole('option', { name: 'Brian (male, american)' })
+
+    await user.click(screen.getByRole('button', { name: /detect speakers/i }))
+    const name = await screen.findByRole('textbox', { name: 'Name for speaker A' })
+    expect(screen.getAllByText('Speaker A').length).toBeGreaterThan(0)   // chip on the statement
+
+    await user.clear(name)
+    await user.type(name, 'Presenter{Enter}')
+    await user.selectOptions(screen.getByRole('combobox', { name: /voice for presenter/i }), 'nPczCjzI2devNBz1zQrb')
+
+    expect(puts.map((p) => p.body)).toEqual([{ name: 'Presenter' }, { voice_id: 'nPczCjzI2devNBz1zQrb' }])
+  })
+})

@@ -6,6 +6,7 @@ class Word:
     text: str
     start: float  # seconds
     end: float    # seconds
+    speaker: str | None = None  # diarization label ("A", "B", …); None if unknown
 
 
 @dataclass(frozen=True)
@@ -15,6 +16,7 @@ class Statement:
     text: str
     start: float
     end: float
+    speaker: str | None = None
 
 
 @dataclass(frozen=True)

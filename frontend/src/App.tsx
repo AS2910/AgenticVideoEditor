@@ -11,9 +11,10 @@ import { ProjectList } from './components/ProjectList'
 import { SpendMeter } from './components/SpendMeter'
 import { TranscriptPanel } from './components/TranscriptPanel'
 import { VoicePicker } from './components/VoicePicker'
+import { SpeakersBar } from './components/SpeakersBar'
 import {
   createProject, previewEdit, approveEdit, exportProject, artifactUrl,
-  pollJob, PollCancelled, ApiError, listProjects, getProject, deleteProject, getUsage, listVoices,
+  pollJob, PollCancelled, ApiError, listProjects, getProject, deleteProject, getUsage, listVoices, updateSpeaker, detectSpeakers,
 } from './api'
 import type {
   Word, Selection, Candidate, Segment, Project, ChatMessage, Question, QuestionOption,
@@ -63,6 +64,7 @@ export default function App() {
   const [voices, setVoices] = useState<Voice[]>([])
   const [voiceId, setVoiceId] = useState(DEFAULT_VOICE)
   const [seekRequest, setSeekRequest] = useState<{ time: number; id: number } | null>(null)
+  const [detecting, setDetecting] = useState(false)
   const previewToken = useRef(0)
 
   const refreshProjects = useCallback(async () => {
@@ -225,6 +227,34 @@ export default function App() {
       `“${s.text}” → “${text}”`)
   }
 
+  const findSpeakers = async () => {
+    if (!projectId) return
+    setDetecting(true)
+    setError(null)
+    try {
+      const updated = await detectSpeakers(projectId)
+      setProject((p) => (p ? { ...p, statements: updated.statements, speakers: updated.speakers } : p))
+      setTranscript(updated.transcript)
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : 'Could not detect speakers.')
+    } finally {
+      setDetecting(false)
+      void refreshUsage(projectId)
+    }
+  }
+
+  const changeSpeaker = async (
+    label: string, change: { name?: string; voice_id?: string; clear_voice?: boolean },
+  ) => {
+    if (!projectId) return
+    try {
+      const speakers = await updateSpeaker(projectId, label, change)
+      setProject((p) => (p ? { ...p, speakers } : p))
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : 'Could not update that speaker.')
+    }
+  }
+
   const seekToStatement = (s: Statement) => {
     setSelection({ start: s.start, end: s.end })
     const edited = view === 'edited' && rendered !== null
@@ -376,7 +406,18 @@ export default function App() {
           currentTime={showEdited ? sourceTime(currentTime, inserts) : currentTime}
           onSelect={setSelection}
         />
+        <SpeakersBar
+          speakers={project.speakers ?? []}
+          voices={voices}
+          hasSpeech={transcript.length > 0}
+          detecting={detecting}
+          onDetect={() => void findSpeakers()}
+          onRename={(label, name) => void changeSpeaker(label, { name })}
+          onVoice={(label, voiceId) => void changeSpeaker(
+            label, voiceId ? { voice_id: voiceId } : { clear_voice: true })}
+        />
         <TranscriptPanel
+          speakerNames={Object.fromEntries((project.speakers ?? []).map((sp) => [sp.label, sp.name]))}
           statements={project.statements ?? []}
           currentTime={showEdited ? sourceTime(currentTime, inserts) : currentTime}
           disabled={generating}

@@ -1,6 +1,10 @@
 export interface Word { text: string; start: number; end: number }
 /** A sentence as spoken, with punctuation — edited from the transcript panel. */
-export interface Statement { text: string; start: number; end: number }
+export interface Statement { text: string; start: number; end: number; speaker?: string | null }
+
+/** A diarized speaker: what to call them, and the voice their new lines are
+ *  spoken in (null = the chat's voice). */
+export interface Speaker { label: string; name: string; voice_id: string | null }
 
 /** A voice a new line can be spoken in. */
 export interface Voice {
@@ -67,6 +71,8 @@ export interface Project {
   transcript: Word[]
   /** Absent from responses of servers before Phase 10. */
   statements?: Statement[]
+  /** Absent from responses of servers before Phase 11. */
+  speakers?: Speaker[]
 }
 
 /** What a project has spent. USD is an estimate from list prices. */
