@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import math
+import re
 import tempfile
 from pathlib import Path
 from typing import Callable
@@ -27,6 +28,10 @@ from app.media import ffmpeg
 from app.store.artifacts import ArtifactStore
 
 ENDPOINT = "https://api.elevenlabs.io/v1/text-to-speech/{voice_id}"
+VOICES_ENDPOINT = "https://api.elevenlabs.io/v2/voices"
+# ElevenLabs voice ids: 20 alphanumerics. Anything else (e.g. the UI's legacy
+# "speaker-1") means "the configured default voice".
+_VOICE_ID = re.compile(r"[A-Za-z0-9]{20}")
 OUTPUT_FORMAT = "pcm_24000"
 SAMPLE_RATE = 24000
 DEFAULT_TIMEOUT = 60.0
@@ -54,6 +59,32 @@ class VoiceError(VendorError):
 
 class VoiceConfigError(NonRetryableError):
     """ElevenLabs refused the request itself: key, quota, or a bad parameter."""
+
+
+def to_voice(raw: dict) -> dict:
+    labels = raw.get("labels") or {}
+    return {
+        "voice_id": raw["voice_id"],
+        # Names arrive as "Brian - Deep, Resonant and Comforting".
+        "name": raw["name"].split(" - ")[0].strip(),
+        "description": raw["name"].split(" - ", 1)[1].strip() if " - " in raw["name"] else "",
+        "gender": labels.get("gender"),
+        "accent": labels.get("accent"),
+        "age": labels.get("age"),
+    }
+
+
+def _get_voices(api_key: str, timeout: float) -> list[dict]:
+    try:
+        response = httpx.get(
+            VOICES_ENDPOINT, params={"voice_type": "default", "page_size": 100},
+            headers={"xi-api-key": api_key}, timeout=timeout,
+        )
+    except httpx.HTTPError:
+        raise VoiceError("Could not reach ElevenLabs to list voices.") from None
+    if response.status_code != 200:
+        _raise_for(response.status_code, response.text.replace(api_key, "***"))
+    return [to_voice(v) for v in response.json().get("voices", [])]
 
 
 def billed_characters(text: str, model: str) -> int:
@@ -130,6 +161,7 @@ class ElevenLabsVoiceAdapter:
         model: str,
         voice_id: str,
         post: PostFn = _post,
+        get_voices: Callable[[str, float], list[dict]] = _get_voices,
         timeout: float = DEFAULT_TIMEOUT,
     ) -> None:
         self._api_key = api_key
@@ -138,6 +170,8 @@ class ElevenLabsVoiceAdapter:
         self._model = model
         self._voice_id = voice_id
         self._post = post
+        self._get_voices = get_voices
+        self._voices: list[dict] | None = None
         self._timeout = timeout
         # A paid take that did not fit its selection, kept so that when the
         # user answers how to place it, that same take is used — the question
@@ -147,16 +181,32 @@ class ElevenLabsVoiceAdapter:
     def cost_of(self, plan: EditPlan) -> int:
         return billed_characters(plan.new_text, self._model)
 
+    @property
+    def default_voice(self) -> str:
+        return self._voice_id
+
+    def voices(self) -> list[dict]:
+        """The premade voices, fetched once. Listing is free."""
+        if self._voices is None:
+            self._voices = self._get_voices(self._api_key, self._timeout)
+        return self._voices
+
+    def voice_for(self, plan: EditPlan) -> str:
+        """The voice an edit asked for, or the configured default."""
+        wanted = plan.voice_profile_id
+        return wanted if _VOICE_ID.fullmatch(wanted) else self._voice_id
+
     def synthesize(
         self, source: Source, plan: EditPlan, transcript: Transcript | None = None,
     ) -> MediaArtifact:
         body = to_request(plan, transcript, self._model)
-        key = f"{source.project_id}|{self._voice_id}|{json.dumps(body, sort_keys=True)}"
+        voice_id = self.voice_for(plan)
+        key = f"{source.project_id}|{voice_id}|{json.dumps(body, sort_keys=True)}"
         audio = self._held.pop(key, None)
         if audio is None:
             # Charged per attempt, before the call: a retry is real spend.
             self._budget.charge(source.project_id, self.cost_of(plan))
-            status, audio, text = self._post(self._voice_id, body, self._api_key, self._timeout)
+            status, audio, text = self._post(voice_id, body, self._api_key, self._timeout)
             if status != 200:
                 _raise_for(status, text.replace(self._api_key, "***"))
 

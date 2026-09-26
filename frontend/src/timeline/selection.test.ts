@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { timeFromX, snapToWords, sourceTime } from './selection'
+import { timeFromX, snapToWords, sourceTime, renderTime } from './selection'
 
 describe('timeFromX', () => {
   it('maps the track midpoint to half the duration', () => {
@@ -47,5 +47,16 @@ describe('sourceTime', () => {
   })
   it('adds up several inserts, whatever their order', () => {
     expect(sourceTime(9.0, [{ at: 5, duration: 1 }, { at: 2, duration: 1 }])).toBeCloseTo(7.0)
+  })
+})
+
+describe('renderTime', () => {
+  it('pushes source time later by the inserts at or before it', () => {
+    expect(renderTime(3, [{ at: 7, duration: 1.1 }])).toBe(3)
+    expect(renderTime(7.5, [{ at: 7, duration: 1.1 }])).toBeCloseTo(8.6)
+  })
+  it('round-trips with sourceTime outside an insert', () => {
+    const ins = [{ at: 2, duration: 1 }, { at: 5, duration: 0.5 }]
+    expect(sourceTime(renderTime(6, ins), ins)).toBeCloseTo(6)
   })
 })

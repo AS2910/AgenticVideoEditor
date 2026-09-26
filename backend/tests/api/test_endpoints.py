@@ -800,3 +800,9 @@ def test_re_approving_a_span_exports_one_edit_not_two(client, project):
     edited = [s for s in segments if s["kind"] == "edited"]
     assert len(edited) == 1
     assert edited[0]["ref"] == second["frames"]["sha256"]
+
+
+def test_voices_are_listed_with_the_default(client):
+    body = client.get("/voices").json()
+    assert body["default"] == "mock"
+    assert [v["voice_id"] for v in body["voices"]] == ["mock"]

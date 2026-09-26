@@ -25,6 +25,12 @@ export function snapToWords(a: number, b: number, words: Word[]): Selection {
   }
 }
 
+/** Where a moment of the source falls in the edited render — the inverse of
+ *  `sourceTime`. An insert at or before `t` pushes it later. */
+export function renderTime(t: number, inserts: { at: number; duration: number }[]): number {
+  return t + inserts.filter((i) => i.at <= t).reduce((sum, i) => sum + i.duration, 0)
+}
+
 /** Where a moment of the edited render falls on the source's timeline. Each
  *  inserted line holds the frame at its point, so during an insert the source
  *  clock stands still, and after it the render runs `duration` ahead. */

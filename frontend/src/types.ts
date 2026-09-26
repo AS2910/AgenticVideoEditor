@@ -1,4 +1,16 @@
 export interface Word { text: string; start: number; end: number }
+/** A sentence as spoken, with punctuation — edited from the transcript panel. */
+export interface Statement { text: string; start: number; end: number }
+
+/** A voice a new line can be spoken in. */
+export interface Voice {
+  voice_id: string
+  name: string
+  description: string
+  gender: string | null
+  accent: string | null
+  age: string | null
+}
 export interface Selection { start: number; end: number }
 
 /** A score is null when it cannot be measured yet (no voice clone, no real
@@ -53,6 +65,8 @@ export interface Project {
   media: MediaArtifact
   consent: ConsentRecord | null
   transcript: Word[]
+  /** Absent from responses of servers before Phase 10. */
+  statements?: Statement[]
 }
 
 /** What a project has spent. USD is an estimate from list prices. */

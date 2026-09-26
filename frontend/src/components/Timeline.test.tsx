@@ -107,3 +107,34 @@ describe('Timeline', () => {
     expect(screen.getByText(/No speech found/)).toBeInTheDocument()
   })
 })
+
+describe('Timeline zoom (Phase 10)', () => {
+  const LONG: Word[] = Array.from({ length: 80 }, (_, i) => ({ text: `w${i}`, start: i * 0.6, end: i * 0.6 + 0.4 }))
+
+  it('opens a long clip zoomed so words are readable, and can fit it back', async () => {
+    const { container } = render(
+      <Timeline words={LONG} duration={48.9} selection={null} currentTime={0} onSelect={() => {}} />,
+    )
+    const track = () => container.querySelector('[class*="track"]') as HTMLElement
+    expect(track().style.width).toBe(`${48.9 * 110}px`)
+    await userEvent.click(screen.getByRole('button', { name: 'Fit' }))
+    expect(track().style.width).toBe('')
+  })
+
+  it('fits a short clip from the start', () => {
+    const { container } = render(
+      <Timeline words={WORDS} duration={2.3} selection={null} currentTime={0} onSelect={() => {}} />,
+    )
+    expect((container.querySelector('[class*="track"]') as HTMLElement).style.width).toBe('')
+    expect(screen.getByRole('button', { name: 'Fit' })).toHaveAttribute('aria-pressed', 'true')
+  })
+
+  it('zooms in from the current zoom', async () => {
+    const { container } = render(
+      <Timeline words={LONG} duration={48.9} selection={null} currentTime={0} onSelect={() => {}} />,
+    )
+    await userEvent.click(screen.getByRole('button', { name: 'Zoom in' }))
+    expect((container.querySelector('[class*="track"]') as HTMLElement).style.width)
+      .toBe(`${48.9 * 165}px`)
+  })
+})

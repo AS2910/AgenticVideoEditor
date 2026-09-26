@@ -8,9 +8,12 @@ interface PlayerProps {
   onSeek: (t: number) => void
   /** Called as the video plays, with its own clock. */
   onTimeUpdate?: (t: number) => void
+  /** A seek asked for from outside (e.g. the transcript). `id` makes asking
+   *  for the same time twice still move the video. */
+  seekRequest?: { time: number; id: number } | null
 }
 
-export function Player({ src, duration, currentTime, onSeek, onTimeUpdate }: PlayerProps) {
+export function Player({ src, duration, currentTime, onSeek, onTimeUpdate, seekRequest }: PlayerProps) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const [playing, setPlaying] = useState(false)
   // The playing file's own length: an edit that adds a line makes the render
@@ -22,6 +25,10 @@ export function Player({ src, duration, currentTime, onSeek, onTimeUpdate }: Pla
     setPlaying(false)
     setLength(duration)
   }, [src, duration])
+
+  useEffect(() => {
+    if (seekRequest && videoRef.current) videoRef.current.currentTime = seekRequest.time
+  }, [seekRequest])
 
   const toggle = () => {
     const video = videoRef.current

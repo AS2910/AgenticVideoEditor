@@ -9,8 +9,18 @@ class Word:
 
 
 @dataclass(frozen=True)
+class Statement:
+    """A sentence as spoken, with punctuation — what the transcript panel
+    shows and edits. Whisper's segments; its words carry no punctuation."""
+    text: str
+    start: float
+    end: float
+
+
+@dataclass(frozen=True)
 class Transcript:
     words: tuple[Word, ...]
+    statements: tuple[Statement, ...] = ()
 
 
 @dataclass(frozen=True)

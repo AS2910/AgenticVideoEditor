@@ -26,6 +26,12 @@ class VoiceAdapter(Protocol):
         """Budget units one attempt at `plan` will charge. 0 for free adapters."""
         ...
 
+    # The voice used when an edit doesn't pick one, and those it can pick from:
+    # dicts of voice_id, name, description, gender, accent, age.
+    default_voice: str
+
+    def voices(self) -> list[dict]: ...
+
     def synthesize(
         self, source: Source, plan: EditPlan, transcript: Transcript | None = None,
     ) -> MediaArtifact:

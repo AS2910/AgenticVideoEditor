@@ -15,7 +15,7 @@ from app.domain.models import (
     Source, Selection, ContinuityReport, EditCandidate, ApprovedEdit, MediaArtifact,
     Consent, EditPlan, Intent,
 )
-from app.domain.transcript import snap_to_word_boundaries
+from app.domain.transcript import snap_to_word_boundaries, statements_of
 from app.config import load_settings
 from app.media import ffmpeg, ingest
 from app.adapters.mock import MockLipSyncAdapter
@@ -201,6 +201,10 @@ def _project_dict(record: ProjectRecord) -> dict:
         "transcript": [
             {"text": w.text, "start": w.start, "end": w.end} for w in record.transcript.words
         ],
+        "statements": [
+            {"text": st.text, "start": st.start, "end": st.end}
+            for st in statements_of(record.transcript)
+        ],
     }
 
 
@@ -249,6 +253,13 @@ async def create_project(
         ledger.record(project_id, "openai", "transcription", minutes, "minutes",
                       minutes * WHISPER_USD_PER_MINUTE)
     return _project_dict(repo.get(project_id))
+
+
+@app.get("/voices")
+def list_voices() -> dict:
+    """The voices a new line can be spoken in, and which one is the default.
+    Multi-voice comes later (a voice per speaker); today a voice is per edit."""
+    return {"default": voice.default_voice, "voices": voice.voices()}
 
 
 @app.get("/projects")

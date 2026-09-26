@@ -1,4 +1,25 @@
-from app.domain.models import Transcript, Selection
+from app.domain.models import Statement, Transcript, Selection
+
+# Grouping words into statements when Whisper gave none (projects transcribed
+# before Phase 10): a pause this long, or this many words, ends a statement.
+_STATEMENT_GAP = 0.6
+_STATEMENT_WORDS = 15
+
+
+def statements_of(transcript: Transcript) -> tuple[Statement, ...]:
+    """The transcript's statements — Whisper's, or grouped from its words."""
+    if transcript.statements:
+        return transcript.statements
+    groups: list[list] = []
+    for word in transcript.words:
+        if (not groups or word.start - groups[-1][-1].end >= _STATEMENT_GAP
+                or len(groups[-1]) >= _STATEMENT_WORDS):
+            groups.append([word])
+        else:
+            groups[-1].append(word)
+    return tuple(
+        Statement(" ".join(w.text for w in g), g[0].start, g[-1].end) for g in groups
+    )
 
 
 def snap_to_word_boundaries(transcript: Transcript, selection: Selection) -> Selection:

@@ -10,7 +10,7 @@ from dataclasses import asdict
 
 from app.domain.models import (
     ApprovedEdit, ContinuityReport, EditCandidate, EditPlan, MediaArtifact, Selection,
-    Source, Transcript, Word,
+    Source, Statement, Transcript, Word,
 )
 
 dump = asdict  # every model is a plain (nested) dataclass
@@ -28,7 +28,11 @@ def source(d: dict) -> Source:
 
 
 def transcript(d: dict) -> Transcript:
-    return Transcript(words=tuple(Word(**w) for w in d["words"]))
+    return Transcript(
+        words=tuple(Word(**w) for w in d["words"]),
+        # Absent from projects transcribed before Phase 10.
+        statements=tuple(Statement(**s) for s in d.get("statements", ())),
+    )
 
 
 def plan(d: dict) -> EditPlan:

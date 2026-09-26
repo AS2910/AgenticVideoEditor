@@ -15,7 +15,7 @@ from typing import Callable
 import httpx
 
 from app.adapters.base import VendorError
-from app.domain.models import Source, Transcript, Word
+from app.domain.models import Source, Statement, Transcript, Word
 from app.media import ffmpeg
 
 MODEL = "whisper-1"
@@ -46,7 +46,16 @@ def to_transcript(payload: dict) -> Transcript:
         except (KeyError, TypeError, ValueError):
             continue
         words.append(Word(text=text, start=start, end=end))
-    return Transcript(words=tuple(words))
+    statements = []
+    for raw in payload.get("segments") or []:
+        text = (raw.get("text") or "").strip()
+        try:
+            start, end = float(raw["start"]), float(raw["end"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if text and end > start:
+            statements.append(Statement(text=text, start=start, end=end))
+    return Transcript(words=tuple(words), statements=tuple(statements))
 
 
 def _post(audio_path: Path, api_key: str, timeout: float) -> dict:
@@ -58,7 +67,9 @@ def _post(audio_path: Path, api_key: str, timeout: float) -> dict:
             data={
                 "model": MODEL,
                 "response_format": "verbose_json",
-                "timestamp_granularities[]": "word",
+                # Words for the timeline and edit boundaries; segments for the
+                # transcript's statements (they keep Whisper's punctuation).
+                "timestamp_granularities[]": ["word", "segment"],
             },
             timeout=timeout,
         )

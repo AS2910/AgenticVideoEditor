@@ -9,20 +9,23 @@ import { QuestionCard } from './components/QuestionCard'
 import { ExportBar } from './components/ExportBar'
 import { ProjectList } from './components/ProjectList'
 import { SpendMeter } from './components/SpendMeter'
+import { TranscriptPanel } from './components/TranscriptPanel'
+import { VoicePicker } from './components/VoicePicker'
 import {
   createProject, previewEdit, approveEdit, exportProject, artifactUrl,
-  pollJob, PollCancelled, ApiError, listProjects, getProject, deleteProject, getUsage,
+  pollJob, PollCancelled, ApiError, listProjects, getProject, deleteProject, getUsage, listVoices,
 } from './api'
 import type {
   Word, Selection, Candidate, Segment, Project, ChatMessage, Question, QuestionOption,
-  Fit, Mix, Insert, ProjectSummary, Usage,
+  Fit, Mix, Insert, ProjectSummary, Usage, Statement, Voice,
 } from './types'
-import { sourceTime } from './timeline/selection'
+import { renderTime, sourceTime } from './timeline/selection'
 import styles from './App.module.css'
 
 /** Bundled demo clip, uploaded through the same path as any other file. */
 const SAMPLE_URL = '/sample-ad.mp4'
-const VOICE = 'speaker-1'
+// Until the voice list loads: the server's configured default voice.
+const DEFAULT_VOICE = 'speaker-1'
 
 /** An answer to a question: the line already read, and the choices so far. */
 interface Answer { text: string; fit?: Fit; mix?: Mix }
@@ -57,6 +60,9 @@ export default function App() {
   const [error, setError] = useState<string | null>(null)
   const [projects, setProjects] = useState<ProjectSummary[]>([])
   const [usage, setUsage] = useState<Usage | null>(null)
+  const [voices, setVoices] = useState<Voice[]>([])
+  const [voiceId, setVoiceId] = useState(DEFAULT_VOICE)
+  const [seekRequest, setSeekRequest] = useState<{ time: number; id: number } | null>(null)
   const previewToken = useRef(0)
 
   const refreshProjects = useCallback(async () => {
@@ -105,6 +111,17 @@ export default function App() {
   }, [])
 
   useEffect(() => { void refreshUsage(projectId) }, [projectId, refreshUsage])
+
+  // The voices, once: they don't change while the app is open.
+  useEffect(() => {
+    if (stage !== 'editor' || voices.length > 0) return
+    listVoices()
+      .then((r) => {
+        setVoices(r.voices)
+        setVoiceId((v) => (v === DEFAULT_VOICE ? r.default : v))
+      })
+      .catch(() => {}) // without the list, edits use the default voice
+  }, [stage, voices.length])
 
   const load = async (file: File) => {
     setLoading(true)
@@ -161,7 +178,7 @@ export default function App() {
         prompt,
         start: at.start,
         end: at.end,
-        voice_profile_id: VOICE,
+        voice_profile_id: voiceId,
         ...(shown !== prompt ? { display: shown } : {}),
         ...answer,
       })
@@ -197,6 +214,23 @@ export default function App() {
       }
       void refreshUsage(projectId)
     }
+  }
+
+  /** A statement rewritten in the transcript: an edit of its span with the
+   *  new wording given directly — there is nothing for Claude to interpret. */
+  const editStatement = (s: Statement, text: string) => {
+    const span = { start: s.start, end: s.end }
+    setSelection(span)
+    void runPreview(`Replace this line with "${text}"`, { text, mix: 'replace' }, span,
+      `“${s.text}” → “${text}”`)
+  }
+
+  const seekToStatement = (s: Statement) => {
+    setSelection({ start: s.start, end: s.end })
+    const edited = view === 'edited' && rendered !== null
+    const time = edited ? renderTime(s.start, inserts) : s.start
+    setSeekRequest((r) => ({ time, id: (r?.id ?? 0) + 1 }))
+    setCurrentTime(time)
   }
 
   const answer = (option: QuestionOption) => {
@@ -318,6 +352,7 @@ export default function App() {
           currentTime={currentTime}
           onSeek={setCurrentTime}
           onTimeUpdate={setCurrentTime}
+          seekRequest={seekRequest}
         />
         {rendered && (
           <div className={styles.versions} role="group" aria-label="Version">
@@ -334,18 +369,31 @@ export default function App() {
           </div>
         )}
         <Timeline
+          key={project.project_id}
           words={transcript}
           duration={project.duration}
           selection={selection}
           currentTime={showEdited ? sourceTime(currentTime, inserts) : currentTime}
           onSelect={setSelection}
         />
+        <TranscriptPanel
+          statements={project.statements ?? []}
+          currentTime={showEdited ? sourceTime(currentTime, inserts) : currentTime}
+          disabled={generating}
+          onSeek={seekToStatement}
+          onEdit={editStatement}
+        />
         <ExportBar segments={segments} inserts={inserts} onExport={() => void runExport()} download={download} />
         <SpendMeter usage={usage} />
         {error && <div className={styles.error}>{error}</div>}
       </div>
       <div className={styles.right}>
-        <ChatPanel messages={messages} canSubmit={selection !== null} onSubmit={(p) => void runPreview(p)}>
+        <ChatPanel
+          messages={messages}
+          canSubmit={selection !== null}
+          onSubmit={(p) => void runPreview(p)}
+          toolbar={<VoicePicker voices={voices} value={voiceId} onChange={setVoiceId} />}
+        >
           {generating && (
             <div className={styles.generating} data-testid="generating">
               <div className={styles.generatingStep}>{progress?.step ?? 'Queued'}</div>

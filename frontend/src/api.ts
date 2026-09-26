@@ -1,5 +1,5 @@
 import type {
-  Project, ApprovedResult, ExportManifest, EditRequest, Job, ProjectSummary, ProjectDetail, Usage,
+  Project, ApprovedResult, ExportManifest, EditRequest, Job, ProjectSummary, ProjectDetail, Usage, Voice,
 } from './types'
 
 const BASE = '/api'
@@ -66,6 +66,8 @@ export const listProjects = async () =>
 
 /** Everything needed to reopen a project. */
 export const getProject = (id: string) => get<ProjectDetail>(`/projects/${id}`)
+
+export const listVoices = () => get<{ default: string; voices: Voice[] }>('/voices')
 
 export const getUsage = (id: string) => get<Usage>(`/projects/${id}/usage`)
 

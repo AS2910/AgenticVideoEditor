@@ -127,3 +127,13 @@ def _artifact_for(path: Path):
     return MediaArtifact(
         kind="video", sha256="0" * 64, path=str(path), duration=1.0, container="mp4",
     )
+
+
+def test_segments_become_statements_with_their_punctuation():
+    from app.adapters.openai_whisper import to_transcript
+    t = to_transcript({
+        "words": [{"word": "Sure", "start": 9.38, "end": 9.6}, {"word": "sir", "start": 9.6, "end": 9.88}],
+        "segments": [{"text": " Sure, sir.", "start": 9.38, "end": 9.88},
+                     {"text": " ", "start": 10.0, "end": 10.2}],
+    })
+    assert [(s.text, s.start, s.end) for s in t.statements] == [("Sure, sir.", 9.38, 9.88)]

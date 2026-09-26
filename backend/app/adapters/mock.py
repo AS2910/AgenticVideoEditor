@@ -16,7 +16,7 @@ import hashlib
 import tempfile
 from pathlib import Path
 
-from app.domain.models import Source, Transcript, Word, EditPlan, MediaArtifact
+from app.domain.models import Source, Statement, Transcript, Word, EditPlan, MediaArtifact
 from app.media import ffmpeg
 from app.store.artifacts import ArtifactStore
 
@@ -43,7 +43,9 @@ def _span(plan: EditPlan) -> float:
 
 class MockTranscriptionAdapter:
     def transcribe(self, source: Source) -> Transcript:
-        return Transcript(words=_CANNED_WORDS)
+        return Transcript(
+            words=_CANNED_WORDS, statements=(Statement("Get 20% off today only.", 0.0, 2.3),),
+        )
 
 
 class MockVoiceAdapter:
@@ -56,6 +58,12 @@ class MockVoiceAdapter:
 
     def cost_of(self, plan: EditPlan) -> int:
         return 0
+
+    default_voice = "mock"
+
+    def voices(self) -> list[dict]:
+        return [{"voice_id": "mock", "name": "Test tone", "description": "Offline stand-in",
+                 "gender": None, "accent": None, "age": None}]
 
     def synthesize(
         self, source: Source, plan: EditPlan, transcript: Transcript | None = None,

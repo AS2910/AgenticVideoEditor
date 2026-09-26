@@ -13,7 +13,7 @@ import pytest
 from app.adapters.base import VendorError
 from app.adapters.elevenlabs import (
     ElevenLabsVoiceAdapter, VoiceConfigError, billed_characters, to_request,
-    SAMPLE_RATE, _post,
+    SAMPLE_RATE, _post, to_voice,
 )
 from app.budget import VoiceBudget, BudgetExceeded
 from app.domain.models import EditPlan, Selection, Transcript, Word
@@ -237,3 +237,38 @@ def test_a_take_that_did_not_fit_is_reused_when_the_user_answers(store):
     # A later take is a fresh one.
     voice.synthesize(SOURCE, replace(wide, fit="stretch"), TRANSCRIPT)
     assert len(post.calls) == 2
+
+
+# --- Phase 10: choosing a voice ------------------------------------------------
+
+@needs_ffmpeg
+def test_an_edit_can_choose_its_voice(store):
+    post = FakePost()
+    chosen = EditPlan(Selection(0.4, 1.3), "30% off", "nPczCjzI2devNBz1zQrb")
+    adapter(store, post=post).synthesize(SOURCE, chosen, TRANSCRIPT)
+    assert post.calls[0][0] == "nPczCjzI2devNBz1zQrb"
+
+
+@needs_ffmpeg
+def test_a_non_voice_id_means_the_default(store):
+    post = FakePost()
+    adapter(store, post=post).synthesize(SOURCE, PLAN, TRANSCRIPT)   # "speaker-1"
+    assert post.calls[0][0] == "voice-x"
+
+
+def test_voices_are_listed_once_and_named_plainly():
+    calls = []
+
+    def get_voices(api_key, timeout):
+        calls.append(api_key)
+        return [to_voice({"voice_id": "nPczCjzI2devNBz1zQrb",
+                          "name": "Brian - Deep, Resonant and Comforting",
+                          "labels": {"gender": "male", "accent": "american", "age": "middle_aged"}})]
+
+    voice = ElevenLabsVoiceAdapter(KEY, None, VoiceBudget(ceiling=10), model="m",
+                                   voice_id="voice-x", get_voices=get_voices)
+    assert voice.voices() == voice.voices()
+    assert calls == [KEY]
+    [brian] = voice.voices()
+    assert (brian["name"], brian["description"], brian["gender"]) == (
+        "Brian", "Deep, Resonant and Comforting", "male")

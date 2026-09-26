@@ -2,7 +2,7 @@
   display: grid; grid-template-columns: 1.4fr 1fr; gap: 20px;
   padding: 20px; height: 100vh;
 }
-.left { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.left { display: flex; flex-direction: column; gap: 16px; min-width: 0; min-height: 0; overflow-y: auto; }
 .right { min-height: 0; }
 .error {
   color: var(--warn); border: 1px solid var(--warn); border-radius: 8px;

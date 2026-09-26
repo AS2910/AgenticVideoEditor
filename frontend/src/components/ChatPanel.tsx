@@ -8,9 +8,11 @@ interface ChatPanelProps {
   canSubmit: boolean
   onSubmit: (prompt: string) => void
   children?: ReactNode
+  /** Controls shown above the composer, e.g. the voice picker. */
+  toolbar?: ReactNode
 }
 
-export function ChatPanel({ messages, canSubmit, onSubmit, children }: ChatPanelProps) {
+export function ChatPanel({ messages, canSubmit, onSubmit, children, toolbar }: ChatPanelProps) {
   const [prompt, setPrompt] = useState('')
   const disabled = !canSubmit || prompt.trim() === ''
 
@@ -28,6 +30,7 @@ export function ChatPanel({ messages, canSubmit, onSubmit, children }: ChatPanel
         ))}
         {children}
       </div>
+      {toolbar}
       <div className={styles.composer}>
         <input
           className={styles.input}

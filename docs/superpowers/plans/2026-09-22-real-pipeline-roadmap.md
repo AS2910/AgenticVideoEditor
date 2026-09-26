@@ -1,7 +1,7 @@
 # Real Pipeline — Phased Roadmap
 
 **Date:** 2026-09-22
-**Status:** Phases 0–4a, 6a, 7, 8 and 9 done and clean (8 and 9 on 2026-09-26; 9c is a design). Phase 10 (editing UX) next. Phases 4b and 5 moved to the **Backlog** — both are blocked on vendor access, not on code.
+**Status:** Phases 0–4a, 6a, 7, 8 and 9 done and clean (8 and 9 on 2026-09-26; 9c is a design). Phase 10 (editing UX) done the same day. Phases 4b and 5 moved to the **Backlog** — both are blocked on vendor access, not on code.
 **Supersedes nothing.** Builds on `2026-07-14-walking-skeleton.md` and `2026-07-17-voltage-frontend.md`.
 
 **Goal:** turn the mocked walking skeleton into a system that ingests a real video, produces a real re-voiced and lip-synced segment, verifies continuity with real signal analysis, and exports a real playable file — honoring the v1 design spec end-to-end.
@@ -164,8 +164,15 @@ Grouped into three milestones. Each milestone is independently useful — you ca
   - **9c** Auth designed, not built: OIDC sign-in (Google first) → session → `current_owner()`; then a login page, CSRF on writes, per-user quotas.
   - **Exit met:** 346 backend + 94 frontend tests. Live: a project and its chat survive a restart; a real clip's spend recorded ($0.0008 Whisper, $0.0067 Claude).
 
-- [ ] **Phase 10 · Editing by transcript, voices, timeline** (same plan)
-  - Transcript panel with editable statements; voice picker (multi-voice later); zoomable, scrollable timeline.
+- [x] **Phase 10 · Editing by transcript, voices, timeline** — **done 2026-09-26** (same plan)
+  - **Statements:** Whisper is asked for segments as well as words; they are the transcript's statements (punctuated). Older projects group words at pauses. The transcript panel edits a statement in place → an edit of its span with the text given directly (no Claude call), through the usual question / candidate / approve flow.
+  - **Voice picker:** `GET /voices` (ElevenLabs premade, 21 on this account); the chosen voice is the plan's `voice_profile_id`.
+  - **Timeline:** zoom (−/+/Fit), horizontal scroll, follows the playhead; clips over 15 s open at a readable 110 px/s.
+  - **Exit met:** 354 backend + 108 frontend tests. Live on the 49 s Bhaji Cam clip: 20 statements; the same statement rewritten in Sarah and in Brian.
+  - **Found live — the case for multi-voice:** that clip has two speakers, and continuity compares the new line with *everyone* speaking nearby: Sarah measured +5.2 semitones, Brian −4.8 — the reference is a blend. Speaker labels (diarization) would let continuity compare against the same speaker only, and give each speaker a voice.
+
+- [ ] **Phase 11 · Multiple voices** *(proposed)*
+  - Speaker labels on statements (diarization); a voice per speaker; continuity measured against the same speaker's speech only.
 
 ---
 

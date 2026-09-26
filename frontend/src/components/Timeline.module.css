@@ -1,4 +1,12 @@
-.timeline { padding: 8px 0; }
+.timeline { padding: 8px 0; position: relative; }
+.scroller { overflow-x: auto; overflow-y: hidden; padding: 4px 0; }
+.zoom { display: flex; gap: 4px; justify-content: flex-end; margin-bottom: 4px; }
+.zoom button {
+  min-width: 28px; padding: 2px 8px; border-radius: 6px; font-size: 12px;
+  background: transparent; color: var(--muted); border: 1px solid var(--border);
+}
+.zoom button:hover { color: var(--text); border-color: var(--cyan); }
+.zoom button[aria-pressed="true"] { color: var(--text); border-color: var(--cyan); }
 .track {
   position: relative; height: 56px;
   background: var(--surface); border: 1px solid var(--border); border-radius: 8px;

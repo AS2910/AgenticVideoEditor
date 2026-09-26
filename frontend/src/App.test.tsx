@@ -8,6 +8,7 @@ const SOURCE_MEDIA = {
 }
 
 const PROJECT = {
+  statements: [{ text: 'Get 20% off today only.', start: 0.0, end: 2.3 }],
   project_id: 'p1',
   filename: 'sample-ad.mp4',
   duration: 2.3,
@@ -79,6 +80,12 @@ function routeFetch(approveStatus = 200, job: unknown = JOB_DONE) {
       return ok({ edit_id: 'e1', continuity: PASSING_CONTINUITY })
     }
     if (url.endsWith('/export')) return ok({ segments: SEGMENTS, render: RENDER })
+    if (url.endsWith('/voices')) {
+      return ok({ default: 'EXAVITQu4vr4xnSDxMaL', voices: [
+        { voice_id: 'EXAVITQu4vr4xnSDxMaL', name: 'Sarah', description: '', gender: 'female', accent: 'american', age: null },
+        { voice_id: 'nPczCjzI2devNBz1zQrb', name: 'Brian', description: '', gender: 'male', accent: 'american', age: null },
+      ] })
+    }
     if (url.endsWith('/usage')) {
       return ok({ spent_usd: 0.01, ceiling_usd: 2, voice_characters: 7,
         voice_characters_ceiling: 2000, lines: [] })
@@ -427,5 +434,53 @@ describe('App projects (Phase 9a)', () => {
     await user.click(screen.getByRole('button', { name: /projects/i }))
 
     expect(await screen.findByText(/your projects/i)).toBeInTheDocument()
+  })
+})
+
+describe('App editing by transcript and voice (Phase 10)', () => {
+  function recording() {
+    const bodies: Record<string, unknown>[] = []
+    const base = routeFetch()
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.endsWith('/edits/preview')) bodies.push(JSON.parse(String(init?.body)))
+      return base(url, init)
+    }))
+    return bodies
+  }
+
+  it('previews a statement rewritten in the transcript, in the chosen voice', async () => {
+    const bodies = recording()
+    const user = userEvent.setup()
+    render(<App />)
+    await reachEditor(user)
+    await screen.findByRole('option', { name: 'Brian (male, american)' })
+
+    await user.selectOptions(screen.getByRole('combobox'), 'nPczCjzI2devNBz1zQrb')
+    await user.click(screen.getByText('Get 20% off today only.'))
+    const box = screen.getByRole('textbox', { name: /new wording/i })
+    await user.clear(box)
+    await user.type(box, 'Get 30% off today only.')
+    await user.click(screen.getByRole('button', { name: /preview change/i }))
+
+    await waitFor(() => expect(screen.getByText(/continuity checked/i)).toBeInTheDocument())
+    expect(bodies[0]).toMatchObject({
+      text: 'Get 30% off today only.', mix: 'replace', start: 0, end: 2.3,
+      voice_profile_id: 'nPczCjzI2devNBz1zQrb',
+      display: '“Get 20% off today only.” → “Get 30% off today only.”',
+    })
+  })
+
+  it('starts in the default voice', async () => {
+    const bodies = recording()
+    const user = userEvent.setup()
+    render(<App />)
+    await reachEditor(user)
+    await screen.findByRole('option', { name: 'Brian (male, american)' })
+
+    await user.click(screen.getByText('20%'))
+    await user.type(screen.getByRole('textbox'), 'change "20% off" to "30% off"{Enter}')
+
+    await waitFor(() => expect(bodies).toHaveLength(1))
+    expect(bodies[0].voice_profile_id).toBe('EXAVITQu4vr4xnSDxMaL')
   })
 })
