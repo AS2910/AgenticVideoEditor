@@ -1,5 +1,5 @@
 import type {
-  Project, ApprovedResult, ExportManifest, EditRequest, Job,
+  Project, ApprovedResult, ExportManifest, EditRequest, Job, ProjectSummary, ProjectDetail,
 } from './types'
 
 const BASE = '/api'
@@ -52,6 +52,25 @@ export async function createProject(file: File, consent: boolean): Promise<Proje
   const res = await fetch(`${BASE}/projects`, { method: 'POST', body })
   if (!res.ok) return failure(res)
   return (await res.json()) as Project
+}
+
+async function get<T>(path: string): Promise<T> {
+  const res = await fetch(`${BASE}${path}`)
+  if (!res.ok) return failure(res)
+  return (await res.json()) as T
+}
+
+/** The caller's projects, newest first. */
+export const listProjects = async () =>
+  (await get<{ projects: ProjectSummary[] }>('/projects')).projects
+
+/** Everything needed to reopen a project. */
+export const getProject = (id: string) => get<ProjectDetail>(`/projects/${id}`)
+
+/** Deletes the project and all its media — also how consent is withdrawn. */
+export async function deleteProject(id: string): Promise<void> {
+  const res = await fetch(`${BASE}/projects/${id}`, { method: 'DELETE' })
+  if (!res.ok) return failure(res)
 }
 
 /** URL the browser can play a stored artifact from; supports range requests. */

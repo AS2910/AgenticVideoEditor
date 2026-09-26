@@ -79,7 +79,7 @@ function routeFetch(approveStatus = 200, job: unknown = JOB_DONE) {
       return ok({ edit_id: 'e1', continuity: PASSING_CONTINUITY })
     }
     if (url.endsWith('/export')) return ok({ segments: SEGMENTS, render: RENDER })
-    if (url.endsWith('/projects')) return ok(PROJECT)
+    if (url.endsWith('/projects')) return ok(_init?.method === 'POST' ? PROJECT : { projects: [] })
     // The sample clip is fetched from /public, then uploaded like any file.
     if (url.endsWith('/sample-ad.mp4')) {
       return { ok: true, status: 200, blob: async () => new Blob(['mp4-bytes']) } as Response
@@ -166,7 +166,8 @@ describe('App full journey', () => {
     render(<App />)
     await reachEditor(user)
 
-    const upload = f.mock.calls.find(([url]) => String(url).endsWith('/projects'))
+    const upload = f.mock.calls.find(
+      ([url, init]) => String(url).endsWith('/projects') && init?.method === 'POST')
     expect(upload).toBeDefined()
     const body = upload?.[1]?.body as FormData
     expect(body.get('consent')).toBe('true')
@@ -179,9 +180,9 @@ describe('App full journey', () => {
       text: async () => JSON.stringify({ detail: 'Confirm you have the right to edit and clone this speaker before generating.' }),
     } as Response
 
-    const f = vi.fn(async (url: string) => {
+    const f = vi.fn(async (url: string, init?: RequestInit) => {
       if (url.endsWith('/edits/preview')) return forbidden
-      if (url.endsWith('/projects')) return ok(PROJECT)
+      if (url.endsWith('/projects')) return ok(init?.method === 'POST' ? PROJECT : { projects: [] })
       if (url.endsWith('/sample-ad.mp4')) {
         return { ok: true, status: 200, blob: async () => new Blob(['mp4']) } as Response
       }
@@ -315,11 +316,9 @@ describe('App conversation (Phase 8)', () => {
     expect(bodies[1]).toMatchObject({
       prompt: 'say 30% off', text: '30% off', fit: 'stretch', mix: 'layer', start: 0.4, end: 0.9,
     })
-    // The conversation so far travels with the answer.
-    expect(bodies[1].history).toEqual([
-      { role: 'user', text: 'say 30% off' },
-      { role: 'assistant', text: question.question },
-    ])
+    // The server keeps the chat; the answer carries only how to show it.
+    expect(bodies[1].display).toBe('Slow it down to fill')
+    expect(bodies[0]).not.toHaveProperty('display')
     // The choice shows in the chat as the user's reply.
     expect(screen.getAllByText('Slow it down to fill').length).toBeGreaterThan(0)
   })
@@ -346,5 +345,81 @@ describe('App playback after approval', () => {
 
     await user.click(screen.getByRole('button', { name: 'Original' }))
     expect(video().getAttribute('src')).toBe(`/api/projects/p1/artifacts/${'s'.repeat(64)}`)
+  })
+})
+
+describe('App projects (Phase 9a)', () => {
+  const DETAIL = {
+    ...PROJECT,
+    created_at: '2026-09-26T08:00:00Z',
+    edits: [{ edit_id: 'e1', candidate_id: 'c1', new_text: '30% off',
+      selection: { start: 0.4, end: 0.9 }, mix: 'replace', overridden: false }],
+    messages: [
+      { role: 'user', text: 'change "20% off" to "30% off"' },
+      { role: 'assistant', text: 'Earlier reply.' },
+    ],
+  }
+
+  function withProjects() {
+    const base = routeFetch()
+    const f = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.endsWith('/projects') && init?.method !== 'POST') {
+        return ok({ projects: [{ project_id: 'p1', filename: 'sample-ad.mp4', duration: 2.3,
+          created_at: '2026-09-26T08:00:00Z', edits: 1 }] })
+      }
+      if (url.endsWith('/projects/p1') && init?.method === 'DELETE') {
+        return { ok: true, status: 204, text: async () => '' } as Response
+      }
+      if (url.endsWith('/projects/p1')) return ok(DETAIL)
+      return base(url, init)
+    })
+    vi.stubGlobal('fetch', f)
+    return f
+  }
+
+  async function toLoadScreen(user: ReturnType<typeof userEvent.setup>) {
+    await user.click(screen.getByRole('checkbox'))
+    await user.click(screen.getByRole('button', { name: /continue/i }))
+  }
+
+  it('reopens a project with its chat, and plays its approved edits', async () => {
+    const f = withProjects()
+    const user = userEvent.setup()
+    const { container } = render(<App />)
+    await toLoadScreen(user)
+
+    await user.click(await screen.findByText('sample-ad.mp4'))
+
+    await waitFor(() => expect(screen.getByText('Earlier reply.')).toBeInTheDocument())
+    expect(screen.getByText('20%')).toBeInTheDocument()
+    await waitFor(() => expect((container.querySelector('video') as HTMLVideoElement)
+      .getAttribute('src')).toBe(`/api/projects/p1/artifacts/${'r'.repeat(64)}`))
+    expect(f.mock.calls.some(([url]) => String(url).endsWith('/export'))).toBe(true)
+  })
+
+  it('deletes a project after asking once more', async () => {
+    const f = withProjects()
+    const user = userEvent.setup()
+    render(<App />)
+    await toLoadScreen(user)
+
+    await user.click(await screen.findByRole('button', { name: 'Delete sample-ad.mp4' }))
+    await user.click(screen.getByRole('button', { name: /delete for good/i }))
+
+    await waitFor(() => expect(f.mock.calls.some(
+      ([url, init]) => String(url).endsWith('/projects/p1') && init?.method === 'DELETE')).toBe(true))
+  })
+
+  it('goes back to the project list from the editor', async () => {
+    withProjects()
+    const user = userEvent.setup()
+    render(<App />)
+    await toLoadScreen(user)
+    await user.click(await screen.findByText('sample-ad.mp4'))
+    await screen.findByText('Earlier reply.')
+
+    await user.click(screen.getByRole('button', { name: /projects/i }))
+
+    expect(await screen.findByText(/your projects/i)).toBeInTheDocument()
   })
 })

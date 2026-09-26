@@ -3,7 +3,9 @@ import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, File, Form, UploadFile
+import shutil
+
+from fastapi import Depends, FastAPI, HTTPException, File, Form, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
@@ -26,7 +28,8 @@ from app.orchestrator.intent import Turn, edit_context
 from app.orchestrator.questions import fit_question, mix_question
 from app.media.ffmpeg import SpanMismatch
 from app.orchestrator.pipeline import run_edit
-from app.store.repository import ProjectRepository
+from app.store.db import Database
+from app.store.repository import ProjectRecord, ProjectRepository, LOCAL_OWNER
 from app.store.artifacts import ArtifactStore
 from app.render.renderer import render
 from app.render.compose import compose
@@ -41,7 +44,7 @@ log = logging.getLogger(__name__)
 settings = load_settings()
 
 # Wiring (module-level singletons for this in-memory slice).
-repo = ProjectRepository()
+repo = ProjectRepository(Database(settings.data_dir / "ave.db"))
 artifacts = ArtifactStore(settings.data_dir / "artifacts")
 # Real vendors when a key is configured, the deterministic mocks otherwise, and
 # the mocks always under AVE_DRY_RUN — so the app runs offline and free.
@@ -71,11 +74,6 @@ _MEDIA_TYPES = {"mp4": "video/mp4", "mov": "video/quicktime", "webm": "video/web
                 "wav": "audio/wav", "m4a": "audio/mp4"}
 
 
-class ChatTurn(BaseModel):
-    role: Literal["user", "assistant"]
-    text: str
-
-
 class EditRequest(BaseModel):
     prompt: str
     start: float
@@ -86,8 +84,9 @@ class EditRequest(BaseModel):
     text: str | None = None
     fit: Literal["start", "stretch"] | None = None
     mix: Literal["replace", "layer", "concatenate"] | None = None
-    # The chat so far, oldest first, so follow-ups can be understood.
-    history: list[ChatTurn] = []
+    # What the chat shows for this turn when it isn't the prompt itself — the
+    # label of an option picked in answer to a question.
+    display: str | None = None
 
 
 class ApproveRequest(BaseModel):
@@ -164,10 +163,45 @@ CONSENT_REQUIRED = (
 )
 
 
+def current_owner() -> str:
+    """Who is calling — the auth seam (Phase 9c).
+
+    Everyone is the local owner until sign-in lands; then this returns the
+    verified subject from the session, and every route below is already
+    scoped by it.
+    """
+    return LOCAL_OWNER
+
+
+def _owned(project_id: str, owner: str) -> ProjectRecord:
+    """The caller's project, or 404. Someone else's project is indistinguishable
+    from a missing one, so ids leak nothing."""
+    record = repo.get(project_id)
+    if record is None or record.owner != owner:
+        raise HTTPException(status_code=404, detail="project not found")
+    return record
+
+
+def _project_dict(record: ProjectRecord) -> dict:
+    source = record.source
+    return {
+        "project_id": source.project_id,
+        "filename": source.filename,
+        "duration": source.duration,
+        "media": _artifact_dict(source.media),
+        "consent": _consent_dict(record.consent),
+        "created_at": record.created_at,
+        "transcript": [
+            {"text": w.text, "start": w.start, "end": w.end} for w in record.transcript.words
+        ],
+    }
+
+
 @app.post("/projects")
 async def create_project(
     file: UploadFile = File(...),
     consent: bool = Form(False),
+    owner: str = Depends(current_owner),
 ) -> dict:
     filename = Path(file.filename or "upload.mp4").name
     container = (Path(filename).suffix.lstrip(".") or "mp4").lower()
@@ -202,40 +236,75 @@ async def create_project(
         ) from exc
 
     granted = Consent(granted_at=_now()) if consent else None
-    repo.create(source, transcript, granted)
+    repo.create(source, transcript, granted, owner=owner)
+    return _project_dict(repo.get(project_id))
+
+
+@app.get("/projects")
+def list_projects(owner: str = Depends(current_owner)) -> dict:
+    """The caller's projects, newest first — enough to show and reopen them."""
+    return {"projects": [
+        {
+            "project_id": r.source.project_id,
+            "filename": r.source.filename,
+            "duration": r.source.duration,
+            "created_at": r.created_at,
+            "edits": len(repo.list_edits(r.source.project_id)),
+        }
+        for r in repo.list(owner)
+    ]}
+
+
+@app.get("/projects/{project_id}")
+def get_project(project_id: str, owner: str = Depends(current_owner)) -> dict:
+    """Everything needed to reopen a project: source, transcript, approved
+    edits and the chat."""
+    record = _owned(project_id, owner)
     return {
-        "project_id": project_id,
-        "filename": filename,
-        "duration": probed.duration,
-        "media": _artifact_dict(media),
-        "consent": _consent_dict(granted),
-        "transcript": [
-            {"text": w.text, "start": w.start, "end": w.end} for w in transcript.words
+        **_project_dict(record),
+        "edits": [
+            {
+                "edit_id": e.edit_id,
+                "candidate_id": e.candidate_id,
+                "new_text": e.plan.new_text,
+                "selection": {"start": e.plan.selection.start, "end": e.plan.selection.end},
+                "mix": e.plan.mix,
+                "overridden": e.overridden,
+            }
+            for e in repo.list_edits(project_id)
         ],
+        "messages": [{"role": m.role, "text": m.text} for m in repo.messages(project_id)],
     }
 
 
+@app.delete("/projects/{project_id}", status_code=204)
+def delete_project(project_id: str, owner: str = Depends(current_owner)) -> None:
+    """Delete the project and all of its media. This is also how consent is
+    withdrawn (design spec §2): nothing of the speaker is kept."""
+    _owned(project_id, owner)
+    repo.delete(project_id)
+    shutil.rmtree(artifacts.root / project_id, ignore_errors=True)
+
+
 @app.post("/projects/{project_id}/consent")
-def grant_consent(project_id: str) -> dict:
+def grant_consent(project_id: str, owner: str = Depends(current_owner)) -> dict:
     """Confirm rights for a project uploaded without them.
 
     Lets a refused generation be recovered without re-uploading.
     """
-    if repo.get(project_id) is None:
-        raise HTTPException(status_code=404, detail="project not found")
+    _owned(project_id, owner)
     recorded = repo.grant_consent(project_id, Consent(granted_at=_now()))
     return {"project_id": project_id, "consent": _consent_dict(recorded)}
 
 
 @app.get("/projects/{project_id}/artifacts/{sha256}")
-def get_artifact(project_id: str, sha256: str) -> FileResponse:
+def get_artifact(project_id: str, sha256: str, owner: str = Depends(current_owner)) -> FileResponse:
     """Serve stored media by content address, with range requests.
 
     Scoped to the project so one project's id cannot be used to read another's
     media, and `sha256` is validated as a bare hex digest by the store.
     """
-    if repo.get(project_id) is None:
-        raise HTTPException(status_code=404, detail="project not found")
+    _owned(project_id, owner)
     path = artifacts.find(project_id, sha256)
     if path is None:
         raise HTTPException(status_code=404, detail="artifact not found")
@@ -260,15 +329,15 @@ def _job_dict(job: Job) -> dict:
 
 
 @app.post("/projects/{project_id}/edits/preview", status_code=202)
-def preview_edit(project_id: str, req: EditRequest) -> dict:
+def preview_edit(
+    project_id: str, req: EditRequest, owner: str = Depends(current_owner),
+) -> dict:
     """Start generation and hand back a job to poll.
 
     Generation takes minutes once lip-sync is a real vendor (design spec §7),
     so this cannot be a synchronous call.
     """
-    record = repo.get(project_id)
-    if record is None:
-        raise HTTPException(status_code=404, detail="project not found")
+    record = _owned(project_id, owner)
     if record.consent is None:
         # Design spec §2/§7: non-negotiable, and this is the moment it binds —
         # the last point before anything synthesizes this speaker's voice.
@@ -276,7 +345,9 @@ def preview_edit(project_id: str, req: EditRequest) -> dict:
 
     selection = snap_to_word_boundaries(record.transcript, Selection(req.start, req.end))
     context = edit_context(record.transcript, selection, record.source.duration)
-    history = [Turn(t.role, t.text) for t in req.history]
+    # The chat so far comes from the server's record, not the client.
+    history = [Turn(m.role, m.text) for m in repo.messages(project_id)]
+    repo.add_message(project_id, "user", req.display or req.prompt)
     candidate_id = repo.next_candidate_id(project_id)
     job = jobs.create("preview", project_id)
 
@@ -287,13 +358,14 @@ def preview_edit(project_id: str, req: EditRequest) -> dict:
             report(0.02, "Reading your request")
             intent = interpreter.interpret(req.prompt, history, context)
         if intent.action != "speak":
+            repo.add_message(project_id, "assistant", intent.reply)
             return {"type": "reply", "text": intent.reply}
 
         # Replacing speech is the obvious reading of an edit over words; over
         # music or silence it is not, so the user is asked.
         mix = req.mix or intent.mix or ("replace" if context.has_speech else None)
         if mix is None:
-            return mix_question(intent.new_text, context)
+            return _asked(mix_question(intent.new_text, context))
 
         plan = EditPlan(selection, intent.new_text, req.voice_profile_id, fit=req.fit, mix=mix)
         cost = voice.cost_of(plan)
@@ -308,15 +380,19 @@ def preview_edit(project_id: str, req: EditRequest) -> dict:
         except SpanMismatch as exc:
             if plan.fit is not None:
                 raise
-            return fit_question(
+            return _asked(fit_question(
                 plan.new_text, mix, exc.natural, exc.target,
                 selection.start, record.source.duration,
-            )
+            ))
         # Retained so approval commits this exact candidate rather than
         # re-running generation, which real vendors would not reproduce
         # byte-for-byte.
         repo.save_candidate(project_id, candidate)
         return _candidate_dict(candidate)
+
+    def _asked(question: dict) -> dict:
+        repo.add_message(project_id, "assistant", question["question"])
+        return question
 
     runner.submit(job, work)
     return _job_dict(job)
@@ -331,7 +407,10 @@ def get_job(job_id: str) -> dict:
 
 
 @app.post("/projects/{project_id}/edits")
-def approve_edit(project_id: str, req: ApproveRequest) -> dict:
+def approve_edit(
+    project_id: str, req: ApproveRequest, owner: str = Depends(current_owner),
+) -> dict:
+    _owned(project_id, owner)
     candidate = repo.get_candidate(project_id, req.candidate_id)
     if candidate is None:
         raise HTTPException(status_code=404, detail="candidate not found")
@@ -356,10 +435,8 @@ def approve_edit(project_id: str, req: ApproveRequest) -> dict:
 
 
 @app.post("/projects/{project_id}/export")
-def export_project(project_id: str) -> dict:
-    record = repo.get(project_id)
-    if record is None:
-        raise HTTPException(status_code=404, detail="project not found")
+def export_project(project_id: str, owner: str = Depends(current_owner)) -> dict:
+    record = _owned(project_id, owner)
     manifest = render(record.source, repo.list_edits(project_id))
     # Synchronous: the video is stream-copied and only the audio re-encoded,
     # so even a 3-minute source renders in seconds.

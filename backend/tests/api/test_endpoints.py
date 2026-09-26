@@ -540,6 +540,13 @@ def test_an_answer_carries_the_choice_and_skips_reading_the_request(client, proj
     assert (plan.new_text, plan.fit, plan.mix) == ("Thirsty", "stretch", "layer")
 
 
+def speechless(monkeypatch, main, transcript):
+    """Make the stored project read back with `transcript`."""
+    from dataclasses import replace
+    real_get = main.repo.get
+    monkeypatch.setattr(main.repo, "get", lambda pid: replace(real_get(pid), transcript=transcript))
+
+
 class Reads:
     """An interpreter returning a fixed Intent, recording what it was given."""
 
@@ -564,16 +571,99 @@ def test_a_request_the_editor_cannot_do_gets_a_reply(client, project, monkeypatc
 
 
 def test_the_chat_so_far_reaches_the_interpreter(client, project, monkeypatch):
+    # Phase 9a: the server keeps the chat, so history is its record — both
+    # sides of earlier turns — not whatever the client sends.
     import app.api.main as main
     from app.domain.models import Intent
-    reader = Reads(Intent("speak", new_text="30% off"))
+    reader = Reads(Intent("unsupported", reply="Speech only."))
     monkeypatch.setattr(main, "interpreter", reader)
+    await_job(client, start_preview(client, prompt="make it white")["job_id"])
 
-    preview(client, history=[{"role": "user", "text": "hi"}, {"role": "assistant", "text": "Hello."}])
+    reader.intent = Intent("speak", new_text="30% off")
+    preview(client, prompt="ok, say 30% off")
 
-    _, history, context = reader.seen[0]
-    assert [(t.role, t.text) for t in history] == [("user", "hi"), ("assistant", "Hello.")]
+    _, history, context = reader.seen[1]
+    assert [(t.role, t.text) for t in history] == [
+        ("user", "make it white"), ("assistant", "Speech only."),
+    ]
     assert context.selected == "20% off"
+
+
+def test_the_chat_is_kept_with_the_project(client, project, monkeypatch):
+    import app.api.main as main
+    from app.domain.models import Intent
+    monkeypatch.setattr(main, "interpreter", Reads(Intent("unsupported", reply="Speech only.")))
+    await_job(client, start_preview(client, prompt="make it white")["job_id"])
+    await_job(client, start_preview(client, prompt="x", display="Layer it")["job_id"])
+
+    messages = client.get("/projects/p1").json()["messages"]
+
+    assert messages == [
+        {"role": "user", "text": "make it white"}, {"role": "assistant", "text": "Speech only."},
+        {"role": "user", "text": "Layer it"}, {"role": "assistant", "text": "Speech only."},
+    ]
+
+
+# ── projects persist, are listed, reopened and deleted (Phase 9a) ────────────
+
+def test_projects_are_listed_newest_first(client, project, sample_video):
+    second = upload(client, sample_video).json()["project_id"]
+    listed = client.get("/projects").json()["projects"]
+    assert [p["project_id"] for p in listed] == [second, "p1"]
+    assert listed[1]["filename"] == "ad.mp4" and listed[1]["edits"] == 0
+
+
+def test_a_project_reopens_with_its_approved_edits(client, project):
+    candidate = preview(client)
+    client.post("/projects/p1/edits", json={"candidate_id": candidate["candidate_id"]})
+
+    reopened = client.get("/projects/p1").json()
+
+    assert reopened["transcript"][1]["text"] == "20%"
+    assert [e["new_text"] for e in reopened["edits"]] == ["30% off"]
+
+
+def test_deleting_a_project_removes_it_and_its_media(client, project):
+    import app.api.main as main
+    media_dir = main.artifacts.root / "p1"
+    assert media_dir.is_dir()
+
+    assert client.delete("/projects/p1").status_code == 204
+
+    assert client.get("/projects/p1").status_code == 404
+    assert not media_dir.exists()
+    assert client.get("/projects").json()["projects"] == []
+
+
+def test_someone_elses_project_is_not_found(client, project, monkeypatch):
+    import app.api.main as main
+    main.app.dependency_overrides[main.current_owner] = lambda: "someone-else"
+    try:
+        assert client.get("/projects/p1").status_code == 404
+        assert client.post("/projects/p1/export").status_code == 404
+        assert client.delete("/projects/p1").status_code == 404
+        assert client.get("/projects").json()["projects"] == []
+    finally:
+        main.app.dependency_overrides.clear()
+    assert client.get("/projects/p1").status_code == 200
+
+
+def test_projects_survive_a_restart(tmp_path):
+    from app.domain.models import Transcript, Word
+    from app.store.db import Database
+    from app.store.repository import ProjectRepository
+    from tests.factories import make_source
+    path = tmp_path / "ave.db"
+    first = ProjectRepository(Database(path))
+    pid = first.next_id()
+    first.create(make_source(project_id=pid), Transcript(words=(Word("hi", 0.0, 0.3),)))
+    first.add_message(pid, "user", "hello")
+
+    again = ProjectRepository(Database(path))
+
+    assert again.get(pid).transcript.words[0].text == "hi"
+    assert [m.text for m in again.messages(pid)] == ["hello"]
+    assert again.next_id() == "p2"   # ids are never reused
 
 
 def test_an_edit_over_no_speech_asks_how_to_mix(client, project, monkeypatch):
@@ -581,8 +671,7 @@ def test_an_edit_over_no_speech_asks_how_to_mix(client, project, monkeypatch):
     from app.domain.models import Intent, Transcript
     reader = Reads(Intent("speak", new_text="Thirsty"))
     monkeypatch.setattr(main, "interpreter", reader)
-    record = main.repo.get("p1")
-    monkeypatch.setattr(record, "transcript", Transcript(words=()))
+    speechless(monkeypatch, main, Transcript(words=()))
 
     q = await_job(client, start_preview(client)["job_id"])["result"]
 
@@ -594,8 +683,7 @@ def test_the_mix_named_in_the_request_is_not_asked_about(client, project, monkey
     import app.api.main as main
     from app.domain.models import Intent, Transcript
     monkeypatch.setattr(main, "interpreter", Reads(Intent("speak", new_text="30% off", mix="layer")))
-    record = main.repo.get("p1")
-    monkeypatch.setattr(record, "transcript", Transcript(words=()))
+    speechless(monkeypatch, main, Transcript(words=()))
 
     candidate = preview(client)
 

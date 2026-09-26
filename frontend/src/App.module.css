@@ -32,3 +32,10 @@
   border: 1px solid var(--border); background: var(--surface); color: var(--muted);
 }
 .versionOn { color: var(--text); border-color: var(--cyan); box-shadow: 0 0 10px rgba(34, 211, 238, 0.35); }
+.topbar { display: flex; align-items: center; gap: 12px; }
+.back {
+  padding: 4px 12px; border-radius: 8px; font-size: 13px;
+  background: transparent; color: var(--muted); border: 1px solid var(--border);
+}
+.back:hover { color: var(--text); border-color: var(--cyan); }
+.filename { color: var(--muted); font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

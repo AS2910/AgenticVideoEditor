@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { ConsentGate } from './components/ConsentGate'
 import { LoadScreen } from './components/LoadScreen'
 import { Player } from './components/Player'
@@ -7,13 +7,14 @@ import { ChatPanel } from './components/ChatPanel'
 import { CandidateCard } from './components/CandidateCard'
 import { QuestionCard } from './components/QuestionCard'
 import { ExportBar } from './components/ExportBar'
+import { ProjectList } from './components/ProjectList'
 import {
   createProject, previewEdit, approveEdit, exportProject, artifactUrl,
-  pollJob, PollCancelled, ApiError,
+  pollJob, PollCancelled, ApiError, listProjects, getProject, deleteProject,
 } from './api'
 import type {
   Word, Selection, Candidate, Segment, Project, ChatMessage, Question, QuestionOption,
-  Fit, Mix, Insert,
+  Fit, Mix, Insert, ProjectSummary,
 } from './types'
 import { sourceTime } from './timeline/selection'
 import styles from './App.module.css'
@@ -53,7 +54,40 @@ export default function App() {
   const [rendered, setRendered] = useState<{ url: string; duration: number } | null>(null)
   const [view, setView] = useState<'original' | 'edited'>('original')
   const [error, setError] = useState<string | null>(null)
+  const [projects, setProjects] = useState<ProjectSummary[]>([])
   const previewToken = useRef(0)
+
+  const refreshProjects = useCallback(async () => {
+    try {
+      setProjects(await listProjects())
+    } catch {
+      setProjects([]) // the list is a convenience; uploading still works
+    }
+  }, [])
+
+  useEffect(() => {
+    if (stage === 'load') void refreshProjects()
+  }, [stage, refreshProjects])
+
+  /** Back to a blank editor state, e.g. before opening another project. */
+  const clearEditor = () => {
+    previewToken.current += 1 // abandon any poll in flight
+    setProject(null)
+    setTranscript([])
+    setSelection(null)
+    setCurrentTime(0)
+    setMessages([])
+    setCandidate(null)
+    setQuestion(null)
+    setGenerating(false)
+    setProgress(null)
+    setSegments([])
+    setInserts([])
+    setDownload(null)
+    setRendered(null)
+    setView('original')
+    setError(null)
+  }
 
   const projectId = project?.project_id ?? null
 
@@ -95,7 +129,6 @@ export default function App() {
     shown: string = prompt,
   ) => {
     if (!projectId || !at) return
-    const history = messages
     say({ role: 'user', text: shown })
     setCandidate(null)
     setQuestion(null)
@@ -114,7 +147,7 @@ export default function App() {
         start: at.start,
         end: at.end,
         voice_profile_id: VOICE,
-        history,
+        ...(shown !== prompt ? { display: shown } : {}),
         ...answer,
       })
       const finished = await pollJob(job.job_id, {
@@ -180,15 +213,17 @@ export default function App() {
   }
 
   /** Renders the approved edits; true when the render is ready to play. */
-  const runExport = async (): Promise<boolean> => {
-    if (!projectId) return false
+  const runExport = async (
+    id: string | null = projectId, filename = project?.filename,
+  ): Promise<boolean> => {
+    if (!id) return false
     setError(null)
     try {
-      const manifest = await exportProject(projectId)
+      const manifest = await exportProject(id)
       setSegments(manifest.segments)
       setInserts(manifest.inserts ?? [])
-      const stem = (project?.filename ?? 'video').replace(/\.[^.]+$/, '')
-      const url = artifactUrl(projectId, manifest.render.sha256)
+      const stem = (filename ?? 'video').replace(/\.[^.]+$/, '')
+      const url = artifactUrl(id, manifest.render.sha256)
       setDownload({ url, filename: `${stem}-edited.mp4` })
       setRendered({ url, duration: manifest.render.duration })
       return true
@@ -196,6 +231,35 @@ export default function App() {
       setError('Export failed.')
       return false
     }
+  }
+
+  const openProject = async (id: string) => {
+    clearEditor()
+    setLoading(true)
+    try {
+      const opened = await getProject(id)
+      setProject(opened)
+      setTranscript(opened.transcript)
+      setMessages(opened.messages)
+      setStage('editor')
+      // Approved edits are rendered again, so Play hears them straight away.
+      if (opened.edits.length > 0 && await runExport(opened.project_id, opened.filename)) {
+        setView('edited')
+      }
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : 'Could not open that project.')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const removeProject = async (id: string) => {
+    try {
+      await deleteProject(id)
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : 'Could not delete that project.')
+    }
+    await refreshProjects()
   }
 
   if (stage === 'consent') {
@@ -215,7 +279,9 @@ export default function App() {
         onLoadSample={loadSample}
         loading={loading}
         error={error}
-      />
+      >
+        <ProjectList projects={projects} onOpen={(id) => void openProject(id)} onDelete={(id) => void removeProject(id)} />
+      </LoadScreen>
     )
   }
 
@@ -224,6 +290,12 @@ export default function App() {
   return (
     <div className={styles.app}>
       <div className={styles.left}>
+        <div className={styles.topbar}>
+          <button className={styles.back} onClick={() => { clearEditor(); setStage('load') }}>
+            ← Projects
+          </button>
+          <span className={styles.filename}>{project.filename}</span>
+        </div>
         <Player
           src={showEdited ? rendered.url : artifactUrl(project.project_id, project.media.sha256)}
           duration={showEdited ? rendered.duration : project.duration}

@@ -1,4 +1,5 @@
 import { useRef } from 'react'
+import type { ReactNode } from 'react'
 import styles from './LoadScreen.module.css'
 
 interface LoadScreenProps {
@@ -6,9 +7,11 @@ interface LoadScreenProps {
   onLoadSample: () => void
   loading: boolean
   error?: string | null
+  /** Past projects, shown under the upload actions. */
+  children?: ReactNode
 }
 
-export function LoadScreen({ onLoad, onLoadSample, loading, error }: LoadScreenProps) {
+export function LoadScreen({ onLoad, onLoadSample, loading, error, children }: LoadScreenProps) {
   const inputRef = useRef<HTMLInputElement>(null)
 
   return (
@@ -44,6 +47,7 @@ export function LoadScreen({ onLoad, onLoadSample, loading, error }: LoadScreenP
 
       <p className={styles.hint}>Up to 3 minutes, English, one speaker on camera.</p>
       {error && <div className={styles.error}>{error}</div>}
+      {children}
     </div>
   )
 }

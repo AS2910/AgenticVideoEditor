@@ -55,6 +55,30 @@ export interface Project {
   transcript: Word[]
 }
 
+/** A row of the start screen's project list. */
+export interface ProjectSummary {
+  project_id: string
+  filename: string
+  duration: number
+  created_at: string
+  edits: number
+}
+
+export interface ApprovedEditSummary {
+  edit_id: string
+  candidate_id: string
+  new_text: string
+  selection: Selection
+  mix: Mix
+  overridden: boolean
+}
+
+/** A reopened project: the upload plus what has been done to it. */
+export interface ProjectDetail extends Project {
+  edits: ApprovedEditSummary[]
+  messages: ChatMessage[]
+}
+
 export interface ApprovedResult {
   edit_id: string
   candidate_id: string
@@ -87,7 +111,9 @@ export interface EditRequest {
   text?: string
   fit?: Fit
   mix?: Mix
-  history?: ChatMessage[]
+  /** What the chat shows for this turn when it isn't the prompt — the label
+   *  of an option picked in answer to a question. */
+  display?: string
 }
 
 export interface QuestionOption {
