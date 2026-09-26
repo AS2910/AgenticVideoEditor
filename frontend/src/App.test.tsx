@@ -79,6 +79,10 @@ function routeFetch(approveStatus = 200, job: unknown = JOB_DONE) {
       return ok({ edit_id: 'e1', continuity: PASSING_CONTINUITY })
     }
     if (url.endsWith('/export')) return ok({ segments: SEGMENTS, render: RENDER })
+    if (url.endsWith('/usage')) {
+      return ok({ spent_usd: 0.01, ceiling_usd: 2, voice_characters: 7,
+        voice_characters_ceiling: 2000, lines: [] })
+    }
     if (url.endsWith('/projects')) return ok(_init?.method === 'POST' ? PROJECT : { projects: [] })
     // The sample clip is fetched from /public, then uploaded like any file.
     if (url.endsWith('/sample-ad.mp4')) {
@@ -113,6 +117,7 @@ describe('App full journey', () => {
 
     await waitFor(() => expect(screen.getByText('30% off')).toBeInTheDocument())
     expect(screen.getByText(/continuity checked/i)).toBeInTheDocument()
+    await waitFor(() => expect(screen.getByTestId('spend')).toHaveTextContent('voice 7 / 2,000'))
 
     await user.click(screen.getByRole('button', { name: /approve/i }))
     await waitFor(() => expect(screen.queryByText(/continuity checked/i)).not.toBeInTheDocument())
@@ -181,6 +186,7 @@ describe('App full journey', () => {
     } as Response
 
     const f = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.endsWith('/usage')) return forbidden
       if (url.endsWith('/edits/preview')) return forbidden
       if (url.endsWith('/projects')) return ok(init?.method === 'POST' ? PROJECT : { projects: [] })
       if (url.endsWith('/sample-ad.mp4')) {

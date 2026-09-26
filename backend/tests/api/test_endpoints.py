@@ -550,12 +550,15 @@ def speechless(monkeypatch, main, transcript):
 class Reads:
     """An interpreter returning a fixed Intent, recording what it was given."""
 
-    def __init__(self, intent):
+    def __init__(self, intent, tokens=None):
         self.intent = intent
+        self.tokens = tokens
         self.seen = []
 
-    def interpret(self, prompt, history, context):
+    def interpret(self, prompt, history, context, meter=None):
         self.seen.append((prompt, history, context))
+        if meter is not None and self.tokens:
+            meter("claude-opus-5", *self.tokens)
         return self.intent
 
 
@@ -602,6 +605,49 @@ def test_the_chat_is_kept_with_the_project(client, project, monkeypatch):
         {"role": "user", "text": "make it white"}, {"role": "assistant", "text": "Speech only."},
         {"role": "user", "text": "Layer it"}, {"role": "assistant", "text": "Speech only."},
     ]
+
+
+# ── spend is recorded, and the ceiling holds (Phase 9b) ──────────────────────
+
+def test_claude_calls_are_recorded_with_their_estimated_cost(client, project, monkeypatch):
+    import app.api.main as main
+    from app.domain.models import Intent
+    monkeypatch.setattr(main, "interpreter", Reads(Intent("unsupported", reply="No."), tokens=(1000, 200)))
+
+    await_job(client, start_preview(client, prompt="make it white")["job_id"])
+
+    usage = client.get("/projects/p1/usage").json()
+    [line] = usage["lines"]
+    assert (line["vendor"], line["what"], line["units"], line["calls"]) == ("anthropic", "intent", 1200, 1)
+    assert line["usd"] == pytest.approx(0.01)      # 1000 × $5/M + 200 × $25/M
+    assert usage["spent_usd"] == pytest.approx(0.01)
+
+
+def test_voice_characters_count_toward_spend(client, project, monkeypatch):
+    import app.api.main as main
+    from app.budget import VoiceBudget
+    monkeypatch.setattr(main, "voice", PricedVoice(main.voice, price=0))
+    budget = VoiceBudget(ceiling=100, ledger=main.ledger, usd_per_1k=0.30)
+    monkeypatch.setattr(main, "budget", budget)
+    budget.charge("p1", 40)
+
+    usage = client.get("/projects/p1/usage").json()
+
+    assert usage["voice_characters"] == 40
+    assert usage["spent_usd"] == pytest.approx(0.012)
+
+
+def test_no_new_paid_work_once_the_ceiling_is_reached(client, project, monkeypatch):
+    import app.api.main as main
+    reader = Reads(None)
+    monkeypatch.setattr(main, "interpreter", reader)
+    main.ledger.record("p1", "anthropic", "intent", 1, "tokens", main.ledger.ceiling_usd)
+
+    job = await_job(client, start_preview(client)["job_id"])
+
+    assert job["status"] == "failed"
+    assert "spending limit" in job["error"]
+    assert reader.seen == []          # Claude was never called
 
 
 # ── projects persist, are listed, reopened and deleted (Phase 9a) ────────────

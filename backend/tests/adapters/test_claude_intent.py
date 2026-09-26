@@ -105,3 +105,12 @@ def test_a_rejected_key_is_not_retried():
         reader.interpret("x", [], CTX)
     assert isinstance(err.value, NonRetryableError)
     assert "ANTHROPIC_WORKSPACE_ID" in str(err.value)
+
+
+def test_token_usage_is_reported_to_the_meter():
+    result = parsed(action="speak", new_text="hi")
+    result.usage = SimpleNamespace(input_tokens=540, output_tokens=75)
+    reader, _ = interpreter(result)
+    seen = []
+    reader.interpret("x", [], CTX, meter=lambda *call: seen.append(call))
+    assert seen == [("claude-opus-5", 540, 75)]

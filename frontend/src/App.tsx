@@ -8,13 +8,14 @@ import { CandidateCard } from './components/CandidateCard'
 import { QuestionCard } from './components/QuestionCard'
 import { ExportBar } from './components/ExportBar'
 import { ProjectList } from './components/ProjectList'
+import { SpendMeter } from './components/SpendMeter'
 import {
   createProject, previewEdit, approveEdit, exportProject, artifactUrl,
-  pollJob, PollCancelled, ApiError, listProjects, getProject, deleteProject,
+  pollJob, PollCancelled, ApiError, listProjects, getProject, deleteProject, getUsage,
 } from './api'
 import type {
   Word, Selection, Candidate, Segment, Project, ChatMessage, Question, QuestionOption,
-  Fit, Mix, Insert, ProjectSummary,
+  Fit, Mix, Insert, ProjectSummary, Usage,
 } from './types'
 import { sourceTime } from './timeline/selection'
 import styles from './App.module.css'
@@ -55,6 +56,7 @@ export default function App() {
   const [view, setView] = useState<'original' | 'edited'>('original')
   const [error, setError] = useState<string | null>(null)
   const [projects, setProjects] = useState<ProjectSummary[]>([])
+  const [usage, setUsage] = useState<Usage | null>(null)
   const previewToken = useRef(0)
 
   const refreshProjects = useCallback(async () => {
@@ -87,9 +89,22 @@ export default function App() {
     setRendered(null)
     setView('original')
     setError(null)
+    setUsage(null)
   }
 
   const projectId = project?.project_id ?? null
+
+  /** Re-reads what the project has spent; after anything that may have paid. */
+  const refreshUsage = useCallback(async (id: string | null) => {
+    if (!id) return
+    try {
+      setUsage(await getUsage(id))
+    } catch {
+      // The meter is informational; a failed read leaves the last value.
+    }
+  }, [])
+
+  useEffect(() => { void refreshUsage(projectId) }, [projectId, refreshUsage])
 
   const load = async (file: File) => {
     setLoading(true)
@@ -180,6 +195,7 @@ export default function App() {
         setGenerating(false)
         setProgress(null)
       }
+      void refreshUsage(projectId)
     }
   }
 
@@ -325,6 +341,7 @@ export default function App() {
           onSelect={setSelection}
         />
         <ExportBar segments={segments} inserts={inserts} onExport={() => void runExport()} download={download} />
+        <SpendMeter usage={usage} />
         {error && <div className={styles.error}>{error}</div>}
       </div>
       <div className={styles.right}>

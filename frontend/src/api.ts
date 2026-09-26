@@ -1,5 +1,5 @@
 import type {
-  Project, ApprovedResult, ExportManifest, EditRequest, Job, ProjectSummary, ProjectDetail,
+  Project, ApprovedResult, ExportManifest, EditRequest, Job, ProjectSummary, ProjectDetail, Usage,
 } from './types'
 
 const BASE = '/api'
@@ -66,6 +66,8 @@ export const listProjects = async () =>
 
 /** Everything needed to reopen a project. */
 export const getProject = (id: string) => get<ProjectDetail>(`/projects/${id}`)
+
+export const getUsage = (id: string) => get<Usage>(`/projects/${id}/usage`)
 
 /** Deletes the project and all its media — also how consent is withdrawn. */
 export async function deleteProject(id: string): Promise<void> {

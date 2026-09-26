@@ -6,7 +6,7 @@ The differentiator is **continuity**: splicing an AI clip into footage is easy; 
 
 **Current state:** upload your own video and edit what is actually said in it. The backend ingests a real file, measures it with ffprobe, stores it immutably, serves it back with range requests, and **transcribes it for real** with OpenAI `whisper-1` — so the timeline shows your words at your timings; click, shift-click or drag across them to select. Requests are **free-form**: Claude reads what you type ("add the line "Thirsty!" over the music", "make it 30%"), answers in the chat when a request isn't about speech, and when a line doesn't fit the selection — or the selection holds no speech — the editor **asks** how to place it (start at the selection or stretch it; replace, layer over, or add after the sound there) rather than refusing. Generation runs as a **background job** the UI polls for progress, with retries on vendor failure. The new line is **spoken for real** by ElevenLabs, fitted to the selection's length, and playable on the candidate card — but in a *stock* voice, not the speaker's (the account's free tier cannot clone). Approving renders straight away and the player switches to the edited version (an Edited / Original toggle compares them); a candidate that fails continuity can still be approved on purpose ("Approve anyway") for trials. Export renders a real MP4 with the new line spliced in — over the original video, since lip-sync is still mocked. Prosody and audio integration are **measured** from the audio, levels and room tone are corrected automatically, and a take that fails continuity is regenerated within a cap. Every paid call is metered against a per-project budget, and `AVE_DRY_RUN=1` switches all vendors off. The *interaction*, *source media*, *transcript*, *pipeline* and *voice* are real; the *speaker's identity* and the *mouth* are not yet.
 
-- `backend/` — Python 3.11 + FastAPI. Domain core, adapters, continuity engine, orchestrator, background job runner, in-memory project store, content-addressed artifact store, ffmpeg wrapper + ingest validation, renderer, HTTP API.
+- `backend/` — Python 3.11 + FastAPI. Domain core, adapters, continuity engine, orchestrator, background job runner, SQLite project store (projects, edits, chat, spend), content-addressed artifact store, ffmpeg wrapper + ingest validation, renderer, HTTP API.
 - `frontend/` — React 19 + Vite + TypeScript. The Voltage editor, calling the backend through a dev-server proxy.
 - `docs/superpowers/specs/` — product and front-end design docs.
 - `docs/superpowers/plans/` — the implementation plans each phase was built from, plus `2026-09-22-real-pipeline-roadmap.md`, the phased route from mocks to a real v1. The `- [ ]` checkboxes in the older plans were never ticked during execution; treat the code and tests as the source of truth, not the boxes.
@@ -36,6 +36,8 @@ ELEVENLABS_MODEL=eleven_multilingual_v2   # eleven_flash_v2_5 bills half
 ELEVENLABS_VOICE_ID=EXAVITQu4vr4xnSDxMaL  # premade "Sarah"
 AVE_VOICE_BUDGET_CHARS=2000               # per-project ElevenLabs ceiling
 AVE_MAX_REGENERATIONS=2                   # extra paid takes when continuity fails
+AVE_PROJECT_BUDGET_USD=2.00               # per-project ceiling on estimated spend, all vendors
+AVE_ELEVENLABS_USD_PER_1K=0.30            # rate for ElevenLabs cost estimates (plan-dependent)
 AVE_DRY_RUN=1                             # never call a paid vendor
 ```
 
@@ -84,8 +86,8 @@ To see the continuity *failure* path, the voice profile has to be `unknown`, whi
 Both suites are offline and deterministic. No running server required.
 
 ```sh
-cd backend && .venv/bin/python -m pytest      # 333 tests
-cd frontend && npm test                        # 85 tests, 12 files
+cd backend && .venv/bin/python -m pytest      # 346 tests
+cd frontend && npm test                        # 94 tests, 14 files
 ```
 
 Backend tests write their media to a temp dir, never to `backend/var/`. Tests that
@@ -104,6 +106,10 @@ Generation is asynchronous (preview returns a job to poll); everything else answ
 | --- | --- | --- | --- |
 | `/health` | GET | — | which adapters are real in this process |
 | `/projects` | POST | `multipart` `file=` | uploads a video; probes it; transcribes it; → `project_id`, `duration`, source `media`, word-level `transcript`. `422` with a reason if it is not a readable video, has no video track, has no audio track, or exceeds the 180s cap; `502` if transcription fails. |
+| `/projects` | GET | — | the caller's projects, newest first (`project_id`, `filename`, `duration`, `created_at`, `edits`) |
+| `/projects/{id}` | GET | — | reopens a project: its upload and transcript, approved `edits` and the chat `messages` |
+| `/projects/{id}` | DELETE | — | **`204`** — deletes the project and all its media; also how consent is withdrawn |
+| `/projects/{id}/usage` | GET | — | estimated spend: `spent_usd` / `ceiling_usd`, ElevenLabs characters against their budget, and per-vendor `lines` |
 | `/projects/{id}/consent` | POST | — | records consent for a project uploaded without it; idempotent, the first timestamp stands |
 | `/projects/{id}/artifacts/{sha256}` | GET | — | serves stored media by content address, with range requests |
 | `/projects/{id}/edits/preview` | POST | `{prompt, start, end, voice_profile_id, history?, text?, fit?, mix?}` | **`202`** — starts a job to poll. Does not block. `403` without consent. The request is read (Claude, or the offline quoted-text rule) inside the job; the job's `result` is tagged by `type`: a `candidate`; a `reply` (a request the editor can't do, or a clarifying question); or a `question` with `options` — how to mix the line with the sound (`replace` / `layer` / `concatenate`), or how to fit it (`start` / `stretch`). Answer by re-sending with `text` and the chosen `fit` / `mix`. A job the project's voice budget cannot cover fails with the reason. |
@@ -146,12 +152,13 @@ These are deliberate and documented, not oversights:
 - **The export re-voices the audio; the video is the original.** Lip-sync is backlogged (Phase 5), and the mock frames are a flat colour, so the render keeps the source's own frames everywhere: the new words play over the old mouth movements. H.264 sources are stream-copied; anything else is re-encoded to H.264 so the download plays everywhere. Seams get 20 ms equal-power crossfades; everything outside an edit is the source's audio, re-encoded to AAC.
 - **Export is synchronous and renders on every click.** Seconds for a 3-minute source, since only the audio is re-encoded; renders are content-addressed, so re-exporting unchanged edits stores nothing new.
 - **Half the continuity scorecard is measured.** With a real voice, prosody (pitch register against the surrounding speech) and audio integration (level and clarity) are measured from the audio, after automatic level and room-tone correction; a failing take is regenerated up to `AVE_MAX_REGENERATIONS` times (default 2 — each one a paid call, charged to the budget). Voice identity and lip-sync read "not measured yet" until Phases 4b and 5. Offline and in dry-run the scores are the mock engine's, tagged *simulated*. Thresholds were calibrated on one clip — expect to tune them on real footage.
-- **Consent is a checkbox attestation, not verification.** The backend records it per project (at upload, or later via `POST /projects/{id}/consent`) and refuses generation with a 403 without it — but it trusts the uploader's word. There is no way to withdraw it yet: by design, withdrawing means deleting the project, and there is no delete endpoint until persistence (Phase 9). A server restart is the only reset.
-- **Project metadata is in-memory; artifacts are on disk.** Restarting the server loses every project but leaves its media in `backend/var/artifacts/`, orphaned. A failed transcription orphans an upload the same way. Persistence (Phase 9) closes the mismatch; until then `rm -rf backend/var` is a safe reset.
+- **Consent is a checkbox attestation, not verification.** The backend records it per project (at upload, or later via `POST /projects/{id}/consent`) and refuses generation with a 403 without it — but it trusts the uploader's word. Withdrawing it means deleting the project (`DELETE /projects/{id}`, or Delete on the start screen), which removes the record and all its media.
+- **Projects persist in SQLite (`backend/var/ave.db`); media on disk.** Projects, approved edits, candidates, the chat and spend survive restarts. Jobs do not: one interrupted by a restart is lost and must be re-run. A failed transcription still orphans its upload's media.
 - **Ingest is still synchronous.** Generation runs as a background job, but upload+transcription does not: a 3-minute upload blocks the request for as long as Whisper takes. Whisper is seconds, so this is liveable; lip-sync would not have been, which is why generation went first.
-- **The voice budget is in memory.** It is per project and resets when the server restarts, like everything else until Phase 9. It meters ElevenLabs only; Whisper is not metered (dry-run does switch it off).
-- **Jobs live in memory and are never evicted.** They accumulate for the life of the process and vanish on restart, along with everything else.
+- **Spend is estimated, and capped.** Every paid call (Whisper minutes, ElevenLabs characters, Claude tokens) is recorded with a USD estimate from list prices — ElevenLabs's depends on your plan, so it is a configurable rate. New paid work stops at `AVE_PROJECT_BUDGET_USD` per project; the ElevenLabs character budget is separate and also persisted.
+- **No sign-in yet (Phase 9c is designed, not built).** Every project has an owner and every route checks it, but today everyone is the one local owner — keep the server on localhost. Sign-in will be OIDC (Google first) behind `current_owner()` in `app/api/main.py`.
+- **Jobs live in memory and are never evicted.** They accumulate for the life of the process and vanish on restart.
 
 ## Not built yet
 
-Deferred by design: the speaker's own cloned voice (Phase 4b) and real lip-sync (Phase 5) — both in the roadmap's backlog, blocked on vendor access — plus voice-identity and lip-sync scoring (Phase 6b, after those), LLM intent parsing (Phase 8), multi-project persistence, and auth. See `docs/superpowers/plans/2026-09-22-real-pipeline-roadmap.md` for the phased route through them. Product-level, v1 is dialogue changes only — visual detail swap (Phase 2), pacing/filler edits, multi-speaker crosstalk, and non-English are all out of scope.
+Deferred by design: the speaker's own cloned voice (Phase 4b) and real lip-sync (Phase 5) — both in the roadmap's backlog, blocked on vendor access — plus voice-identity and lip-sync scoring (Phase 6b, after those), sign-in (Phase 9c, designed), and the editing work of Phase 10 (a transcript you edit statement by statement, a voice picker, a zoomable timeline). See `docs/superpowers/plans/2026-09-22-real-pipeline-roadmap.md` for the phased route through them. Product-level, v1 is dialogue changes only — visual detail swap (Phase 2), pacing/filler edits, multi-speaker crosstalk, and non-English are all out of scope.

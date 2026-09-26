@@ -17,7 +17,7 @@ from pydantic import BaseModel, Field
 from app.adapters.base import VendorError
 from app.domain.models import Intent
 from app.errors import NonRetryableError
-from app.orchestrator.intent import EditContext, Turn
+from app.orchestrator.intent import EditContext, Meter, Turn
 
 MODEL = "claude-opus-5"
 MAX_TOKENS = 2000
@@ -110,7 +110,10 @@ class ClaudeInterpreter:
         self._client = client or anthropic.Anthropic(api_key=api_key, default_headers=headers)
         self._model = model
 
-    def interpret(self, prompt: str, history: Sequence[Turn], context: EditContext) -> Intent:
+    def interpret(
+        self, prompt: str, history: Sequence[Turn], context: EditContext,
+        meter: Meter | None = None,
+    ) -> Intent:
         try:
             response = self._client.messages.parse(
                 model=self._model,
@@ -128,6 +131,8 @@ class ClaudeInterpreter:
                 "Check ANTHROPIC_API_KEY and ANTHROPIC_WORKSPACE_ID."
             ) from None
 
+        if meter is not None and response.usage is not None:
+            meter(self._model, response.usage.input_tokens, response.usage.output_tokens)
         if response.stop_reason == "refusal":
             return Intent(action="unsupported", reply="I can't help with that request.")
         if response.parsed_output is None:

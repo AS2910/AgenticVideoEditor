@@ -1,7 +1,7 @@
 # Real Pipeline — Phased Roadmap
 
 **Date:** 2026-09-22
-**Status:** Phases 0–4a, 6a, 7 and 8 done and clean (8 on 2026-09-26). Phases 4b and 5 moved to the **Backlog** — both are blocked on vendor access, not on code.
+**Status:** Phases 0–4a, 6a, 7, 8 and 9 done and clean (8 and 9 on 2026-09-26; 9c is a design). Phase 10 (editing UX) next. Phases 4b and 5 moved to the **Backlog** — both are blocked on vendor access, not on code.
 **Supersedes nothing.** Builds on `2026-07-14-walking-skeleton.md` and `2026-07-17-voltage-frontend.md`.
 
 **Goal:** turn the mocked walking skeleton into a system that ingests a real video, produces a real re-voiced and lip-synced segment, verifies continuity with real signal analysis, and exports a real playable file — honoring the v1 design spec end-to-end.
@@ -158,8 +158,14 @@ Grouped into three milestones. Each milestone is independently useful — you ca
   - **Exit met:** 330 backend + 74 frontend tests at the time. Live on a speech-free portrait clip: "Add the line "Thirsty Thirsty"" → mix question → fit question → layered at 2.1–3.5 s with the music intact; "after this bit" read as concatenate → export 8.00 → 9.11 s, frame held; "make the background white" → a reply.
   - **Follow-ups from hands-on testing (same day):** player unmuted and wired to its slider/playhead; approving renders at once and plays the edit (Edited / Original toggle); "Approve anyway" for trials (explicit `override`, recorded on the edit); Whisper's zero-length words no longer crash the continuity check. 333 backend + 85 frontend tests.
 
-- [ ] **Phase 9 · Durability & hardening**
-  - SQLite persistence replacing the in-memory store; multi-project; auth; cost tracking and quotas.
+- [x] **Phase 9 · Durability & hardening** — **done 2026-09-26** (plan: `2026-09-26-phase-9-10-durability-and-editing.md`)
+  - **9a** SQLite (`var/ave.db`): projects, candidates, edits and the chat survive restarts; ids never reused; project list, reopen, delete (= consent withdrawal); the server keeps the chat. Every project has an owner, checked on every route (another's project is a 404).
+  - **9b** Usage ledger: every paid call recorded with an estimated USD (Whisper minutes, ElevenLabs characters, Claude tokens); the voice budget reads it; `AVE_PROJECT_BUDGET_USD` caps new paid work per project; `GET /projects/{id}/usage`; spend shown in the editor.
+  - **9c** Auth designed, not built: OIDC sign-in (Google first) → session → `current_owner()`; then a login page, CSRF on writes, per-user quotas.
+  - **Exit met:** 346 backend + 94 frontend tests. Live: a project and its chat survive a restart; a real clip's spend recorded ($0.0008 Whisper, $0.0067 Claude).
+
+- [ ] **Phase 10 · Editing by transcript, voices, timeline** (same plan)
+  - Transcript panel with editable statements; voice picker (multi-voice later); zoomable, scrollable timeline.
 
 ---
 

@@ -37,6 +37,11 @@ DEFAULT_ELEVENLABS_VOICE_ID = "EXAVITQu4vr4xnSDxMaL"
 DEFAULT_VOICE_BUDGET_CHARS = 2000
 # Extra paid takes allowed when a take fails continuity (spec §6 auto-retry).
 DEFAULT_MAX_REGENERATIONS = 2
+# Per-project ceiling on estimated spend across every paid vendor (Phase 9b).
+DEFAULT_PROJECT_BUDGET_USD = 2.0
+# ElevenLabs bills by plan; this is the rate used for the USD estimate only.
+# 0.30 per 1k characters is roughly Creator-plan overage.
+DEFAULT_ELEVENLABS_USD_PER_1K = 0.30
 
 _TRUTHY = {"1", "true", "yes", "on"}
 
@@ -57,6 +62,8 @@ class Settings:
     anthropic_api_key: str | None = None
     # Required when the key is not scoped to a workspace (the API says so).
     anthropic_workspace_id: str | None = None
+    project_budget_usd: float = DEFAULT_PROJECT_BUDGET_USD
+    elevenlabs_usd_per_1k: float = DEFAULT_ELEVENLABS_USD_PER_1K
 
     @property
     def has_anthropic(self) -> bool:
@@ -84,6 +91,19 @@ def _whole_number(name: str, default: int) -> int:
     return value
 
 
+def _amount(name: str, default: float) -> float:
+    raw = os.environ.get(name)
+    if raw is None or raw == "":
+        return default
+    try:
+        value = float(raw)
+    except ValueError:
+        value = -1.0
+    if value < 0:
+        raise ValueError(f"{name} must be an amount >= 0, got {raw!r}")
+    return value
+
+
 def load_settings() -> Settings:
     load_dotenv()
     return Settings(
@@ -97,4 +117,6 @@ def load_settings() -> Settings:
         max_regenerations=_whole_number("AVE_MAX_REGENERATIONS", DEFAULT_MAX_REGENERATIONS),
         anthropic_api_key=os.environ.get("ANTHROPIC_API_KEY") or None,
         anthropic_workspace_id=os.environ.get("ANTHROPIC_WORKSPACE_ID") or None,
+        project_budget_usd=_amount("AVE_PROJECT_BUDGET_USD", DEFAULT_PROJECT_BUDGET_USD),
+        elevenlabs_usd_per_1k=_amount("AVE_ELEVENLABS_USD_PER_1K", DEFAULT_ELEVENLABS_USD_PER_1K),
     )

@@ -29,6 +29,7 @@ from app.orchestrator.questions import fit_question, mix_question
 from app.media.ffmpeg import SpanMismatch
 from app.orchestrator.pipeline import run_edit
 from app.store.db import Database
+from app.usage import Ledger, WHISPER_USD_PER_MINUTE, claude_usd
 from app.store.repository import ProjectRecord, ProjectRepository, LOCAL_OWNER
 from app.store.artifacts import ArtifactStore
 from app.render.renderer import render
@@ -44,11 +45,17 @@ log = logging.getLogger(__name__)
 settings = load_settings()
 
 # Wiring (module-level singletons for this in-memory slice).
-repo = ProjectRepository(Database(settings.data_dir / "ave.db"))
+database = Database(settings.data_dir / "ave.db")
+repo = ProjectRepository(database)
+# Every paid call is recorded here; it backs the voice budget and the
+# per-project spend ceiling (Phase 9b).
+ledger = Ledger(database, ceiling_usd=settings.project_budget_usd)
 artifacts = ArtifactStore(settings.data_dir / "artifacts")
 # Real vendors when a key is configured, the deterministic mocks otherwise, and
 # the mocks always under AVE_DRY_RUN — so the app runs offline and free.
-budget = VoiceBudget(ceiling=settings.voice_budget_chars)
+budget = VoiceBudget(
+    ceiling=settings.voice_budget_chars, ledger=ledger, usd_per_1k=settings.elevenlabs_usd_per_1k,
+)
 transcriber, transcriber_label = select_transcriber(settings)
 voice, voice_label = select_voice(settings, artifacts, budget)
 lipsync = MockLipSyncAdapter(artifacts)
@@ -237,6 +244,10 @@ async def create_project(
 
     granted = Consent(granted_at=_now()) if consent else None
     repo.create(source, transcript, granted, owner=owner)
+    if transcriber_label.startswith("openai"):
+        minutes = source.duration / 60
+        ledger.record(project_id, "openai", "transcription", minutes, "minutes",
+                      minutes * WHISPER_USD_PER_MINUTE)
     return _project_dict(repo.get(project_id))
 
 
@@ -274,6 +285,24 @@ def get_project(project_id: str, owner: str = Depends(current_owner)) -> dict:
             for e in repo.list_edits(project_id)
         ],
         "messages": [{"role": m.role, "text": m.text} for m in repo.messages(project_id)],
+    }
+
+
+@app.get("/projects/{project_id}/usage")
+def get_usage(project_id: str, owner: str = Depends(current_owner)) -> dict:
+    """What the project has spent, per vendor, against its limits. USD is an
+    estimate from list prices."""
+    _owned(project_id, owner)
+    return {
+        "spent_usd": round(ledger.spent_usd(project_id), 4),
+        "ceiling_usd": ledger.ceiling_usd,
+        "voice_characters": budget.spent(project_id),
+        "voice_characters_ceiling": budget.ceiling,
+        "lines": [
+            {"vendor": u.vendor, "what": u.what, "unit": u.unit, "units": round(u.units, 4),
+             "usd": round(u.usd, 4), "calls": u.calls}
+            for u in ledger.lines(project_id)
+        ],
     }
 
 
@@ -351,12 +380,18 @@ def preview_edit(
     candidate_id = repo.next_candidate_id(project_id)
     job = jobs.create("preview", project_id)
 
+    def meter(model: str, input_tokens: int, output_tokens: int) -> None:
+        ledger.record(project_id, "anthropic", "intent", input_tokens + output_tokens, "tokens",
+                      claude_usd(model, input_tokens, output_tokens))
+
     def work(report) -> dict:
+        # No new paid work once the project has reached its spend ceiling.
+        ledger.ensure_can_spend(project_id)
         if req.text is not None:
             intent = Intent(action="speak", new_text=req.text)
         else:
             report(0.02, "Reading your request")
-            intent = interpreter.interpret(req.prompt, history, context)
+            intent = interpreter.interpret(req.prompt, history, context, meter=meter)
         if intent.action != "speak":
             repo.add_message(project_id, "assistant", intent.reply)
             return {"type": "reply", "text": intent.reply}

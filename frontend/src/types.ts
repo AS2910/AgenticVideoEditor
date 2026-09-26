@@ -55,6 +55,15 @@ export interface Project {
   transcript: Word[]
 }
 
+/** What a project has spent. USD is an estimate from list prices. */
+export interface Usage {
+  spent_usd: number
+  ceiling_usd: number
+  voice_characters: number
+  voice_characters_ceiling: number
+  lines: { vendor: string; what: string; unit: string; units: number; usd: number; calls: number }[]
+}
+
 /** A row of the start screen's project list. */
 export interface ProjectSummary {
   project_id: string

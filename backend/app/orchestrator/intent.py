@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import Protocol, Sequence
+from typing import Callable, Protocol, Sequence
 
 from app.domain.models import Intent, Selection, Transcript
 
@@ -45,8 +45,15 @@ def edit_context(transcript: Transcript, selection: Selection, duration: float) 
     return EditContext(selection, duration, " ".join(inside), " ".join(before), " ".join(after))
 
 
+# Told (model, input tokens, output tokens) after each paid call, to record spend.
+Meter = Callable[[str, int, int], None]
+
+
 class Interpreter(Protocol):
-    def interpret(self, prompt: str, history: Sequence[Turn], context: EditContext) -> Intent: ...
+    def interpret(
+        self, prompt: str, history: Sequence[Turn], context: EditContext,
+        meter: Meter | None = None,
+    ) -> Intent: ...
 
 
 # The quoted text after "to", or failing that the last quoted text.
@@ -59,7 +66,10 @@ class RuleInterpreter:
 
     identity = "rules"
 
-    def interpret(self, prompt: str, history: Sequence[Turn], context: EditContext) -> Intent:
+    def interpret(
+        self, prompt: str, history: Sequence[Turn], context: EditContext,
+        meter: Meter | None = None,
+    ) -> Intent:
         prompt = prompt.strip()
         match = _TO_QUOTED.search(prompt)
         if match:
