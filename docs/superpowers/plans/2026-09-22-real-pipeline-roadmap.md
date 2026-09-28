@@ -1,7 +1,7 @@
 # Real Pipeline — Phased Roadmap
 
 **Date:** 2026-09-22
-**Status:** Phases 0–4a, 6a, 7, 8 and 9 done and clean (8 and 9 on 2026-09-26; 9c is a design). Phases 10 (editing UX) and 11 (multiple voices) done the same day. Phases 4b and 5 moved to the **Backlog** — both are blocked on vendor access, not on code.
+**Status:** Phases 0–4a, 6a, 7, 8 and 9 done and clean (8 and 9 on 2026-09-26; 9c is a design). Phases 10 (editing UX) and 11 (multiple voices) done the same day; the editor was redesigned on 2026-09-26 (`docs/superpowers/specs/2026-09-26-editor-ui-redesign.md`). **Next: Phase 12 (the new agentic editor), then 13 (the agent)** — decided 2026-09-28, plan and mocks in `2026-09-28-phase-12-13-agentic-editor.md`. Phases 4b and 5 moved to the **Backlog** — both are blocked on vendor access, not on code.
 **Supersedes nothing.** Builds on `2026-07-14-walking-skeleton.md` and `2026-07-17-voltage-frontend.md`.
 
 **Goal:** turn the mocked walking skeleton into a system that ingests a real video, produces a real re-voiced and lip-synced segment, verifies continuity with real signal analysis, and exports a real playable file — honoring the v1 design spec end-to-end.
@@ -176,6 +176,12 @@ Grouped into three milestones. Each milestone is independently useful — you ca
   - **A voice per speaker:** rename speakers, pick each one's voice; a line in one speaker's words uses theirs, else the chat's voice.
   - **Continuity per speaker:** the pitch/level reference is the edited speaker's own words.
   - **Exit met:** 368 backend + 113 frontend tests. Live on the Bhaji Cam clip: speakers A (customer) / B (shopkeeper) detected; the customer's line, blended-reference before → speaker-only now: Sarah 0.74 → 0.83, Brian 0.76 → **0.96**, both passing.
+
+- [ ] **Phase 12 · The new editor** *(next — plan: `2026-09-28-phase-12-13-agentic-editor.md`)*
+  - Modern layout: transcript as a document with inline tracked changes and per-line status, agent panel; hands-on inline editing; long lines run into the pause without asking (remembered per project); Revert an approved edit.
+
+- [ ] **Phase 13 · The agent** *(same plan)*
+  - Claude plans edits across the whole video from a goal; autonomy switch (*Ask before running*, the default, with a cost estimate; or *Draft everything*); plan jobs with per-item status; the agent's own fixes and suggestions; review screen with an activity log.
 
 ---
 
