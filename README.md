@@ -47,6 +47,15 @@ Without a key the app still runs: each missing vendor falls back to its
 deterministic mock, offline and free, and `AVE_DRY_RUN=1` forces every one onto
 its mock whatever keys exist. `GET /health` reports which adapters are live.
 
+**Keys on another machine.** The keys travel with the repo *encrypted*: `backend/.env.enc` is `backend/.env` locked with a passphrase you choose (AES-256, PBKDF2), and only the ciphertext is committed — `.env` itself is git-ignored. The passphrase is the one thing you keep outside git (a password manager, or the server's own secret store).
+
+```sh
+tools/env-lock.sh                            # here, after changing a key: prompts for the passphrase, writes backend/.env.enc
+AVE_ENV_PASSPHRASE='…' tools/env-unlock.sh   # on a fresh clone: writes backend/.env (mode 600)
+```
+
+Anyone with the repo but not the passphrase has nothing. Rotate a key by editing `backend/.env`, running `tools/env-lock.sh` again and committing the new `.env.enc`.
+
 Two terminals. The backend must be up first — the front end proxies to it.
 
 ### 1. Backend (port 8000)
