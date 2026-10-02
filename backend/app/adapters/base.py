@@ -15,6 +15,11 @@ class VendorError(RuntimeError):
 class TranscriptionAdapter(Protocol):
     def transcribe(self, source: Source) -> Transcript: ...
 
+    def diarize(self, source: Source) -> list[tuple[str, float, float]]:
+        """Speaker turns (label, start, end), for projects transcribed before
+        speakers were detected."""
+        ...
+
 
 class VoiceAdapter(Protocol):
     # Whose voice this produces: "mock" (a tone), "stock" (a real voice that is
@@ -25,6 +30,12 @@ class VoiceAdapter(Protocol):
     def cost_of(self, plan: EditPlan) -> int:
         """Budget units one attempt at `plan` will charge. 0 for free adapters."""
         ...
+
+    # The voice used when an edit doesn't pick one, and those it can pick from:
+    # dicts of voice_id, name, description, gender, accent, age.
+    default_voice: str
+
+    def voices(self) -> list[dict]: ...
 
     def synthesize(
         self, source: Source, plan: EditPlan, transcript: Transcript | None = None,

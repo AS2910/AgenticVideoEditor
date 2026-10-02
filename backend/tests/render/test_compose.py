@@ -129,3 +129,61 @@ def test_a_non_h264_source_is_re_encoded_so_it_plays_everywhere(tmp_path):
     out = compose.compose(src, render(src, []).segments, tmp_path / "out.mp4")
     video = next(s for s in ffmpeg.probe(out)["streams"] if s["codec_type"] == "video")
     assert video["codec_name"] == "h264"
+
+
+# ── Phase 8: layering and inserts ────────────────────────────────────────────
+
+from dataclasses import replace  # noqa: E402
+
+
+def with_mix(edit, mix):
+    return replace(edit, plan=replace(edit.plan, mix=mix))
+
+
+def _rms(x):
+    return float(np.sqrt(np.mean(x ** 2)))
+
+
+def test_a_layered_edit_keeps_the_original_sound_underneath(source, tmp_path):
+    base = compose.decode(source.media.path)
+    edit = with_mix(approved(tmp_path, "a", 1.0, 2.0), "layer")
+    out = compose.splice(base, render(source, [edit]).segments)
+    mid = slice(int(1.4 * RATE), int(1.6 * RATE))
+    # Replacing would leave only the edit's tone; layering adds it to the source's.
+    expected = base[mid] + compose.decode(edit.audio.path, channels=base.shape[1])[
+        int(0.4 * RATE):int(0.6 * RATE)]
+    assert np.allclose(out[mid], expected, atol=1e-3)
+
+
+def test_a_concatenated_edit_takes_no_span_and_becomes_an_insert(source, tmp_path):
+    edit = with_mix(approved(tmp_path, "a", 1.0, 2.0), "concatenate")
+    manifest = render(source, [edit])
+    assert all(s.kind == "original" for s in manifest.segments)
+    assert [(i.at, i.edit.edit_id) for i in manifest.inserts] == [(2.0, "a")]
+
+
+def test_an_insert_pushes_the_rest_of_the_audio_later(source, tmp_path):
+    base = compose.decode(source.media.path)
+    edit = with_mix(approved(tmp_path, "a", 1.0, 2.0), "concatenate")
+    out = compose.insert_audio(base, render(source, [edit]).inserts, source.duration)
+    line = int(edit.audio.duration * RATE)
+    assert len(out) == len(base) + line
+    # What followed the insert point now starts after the line.
+    assert np.allclose(out[2 * RATE + line:2 * RATE + line + 100], base[2 * RATE:2 * RATE + 100])
+
+
+def test_the_export_holds_the_frame_for_an_insert(source, tmp_path):
+    edit = with_mix(approved(tmp_path, "a", 1.0, 2.0), "concatenate")
+    manifest = render(source, [edit])
+    out = compose.compose(source, manifest.segments, tmp_path / "out.mp4", inserts=manifest.inserts)
+    streams = {s["codec_type"]: s for s in ffmpeg.probe(out)["streams"]}
+    grown = source.duration + edit.audio.duration
+    assert float(streams["video"]["duration"]) == pytest.approx(grown, abs=0.1)
+    assert float(streams["audio"]["duration"]) == pytest.approx(grown, abs=0.1)
+
+
+def test_hold_points_at_the_edges_pad_the_first_or_last_piece():
+    graph = compose.hold_filter([(0.0, 0.5), (3.0, 1.0)], 3.0)
+    assert "start_mode=clone:start_duration=0.500" in graph
+    assert "stop_mode=clone:stop_duration=1.000" in graph
+    assert "split" not in graph  # one piece: nothing to cut

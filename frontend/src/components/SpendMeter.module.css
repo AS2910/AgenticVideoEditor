@@ -1,0 +1,3 @@
+.meter { color: var(--muted); font-size: 13px; white-space: nowrap; }
+.near { color: var(--amber); font-size: 13px; white-space: nowrap; }
+@media (max-width: 1200px) { .detail { display: none; } }

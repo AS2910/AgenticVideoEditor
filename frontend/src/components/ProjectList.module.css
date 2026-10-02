@@ -1,0 +1,16 @@
+.list { width: 100%; display: flex; flex-direction: column; }
+.heading { color: var(--muted); font-size: 13px; margin-bottom: 6px; }
+.row { display: flex; gap: 8px; align-items: center; border-top: 1px solid var(--line); }
+.open {
+  flex: 1; min-width: 0; display: flex; flex-wrap: wrap; gap: 2px 12px; align-items: baseline; text-align: left;
+  padding: 10px 0; background: none; border: none; color: var(--text);
+}
+.open:hover .name { color: var(--accent); }
+.name { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.meta { color: var(--muted); font-size: 13px; }
+.delete, .cancel, .confirm {
+  padding: 3px 10px; border-radius: 6px; font-size: 12px;
+  background: transparent; color: var(--muted); border: 1px solid transparent;
+}
+.delete:hover, .cancel:hover { border-color: var(--line); color: var(--text); }
+.confirm { color: var(--amber); border-color: var(--amber-line); }

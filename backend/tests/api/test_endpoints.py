@@ -403,6 +403,27 @@ def test_approve_rejected_when_continuity_fails(client, project):
     assert resp.json()["detail"] == "continuity check failed"
 
 
+def test_a_failing_candidate_can_be_approved_on_purpose_and_is_marked(client, project):
+    candidate = preview(client, voice_profile_id="unknown")
+
+    resp = client.post(
+        "/projects/p1/edits", json={"candidate_id": candidate["candidate_id"], "override": True},
+    )
+
+    assert resp.status_code == 200
+    assert resp.json()["overridden"] is True
+    import app.api.main as main
+    assert main.repo.list_edits("p1")[-1].overridden is True
+
+
+def test_a_passing_candidate_is_not_marked_overridden(client, project):
+    candidate = preview(client)
+    resp = client.post(
+        "/projects/p1/edits", json={"candidate_id": candidate["candidate_id"], "override": True},
+    )
+    assert resp.json()["overridden"] is False
+
+
 def test_approve_unknown_candidate_is_404(client, project):
     assert client.post("/projects/p1/edits", json={"candidate_id": "c99"}).status_code == 404
 
@@ -430,19 +451,22 @@ class PricedVoice:
         return self._inner.synthesize(source, plan, transcript)
 
 
-def test_an_edit_the_project_cannot_afford_is_refused_before_any_job(client, project, monkeypatch):
+def test_an_edit_the_project_cannot_afford_is_refused_before_any_generation(client, project, monkeypatch):
+    # The price is only known once the request has been read (Phase 8), which
+    # happens inside the job — so the refusal is the job's, and nothing is
+    # generated or retried.
     import app.api.main as main
     from app.budget import VoiceBudget
     voice = PricedVoice(main.voice, price=50)
     monkeypatch.setattr(main, "voice", voice)
     monkeypatch.setattr(main, "budget", VoiceBudget(ceiling=10))
 
-    resp = client.post("/projects/p1/edits/preview", json=PREVIEW)
+    job = await_job(client, start_preview(client)["job_id"])
 
-    assert resp.status_code == 402
-    assert "10 remain" in resp.json()["detail"]
-    assert jobs.get("j1") is None      # no job was created
-    assert voice.calls == 0            # and nothing was generated
+    assert job["status"] == "failed"
+    assert job["attempts"] == 1
+    assert "10 remain" in job["error"]
+    assert voice.calls == 0
 
 
 def test_an_affordable_paid_edit_goes_ahead_and_is_labelled_stock(client, project, monkeypatch):
@@ -457,25 +481,260 @@ def test_an_affordable_paid_edit_goes_ahead_and_is_labelled_stock(client, projec
     assert STOCK_VOICE_WARNING in candidate["continuity"]["warnings"]
 
 
-def test_a_refusal_inside_the_job_reaches_the_user_verbatim(client, project, monkeypatch):
+class Unfitted:
+    """A voice whose line is `natural` seconds against any selection."""
+
+    identity = "stock"
+
+    def __init__(self, natural):
+        self.natural = natural
+        self.plans = []
+
+    def cost_of(self, plan):
+        return 0
+
+    def synthesize(self, source, plan, transcript=None):
+        from app.media.ffmpeg import SpanMismatch
+        self.plans.append(plan)
+        raise SpanMismatch(natural=self.natural, target=plan.selection.end - plan.selection.start)
+
+
+def test_a_line_too_long_for_the_selection_becomes_a_question(client, project, monkeypatch):
     import app.api.main as main
-    from app.media.ffmpeg import SpanMismatch
+    voice = Unfitted(natural=2.0)
+    monkeypatch.setattr(main, "voice", voice)
 
-    class TooLong:
-        identity = "stock"
+    job = await_job(client, start_preview(client)["job_id"])
 
-        def cost_of(self, plan):
-            return 0
+    assert job["status"] == "succeeded"
+    q = job["result"]
+    assert q["type"] == "question"
+    assert q["text"] == "30% off" and q["mix"] == "replace"
+    assert [o["fit"] for o in q["options"]] == ["stretch"]  # no room to run past the end
+    assert "rushed" in q["options"][0]["warning"]
+    assert len(voice.plans) == 1
 
-        def synthesize(self, source, plan, transcript=None):
-            raise SpanMismatch(natural=2.0, target=0.5)
 
-    monkeypatch.setattr(main, "voice", TooLong())
+def test_a_line_too_short_offers_start_or_stretch(client, project, monkeypatch):
+    import app.api.main as main
+    monkeypatch.setattr(main, "voice", Unfitted(natural=0.2))
+
+    q = await_job(client, start_preview(client)["job_id"])["result"]
+
+    assert [o["fit"] for o in q["options"]] == ["start", "stretch"]
+    assert "silence" in q["options"][0]["label"]
+    assert "dragged" in q["options"][1]["warning"]
+
+
+def test_an_answer_carries_the_choice_and_skips_reading_the_request(client, project, monkeypatch):
+    import app.api.main as main
+    voice = Unfitted(natural=0.2)
+    monkeypatch.setattr(main, "voice", voice)
+
+    job = await_job(client, start_preview(
+        client, prompt="anything", text="Thirsty", fit="stretch", mix="layer",
+    )["job_id"])
+
+    assert job["status"] == "failed"        # the fake cannot place it either way
+    plan = voice.plans[0]
+    assert (plan.new_text, plan.fit, plan.mix) == ("Thirsty", "stretch", "layer")
+
+
+def speechless(monkeypatch, main, transcript):
+    """Make the stored project read back with `transcript`."""
+    from dataclasses import replace
+    real_get = main.repo.get
+    monkeypatch.setattr(main.repo, "get", lambda pid: replace(real_get(pid), transcript=transcript))
+
+
+class Reads:
+    """An interpreter returning a fixed Intent, recording what it was given."""
+
+    def __init__(self, intent, tokens=None):
+        self.intent = intent
+        self.tokens = tokens
+        self.seen = []
+
+    def interpret(self, prompt, history, context, meter=None):
+        self.seen.append((prompt, history, context))
+        if meter is not None and self.tokens:
+            meter("claude-opus-5", *self.tokens)
+        return self.intent
+
+
+def test_a_request_the_editor_cannot_do_gets_a_reply(client, project, monkeypatch):
+    import app.api.main as main
+    from app.domain.models import Intent
+    monkeypatch.setattr(main, "interpreter", Reads(Intent("unsupported", reply="Speech only.")))
+
+    job = await_job(client, start_preview(client, prompt="make the background white")["job_id"])
+
+    assert job["status"] == "succeeded"
+    assert job["result"] == {"type": "reply", "text": "Speech only."}
+
+
+def test_the_chat_so_far_reaches_the_interpreter(client, project, monkeypatch):
+    # Phase 9a: the server keeps the chat, so history is its record — both
+    # sides of earlier turns — not whatever the client sends.
+    import app.api.main as main
+    from app.domain.models import Intent
+    reader = Reads(Intent("unsupported", reply="Speech only."))
+    monkeypatch.setattr(main, "interpreter", reader)
+    await_job(client, start_preview(client, prompt="make it white")["job_id"])
+
+    reader.intent = Intent("speak", new_text="30% off")
+    preview(client, prompt="ok, say 30% off")
+
+    _, history, context = reader.seen[1]
+    assert [(t.role, t.text) for t in history] == [
+        ("user", "make it white"), ("assistant", "Speech only."),
+    ]
+    assert context.selected == "20% off"
+
+
+def test_the_chat_is_kept_with_the_project(client, project, monkeypatch):
+    import app.api.main as main
+    from app.domain.models import Intent
+    monkeypatch.setattr(main, "interpreter", Reads(Intent("unsupported", reply="Speech only.")))
+    await_job(client, start_preview(client, prompt="make it white")["job_id"])
+    await_job(client, start_preview(client, prompt="x", display="Layer it")["job_id"])
+
+    messages = client.get("/projects/p1").json()["messages"]
+
+    assert messages == [
+        {"role": "user", "text": "make it white"}, {"role": "assistant", "text": "Speech only."},
+        {"role": "user", "text": "Layer it"}, {"role": "assistant", "text": "Speech only."},
+    ]
+
+
+# ── spend is recorded, and the ceiling holds (Phase 9b) ──────────────────────
+
+def test_claude_calls_are_recorded_with_their_estimated_cost(client, project, monkeypatch):
+    import app.api.main as main
+    from app.domain.models import Intent
+    monkeypatch.setattr(main, "interpreter", Reads(Intent("unsupported", reply="No."), tokens=(1000, 200)))
+
+    await_job(client, start_preview(client, prompt="make it white")["job_id"])
+
+    usage = client.get("/projects/p1/usage").json()
+    [line] = usage["lines"]
+    assert (line["vendor"], line["what"], line["units"], line["calls"]) == ("anthropic", "intent", 1200, 1)
+    assert line["usd"] == pytest.approx(0.01)      # 1000 × $5/M + 200 × $25/M
+    assert usage["spent_usd"] == pytest.approx(0.01)
+
+
+def test_voice_characters_count_toward_spend(client, project, monkeypatch):
+    import app.api.main as main
+    from app.budget import VoiceBudget
+    monkeypatch.setattr(main, "voice", PricedVoice(main.voice, price=0))
+    budget = VoiceBudget(ceiling=100, ledger=main.ledger, usd_per_1k=0.30)
+    monkeypatch.setattr(main, "budget", budget)
+    budget.charge("p1", 40)
+
+    usage = client.get("/projects/p1/usage").json()
+
+    assert usage["voice_characters"] == 40
+    assert usage["spent_usd"] == pytest.approx(0.012)
+
+
+def test_no_new_paid_work_once_the_ceiling_is_reached(client, project, monkeypatch):
+    import app.api.main as main
+    reader = Reads(None)
+    monkeypatch.setattr(main, "interpreter", reader)
+    main.ledger.record("p1", "anthropic", "intent", 1, "tokens", main.ledger.ceiling_usd)
+
     job = await_job(client, start_preview(client)["job_id"])
 
     assert job["status"] == "failed"
-    assert job["attempts"] == 1
-    assert "widen the selection" in job["error"]
+    assert "spending limit" in job["error"]
+    assert reader.seen == []          # Claude was never called
+
+
+# ── projects persist, are listed, reopened and deleted (Phase 9a) ────────────
+
+def test_projects_are_listed_newest_first(client, project, sample_video):
+    second = upload(client, sample_video).json()["project_id"]
+    listed = client.get("/projects").json()["projects"]
+    assert [p["project_id"] for p in listed] == [second, "p1"]
+    assert listed[1]["filename"] == "ad.mp4" and listed[1]["edits"] == 0
+
+
+def test_a_project_reopens_with_its_approved_edits(client, project):
+    candidate = preview(client)
+    client.post("/projects/p1/edits", json={"candidate_id": candidate["candidate_id"]})
+
+    reopened = client.get("/projects/p1").json()
+
+    assert reopened["transcript"][1]["text"] == "20%"
+    assert [e["new_text"] for e in reopened["edits"]] == ["30% off"]
+
+
+def test_deleting_a_project_removes_it_and_its_media(client, project):
+    import app.api.main as main
+    media_dir = main.artifacts.root / "p1"
+    assert media_dir.is_dir()
+
+    assert client.delete("/projects/p1").status_code == 204
+
+    assert client.get("/projects/p1").status_code == 404
+    assert not media_dir.exists()
+    assert client.get("/projects").json()["projects"] == []
+
+
+def test_someone_elses_project_is_not_found(client, project, monkeypatch):
+    import app.api.main as main
+    main.app.dependency_overrides[main.current_owner] = lambda: "someone-else"
+    try:
+        assert client.get("/projects/p1").status_code == 404
+        assert client.post("/projects/p1/export").status_code == 404
+        assert client.delete("/projects/p1").status_code == 404
+        assert client.get("/projects").json()["projects"] == []
+    finally:
+        main.app.dependency_overrides.clear()
+    assert client.get("/projects/p1").status_code == 200
+
+
+def test_projects_survive_a_restart(tmp_path):
+    from app.domain.models import Transcript, Word
+    from app.store.db import Database
+    from app.store.repository import ProjectRepository
+    from tests.factories import make_source
+    path = tmp_path / "ave.db"
+    first = ProjectRepository(Database(path))
+    pid = first.next_id()
+    first.create(make_source(project_id=pid), Transcript(words=(Word("hi", 0.0, 0.3),)))
+    first.add_message(pid, "user", "hello")
+
+    again = ProjectRepository(Database(path))
+
+    assert again.get(pid).transcript.words[0].text == "hi"
+    assert [m.text for m in again.messages(pid)] == ["hello"]
+    assert again.next_id() == "p2"   # ids are never reused
+
+
+def test_an_edit_over_no_speech_asks_how_to_mix(client, project, monkeypatch):
+    import app.api.main as main
+    from app.domain.models import Intent, Transcript
+    reader = Reads(Intent("speak", new_text="Thirsty"))
+    monkeypatch.setattr(main, "interpreter", reader)
+    speechless(monkeypatch, main, Transcript(words=()))
+
+    q = await_job(client, start_preview(client)["job_id"])["result"]
+
+    assert q["type"] == "question"
+    assert [o["mix"] for o in q["options"]] == ["replace", "layer", "concatenate"]
+
+
+def test_the_mix_named_in_the_request_is_not_asked_about(client, project, monkeypatch):
+    import app.api.main as main
+    from app.domain.models import Intent, Transcript
+    monkeypatch.setattr(main, "interpreter", Reads(Intent("speak", new_text="30% off", mix="layer")))
+    speechless(monkeypatch, main, Transcript(words=()))
+
+    candidate = preview(client)
+
+    assert candidate["type"] == "candidate"
+    assert candidate["plan"]["mix"] == "layer"
 
 
 # ── measured continuity over the wire (Phase 6a) ─────────────────────────────
@@ -541,3 +800,490 @@ def test_re_approving_a_span_exports_one_edit_not_two(client, project):
     edited = [s for s in segments if s["kind"] == "edited"]
     assert len(edited) == 1
     assert edited[0]["ref"] == second["frames"]["sha256"]
+
+
+def test_voices_are_listed_with_the_default(client):
+    body = client.get("/voices").json()
+    assert body["default"] == "mock"
+    assert [v["voice_id"] for v in body["voices"]] == ["mock"]
+
+
+# ── speakers and their voices (Phase 11) ─────────────────────────────────────
+
+def detected(client):
+    resp = client.post("/projects/p1/speakers/detect")
+    assert resp.status_code == 200, resp.text
+    return resp.json()
+
+
+def test_speakers_can_be_detected_for_an_older_project(client, project):
+    assert project["speakers"] == []
+    body = detected(client)
+    assert body["speakers"] == [{"label": "A", "name": "Speaker A", "voice_id": None}]
+    assert {st["speaker"] for st in body["statements"]} == {"A"}
+
+
+def test_a_speaker_can_be_renamed_and_given_a_voice(client, project):
+    detected(client)
+    resp = client.put("/projects/p1/speakers/A", json={"name": "Shopkeeper", "voice_id": "nPczCjzI2devNBz1zQrb"})
+    assert resp.json()["speakers"] == [
+        {"label": "A", "name": "Shopkeeper", "voice_id": "nPczCjzI2devNBz1zQrb"}]
+    resp = client.put("/projects/p1/speakers/A", json={"clear_voice": True})
+    assert resp.json()["speakers"][0]["voice_id"] is None
+    assert resp.json()["speakers"][0]["name"] == "Shopkeeper"
+
+
+def test_an_unknown_speaker_is_404(client, project):
+    assert client.put("/projects/p1/speakers/Z", json={"name": "x"}).status_code == 404
+
+
+def test_a_speakers_line_is_spoken_in_their_voice(client, project):
+    detected(client)
+    client.put("/projects/p1/speakers/A", json={"voice_id": "nPczCjzI2devNBz1zQrb"})
+    candidate = preview(client)             # the selection is A's words
+    assert candidate["plan"]["voice_profile_id"] == "nPczCjzI2devNBz1zQrb"
+
+
+def test_without_a_speaker_voice_the_chats_voice_is_used(client, project):
+    detected(client)
+    candidate = preview(client, voice_profile_id="EXAVITQu4vr4xnSDxMaL")
+    assert candidate["plan"]["voice_profile_id"] == "EXAVITQu4vr4xnSDxMaL"
+
+
+def test_speaker_settings_survive_reopening(client, project):
+    detected(client)
+    client.put("/projects/p1/speakers/A", json={"name": "Shopkeeper"})
+    reopened = client.get("/projects/p1").json()
+    assert reopened["speakers"][0]["name"] == "Shopkeeper"
+
+
+# ── Phase 12: Revert, project settings, long lines, wording ──────────────────
+
+def test_a_reverted_edit_is_marked_skipped_by_the_render_and_not_counted(client, project):
+    candidate = preview(client)
+    client.post("/projects/p1/edits", json={"candidate_id": candidate["candidate_id"]})
+    assert client.get("/projects").json()["projects"][0]["edits"] == 1
+
+    resp = client.post("/projects/p1/edits/e1/revert")
+
+    assert resp.status_code == 200 and resp.json() == {"edit_id": "e1", "reverted": True}
+    reopened = client.get("/projects/p1").json()
+    assert [(e["edit_id"], e["reverted"]) for e in reopened["edits"]] == [("e1", True)]
+    segments = client.post("/projects/p1/export").json()["segments"]
+    assert [s["kind"] for s in segments] == ["original"]
+    assert client.get("/projects").json()["projects"][0]["edits"] == 0
+
+
+def test_reverting_an_unknown_edit_is_404(client, project):
+    assert client.post("/projects/p1/edits/e9/revert").status_code == 404
+
+
+def test_long_lines_run_into_the_pause_by_default_and_the_setting_can_change_it(client, project):
+    assert project["settings"] == {"long_lines": "pause", "autonomy": "ask"}
+    resp = client.put("/projects/p1/settings", json={"long_lines": "ask"})
+    assert resp.json() == {"settings": {"long_lines": "ask", "autonomy": "ask"}}
+    assert client.get("/projects/p1").json()["settings"]["long_lines"] == "ask"
+
+
+class HeldTake:
+    """A voice whose line is `natural` seconds: it cannot fit the selection on
+    its own, but once told how to place it, it does — like ElevenLabs holding
+    the take that prompted the question."""
+
+    identity = "stock"
+
+    def __init__(self, natural):
+        self.natural = natural
+        self.plans = []
+
+    def cost_of(self, plan):
+        return 0
+
+    def synthesize(self, source, plan, transcript=None):
+        import tempfile
+        from pathlib import Path
+        import app.api.main as main
+        from app.media.ffmpeg import SpanMismatch
+        self.plans.append(plan)
+        target = plan.selection.end - plan.selection.start
+        if plan.fit is None:
+            raise SpanMismatch(natural=self.natural, target=target)
+        length = self.natural if plan.fit == "start" else target
+        with tempfile.TemporaryDirectory() as tmp:
+            path, duration = ffmpeg.generate_tone(Path(tmp) / "take.wav", length, 440)
+            return main.artifacts.put_file(source.project_id, path, kind="audio",
+                                           container="wav", duration=duration)
+
+
+def with_a_pause(monkeypatch):
+    """A transcript with a 0.5 s pause after "off" (1.3–1.8)."""
+    import app.api.main as main
+    from app.domain.models import Transcript, Word
+    speechless(monkeypatch, main, Transcript(words=(
+        Word("Get", 0.0, 0.4), Word("20%", 0.4, 0.9), Word("off", 0.9, 1.3), Word("today", 1.8, 2.3),
+    )))
+
+
+def test_a_longer_line_runs_into_the_pause_after_it_without_asking(client, project, monkeypatch):
+    import app.api.main as main
+    voice = HeldTake(natural=1.3)   # 0.4 s longer than the 0.9 s selection; the pause is 0.5 s
+    monkeypatch.setattr(main, "voice", voice)
+    with_a_pause(monkeypatch)
+
+    result = preview(client)
+
+    assert result["type"] == "candidate"
+    assert [p.fit for p in voice.plans] == [None, "start"]
+    # The edit now covers the whole line, so its end is not cut off.
+    assert result["plan"]["selection"] == {"start": 0.4, "end": pytest.approx(1.7, abs=0.02)}
+
+
+def test_a_line_too_long_for_the_pause_still_asks(client, project, monkeypatch):
+    import app.api.main as main
+    voice = HeldTake(natural=2.0)   # 1.1 s over; only 0.5 s of pause
+    monkeypatch.setattr(main, "voice", voice)
+    with_a_pause(monkeypatch)
+
+    result = preview(client)
+
+    assert result["type"] == "question"
+    assert len(voice.plans) == 1
+
+
+def test_the_project_can_insist_on_being_asked(client, project, monkeypatch):
+    import app.api.main as main
+    voice = HeldTake(natural=1.3)
+    monkeypatch.setattr(main, "voice", voice)
+    with_a_pause(monkeypatch)
+    client.put("/projects/p1/settings", json={"long_lines": "ask"})
+
+    assert preview(client)["type"] == "question"
+    assert len(voice.plans) == 1
+
+
+def test_one_edit_can_choose_to_speed_up_instead(client, project, monkeypatch):
+    import app.api.main as main
+    voice = HeldTake(natural=1.3)
+    monkeypatch.setattr(main, "voice", voice)
+    with_a_pause(monkeypatch)
+
+    result = preview(client, on_long="stretch")
+
+    assert result["type"] == "candidate"
+    assert [p.fit for p in voice.plans] == [None, "stretch"]
+    assert result["plan"]["selection"] == {"start": 0.4, "end": 1.3}
+
+
+def test_a_short_line_always_asks(client, project, monkeypatch):
+    import app.api.main as main
+    voice = HeldTake(natural=0.2)
+    monkeypatch.setattr(main, "voice", voice)
+    with_a_pause(monkeypatch)
+    assert preview(client)["type"] == "question"
+
+
+def test_wording_suggestions_come_from_claude_and_are_metered(client, project, monkeypatch):
+    import app.api.main as main
+    from app.domain.models import Intent
+    reader = Reads(Intent("speak", new_text="Get 30% off."), tokens=(120, 10))
+    reader.identity = "claude"
+    monkeypatch.setattr(main, "interpreter", reader)
+
+    resp = client.post("/projects/p1/lines/reword",
+                       json={"start": 0.5, "end": 1.0, "draft": "Get thirty percent off"})
+
+    assert resp.status_code == 200
+    assert resp.json()["text"] == "Get 30% off."
+    assert resp.json()["selection"] == {"start": 0.4, "end": 1.3}
+    prompt, history, context = reader.seen[0]
+    assert "Get thirty percent off" in prompt and history == []
+    assert context.selected == "20% off"
+    lines = client.get("/projects/p1/usage").json()["lines"]
+    assert any(line["what"] == "wording" for line in lines)
+
+
+def test_wording_suggestions_need_claude(client, project):
+    resp = client.post("/projects/p1/lines/reword", json={"start": 0.5, "end": 1.0})
+    assert resp.status_code == 503
+    assert "ANTHROPIC_API_KEY" in resp.json()["detail"]
+
+
+def test_a_wording_request_claude_cannot_answer_is_a_422(client, project, monkeypatch):
+    import app.api.main as main
+    from app.domain.models import Intent
+    reader = Reads(Intent("clarify", reply="Which part should change?"))
+    reader.identity = "claude"
+    monkeypatch.setattr(main, "interpreter", reader)
+    resp = client.post("/projects/p1/lines/reword", json={"start": 0.5, "end": 1.0})
+    assert resp.status_code == 422 and resp.json()["detail"] == "Which part should change?"
+
+
+# ── Phase 13: the agent ──────────────────────────────────────────────────────
+
+GOAL = 'change "20% off" to "30% off"'
+
+
+class Plans:
+    """A planner returning a fixed proposal, with an optional shorter line."""
+
+    identity = "claude"
+
+    def __init__(self, edits, suggestions=(), shorter=None, summary="Here's my plan."):
+        from app.orchestrator.planner import Change, Proposal
+        self.proposal = Proposal(summary, tuple(Change(*e) for e in edits), tuple(Change(*s) for s in suggestions))
+        self.shorter = shorter
+        self.seen = []
+
+    def plan(self, goal, lines, history=(), meter=None):
+        self.seen.append((goal, lines, list(history)))
+        if meter:
+            meter("claude-opus-5", 800, 100)
+        return self.proposal
+
+    def shorten(self, text, share, line, meter=None):
+        return self.shorter
+
+
+def make_plan(client, goal=GOAL, **body):
+    resp = client.post("/projects/p1/plans", json={"goal": goal, **body})
+    assert resp.status_code == 200, resp.text
+    return resp.json()
+
+
+def run_plan(client, plan_id, **body):
+    resp = client.post(f"/projects/p1/plans/{plan_id}/run", json=body)
+    assert resp.status_code == 202, resp.text
+    job = await_job(client, resp.json()["job_id"])
+    assert job["status"] == "succeeded", job
+    return job["result"]
+
+
+def test_a_goal_becomes_a_plan_that_waits_for_run(client, project):
+    plan = make_plan(client)
+
+    assert plan["plan_id"] == "plan1" and plan["mode"] == "ask" and plan["status"] == "proposed"
+    assert [(i["item_id"], i["old_text"], i["new_text"], i["status"], i["enabled"]) for i in plan["items"]] == [
+        ("i1", "Get 20% off today only.", "Get 30% off today only.", "planned", True),
+    ]
+    assert plan["items"][0]["selection"] == {"start": 0.0, "end": 2.3}
+    assert plan["estimate"]["items"] == 1 and plan["estimate"]["seconds"] > 0
+    assert [e["text"] for e in plan["log"]] == ["Read your goal and all 1 lines", "Planned 1 change"]
+    # The goal and the summary join the chat; the plan comes back with the project.
+    reopened = client.get("/projects/p1").json()
+    assert [m["text"] for m in reopened["messages"]] == [GOAL, "Found 1 line to change."]
+    assert reopened["plan"]["plan_id"] == "plan1"
+    assert client.get("/projects/p1/plans/plan1").json()["goal"] == GOAL
+
+
+def test_an_empty_goal_or_a_silent_video_is_refused(client, project, monkeypatch):
+    assert client.post("/projects/p1/plans", json={"goal": "  "}).status_code == 422
+    import app.api.main as main
+    from app.domain.models import Transcript
+    speechless(monkeypatch, main, Transcript(words=()))
+    assert client.post("/projects/p1/plans", json={"goal": GOAL}).status_code == 422
+
+
+def test_planning_is_metered_and_uses_the_speakers_names(client, project, monkeypatch):
+    import app.api.main as main
+    planner = Plans([(1, "Get 30% off today only.", "replace", "Offer")])
+    monkeypatch.setattr(main, "planner", planner)
+    client.post("/projects/p1/speakers/detect")
+    client.put("/projects/p1/speakers/A", json={"name": "Presenter"})
+
+    make_plan(client, goal="make it 30% off")
+    make_plan(client, goal="and louder")
+
+    goal, lines, history = planner.seen[1]
+    assert lines[0].speaker == "Presenter" and lines[0].index == 1
+    assert history == ["make it 30% off"]     # the earlier goal, for context
+    usage = client.get("/projects/p1/usage").json()
+    assert any(line["what"] == "planning" and line["calls"] == 2 for line in usage["lines"])
+
+
+def test_items_can_be_unticked_reworded_and_suggestions_added_or_left(client, project, monkeypatch):
+    import app.api.main as main
+    monkeypatch.setattr(main, "planner", Plans(
+        [(1, "Get 30% off today only.", "replace", "Offer")],
+        suggestions=[(1, "Get 30% off this week only.", "replace", "Reads better")],
+    ))
+    plan = make_plan(client, goal="30% off")
+    assert [(i["kind"], i["status"], i["enabled"]) for i in plan["items"]] == [
+        ("planned", "planned", True), ("suggestion", "suggested", False)]
+
+    off = client.put("/projects/p1/plans/plan1/items/i1", json={"enabled": False}).json()
+    assert off["items"][0]["enabled"] is False and off["estimate"]["items"] == 0
+
+    worded = client.put("/projects/p1/plans/plan1/items/i1", json={"enabled": True, "new_text": " Get half off. "}).json()
+    assert worded["items"][0]["new_text"] == "Get half off." and worded["items"][0]["note"] == "Your wording"
+
+    added = client.put("/projects/p1/plans/plan1/items/i2", json={"include": True}).json()
+    assert (added["items"][1]["kind"], added["items"][1]["status"], added["items"][1]["enabled"]) == ("planned", "planned", True)
+    assert added["estimate"]["items"] == 2
+    left = client.put("/projects/p1/plans/plan1/items/i2", json={"include": False}).json()
+    assert left["items"][1]["status"] == "dismissed" and left["estimate"]["items"] == 1
+    assert client.put("/projects/p1/plans/plan1/items/i9", json={"enabled": True}).status_code == 404
+    assert client.put("/projects/p1/plans/plan1/items/i1", json={"new_text": " "}).status_code == 422
+
+
+def test_running_the_plan_voices_each_item_then_approve_all_exports(client, project):
+    plan = make_plan(client)
+
+    done = run_plan(client, plan["plan_id"])
+
+    item = done["items"][0]
+    assert done["status"] == "done" and item["status"] == "ready"
+    assert item["candidate"]["candidate_id"] == "c1" and item["candidate"]["continuity"]["passed"] is True
+    assert any(e["text"].startswith("Voiced the line at 0:00") for e in done["log"])
+
+    resp = client.post("/projects/p1/plans/plan1/approve", json={})
+    body = resp.json()
+    assert resp.status_code == 200
+    assert body["approved"] == [{"item_id": "i1", "edit_id": "e1", "overridden": False}] and body["skipped"] == []
+    assert [s["kind"] for s in body["export"]["segments"]] == ["edited"]
+    assert body["plan"]["items"][0]["status"] == "approved" and body["plan"]["items"][0]["edit_id"] == "e1"
+    assert body["plan"]["log"][-1]["text"] == "Rendered the edited video"
+    assert [e["edit_id"] for e in client.get("/projects/p1").json()["edits"]] == ["e1"]
+
+
+def test_draft_mode_runs_the_plan_at_once(client, project):
+    client.put("/projects/p1/settings", json={"autonomy": "draft"})
+    assert client.get("/projects/p1").json()["settings"]["autonomy"] == "draft"
+
+    plan = make_plan(client)
+
+    assert plan["mode"] == "draft" and plan["status"] == "running" and plan["job_id"]
+    job = await_job(client, plan["job_id"])
+    assert job["result"]["items"][0]["status"] == "ready"
+
+
+def test_running_needs_consent(client, project_without_consent):
+    plan = make_plan(client)
+    assert client.post("/projects/p1/plans/plan1/run", json={}).status_code == 403
+    assert client.post("/projects/p1/plans", json={"goal": GOAL, "mode": "draft"}).status_code == 403
+    assert plan["status"] == "proposed"
+
+
+def test_nothing_ticked_is_refused_and_an_unknown_plan_is_404(client, project):
+    make_plan(client)
+    client.put("/projects/p1/plans/plan1/items/i1", json={"enabled": False})
+    assert client.post("/projects/p1/plans/plan1/run", json={}).status_code == 422
+    assert client.post("/projects/p1/plans/plan9/run", json={}).status_code == 404
+    assert client.get("/projects/p1/plans/plan9").status_code == 404
+
+
+class LongUnlessShort:
+    """A voice whose line runs 4.0 s unless it is short, in which case it fits."""
+
+    identity = "stock"
+
+    def __init__(self):
+        self.plans = []
+
+    def cost_of(self, plan):
+        return 0
+
+    def synthesize(self, source, plan, transcript=None):
+        import tempfile
+        from pathlib import Path
+        import app.api.main as main
+        from app.media.ffmpeg import SpanMismatch
+        self.plans.append(plan)
+        target = plan.selection.end - plan.selection.start
+        if plan.fit is None and len(plan.new_text) > 20:
+            raise SpanMismatch(natural=4.0, target=target)
+        with tempfile.TemporaryDirectory() as tmp:
+            path, duration = ffmpeg.generate_tone(Path(tmp) / "take.wav", target, 330)
+            return main.artifacts.put_file(source.project_id, path, kind="audio",
+                                           container="wav", duration=duration)
+
+
+def test_a_line_that_runs_long_needs_you_with_the_agents_own_fix_first(client, project, monkeypatch):
+    import app.api.main as main
+    monkeypatch.setattr(main, "voice", LongUnlessShort())
+    monkeypatch.setattr(main, "planner", Plans(
+        [(1, "Get thirty percent off today only, this week.", "replace", "Offer")], shorter="30% off now.",
+    ))
+    plan = make_plan(client, goal="30% off")
+
+    done = run_plan(client, plan["plan_id"])
+
+    item = done["items"][0]
+    assert item["status"] == "needs-you" and done["status"] == "done"
+    assert item["question"]["question"].startswith("The new line runs")
+    assert item["question"]["options"][0] == {
+        "label": "Use a shorter line: “30% off now.”", "fit": None, "mix": None, "warning": None, "text": "30% off now.",
+    }
+    assert "stretch" in [o["fit"] for o in item["question"]["options"]]
+
+    resp = client.post("/projects/p1/plans/plan1/items/i1/answer", json={"text": "30% off now."})
+    assert resp.status_code == 202
+    answered = await_job(client, resp.json()["job_id"])["result"]
+    assert answered["items"][0]["status"] == "ready"
+    assert answered["items"][0]["note"] == "The shorter line you picked"
+    assert any("picked the shorter line" in e["text"] for e in answered["log"])
+
+
+def test_a_placement_answer_and_a_redo_voice_the_item_again(client, project, monkeypatch):
+    import app.api.main as main
+    voice = LongUnlessShort()
+    monkeypatch.setattr(main, "voice", voice)
+    monkeypatch.setattr(main, "planner", Plans([(1, "Get thirty percent off today only, friends.", "replace", "")]))
+    make_plan(client, goal="30% off")
+    assert run_plan(client, "plan1")["items"][0]["status"] == "needs-you"
+
+    resp = client.post("/projects/p1/plans/plan1/items/i1/answer", json={"fit": "stretch"})
+    ready = await_job(client, resp.json()["job_id"])["result"]
+    assert ready["items"][0]["status"] == "ready" and voice.plans[-1].fit == "stretch"
+    first = ready["items"][0]["candidate"]["candidate_id"]
+
+    resp = client.post("/projects/p1/plans/plan1/items/i1/redo")
+    redone = await_job(client, resp.json()["job_id"])["result"]
+    assert redone["items"][0]["status"] == "ready"
+    assert redone["items"][0]["candidate"]["candidate_id"] != first
+
+
+def test_a_failing_take_is_skipped_by_approve_all_unless_overridden(client, project):
+    client.post("/projects/p1/speakers/detect")
+    client.put("/projects/p1/speakers/A", json={"voice_id": "unknown"})   # the mock engine fails this voice
+    make_plan(client)
+    assert run_plan(client, "plan1")["items"][0]["candidate"]["continuity"]["passed"] is False
+
+    body = client.post("/projects/p1/plans/plan1/approve", json={}).json()
+    assert body["approved"] == [] and body["skipped"] == [{"item_id": "i1", "reason": "continuity check failed"}]
+    assert body["export"] is None
+
+    body = client.post("/projects/p1/plans/plan1/approve", json={"override": True}).json()
+    assert body["approved"] == [{"item_id": "i1", "edit_id": "e1", "overridden": True}]
+
+
+def test_approving_a_plan_items_take_through_the_edit_route_marks_the_item(client, project):
+    make_plan(client)
+    done = run_plan(client, "plan1")
+    client.post("/projects/p1/edits", json={"candidate_id": done["items"][0]["candidate"]["candidate_id"]})
+    item = client.get("/projects/p1/plans/plan1").json()["items"][0]
+    assert (item["status"], item["edit_id"]) == ("approved", "e1")
+
+
+def test_a_vendor_failure_fails_the_item_not_the_plan(client, project, monkeypatch):
+    import app.api.main as main
+    from app.adapters.base import VendorError
+
+    class Down:
+        identity = "stock"
+
+        def cost_of(self, plan):
+            return 0
+
+        def synthesize(self, source, plan, transcript=None):
+            raise VendorError("ElevenLabs is unavailable right now (503).")
+
+    monkeypatch.setattr(main, "voice", Down())
+    monkeypatch.setattr(main.runner, "_sleep", lambda s: None)
+    monkeypatch.setattr("app.api.main.with_retries", lambda work, **kw: __import__("app.jobs.runner", fromlist=["with_retries"]).with_retries(work, sleep=lambda s: None))
+    make_plan(client)
+
+    done = run_plan(client, "plan1")
+
+    item = done["items"][0]
+    assert item["status"] == "failed" and "Redo" in item["error"]
+    assert done["status"] == "done"

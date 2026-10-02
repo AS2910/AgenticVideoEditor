@@ -1,14 +1,33 @@
-.player { display: flex; flex-direction: column; gap: 12px; }
+.player { display: flex; flex-direction: column; gap: 10px; }
+/* The monitor: neutral black surround so picture reads true. */
 .stage {
-  aspect-ratio: 16 / 9; border-radius: var(--radius); overflow: hidden;
-  background: linear-gradient(135deg, #0d1a2b, #0a0e14);
-  border: 1px solid var(--border);
-  display: grid; place-items: center;
+  aspect-ratio: 16 / 9; max-height: 46vh; position: relative; overflow: hidden;
+  background: #000; border-radius: var(--radius-lg);
 }
-.video { width: 100%; height: 100%; object-fit: cover; }
-.controls { display: flex; gap: 12px; align-items: center; }
+/* Pinned to the stage rather than sized by percentage: `height: 100%` does not
+   resolve against an aspect-ratio box, which let a portrait video grow to its
+   natural height and be clipped to its middle. */
+.video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; background: #000; }
+
+.controls { display: flex; align-items: center; gap: 12px; }
 .play {
-  padding: 8px 18px; border-radius: 8px; border: 1px solid var(--border);
-  background: var(--surface); color: var(--text);
+  width: 34px; height: 34px; flex: none; border-radius: 50%; border: none;
+  background: var(--text); color: var(--bg); display: flex; align-items: center; justify-content: center;
 }
-.scrubber { flex: 1; accent-color: var(--electric); }
+.play:hover { background: #fff; }
+.timecode { font-size: 13px; white-space: nowrap; }
+.of { color: var(--muted); }
+
+/* The progress bar: a thin track, the played part, markers where the changes
+   are, and the real range input laid invisibly over it so it stays a slider. */
+.bar { position: relative; flex: 1; height: 4px; border-radius: 2px; background: var(--line); }
+.played { position: absolute; left: 0; top: 0; height: 4px; border-radius: 2px; background: var(--text); pointer-events: none; }
+.mark {
+  position: absolute; top: -3px; width: 3px; height: 10px; margin-left: -1px;
+  border-radius: 2px; background: var(--accent); pointer-events: none;
+}
+.scrubber {
+  position: absolute; left: 0; top: -8px; width: 100%; height: 20px; margin: 0;
+  opacity: 0; cursor: pointer;
+}
+.scrubber:focus-visible { opacity: 1; }

@@ -1,0 +1,16 @@
+.box { display: flex; flex-direction: column; gap: 14px; }
+.title { margin: 0; font-size: 22px; font-weight: 600; letter-spacing: -0.02em; line-height: 1.2; }
+.lead { margin: 0; color: var(--muted); font-size: 14px; line-height: 1.5; }
+.card { display: flex; flex-direction: column; gap: 10px; padding: 12px; border-radius: 14px; background: var(--surface); border: 1px solid var(--line); }
+.card:focus-within { border-color: var(--accent); }
+.input { width: 100%; resize: none; padding: 2px; font-size: 15px; line-height: 1.5; background: transparent; color: var(--text); border: none; }
+.input:focus { outline: none; }
+.input::placeholder { color: var(--faint); }
+.row { display: flex; align-items: center; gap: 10px; }
+.caption { color: var(--muted); font-size: 13px; }
+.spacer { flex: 1; }
+.plan { padding: 8px 14px; border-radius: 10px; font-weight: 600; background: var(--accent-fill); color: #fff; border: none; }
+.plan:disabled { background: var(--raised); color: var(--muted); }
+.examples { display: flex; flex-wrap: wrap; gap: 8px; }
+.example { padding: 6px 12px; border-radius: 999px; font-size: 13px; background: var(--surface); color: var(--text); border: 1px solid var(--line); text-align: left; }
+.example:hover { border-color: var(--muted); }

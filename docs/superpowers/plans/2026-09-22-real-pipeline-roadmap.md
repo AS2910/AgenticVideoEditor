@@ -1,7 +1,7 @@
 # Real Pipeline — Phased Roadmap
 
 **Date:** 2026-09-22
-**Status:** Phases 0–4a, 6a and 7 done and clean (2026-09-23). Phases 4b and 5 moved to the **Backlog** — both are blocked on vendor access, not on code.
+**Status:** Phases 0–4a, 6a, 7, 8 and 9 done and clean (8 and 9 on 2026-09-26; 9c is a design). Phases 10 (editing UX) and 11 (multiple voices) done the same day; the editor was redesigned on 2026-09-26 (`docs/superpowers/specs/2026-09-26-editor-ui-redesign.md`). Phases 12 (the agentic editor) and 13 (the agent) done 2026-10-02 (`2026-09-28-phase-12-13-agentic-editor.md`). **Next: the Backlog** — 9c sign-in is the only item not blocked on a vendor. Phases 4b and 5 moved to the **Backlog** — both are blocked on vendor access, not on code.
 **Supersedes nothing.** Builds on `2026-07-14-walking-skeleton.md` and `2026-07-17-voltage-frontend.md`.
 
 **Goal:** turn the mocked walking skeleton into a system that ingests a real video, produces a real re-voiced and lip-synced segment, verifies continuity with real signal analysis, and exports a real playable file — honoring the v1 design spec end-to-end.
@@ -152,13 +152,43 @@ Grouped into three milestones. Each milestone is independently useful — you ca
   - Export returns the render; the UI offers "Download MP4", cleared when a new edit is approved
   - **Exit met:** 287 backend + 62 frontend tests. Live: sample → "30% off" (prosody 0.97) → approve → export → a 2.300 s H.264/AAC MP4 that Whisper transcribes as **"Get 30% off today only."**; seam discontinuities 0.036/0.046 vs 0.198 for ordinary speech.
 
-- [ ] **Phase 8 · Real intent parsing**
-  - Replace the regex planner with transcript-aware LLM intent parsing — handles "make it sound more urgent", "drop the price mention", not just `change "X" to "Y"`
-  - Preserve chat context across the iterate loop (spec §5.8)
-  - Model selection pinned at implementation time against current model docs.
+- [x] **Phase 8 · Real intent parsing** — **done 2026-09-26** (plan: `2026-09-26-phase-8-intent-and-placement.md`)
+  - Claude (`claude-opus-5`, effort low, structured output) reads free-form requests with the selection's words and the chat so far (spec §5.8); non-speech requests get a plain chat reply. The regex survives as the offline `RuleInterpreter`.
+  - **Asks instead of refusing:** a line that doesn't fit is placed as the user chooses — *start at the selection* or *stretch* (any amount, warned outside 0.8–1.25×); over a speech-free selection, *replace*, *layer* or *concatenate* (frame held while the line plays; the video grows). The take that prompted the question is reused, so asking costs nothing.
+  - **Exit met:** 330 backend + 74 frontend tests at the time. Live on a speech-free portrait clip: "Add the line "Thirsty Thirsty"" → mix question → fit question → layered at 2.1–3.5 s with the music intact; "after this bit" read as concatenate → export 8.00 → 9.11 s, frame held; "make the background white" → a reply.
+  - **Follow-ups from hands-on testing (same day):** player unmuted and wired to its slider/playhead; approving renders at once and plays the edit (Edited / Original toggle); "Approve anyway" for trials (explicit `override`, recorded on the edit); Whisper's zero-length words no longer crash the continuity check. 333 backend + 85 frontend tests.
 
-- [ ] **Phase 9 · Durability & hardening**
-  - SQLite persistence replacing the in-memory store; multi-project; auth; cost tracking and quotas.
+- [x] **Phase 9 · Durability & hardening** — **done 2026-09-26** (plan: `2026-09-26-phase-9-10-durability-and-editing.md`)
+  - **9a** SQLite (`var/ave.db`): projects, candidates, edits and the chat survive restarts; ids never reused; project list, reopen, delete (= consent withdrawal); the server keeps the chat. Every project has an owner, checked on every route (another's project is a 404).
+  - **9b** Usage ledger: every paid call recorded with an estimated USD (Whisper minutes, ElevenLabs characters, Claude tokens); the voice budget reads it; `AVE_PROJECT_BUDGET_USD` caps new paid work per project; `GET /projects/{id}/usage`; spend shown in the editor.
+  - **9c** Auth designed, not built: OIDC sign-in (Google first) → session → `current_owner()`; then a login page, CSRF on writes, per-user quotas.
+  - **Exit met:** 346 backend + 94 frontend tests. Live: a project and its chat survive a restart; a real clip's spend recorded ($0.0008 Whisper, $0.0067 Claude).
+
+- [x] **Phase 10 · Editing by transcript, voices, timeline** — **done 2026-09-26** (same plan)
+  - **Statements:** Whisper is asked for segments as well as words; they are the transcript's statements (punctuated). Older projects group words at pauses. The transcript panel edits a statement in place → an edit of its span with the text given directly (no Claude call), through the usual question / candidate / approve flow.
+  - **Voice picker:** `GET /voices` (ElevenLabs premade, 21 on this account); the chosen voice is the plan's `voice_profile_id`.
+  - **Timeline:** zoom (−/+/Fit), horizontal scroll, follows the playhead; clips over 15 s open at a readable 110 px/s.
+  - **Exit met:** 354 backend + 108 frontend tests. Live on the 49 s Bhaji Cam clip: 20 statements; the same statement rewritten in Sarah and in Brian.
+  - **Found live — the case for multi-voice:** that clip has two speakers, and continuity compares the new line with *everyone* speaking nearby: Sarah measured +5.2 semitones, Brian −4.8 — the reference is a blend. Speaker labels (diarization) would let continuity compare against the same speaker only, and give each speaker a voice.
+
+- [x] **Phase 11 · Multiple voices** — **done 2026-09-26** (plan: `2026-09-26-phase-11-multiple-voices.md`)
+  - **Diarization:** spiked OpenAI `gpt-4o-transcribe-diarize` vs ElevenLabs Scribe on the two-speaker clip — both exact; OpenAI chosen alongside Whisper to keep the free ElevenLabs credits for speech (Scribe is the single-call option if the plan is upgraded). Words and statements carry a speaker; diarization failing never fails an upload; older projects detect on demand.
+  - **A voice per speaker:** rename speakers, pick each one's voice; a line in one speaker's words uses theirs, else the chat's voice.
+  - **Continuity per speaker:** the pitch/level reference is the edited speaker's own words.
+  - **Exit met:** 368 backend + 113 frontend tests. Live on the Bhaji Cam clip: speakers A (customer) / B (shopkeeper) detected; the customer's line, blended-reference before → speaker-only now: Sarah 0.74 → 0.83, Brian 0.76 → **0.96**, both passing.
+
+- [x] **Phase 12 · The new editor** — **done 2026-10-02** (plan: `2026-09-28-phase-12-13-agentic-editor.md`)
+  - New visual system from the mocks (one sans, dark neutral surfaces, one blue accent, amber for "needs you"); the transcript as a document — time, speaker avatar, words, with approved edits as **inline tracked changes** (`src/transcript/changes.ts`, a word-level LCS diff that keeps the statement's punctuation) and a status chip per line being worked on; the Voltage panel on the right with the chat, takes and questions.
+  - **Hands-on editing in place:** wording, voice, "if it runs long" (use the pause / speed up / ask me), **Ask Voltage for wording** (`POST /lines/reword`, Claude, metered as `wording`), Preview.
+  - **Long lines run into the pause** without asking when the pause can hold the overrun (`room_after`, 50 ms slack); per-project `long_lines` setting (`PUT /settings`, SQLite `settings` column) with "Ask me each time instead" shown under a take that ran on. Only long lines are placed automatically; short ones still ask.
+  - **Revert:** `ApprovedEdit.reverted`, `POST /edits/{id}/revert`; the renderer skips reverted edits; reopen and the project list respect it.
+  - **Exit met:** 387 backend + 134 frontend tests; frontend lint and build clean. Live on the 49 s Bhaji Cam clip: "Bajicam" → "Bhaji Cam" came back 1.86 s for a 1.48 s line and **ran 0.38 s into the pause after it with no question** (fit `start`, edit grown to 7.54–9.40); approved, exported, reverted (export back to one original segment, list count 0); Claude reworded "These are regular ones." → "These are the regular ones." Layout checked by headless-Chrome screenshot at 1470 px and 420 px.
+
+- [x] **Phase 13 · The agent** — **done 2026-10-02** (same plan)
+  - `app/adapters/claude_planner.py` reads the goal with every line and speaker (structured output, effort medium) → edits + suggestions + a summary; `RulePlanner` offline (`change "X" to "Y"`). `app/domain/plan.py`; `plans` table; `POST /plans`, `GET /plans/{id}`, `PUT …/items/{id}`, `POST …/run`, `…/answer`, `…/redo`, `…/approve`.
+  - **Autonomy switch** per project (`settings.autonomy`): *Ask before running* (default) shows the plan with each change ticked and editable and an estimate (characters × ledger rate, 12 s a line); *Draft everything* runs at once.
+  - **Plan jobs:** one job, a status per item; the agent's own fix first on a long line (`planner.shorten`, metered as `wording`); unprompted suggestions with Add to plan / Leave it; Review screen (before / after, Compare, Redo, Approve all and export) and the "What Voltage did" log.
+  - **Exit met:** 412 backend + 148 frontend tests; lint and build clean. Live on the Bhaji Cam clip, goal *"Turn this into our Diwali ad: everything's 30% off, and say the brand name as Bhaji Cam"*: Claude planned 3 changes across both speakers plus 2 suggestions (9.7 s); Run voiced them in 21 s; the bill line ran 1.2 s long with a 0.2 s pause, so the agent offered *"Got the bill, 30% off, paying now."* first — picked, voiced, prosody 0.99; Approve all exported two replaced spans and a 3.5 s insert. Phase cost ≈ $0.10.
 
 ---
 

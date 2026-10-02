@@ -1,76 +1,359 @@
-from dataclasses import dataclass, field
+"""Projects, their candidates, approved edits and chat (Phase 9a: SQLite).
 
-from app.domain.models import Source, Transcript, ApprovedEdit, EditCandidate, Consent
+Source is never mutated and edits only ever append (design spec §7). A
+`ProjectRepository()` with no database is in-memory — the tests' default.
+"""
+from __future__ import annotations
+
+import json
+from dataclasses import dataclass
+from datetime import datetime, timezone
+
+from app.domain.models import ApprovedEdit, Consent, EditCandidate, Source, Transcript
+from app.domain.plan import Plan, plan_from_dict
+from app.store import codec
+from app.store.db import PROJECT_TABLES, Database
+
+# Who owns a project until sign-in exists (Phase 9c): everyone is this owner.
+LOCAL_OWNER = "local"
 
 
-@dataclass
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+@dataclass(frozen=True)
 class ProjectRecord:
-    source: Source                       # immutable original
+    """A snapshot of a project. Changes go through the repository."""
+    source: Source                 # immutable original
     transcript: Transcript
     # None until the uploader confirms rights. Generation is refused without it.
     consent: Consent | None = None
-    # Every candidate ever previewed is retained (design spec §7: nothing is
-    # lost, rollback is always available) and is what approval commits.
-    candidates: dict[str, EditCandidate] = field(default_factory=dict)
-    edits: list[ApprovedEdit] = field(default_factory=list)
-    candidate_counter: int = 0
+    owner: str = LOCAL_OWNER
+    created_at: str = ""
+
+
+@dataclass(frozen=True)
+class Speaker:
+    """How the editor treats one diarized speaker: what to call them, and the
+    voice their new lines are spoken in (None = the chat's voice)."""
+    label: str                  # the diarization label, "A", "B", …
+    name: str
+    voice_id: str | None = None
+
+
+@dataclass(frozen=True)
+class Message:
+    role: str   # "user" | "assistant"
+    text: str
+    at: str
+
+
+def _record(row) -> ProjectRecord:
+    return ProjectRecord(
+        source=codec.source(json.loads(row["source"])),
+        transcript=codec.transcript(json.loads(row["transcript"])),
+        consent=Consent(row["consent_at"]) if row["consent_at"] else None,
+        owner=row["owner"],
+        created_at=row["created_at"],
+    )
 
 
 class ProjectRepository:
-    """In-memory store. Source is never mutated; edits only ever append."""
-
-    def __init__(self) -> None:
-        self._projects: dict[str, ProjectRecord] = {}
-        self._counter = 0
+    def __init__(self, db: Database | None = None) -> None:
+        self.db = db or Database()
 
     def reset(self) -> None:
-        """Clear all projects and id counter. Intended for test isolation."""
-        self._projects.clear()
-        self._counter = 0
+        """Clear all projects and the id counter. Intended for test isolation."""
+        self.db.reset()
 
     def next_id(self) -> str:
-        self._counter += 1
-        return f"p{self._counter}"
+        # A persisted counter, so an id is never reused — not even after a
+        # delete, when stale links must not land on someone else's project.
+        with self.db.tx() as c:
+            row = c.execute("SELECT value FROM meta WHERE key = 'project_counter'").fetchone()
+            n = int(row["value"]) + 1 if row else 1
+            c.execute(
+                "INSERT INTO meta (key, value) VALUES ('project_counter', ?) "
+                "ON CONFLICT (key) DO UPDATE SET value = excluded.value", (str(n),),
+            )
+        return f"p{n}"
 
     def create(
         self, source: Source, transcript: Transcript, consent: Consent | None = None,
+        owner: str = LOCAL_OWNER,
     ) -> None:
-        self._projects[source.project_id] = ProjectRecord(
-            source=source, transcript=transcript, consent=consent,
-        )
+        with self.db.tx() as c:
+            c.execute(
+                "INSERT INTO projects (id, owner, created_at, source, transcript, consent_at) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (source.project_id, owner, _now(), json.dumps(codec.dump(source)),
+                 json.dumps(codec.dump(transcript)), consent.granted_at if consent else None),
+            )
 
     def grant_consent(self, project_id: str, consent: Consent) -> Consent | None:
         """Record consent for a project that was uploaded without it."""
-        record = self._projects.get(project_id)
-        if record is None:
+        with self.db.tx() as c:
+            # First grant wins, so re-confirming cannot quietly restamp the record.
+            c.execute(
+                "UPDATE projects SET consent_at = ? WHERE id = ? AND consent_at IS NULL",
+                (consent.granted_at, project_id),
+            )
+            row = c.execute("SELECT consent_at FROM projects WHERE id = ?", (project_id,)).fetchone()
+        if row is None:
             return None
-        # First grant wins, so re-confirming cannot quietly restamp the record.
-        if record.consent is None:
-            record.consent = consent
-        return record.consent
+        return Consent(row["consent_at"])
 
     def get(self, project_id: str) -> ProjectRecord | None:
-        return self._projects.get(project_id)
+        with self.db.tx() as c:
+            row = c.execute("SELECT * FROM projects WHERE id = ?", (project_id,)).fetchone()
+        return _record(row) if row else None
 
-    def next_candidate_id(self, project_id: str) -> str:
-        record = self._projects[project_id]
-        record.candidate_counter += 1
-        return f"c{record.candidate_counter}"
+    def list(self, owner: str) -> list[ProjectRecord]:
+        """The owner's projects, newest first."""
+        with self.db.tx() as c:
+            rows = c.execute(
+                "SELECT * FROM projects WHERE owner = ? ORDER BY created_at DESC, id DESC", (owner,),
+            ).fetchall()
+        return [_record(r) for r in rows]
 
-    def save_candidate(self, project_id: str, candidate: EditCandidate) -> None:
-        self._projects[project_id].candidates[candidate.candidate_id] = candidate
+    def delete(self, project_id: str) -> bool:
+        with self.db.tx() as c:
+            gone = c.execute("DELETE FROM projects WHERE id = ?", (project_id,)).rowcount
+            for table in PROJECT_TABLES:
+                c.execute(f"DELETE FROM {table} WHERE project_id = ?", (project_id,))
+        return gone > 0
 
-    def get_candidate(self, project_id: str, candidate_id: str) -> EditCandidate | None:
-        record = self._projects.get(project_id)
-        if record is None:
-            return None
-        return record.candidates.get(candidate_id)
+    def update_transcript(self, project_id: str, transcript: Transcript) -> None:
+        """Replace the transcript — only ever to add labels (speakers) to the
+        same words; the source itself is never touched."""
+        with self.db.tx() as c:
+            c.execute(
+                "UPDATE projects SET transcript = ? WHERE id = ?",
+                (json.dumps(codec.dump(transcript)), project_id),
+            )
 
-    def append_edit(self, project_id: str, edit: ApprovedEdit) -> None:
-        self._projects[project_id].edits.append(edit)
+    # ── speakers ──
 
-    def list_edits(self, project_id: str) -> list[ApprovedEdit]:
-        record = self._projects.get(project_id)
+    def speakers(self, project_id: str) -> list[Speaker]:
+        """Every speaker in the transcript, with any name and voice set for them."""
+        record = self.get(project_id)
         if record is None:
             return []
-        return list(record.edits)
+        with self.db.tx() as c:
+            row = c.execute("SELECT speakers FROM projects WHERE id = ?", (project_id,)).fetchone()
+        saved = json.loads(row["speakers"] or "{}")
+        labels = sorted({w.speaker for w in record.transcript.words if w.speaker is not None})
+        return [
+            Speaker(label, saved.get(label, {}).get("name") or f"Speaker {label}",
+                    saved.get(label, {}).get("voice_id"))
+            for label in labels
+        ]
+
+    def set_speaker(
+        self, project_id: str, label: str, *, name: str | None = None,
+        voice_id: str | None = None, clear_voice: bool = False,
+    ) -> None:
+        with self.db.tx() as c:
+            row = c.execute("SELECT speakers FROM projects WHERE id = ?", (project_id,)).fetchone()
+            if row is None:
+                raise KeyError(project_id)
+            saved = json.loads(row["speakers"] or "{}")
+            entry = saved.setdefault(label, {})
+            if name is not None:
+                entry["name"] = name
+            if voice_id is not None:
+                entry["voice_id"] = voice_id
+            if clear_voice:
+                entry.pop("voice_id", None)
+            c.execute("UPDATE projects SET speakers = ? WHERE id = ?", (json.dumps(saved), project_id))
+
+    # ── candidates ──
+
+    def next_candidate_id(self, project_id: str) -> str:
+        with self.db.tx() as c:
+            c.execute(
+                "UPDATE projects SET candidate_counter = candidate_counter + 1 WHERE id = ?",
+                (project_id,),
+            )
+            row = c.execute(
+                "SELECT candidate_counter FROM projects WHERE id = ?", (project_id,),
+            ).fetchone()
+        if row is None:
+            raise KeyError(project_id)
+        return f"c{row['candidate_counter']}"
+
+    def save_candidate(self, project_id: str, candidate: EditCandidate) -> None:
+        # Every candidate ever previewed is retained (spec §7: nothing is lost)
+        # and is what approval commits.
+        with self.db.tx() as c:
+            c.execute(
+                "INSERT OR REPLACE INTO candidates (project_id, candidate_id, body) VALUES (?, ?, ?)",
+                (project_id, candidate.candidate_id, json.dumps(codec.dump(candidate))),
+            )
+
+    def get_candidate(self, project_id: str, candidate_id: str) -> EditCandidate | None:
+        with self.db.tx() as c:
+            row = c.execute(
+                "SELECT body FROM candidates WHERE project_id = ? AND candidate_id = ?",
+                (project_id, candidate_id),
+            ).fetchone()
+        return codec.candidate(json.loads(row["body"])) if row else None
+
+    # ── approved edits ──
+
+    def append_edit(self, project_id: str, edit: ApprovedEdit) -> None:
+        with self.db.tx() as c:
+            c.execute(
+                "INSERT INTO edits (project_id, seq, body) VALUES (?, "
+                "(SELECT COALESCE(MAX(seq), 0) + 1 FROM edits WHERE project_id = ?), ?)",
+                (project_id, project_id, json.dumps(codec.dump(edit))),
+            )
+
+    def list_edits(self, project_id: str) -> list[ApprovedEdit]:
+        """Every approved edit in approval order, reverted ones included —
+        callers that render or count skip `reverted` themselves."""
+        with self.db.tx() as c:
+            rows = c.execute(
+                "SELECT body FROM edits WHERE project_id = ? ORDER BY seq", (project_id,),
+            ).fetchall()
+        return [codec.edit(json.loads(r["body"])) for r in rows]
+
+    def revert_edit(self, project_id: str, edit_id: str) -> bool:
+        """Mark an approved edit undone (Phase 12). The record stays — edits
+        only ever append — but the render skips it. False if there is no such
+        edit; reverting twice is harmless."""
+        with self.db.tx() as c:
+            rows = c.execute(
+                "SELECT seq, body FROM edits WHERE project_id = ? ORDER BY seq", (project_id,),
+            ).fetchall()
+            for row in rows:
+                body = json.loads(row["body"])
+                if body["edit_id"] == edit_id:
+                    body["reverted"] = True
+                    c.execute(
+                        "UPDATE edits SET body = ? WHERE project_id = ? AND seq = ?",
+                        (json.dumps(body), project_id, row["seq"]),
+                    )
+                    return True
+        return False
+
+    # ── settings ──
+
+    def settings(self, project_id: str) -> dict:
+        """Per-project preferences, e.g. how a long line is placed."""
+        with self.db.tx() as c:
+            row = c.execute("SELECT settings FROM projects WHERE id = ?", (project_id,)).fetchone()
+        return json.loads(row["settings"] or "{}") if row else {}
+
+    def set_settings(self, project_id: str, **changes) -> dict:
+        with self.db.tx() as c:
+            row = c.execute("SELECT settings FROM projects WHERE id = ?", (project_id,)).fetchone()
+            if row is None:
+                raise KeyError(project_id)
+            saved = json.loads(row["settings"] or "{}")
+            saved.update({k: v for k, v in changes.items() if v is not None})
+            c.execute("UPDATE projects SET settings = ? WHERE id = ?", (json.dumps(saved), project_id))
+        return saved
+
+    # ── chat ──
+
+    def add_message(self, project_id: str, role: str, text: str) -> None:
+        with self.db.tx() as c:
+            c.execute(
+                "INSERT INTO messages (project_id, seq, role, text, at) VALUES (?, "
+                "(SELECT COALESCE(MAX(seq), 0) + 1 FROM messages WHERE project_id = ?), ?, ?, ?)",
+                (project_id, project_id, role, text, _now()),
+            )
+
+    def messages(self, project_id: str) -> list[Message]:
+        with self.db.tx() as c:
+            rows = c.execute(
+                "SELECT role, text, at FROM messages WHERE project_id = ? ORDER BY seq",
+                (project_id,),
+            ).fetchall()
+        return [Message(r["role"], r["text"], r["at"]) for r in rows]
+
+    # ── plans (Phase 13) ──
+
+    def next_plan_id(self, project_id: str) -> str:
+        with self.db.tx() as c:
+            row = c.execute(
+                "SELECT COALESCE(MAX(seq), 0) AS n FROM plans WHERE project_id = ?", (project_id,),
+            ).fetchone()
+        return f"plan{int(row['n']) + 1}"
+
+    def save_plan(self, plan: Plan) -> None:
+        """Insert or replace the whole plan — items change as the run goes."""
+        body = json.dumps(codec.dump(plan))
+        with self.db.tx() as c:
+            row = c.execute(
+                "SELECT seq FROM plans WHERE project_id = ? AND plan_id = ?",
+                (plan.project_id, plan.plan_id),
+            ).fetchone()
+            if row:
+                c.execute("UPDATE plans SET body = ? WHERE project_id = ? AND plan_id = ?",
+                          (body, plan.project_id, plan.plan_id))
+            else:
+                c.execute(
+                    "INSERT INTO plans (project_id, plan_id, seq, body) VALUES (?, ?, "
+                    "(SELECT COALESCE(MAX(seq), 0) + 1 FROM plans WHERE project_id = ?), ?)",
+                    (plan.project_id, plan.plan_id, plan.project_id, body),
+                )
+
+    def get_plan(self, project_id: str, plan_id: str) -> Plan | None:
+        with self.db.tx() as c:
+            row = c.execute(
+                "SELECT body FROM plans WHERE project_id = ? AND plan_id = ?", (project_id, plan_id),
+            ).fetchone()
+        return plan_from_dict(json.loads(row["body"])) if row else None
+
+    def latest_plan(self, project_id: str) -> Plan | None:
+        with self.db.tx() as c:
+            row = c.execute(
+                "SELECT body FROM plans WHERE project_id = ? ORDER BY seq DESC LIMIT 1", (project_id,),
+            ).fetchone()
+        return plan_from_dict(json.loads(row["body"])) if row else None
+
+    def update_item(self, project_id: str, plan_id: str, item_id: str, **changes) -> Plan | None:
+        """Change one item inside a transaction, so a running job and a
+        request editing another item never overwrite each other."""
+        with self.db.tx() as c:
+            row = c.execute(
+                "SELECT body FROM plans WHERE project_id = ? AND plan_id = ?", (project_id, plan_id),
+            ).fetchone()
+            if row is None:
+                return None
+            plan = plan_from_dict(json.loads(row["body"])).with_item(item_id, **changes)
+            c.execute("UPDATE plans SET body = ? WHERE project_id = ? AND plan_id = ?",
+                      (json.dumps(codec.dump(plan)), project_id, plan_id))
+        return plan
+
+    def update_plan(self, project_id: str, plan_id: str, **changes) -> Plan | None:
+        """Change the plan's own fields (status, log) under the same lock."""
+        from dataclasses import replace as _replace
+        with self.db.tx() as c:
+            row = c.execute(
+                "SELECT body FROM plans WHERE project_id = ? AND plan_id = ?", (project_id, plan_id),
+            ).fetchone()
+            if row is None:
+                return None
+            plan = _replace(plan_from_dict(json.loads(row["body"])), **changes)
+            c.execute("UPDATE plans SET body = ? WHERE project_id = ? AND plan_id = ?",
+                      (json.dumps(codec.dump(plan)), project_id, plan_id))
+        return plan
+
+    def append_log(self, project_id: str, plan_id: str, text: str, detail: str = "") -> None:
+        """Add a line to what Voltage did, under the same lock as item updates."""
+        from dataclasses import replace as _replace
+        entry = {"at": _now(), "text": text, "detail": detail}
+        with self.db.tx() as c:
+            row = c.execute(
+                "SELECT body FROM plans WHERE project_id = ? AND plan_id = ?", (project_id, plan_id),
+            ).fetchone()
+            if row is None:
+                return
+            plan = plan_from_dict(json.loads(row["body"]))
+            plan = _replace(plan, log=plan.log + (entry,))
+            c.execute("UPDATE plans SET body = ? WHERE project_id = ? AND plan_id = ?",
+                      (json.dumps(codec.dump(plan)), project_id, plan_id))

@@ -126,3 +126,96 @@ def test_reset_clears_projects_and_counters():
 
     assert repo.get(pid) is None
     assert repo.next_id() == "p1"
+
+
+# ── revert and settings (Phase 12) ───────────────────────────────────────────
+
+def _approved(edit_id="e1"):
+    from app.domain.models import ApprovedEdit, EditPlan, MediaArtifact, Selection
+    media = MediaArtifact(kind="audio", sha256="a" * 64, path="/tmp/a.wav", duration=0.5, container="wav")
+    return ApprovedEdit(edit_id, "c1", EditPlan(Selection(0.4, 0.9), "x", "v"), media, media)
+
+
+def test_reverting_an_edit_keeps_it_but_marks_it():
+    from app.domain.models import Transcript
+    from tests.factories import make_source
+    repo = ProjectRepository()
+    repo.create(make_source(), Transcript(words=()))
+    repo.append_edit("p1", _approved("e1"))
+    repo.append_edit("p1", _approved("e2"))
+
+    assert repo.revert_edit("p1", "e1") is True
+
+    edits = repo.list_edits("p1")
+    assert [(e.edit_id, e.reverted) for e in edits] == [("e1", True), ("e2", False)]
+
+
+def test_reverting_an_unknown_edit_is_false():
+    from app.domain.models import Transcript
+    from tests.factories import make_source
+    repo = ProjectRepository()
+    repo.create(make_source(), Transcript(words=()))
+    assert repo.revert_edit("p1", "e9") is False
+
+
+def test_settings_default_empty_and_remember_changes():
+    from app.domain.models import Transcript
+    from tests.factories import make_source
+    repo = ProjectRepository()
+    repo.create(make_source(), Transcript(words=()))
+    assert repo.settings("p1") == {}
+    repo.set_settings("p1", long_lines="ask")
+    repo.set_settings("p1", long_lines=None)   # None leaves it alone
+    assert repo.settings("p1") == {"long_lines": "ask"}
+
+
+# ── plans (Phase 13) ─────────────────────────────────────────────────────────
+
+def _plan(plan_id="plan1"):
+    from app.domain.models import Selection
+    from app.domain.plan import Plan, PlanItem
+    return Plan(plan_id, "p1", "goal", "summary", (
+        PlanItem("i1", Selection(0.4, 0.9), "20% off", "30% off", status="planned"),
+        PlanItem("i2", Selection(1.3, 2.3), "today only", "this week", kind="suggestion",
+                 enabled=False, status="suggested"),
+    ), estimate={"items": 1})
+
+
+def test_plans_are_saved_read_back_and_the_latest_found():
+    from app.domain.models import Transcript
+    from tests.factories import make_source
+    repo = ProjectRepository()
+    repo.create(make_source(), Transcript(words=()))
+    assert repo.latest_plan("p1") is None
+    assert repo.next_plan_id("p1") == "plan1"
+    repo.save_plan(_plan("plan1"))
+    repo.save_plan(_plan("plan2"))
+    assert repo.next_plan_id("p1") == "plan3"
+    assert repo.get_plan("p1", "plan1").items[1].kind == "suggestion"
+    assert repo.latest_plan("p1").plan_id == "plan2"
+
+
+def test_an_item_and_the_log_are_updated_in_place():
+    from app.domain.models import Transcript
+    from tests.factories import make_source
+    repo = ProjectRepository()
+    repo.create(make_source(), Transcript(words=()))
+    repo.save_plan(_plan())
+    updated = repo.update_item("p1", "plan1", "i1", status="ready", candidate_id="c1")
+    assert (updated.item("i1").status, updated.item("i1").candidate_id) == ("ready", "c1")
+    assert updated.item("i2").status == "suggested"
+    repo.append_log("p1", "plan1", "Voiced the line at 0:00", "12 characters")
+    repo.update_plan("p1", "plan1", status="done")
+    plan = repo.get_plan("p1", "plan1")
+    assert plan.status == "done" and plan.log[-1]["text"] == "Voiced the line at 0:00"
+    assert plan.runnable == (plan.item("i1"),)
+
+
+def test_deleting_a_project_removes_its_plans():
+    from app.domain.models import Transcript
+    from tests.factories import make_source
+    repo = ProjectRepository()
+    repo.create(make_source(), Transcript(words=()))
+    repo.save_plan(_plan())
+    repo.delete("p1")
+    assert repo.get_plan("p1", "plan1") is None

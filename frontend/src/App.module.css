@@ -1,28 +1,88 @@
+/* The agentic editor: a header, the main column (monitor, words, transcript)
+   and the Voltage panel on the right. */
 .app {
-  display: grid; grid-template-columns: 1.4fr 1fr; gap: 20px;
-  padding: 20px; height: 100vh;
-}
-.left { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
-.right { min-height: 0; }
-.error {
-  color: var(--warn); border: 1px solid var(--warn); border-radius: 8px;
-  padding: 8px 12px; font-size: 13px;
-}
-.generating {
-  align-self: stretch; color: var(--muted); font-size: 13px;
-  padding: 8px 12px; border: 1px dashed var(--border); border-radius: 8px;
-  display: flex; flex-direction: column; gap: 8px;
-}
-.generatingStep { color: var(--muted); }
-.progressTrack {
-  height: 6px; background: var(--surface); border-radius: 3px; overflow: hidden;
-}
-.progressFill {
-  height: 100%; background: var(--electric);
-  box-shadow: 0 0 10px var(--electric);
-  transition: width 300ms ease;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(380px, 38%);
+  grid-template-rows: 56px minmax(0, 1fr);
+  grid-template-areas: "header header" "main panel";
+  height: 100vh;
 }
 
-@media (max-width: 900px) {
-  .app { grid-template-columns: 1fr; height: auto; }
+.header {
+  grid-area: header;
+  display: flex; align-items: center; gap: 14px;
+  padding: 0 20px; border-bottom: 1px solid var(--line);
+}
+.back {
+  padding: 5px 10px; border-radius: 8px; font-size: 13px; font-weight: 500;
+  background: transparent; color: var(--muted); border: 1px solid var(--line);
+}
+.back:hover { color: var(--text); border-color: var(--muted); }
+.slash { color: var(--line); }
+.filename { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.meta { color: var(--muted); font-size: 13px; white-space: nowrap; }
+.spacer { flex: 1; }
+
+.main {
+  grid-area: main;
+  display: flex; flex-direction: column; gap: 16px;
+  padding: 18px 24px 32px; min-height: 0; overflow-y: auto;
+}
+.main > * { flex-shrink: 0; }
+
+.panel {
+  grid-area: panel;
+  display: flex; flex-direction: column; min-height: 0;
+  border-left: 1px solid var(--line);
+}
+.panelHead {
+  flex: none; display: flex; align-items: center; gap: 10px;
+  padding: 12px 20px; border-bottom: 1px solid var(--line);
+}
+.panelTitle { font-weight: 600; }
+.panelNote { color: var(--muted); font-size: 13px; }
+
+.reviewButton {
+  padding: 7px 12px; border-radius: 8px; font-size: 13px; font-weight: 500;
+  background: var(--accent-fill); color: #fff; border: 1px solid var(--accent-fill); white-space: nowrap;
+}
+.versions { display: flex; padding: 2px; border-radius: 8px; background: var(--surface); border: 1px solid var(--line); }
+.version, .versionOn { padding: 3px 10px; border-radius: 6px; font-size: 12px; border: none; }
+.version { background: transparent; color: var(--muted); }
+.versionOn { background: var(--raised); color: var(--text); }
+
+.error {
+  padding: 8px 12px; border-radius: 8px; font-size: 13px;
+  color: var(--amber); background: var(--amber-tint); border: 1px solid var(--amber-line);
+}
+
+.generating { display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: var(--muted); }
+.generatingStep { color: var(--text); display: flex; align-items: center; gap: 8px; }
+.spinner {
+  width: 14px; height: 14px; flex: none; border-radius: 50%;
+  border: 1.5px solid var(--line); border-top-color: var(--accent);
+  animation: spin 900ms linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+.progressTrack { height: 4px; border-radius: 2px; background: var(--line); overflow: hidden; }
+.progressFill { height: 100%; background: var(--accent); transition: width 300ms ease; }
+
+.remembered { color: var(--muted); font-size: 12px; line-height: 1.5; }
+.remembered button { background: none; border: none; padding: 0; color: var(--accent); font-size: 12px; }
+.remembered button:hover { text-decoration: underline; }
+
+@media (max-width: 960px) {
+  /* One column that can never grow past the viewport: the header's items
+     wrap instead of widening the page. */
+  .app {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto auto auto;
+    grid-template-areas: "header" "main" "panel";
+    height: auto;
+  }
+  .header { flex-wrap: wrap; gap: 8px 10px; min-height: 56px; padding: 8px 16px; }
+  .meta { display: none; }
+  .filename { max-width: 50vw; }
+  .main { padding: 16px 16px 24px; overflow: visible; }
+  .panel { border-left: none; border-top: 1px solid var(--line); min-height: 60vh; }
 }

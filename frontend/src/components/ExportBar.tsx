@@ -1,4 +1,4 @@
-import type { Segment } from '../types'
+import type { Insert, Segment } from '../types'
 import styles from './ExportBar.module.css'
 
 interface ExportBarProps {
@@ -6,18 +6,14 @@ interface ExportBarProps {
   onExport: () => void
   /** The rendered MP4, once an export has produced one. */
   download?: { url: string; filename: string } | null
+  /** Lines added after a point; each makes the export longer. */
+  inserts?: Insert[]
 }
 
-export function ExportBar({ segments, onExport, download }: ExportBarProps) {
+export function ExportBar({ segments, onExport, download, inserts = [] }: ExportBarProps) {
   const total = segments.length ? segments[segments.length - 1].end : 0
   return (
     <div className={styles.bar}>
-      <button className={styles.export} onClick={onExport}>Export</button>
-      {download && (
-        <a className={styles.download} href={download.url} download={download.filename}>
-          Download MP4
-        </a>
-      )}
       {segments.length > 0 && (
         <div className={styles.strip}>
           {segments.map((s, i) => (
@@ -31,6 +27,18 @@ export function ExportBar({ segments, onExport, download }: ExportBarProps) {
             />
           ))}
         </div>
+      )}
+      {inserts.length > 0 && (
+        <div className={styles.inserts} data-testid="inserts">
+          +{inserts.length} added {inserts.length === 1 ? 'line' : 'lines'}, holding the frame for{' '}
+          {inserts.reduce((t, i) => t + i.duration, 0).toFixed(2)}s
+        </div>
+      )}
+      <button className={styles.export} onClick={onExport}>Export MP4</button>
+      {download && (
+        <a className={styles.download} href={download.url} download={download.filename}>
+          Download MP4
+        </a>
       )}
     </div>
   )

@@ -1,29 +1,40 @@
-.timeline { padding: 8px 0; }
+.timeline { position: relative; }
+.scroller { overflow-x: auto; overflow-y: hidden; padding-bottom: 4px; }
+.zoom { display: flex; gap: 4px; justify-content: flex-end; margin-bottom: 6px; }
+.zoom button {
+  min-width: 28px; padding: 1px 8px; border-radius: 6px; font-size: 12px;
+  background: transparent; color: var(--muted); border: 1px solid var(--line);
+}
+.zoom button:hover, .zoom button[aria-pressed="true"] { color: var(--text); border-color: var(--muted); }
 .track {
-  position: relative; height: 56px;
-  background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+  position: relative; height: 64px;
+  background: var(--surface); border-radius: 10px;
+  cursor: text; user-select: none; touch-action: none;
 }
+/* A word: a block as long as it is spoken, its label above; two rows. */
 .word {
-  position: absolute; top: 8px; height: 40px;
-  background: transparent; color: var(--text);
-  border: 1px solid var(--border); border-radius: 6px;
-  font-size: 12px; white-space: nowrap; overflow: hidden;
-  transition: border-color 150ms ease, box-shadow 150ms ease;
+  position: absolute; height: 26px; padding: 0 0 0 4px;
+  background: var(--raised); color: var(--text);
+  border: none; border-left: 1px solid var(--muted); border-radius: 0 4px 4px 0;
+  font-size: 12px; line-height: 26px; text-align: left;
+  white-space: nowrap; overflow: visible;
 }
-.word:hover {
-  border-color: var(--cyan);
-  box-shadow: 0 0 10px rgba(34, 211, 238, 0.35);
-}
+.word[data-lane="0"] { top: 5px; }
+.word[data-lane="1"] { top: 33px; }
+.word:hover { background: var(--line); z-index: 1; }
 .selection {
   position: absolute; top: 0; height: 100%;
-  background: rgba(34, 211, 238, 0.18);
-  border: 1px solid var(--cyan);
-  box-shadow: 0 0 18px rgba(34, 211, 238, 0.5);
-  pointer-events: none; border-radius: 6px;
-  transition: left 200ms ease, width 200ms ease;
+  background: var(--accent-tint);
+  border-left: 2px solid var(--accent); border-right: 2px solid var(--accent);
+  pointer-events: none; z-index: 2;
+  transition: left 150ms ease, width 150ms ease;
 }
 .playhead {
-  position: absolute; top: -4px; height: calc(100% + 8px); width: 2px;
-  background: var(--electric); box-shadow: 0 0 10px var(--electric);
-  pointer-events: none;
+  position: absolute; top: -3px; height: calc(100% + 6px); width: 2px;
+  background: var(--text); pointer-events: none; z-index: 3;
 }
+.empty {
+  position: absolute; inset: 0; display: grid; place-items: center;
+  color: var(--muted); font-size: 13px; pointer-events: none;
+}
+.hint { margin-top: 6px; color: var(--muted); font-size: 12px; }

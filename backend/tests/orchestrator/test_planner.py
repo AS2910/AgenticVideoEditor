@@ -1,21 +1,29 @@
-from app.domain.models import Selection
-from app.orchestrator.planner import extract_new_text, build_edit_plan
+from app.orchestrator.planner import Line, RulePlanner
+
+LINES = [
+    Line(1, 0.0, 2.3, "Presenter", "Get 20% off today only."),
+    Line(2, 2.5, 4.0, "Presenter", "Twenty percent, this week."),
+    Line(3, 4.2, 5.0, None, "Thanks."),
+]
 
 
-def test_extract_new_text_from_change_to_pattern():
-    assert extract_new_text('change "20% off" to "30% off"') == "30% off"
+def test_a_quoted_change_is_applied_to_every_line_that_says_it():
+    proposal = RulePlanner().plan('change "20% off" to "30% off"', LINES)
+    assert [(c.line, c.new_text) for c in proposal.edits] == [(1, "Get 30% off today only.")]
+    assert proposal.summary == "Found 1 line to change."
+    assert proposal.suggestions == ()
 
 
-def test_extract_new_text_falls_back_to_whole_prompt():
-    assert extract_new_text("make her say hello there") == "make her say hello there"
+def test_the_rule_planner_cannot_read_a_goal_in_prose():
+    proposal = RulePlanner().plan("make it a Diwali ad", LINES)
+    assert proposal.edits == ()
+    assert "Claude" in proposal.summary
 
 
-def test_build_edit_plan_uses_selection_and_voice():
-    plan = build_edit_plan(
-        prompt='change "20% off" to "30% off"',
-        selection=Selection(0.4, 1.3),
-        voice_profile_id="speaker-1",
-    )
-    assert plan.new_text == "30% off"
-    assert plan.selection == Selection(0.4, 1.3)
-    assert plan.voice_profile_id == "speaker-1"
+def test_a_change_nobody_says_plans_nothing():
+    proposal = RulePlanner().plan('change "half price" to "free"', LINES)
+    assert proposal.edits == () and 'No line says "half price"' in proposal.summary
+
+
+def test_the_rule_planner_offers_no_shorter_line():
+    assert RulePlanner().shorten("a long line", 0.6, LINES[0]) is None

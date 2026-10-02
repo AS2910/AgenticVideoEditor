@@ -1,58 +1,35 @@
+/* A take: the new line, playable, with how well it sits. */
 .card {
-  background: var(--bg); border: 1px solid var(--border); border-radius: 12px;
-  padding: 16px; display: flex; flex-direction: column; gap: 12px;
+  display: flex; flex-direction: column; gap: 10px;
+  padding: 12px 14px; background: var(--surface);
+  border-radius: var(--radius-lg); border: 1px solid var(--line);
 }
-.newText { font-size: 18px; font-weight: 600; }
-.audio { width: 100%; height: 32px; }
-.media { font-size: 11px; color: var(--muted); letter-spacing: 0.02em; }
-.badge {
-  align-self: flex-start; color: var(--pass);
-  border: 1px solid var(--pass); border-radius: 999px;
-  padding: 2px 10px; font-size: 12px;
-  box-shadow: 0 0 12px rgba(34, 211, 238, 0.4);
-  animation: pulse 2.4s ease-in-out infinite;
-}
-@keyframes pulse {
-  0%, 100% { box-shadow: 0 0 12px rgba(34, 211, 238, 0.4); }
-  50%      { box-shadow: 0 0 20px rgba(34, 211, 238, 0.7); }
-}
-.badgeFail {
-  align-self: flex-start; color: var(--warn);
-  border: 1px solid var(--warn); border-radius: 999px;
-  padding: 2px 10px; font-size: 12px;
-}
-.metrics { display: flex; flex-direction: column; gap: 8px; }
+.meta { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); }
+.spacer { flex: 1; }
+.newText { font-size: 15px; line-height: 1.5; color: var(--text); }
+.audio { width: 100%; height: 32px; border-radius: 16px; }
+.media { font-size: 12px; color: var(--muted); }
+.badge, .badgeFail { align-self: flex-start; font-size: 12px; font-weight: 500; }
+.badge { color: var(--accent); }
+.badgeFail { color: var(--amber); }
+.metrics { display: flex; flex-direction: column; gap: 6px; }
 .metric {
-  display: grid; grid-template-columns: 120px 1fr 40px; gap: 8px;
+  display: grid; grid-template-columns: 128px 1fr 36px; gap: 8px;
   align-items: center; font-size: 12px;
 }
 .metricLabel { color: var(--muted); }
-.barTrack { height: 8px; background: var(--surface); border-radius: 4px; overflow: hidden; }
-.barFillOk {
-  height: 100%; background: var(--cyan);
-  box-shadow: 0 0 10px var(--cyan);
-  transition: width 400ms ease;
-}
-.barFillWarn {
-  height: 100%; background: var(--warn);
-  box-shadow: 0 0 10px var(--warn);
-  transition: width 400ms ease;
-}
+.barTrack { height: 4px; border-radius: 2px; background: var(--line); overflow: hidden; }
+.barFillOk { height: 100%; background: var(--accent); transition: width 400ms ease; }
+.barFillWarn { height: 100%; background: var(--amber); transition: width 400ms ease; }
 .metricValue { text-align: right; color: var(--text); }
-.unmeasured { grid-column: 2 / 4; color: var(--muted); font-style: italic; }
-.simulated { color: var(--muted); font-size: 10px; }
-.warnings { margin: 0; padding-left: 18px; color: var(--warn); font-size: 12px; }
-.actions { display: flex; gap: 8px; }
-.approve {
-  flex: 1; padding: 10px; background: var(--electric); color: white;
-  border: none; border-radius: 8px;
-  box-shadow: 0 0 16px rgba(46, 107, 255, 0.4);
-  transition: box-shadow 150ms ease;
-}
-.approve:not(:disabled):hover { box-shadow: 0 0 24px rgba(46, 107, 255, 0.65); }
-.approve:disabled { background: var(--border); color: var(--muted); box-shadow: none; cursor: not-allowed; }
-.tryAgain {
-  padding: 10px 16px; background: transparent; color: var(--text);
-  border: 1px solid var(--border); border-radius: 8px;
-}
+.unmeasured { grid-column: 2 / 4; color: var(--muted); }
+.simulated { color: var(--faint); }
+.warnings { margin: 0; padding-left: 16px; color: var(--amber); font-size: 12px; }
+.actions { display: flex; justify-content: flex-end; gap: 8px; }
+.approve, .approveAnyway, .tryAgain { padding: 7px 12px; border-radius: 8px; font-size: 13px; font-weight: 500; }
+.approve { background: var(--accent-fill); color: #fff; border: 1px solid var(--accent-fill); }
+.approve:disabled { background: var(--raised); color: var(--muted); border-color: var(--line); }
+.approveAnyway { background: transparent; color: var(--amber); border: 1px solid var(--amber-line); }
+.approveAnyway:hover { border-color: var(--amber); }
+.tryAgain { background: var(--raised); color: var(--text); border: 1px solid var(--line); }
 .tryAgain:hover { border-color: var(--muted); }

@@ -18,3 +18,45 @@ describe('Player', () => {
     expect(screen.getByRole('button', { name: /play|pause/i })).toBeInTheDocument()
   })
 })
+
+describe('Player playback (Phase 8 fix)', () => {
+  it('plays with sound', () => {
+    const { container } = render(<Player src="/a.mp4" duration={8} currentTime={0} onSeek={() => {}} />)
+    expect((container.querySelector('video') as HTMLVideoElement).muted).toBe(false)
+  })
+
+  it('moves the video when the slider is dragged', () => {
+    const onSeek = vi.fn()
+    const { container } = render(<Player src="/a.mp4" duration={8} currentTime={0} onSeek={onSeek} />)
+    fireEvent.change(screen.getByRole('slider', { name: /seek/i }), { target: { value: '3.5' } })
+    expect((container.querySelector('video') as HTMLVideoElement).currentTime).toBe(3.5)
+    expect(onSeek).toHaveBeenCalledWith(3.5)
+  })
+
+  it('reports the time as the video plays', () => {
+    const onTimeUpdate = vi.fn()
+    const { container } = render(
+      <Player src="/a.mp4" duration={8} currentTime={0} onSeek={() => {}} onTimeUpdate={onTimeUpdate} />,
+    )
+    const video = container.querySelector('video') as HTMLVideoElement
+    video.currentTime = 2.25
+    fireEvent.timeUpdate(video)
+    expect(onTimeUpdate).toHaveBeenCalledWith(2.25)
+  })
+})
+
+describe('Player transport (redesign)', () => {
+  it('shows a timecode of position and length', () => {
+    render(<Player src="/a.mp4" duration={48.9} currentTime={7.54} onSeek={() => {}} />)
+    expect(screen.getByTestId('timecode')).toHaveTextContent('0:07.54 / 0:48.90')
+  })
+
+  it('carries extra controls in the transport row', () => {
+    render(
+      <Player src="/a.mp4" duration={8} currentTime={0} onSeek={() => {}}>
+        <button>Edited</button>
+      </Player>,
+    )
+    expect(screen.getByRole('button', { name: 'Edited' })).toBeInTheDocument()
+  })
+})

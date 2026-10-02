@@ -202,6 +202,62 @@ def fit_duration(
     return dest, duration_of(dest)
 
 
+def atempo_chain(tempo: float) -> str:
+    """An `atempo` filter chain for any tempo, each stage inside 0.5–2.0×.
+
+    One `atempo` handles 0.5–2.0 on every ffmpeg build; larger changes are the
+    product of several stages.
+    """
+    stages = []
+    while tempo < 0.5:
+        stages.append(0.5)
+        tempo /= 0.5
+    while tempo > 2.0:
+        stages.append(2.0)
+        tempo /= 2.0
+    stages.append(tempo)
+    return ",".join(f"atempo={t:.6f}" for t in stages)
+
+
+def natural_range(natural: float, target: float) -> bool:
+    """True when stretching `natural` onto `target` still sounds like speech."""
+    return MIN_TEMPO <= natural / target <= MAX_TEMPO
+
+
+def place(
+    source: str | Path, dest: str | Path, target: float,
+    fit: str | None = None, mix: str = "replace",
+) -> tuple[Path, float]:
+    """Place speech in a `target`-second selection as the user chose.
+
+    fit None       — `fit_duration`: automatic, or SpanMismatch to ask the user
+    fit "stretch"  — tempo changed to land exactly on `target`, however far
+    fit "start"    — natural speed from the start; a shorter line is padded
+                     with silence to `target`, a longer one keeps its length
+    mix "concatenate" ignores `fit`: the line is inserted after the selection
+    at its natural length, so there is nothing to fit.
+    """
+    if mix != "concatenate" and fit is None:
+        return fit_duration(source, dest, target)
+    natural = duration_of(source)
+    dest = Path(dest)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    if mix == "concatenate" or (fit == "start" and natural >= target):
+        af, length = "anull", natural
+    elif fit == "start":
+        af, length = "apad", target
+    elif fit == "stretch":
+        af, length = f"{atempo_chain(natural / target)},apad", target
+    else:
+        raise ValueError(f"unknown fit {fit!r}")
+    _run(FFMPEG, [
+        "-y", "-loglevel", "error", *_BITEXACT_IN, "-i", str(source),
+        "-af", af, "-t", f"{length:.3f}",
+        "-c:a", "pcm_s16le", *_BITEXACT_OUT, str(dest),
+    ])
+    return dest, duration_of(dest)
+
+
 def extract_segment(
     source: str | Path, dest: str | Path, start: float, end: float,
     sample_rate: int = 16000,

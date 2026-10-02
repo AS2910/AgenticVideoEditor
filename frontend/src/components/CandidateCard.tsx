@@ -1,5 +1,6 @@
 import type { Candidate, ContinuityReport } from '../types'
 import { artifactUrl } from '../api'
+import { Avatar } from './Avatar'
 import styles from './CandidateCard.module.css'
 
 // Fixed order, mirroring the backend's continuity engine.
@@ -15,14 +16,33 @@ const THRESHOLD = 0.8
 interface CandidateCardProps {
   candidate: Candidate
   onApprove: () => void
+  /** Approve despite failed continuity — offered only when it failed. */
+  onApproveAnyway?: () => void
   onTryAgain: () => void
   projectId: string
+  /** Which change this is a take of, e.g. "The change at 0:07". */
+  label?: string
+  /** Who says it. */
+  speaker?: { name: string; slot: string } | null
+  /** How the line was placed, e.g. "Ran 0.4 s into the pause after it". */
+  note?: string | null
 }
 
-export function CandidateCard({ candidate, onApprove, onTryAgain, projectId }: CandidateCardProps) {
+/** A take: the new line, playable, and how well it sits. */
+export function CandidateCard({
+  candidate, onApprove, onApproveAnyway, onTryAgain, projectId, label, speaker, note,
+}: CandidateCardProps) {
   const c = candidate.continuity
   return (
     <div className={styles.card}>
+      {(label || speaker || note) && (
+        <div className={styles.meta}>
+          {speaker && <Avatar name={speaker.name} slot={speaker.slot} size={18} />}
+          {label && <span>{label}</span>}
+          <span className={styles.spacer} />
+          {note && <span data-testid="placement">{note}</span>}
+        </div>
+      )}
       <div className={styles.newText}>{candidate.plan.new_text}</div>
 
       {/* The generated line, playable. The frames stay unplayed until lip-sync
@@ -41,18 +61,18 @@ export function CandidateCard({ candidate, onApprove, onTryAgain, projectId }: C
       </div>
 
       {c.passed ? (
-        <div className={styles.badge}>✓ Continuity checked</div>
+        <div className={styles.badge}>Continuity checked</div>
       ) : (
         <div className={styles.badgeFail}>Continuity below threshold</div>
       )}
 
       <div className={styles.metrics}>
-        {METRICS.map(({ key, label }) => {
+        {METRICS.map(({ key, label: name }) => {
           const value = c[key] as number | null
           if (value === null) {
             return (
               <div key={key} className={styles.metric}>
-                <span className={styles.metricLabel}>{label}</span>
+                <span className={styles.metricLabel}>{name}</span>
                 <span className={styles.unmeasured}>not measured yet</span>
               </div>
             )
@@ -62,7 +82,7 @@ export function CandidateCard({ candidate, onApprove, onTryAgain, projectId }: C
           return (
             <div key={key} className={styles.metric}>
               <span className={styles.metricLabel}>
-                {label}
+                {name}
                 {simulated && <span className={styles.simulated}> · simulated</span>}
               </span>
               <div className={styles.barTrack}>
@@ -86,10 +106,20 @@ export function CandidateCard({ candidate, onApprove, onTryAgain, projectId }: C
       )}
 
       <div className={styles.actions}>
-        <button className={styles.approve} onClick={onApprove} disabled={!c.passed}>
-          Approve
-        </button>
         <button className={styles.tryAgain} onClick={onTryAgain}>Try again</button>
+        {c.passed || !onApproveAnyway ? (
+          <button className={styles.approve} onClick={onApprove} disabled={!c.passed}>
+            Approve
+          </button>
+        ) : (
+          <button
+            className={styles.approveAnyway}
+            onClick={onApproveAnyway}
+            title="Approve for a trial even though the continuity check failed"
+          >
+            Approve anyway
+          </button>
+        )}
       </div>
     </div>
   )

@@ -1,5 +1,6 @@
 import type {
-  Project, ApprovedResult, ExportManifest, EditRequest, Job,
+  Project, ApprovedResult, ExportManifest, EditRequest, Job, ProjectSummary, ProjectDetail, Usage, Voice, Speaker,
+  ProjectSettings, LongLines, Rewording, Autonomy, Plan, Fit, Mix,
 } from './types'
 
 const BASE = '/api'
@@ -54,6 +55,46 @@ export async function createProject(file: File, consent: boolean): Promise<Proje
   return (await res.json()) as Project
 }
 
+async function get<T>(path: string): Promise<T> {
+  const res = await fetch(`${BASE}${path}`)
+  if (!res.ok) return failure(res)
+  return (await res.json()) as T
+}
+
+/** The caller's projects, newest first. */
+export const listProjects = async () =>
+  (await get<{ projects: ProjectSummary[] }>('/projects')).projects
+
+/** Everything needed to reopen a project. */
+export const getProject = (id: string) => get<ProjectDetail>(`/projects/${id}`)
+
+export const listVoices = () => get<{ default: string; voices: Voice[] }>('/voices')
+
+/** Rename a speaker or set their voice; `voice_id: null` with `clear_voice`
+ *  returns them to the chat's voice. */
+export async function updateSpeaker(
+  id: string, label: string, change: { name?: string; voice_id?: string; clear_voice?: boolean },
+): Promise<Speaker[]> {
+  const res = await fetch(`${BASE}/projects/${id}/speakers/${label}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(change),
+  })
+  if (!res.ok) return failure(res)
+  return ((await res.json()) as { speakers: Speaker[] }).speakers
+}
+
+/** Finds who speaks when, for a project transcribed before speakers existed. */
+export const detectSpeakers = (id: string) => post<Project>(`/projects/${id}/speakers/detect`)
+
+export const getUsage = (id: string) => get<Usage>(`/projects/${id}/usage`)
+
+/** Deletes the project and all its media — also how consent is withdrawn. */
+export async function deleteProject(id: string): Promise<void> {
+  const res = await fetch(`${BASE}/projects/${id}`, { method: 'DELETE' })
+  if (!res.ok) return failure(res)
+}
+
 /** URL the browser can play a stored artifact from; supports range requests. */
 export const artifactUrl = (projectId: string, sha256: string) =>
   `${BASE}/projects/${projectId}/artifacts/${sha256}`
@@ -99,8 +140,80 @@ export async function pollJob(
  * exact media that preview produced rather than regenerating it — which real
  * vendors would not reproduce byte-for-byte.
  */
-export const approveEdit = (id: string, candidateId: string) =>
-  post<ApprovedResult>(`/projects/${id}/edits`, { candidate_id: candidateId })
+export const approveEdit = (id: string, candidateId: string, override = false) =>
+  post<ApprovedResult>(
+    `/projects/${id}/edits`,
+    // `override` approves a candidate that failed continuity, for trials.
+    override ? { candidate_id: candidateId, override: true } : { candidate_id: candidateId },
+  )
 
 export const exportProject = (id: string) =>
   post<ExportManifest>(`/projects/${id}/export`)
+
+/** Undoes an approved edit. The edit is kept and marked; the render skips it. */
+export const revertEdit = (id: string, editId: string) =>
+  post<{ edit_id: string; reverted: boolean }>(`/projects/${id}/edits/${editId}/revert`)
+
+/** Remembers how this project places a line that runs long, and how much
+ *  Voltage does on its own. */
+export async function updateSettings(
+  id: string, change: { long_lines?: LongLines; autonomy?: Autonomy },
+): Promise<ProjectSettings> {
+  const res = await fetch(`${BASE}/projects/${id}/settings`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(change),
+  })
+  if (!res.ok) return failure(res)
+  return ((await res.json()) as { settings: ProjectSettings }).settings
+}
+
+/** Asks Claude for a new wording of the line in a span, given the draft so far. */
+export const rewordLine = (id: string, req: { start: number; end: number; draft?: string; instruction?: string }) =>
+  post<Rewording>(`/projects/${id}/lines/reword`, req)
+
+async function put<T>(path: string, body: unknown): Promise<T> {
+  const res = await fetch(`${BASE}${path}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  if (!res.ok) return failure(res)
+  return (await res.json()) as T
+}
+
+/** Plans edits across the whole video from a goal. Under "draft" the plan
+ *  comes back already running, with its `job_id`. */
+export const createPlan = (id: string, req: { goal: string; mode?: Autonomy }) =>
+  post<Plan>(`/projects/${id}/plans`, req)
+
+export const getPlan = (id: string, planId: string) => get<Plan>(`/projects/${id}/plans/${planId}`)
+
+/** Untick, reword, or add / leave a suggestion. */
+export const updateItem = (
+  id: string, planId: string, itemId: string,
+  change: { enabled?: boolean; new_text?: string; include?: boolean },
+) => put<Plan>(`/projects/${id}/plans/${planId}/items/${itemId}`, change)
+
+/** Voices the ticked items; returns the job to poll. */
+export const runPlan = (id: string, planId: string, items?: string[]) =>
+  post<Job>(`/projects/${id}/plans/${planId}/run`, items ? { items } : {})
+
+/** Answers a needs-you item and voices it again. */
+export const answerItem = (
+  id: string, planId: string, itemId: string, answer: { fit?: Fit; mix?: Mix; text?: string },
+) => post<Job>(`/projects/${id}/plans/${planId}/items/${itemId}/answer`, answer)
+
+export const redoItem = (id: string, planId: string, itemId: string) =>
+  post<Job>(`/projects/${id}/plans/${planId}/items/${itemId}/redo`)
+
+export interface PlanApproval {
+  approved: { item_id: string; edit_id: string; overridden: boolean }[]
+  skipped: { item_id: string; reason: string }[]
+  export: ExportManifest | null
+  plan: Plan
+}
+
+/** Approves every ready item and renders. */
+export const approvePlan = (id: string, planId: string, req: { items?: string[]; override?: boolean } = {}) =>
+  post<PlanApproval>(`/projects/${id}/plans/${planId}/approve`, req)

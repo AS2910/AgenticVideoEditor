@@ -29,6 +29,7 @@ from app.continuity.engine import Assessment
 from app.domain.models import (
     ContinuityReport, EditPlan, MediaArtifact, Selection, Source, Transcript, Word,
 )
+from app.domain.transcript import speaker_of
 from app.media.reference import speech_runs
 from app.store.artifacts import ArtifactStore
 
@@ -91,10 +92,16 @@ def clarity_score(generated_db: float | None, context_db: float | None) -> float
 def context_spans(
     transcript: Transcript, selection: Selection, window: float = CONTEXT_WINDOW,
 ) -> list[tuple[float, float]]:
-    """Runs of the speaker's words near the selection, never inside it."""
+    """Runs of the speaker's words near the selection, never inside it.
+
+    When the selection is one speaker's words (Phase 11), only that speaker's
+    words count: another speaker's pitch is not the reference for this one.
+    """
+    speaker = speaker_of(transcript, selection)
     near = tuple(
         w for w in transcript.words
         if w.end > selection.start - window and w.start < selection.end + window
+        and (speaker is None or w.speaker == speaker)
     )
     return speech_runs(Transcript(words=near), selection)
 
@@ -192,7 +199,8 @@ class MeasuredContinuityEngine:
         # Without context speech there is no level to call "quiet" against, so
         # no room tone: unfiltered gaps can hold speech (see `quiet_part`).
         room = None
-        if context_level is not None:
+        # A layered line plays over the original sound, room and all.
+        if context_level is not None and plan.mix != "layer":
             room = _concat(src, gap_spans(transcript, source.duration), rate=rate)
         if room is not None:
             room = quiet_part(room, rate, context_level - ROOM_BELOW_SPEECH_DB)

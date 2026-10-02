@@ -31,9 +31,19 @@ describe('ChatPanel', () => {
     expect(onSubmit).toHaveBeenCalledWith('make it 40%')
   })
 
-  it('renders prior messages', () => {
-    render(<ChatPanel messages={['hello there']} canSubmit={true} onSubmit={() => {}} />)
-    expect(screen.getByText('hello there')).toBeInTheDocument()
+  it('renders both sides of the conversation', () => {
+    render(
+      <ChatPanel
+        messages={[
+          { role: 'user', text: 'make the background white' },
+          { role: 'assistant', text: 'This editor only changes spoken dialogue.' },
+        ]}
+        canSubmit={true}
+        onSubmit={() => {}}
+      />,
+    )
+    expect(screen.getByText('make the background white')).toBeInTheDocument()
+    expect(screen.getByText('This editor only changes spoken dialogue.')).toBeInTheDocument()
   })
 
   it('renders children in the message area', () => {

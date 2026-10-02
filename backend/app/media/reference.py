@@ -22,6 +22,10 @@ MIN_REFERENCE_SECONDS = 10.0
 # survive instead of being chopped at every boundary.
 _JOIN_GAP = 0.25
 
+# Runs shorter than this are dropped: Whisper gives some words no length at
+# all (start == end), and cutting a zero-length span yields an empty file.
+_MIN_RUN = 0.05
+
 
 def speech_runs(transcript: Transcript, exclude: Selection | None) -> list[tuple[float, float]]:
     """Spans of speech to cut, never crossing into `exclude`."""
@@ -35,7 +39,7 @@ def speech_runs(transcript: Transcript, exclude: Selection | None) -> list[tuple
             runs[-1] = (runs[-1][0], word.end)
         else:
             runs.append((word.start, word.end))
-    return runs
+    return [(start, end) for start, end in runs if end - start >= _MIN_RUN]
 
 
 def extract_reference_audio(
