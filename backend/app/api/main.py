@@ -1,5 +1,6 @@
 import logging
 import tempfile
+from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -16,7 +17,7 @@ from app.domain.models import (
     Consent, EditPlan, Intent,
 )
 from app.domain.transcript import (
-    assign_speakers, snap_to_word_boundaries, speaker_of, statements_of,
+    assign_speakers, room_after, snap_to_word_boundaries, speaker_of, statements_of,
 )
 from app.config import load_settings
 from app.media import ffmpeg, ingest
@@ -96,6 +97,18 @@ class EditRequest(BaseModel):
     # What the chat shows for this turn when it isn't the prompt itself — the
     # label of an option picked in answer to a question.
     display: str | None = None
+    # What to do when the line runs longer than the selection (Phase 12):
+    # "pause" runs it into the pause after the selection when there is room,
+    # "stretch" speeds it up, "ask" asks. Unset = the project's setting.
+    on_long: Literal["pause", "stretch", "ask"] | None = None
+
+
+# How a line longer than its selection is placed, unless the project says
+# otherwise: into the pause after it, without asking, when there is room.
+DEFAULT_LONG_LINES = "pause"
+# Slack allowed when the overrun is judged against the pause: timings are
+# Whisper's, and a line a few hundredths long is not worth a question.
+PAUSE_SLACK = 0.05
 
 
 class ApproveRequest(BaseModel):
@@ -208,7 +221,13 @@ def _project_dict(record: ProjectRecord) -> dict:
             for st in statements_of(record.transcript)
         ],
         "speakers": _speakers(source.project_id),
+        "settings": _settings(source.project_id),
     }
+
+
+def _settings(project_id: str) -> dict:
+    saved = repo.settings(project_id)
+    return {"long_lines": saved.get("long_lines", DEFAULT_LONG_LINES)}
 
 
 def _speakers(project_id: str) -> list[dict]:
@@ -290,7 +309,7 @@ def list_projects(owner: str = Depends(current_owner)) -> dict:
             "filename": r.source.filename,
             "duration": r.source.duration,
             "created_at": r.created_at,
-            "edits": len(repo.list_edits(r.source.project_id)),
+            "edits": sum(1 for e in repo.list_edits(r.source.project_id) if not e.reverted),
         }
         for r in repo.list(owner)
     ]}
@@ -311,6 +330,7 @@ def get_project(project_id: str, owner: str = Depends(current_owner)) -> dict:
                 "selection": {"start": e.plan.selection.start, "end": e.plan.selection.end},
                 "mix": e.plan.mix,
                 "overridden": e.overridden,
+                "reverted": e.reverted,
             }
             for e in repo.list_edits(project_id)
         ],
@@ -334,6 +354,22 @@ def get_usage(project_id: str, owner: str = Depends(current_owner)) -> dict:
             for u in ledger.lines(project_id)
         ],
     }
+
+
+class SettingsUpdate(BaseModel):
+    long_lines: Literal["pause", "stretch", "ask"] | None = None
+
+
+@app.put("/projects/{project_id}/settings")
+def update_settings(
+    project_id: str, req: SettingsUpdate, owner: str = Depends(current_owner),
+) -> dict:
+    """Per-project preferences. `long_lines` is remembered from the first
+    answer about a line that runs long: "pause" (run into the pause after it
+    when there is room), "stretch", or "ask" each time."""
+    _owned(project_id, owner)
+    repo.set_settings(project_id, long_lines=req.long_lines)
+    return {"settings": _settings(project_id)}
 
 
 class SpeakerUpdate(BaseModel):
@@ -487,19 +523,32 @@ def preview_edit(
         cost = voice.cost_of(plan)
         if not budget.can_afford(project_id, cost):
             raise BudgetExceeded(cost, budget.remaining(project_id))
-        try:
-            candidate = run_edit(
+        def generate(plan: EditPlan) -> EditCandidate:
+            return run_edit(
                 candidate_id, plan, record.source, voice, lipsync, continuity, report,
                 transcript=record.transcript,
                 max_regenerations=settings.max_regenerations,
             )
+
+        try:
+            candidate = generate(plan)
         except SpanMismatch as exc:
             if plan.fit is not None:
                 raise
-            return _asked(fit_question(
-                plan.new_text, mix, exc.natural, exc.target,
-                selection.start, record.source.duration,
-            ))
+            # A longer line is placed without asking when the project says how
+            # (Phase 12). The take that did not fit is held by the adapter, so
+            # placing it costs nothing more.
+            fit = _long_line_fit(
+                req.on_long or _settings(project_id)["long_lines"], exc, selection,
+                record.transcript, record.source.duration,
+            )
+            if fit is None:
+                return _asked(fit_question(
+                    plan.new_text, mix, exc.natural, exc.target,
+                    selection.start, record.source.duration,
+                ))
+            report(0.1, "Placing the line")
+            candidate = generate(replace(plan, fit=fit))
         # Retained so approval commits this exact candidate rather than
         # re-running generation, which real vendors would not reproduce
         # byte-for-byte.
@@ -512,6 +561,26 @@ def preview_edit(
 
     runner.submit(job, work)
     return _job_dict(job)
+
+
+def _long_line_fit(policy: str, exc: SpanMismatch, selection: Selection,
+                   transcript, duration: float) -> str | None:
+    """How to place a line that ran long, or None to ask the user.
+
+    Only a *long* line is placed automatically — a short one always asks,
+    since silence or a slowed line is a real choice. "stretch" speeds it up;
+    "pause" lets it run into the pause after the selection if that pause (plus
+    a little slack) can hold the overrun and the video does not end first.
+    """
+    if exc.natural <= exc.target or policy == "ask":
+        return None
+    if policy == "stretch":
+        return "stretch"
+    overrun = exc.natural - exc.target
+    room = room_after(transcript, selection, duration)
+    if overrun <= room + PAUSE_SLACK and selection.start + exc.natural <= duration + PAUSE_SLACK:
+        return "start"
+    return None
 
 
 @app.get("/jobs/{job_id}")
@@ -548,6 +617,67 @@ def approve_edit(
         "overridden": overridden,
         "continuity": _continuity_dict(candidate.continuity),
     }
+
+
+@app.post("/projects/{project_id}/edits/{edit_id}/revert")
+def revert_edit(project_id: str, edit_id: str, owner: str = Depends(current_owner)) -> dict:
+    """Undo an approved edit (Phase 12). The edit is kept and marked, so
+    nothing is lost; the render skips it and the transcript shows the line as
+    shot. Reverting again is harmless."""
+    _owned(project_id, owner)
+    if not repo.revert_edit(project_id, edit_id):
+        raise HTTPException(status_code=404, detail="edit not found")
+    return {"edit_id": edit_id, "reverted": True}
+
+
+class RewordRequest(BaseModel):
+    start: float
+    end: float
+    # The user's own draft of the line so far, if they have started one.
+    draft: str | None = None
+    # What kind of rewording; the default is a tighter, more natural line.
+    instruction: str | None = None
+
+
+DEFAULT_REWORD = "so it is shorter and more natural, keeping its meaning and the speaker's tone"
+
+
+@app.post("/projects/{project_id}/lines/reword")
+def reword_line(
+    project_id: str, req: RewordRequest, owner: str = Depends(current_owner),
+) -> dict:
+    """Ask Claude for a new wording of the line in a span (Phase 12, the
+    hands-on editor's "Ask Voltage for wording"). Nothing is spoken: this is a
+    text suggestion the user can edit before previewing. Needs the Claude
+    interpreter; offline there is no one to ask."""
+    record = _owned(project_id, owner)
+    if getattr(interpreter, "identity", "rules") != "claude":
+        raise HTTPException(
+            status_code=503,
+            detail="Wording suggestions need Claude. Set ANTHROPIC_API_KEY to turn them on.",
+        )
+    try:
+        ledger.ensure_can_spend(project_id)
+    except SpendCeilingReached as exc:
+        raise HTTPException(status_code=402, detail=str(exc)) from exc
+    selection = snap_to_word_boundaries(record.transcript, Selection(req.start, req.end))
+    context = edit_context(record.transcript, selection, record.source.duration)
+    how = (req.instruction or "").strip() or DEFAULT_REWORD
+    draft = (req.draft or "").strip()
+    if draft and draft != context.selected:
+        prompt = (f'The user has drafted this wording for the selected line: "{draft}". '
+                  f"Improve the draft {how}. Reply with the full new line.")
+    else:
+        prompt = f"Rewrite the selected line {how}. Reply with the full new line."
+
+    def meter(model: str, input_tokens: int, output_tokens: int) -> None:
+        ledger.record(project_id, "anthropic", "wording", input_tokens + output_tokens, "tokens",
+                      claude_usd(model, input_tokens, output_tokens))
+
+    intent = interpreter.interpret(prompt, [], context, meter=meter)
+    if intent.action != "speak" or not intent.new_text:
+        raise HTTPException(status_code=422, detail=intent.reply or "Could not suggest a wording.")
+    return {"text": intent.new_text, "selection": {"start": selection.start, "end": selection.end}}
 
 
 @app.post("/projects/{project_id}/export")

@@ -2,8 +2,19 @@ export interface Word { text: string; start: number; end: number }
 /** A sentence as spoken, with punctuation — edited from the transcript panel. */
 export interface Statement { text: string; start: number; end: number; speaker?: string | null }
 
-/** An approved edit as the script shows it: the new words over a span. */
-export interface Revision { start: number; end: number; text: string; mix: Mix }
+/** An approved edit as the transcript shows it: the new words over a span,
+ *  as inline tracked changes. `edit_id` is what Revert names. */
+export interface Revision { edit_id?: string; start: number; end: number; text: string; mix: Mix }
+
+/** What happens when a new line runs longer than the words it replaces:
+ *  run into the pause after them (when there is room), speed it up, or ask. */
+export type LongLines = 'pause' | 'stretch' | 'ask'
+
+/** Per-project preferences, remembered on the server. */
+export interface ProjectSettings { long_lines: LongLines }
+
+/** Where a line stands while the editor works on it. */
+export type LineStatus = 'working' | 'ready' | 'needs-you'
 
 /** A diarized speaker: what to call them, and the voice their new lines are
  *  spoken in (null = the chat's voice). */
@@ -76,6 +87,8 @@ export interface Project {
   statements?: Statement[]
   /** Absent from responses of servers before Phase 11. */
   speakers?: Speaker[]
+  /** Absent from responses of servers before Phase 12. */
+  settings?: ProjectSettings
 }
 
 /** What a project has spent. USD is an estimate from list prices. */
@@ -103,6 +116,8 @@ export interface ApprovedEditSummary {
   selection: Selection
   mix: Mix
   overridden: boolean
+  /** Undone after approval; the render skips it. */
+  reverted?: boolean
 }
 
 /** A reopened project: the upload plus what has been done to it. */
@@ -116,6 +131,9 @@ export interface ApprovedResult {
   candidate_id: string
   continuity: ContinuityReport
 }
+
+/** A wording Claude suggests for a line; nothing is spoken yet. */
+export interface Rewording { text: string; selection: Selection }
 
 export interface Segment {
   start: number
@@ -146,6 +164,9 @@ export interface EditRequest {
   /** What the chat shows for this turn when it isn't the prompt — the label
    *  of an option picked in answer to a question. */
   display?: string
+  /** For this edit only: how a line that runs long is placed. Unset = the
+   *  project's setting. */
+  on_long?: LongLines
 }
 
 export interface QuestionOption {

@@ -49,6 +49,15 @@ def speaker_of(transcript: Transcript, selection: Selection) -> str | None:
     return speakers.pop() if len(speakers) == 1 else None
 
 
+def room_after(transcript: Transcript, selection: Selection, duration: float) -> float:
+    """Seconds of pause after the selection before anyone speaks again — or
+    until the video ends. A longer line can run into this without asking."""
+    following = [w.start for w in transcript.words if w.start >= selection.end - 1e-6
+                 and w.end > selection.end]
+    until = min(following) if following else duration
+    return max(0.0, until - selection.end)
+
+
 def statements_of(transcript: Transcript) -> tuple[Statement, ...]:
     """The transcript's statements — Whisper's, or grouped from its words."""
     if transcript.statements:

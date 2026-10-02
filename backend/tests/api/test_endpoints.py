@@ -855,3 +855,164 @@ def test_speaker_settings_survive_reopening(client, project):
     client.put("/projects/p1/speakers/A", json={"name": "Shopkeeper"})
     reopened = client.get("/projects/p1").json()
     assert reopened["speakers"][0]["name"] == "Shopkeeper"
+
+
+# ── Phase 12: Revert, project settings, long lines, wording ──────────────────
+
+def test_a_reverted_edit_is_marked_skipped_by_the_render_and_not_counted(client, project):
+    candidate = preview(client)
+    client.post("/projects/p1/edits", json={"candidate_id": candidate["candidate_id"]})
+    assert client.get("/projects").json()["projects"][0]["edits"] == 1
+
+    resp = client.post("/projects/p1/edits/e1/revert")
+
+    assert resp.status_code == 200 and resp.json() == {"edit_id": "e1", "reverted": True}
+    reopened = client.get("/projects/p1").json()
+    assert [(e["edit_id"], e["reverted"]) for e in reopened["edits"]] == [("e1", True)]
+    segments = client.post("/projects/p1/export").json()["segments"]
+    assert [s["kind"] for s in segments] == ["original"]
+    assert client.get("/projects").json()["projects"][0]["edits"] == 0
+
+
+def test_reverting_an_unknown_edit_is_404(client, project):
+    assert client.post("/projects/p1/edits/e9/revert").status_code == 404
+
+
+def test_long_lines_run_into_the_pause_by_default_and_the_setting_can_change_it(client, project):
+    assert project["settings"] == {"long_lines": "pause"}
+    resp = client.put("/projects/p1/settings", json={"long_lines": "ask"})
+    assert resp.json() == {"settings": {"long_lines": "ask"}}
+    assert client.get("/projects/p1").json()["settings"]["long_lines"] == "ask"
+
+
+class HeldTake:
+    """A voice whose line is `natural` seconds: it cannot fit the selection on
+    its own, but once told how to place it, it does — like ElevenLabs holding
+    the take that prompted the question."""
+
+    identity = "stock"
+
+    def __init__(self, natural):
+        self.natural = natural
+        self.plans = []
+
+    def cost_of(self, plan):
+        return 0
+
+    def synthesize(self, source, plan, transcript=None):
+        import tempfile
+        from pathlib import Path
+        import app.api.main as main
+        from app.media.ffmpeg import SpanMismatch
+        self.plans.append(plan)
+        target = plan.selection.end - plan.selection.start
+        if plan.fit is None:
+            raise SpanMismatch(natural=self.natural, target=target)
+        length = self.natural if plan.fit == "start" else target
+        with tempfile.TemporaryDirectory() as tmp:
+            path, duration = ffmpeg.generate_tone(Path(tmp) / "take.wav", length, 440)
+            return main.artifacts.put_file(source.project_id, path, kind="audio",
+                                           container="wav", duration=duration)
+
+
+def with_a_pause(monkeypatch):
+    """A transcript with a 0.5 s pause after "off" (1.3–1.8)."""
+    import app.api.main as main
+    from app.domain.models import Transcript, Word
+    speechless(monkeypatch, main, Transcript(words=(
+        Word("Get", 0.0, 0.4), Word("20%", 0.4, 0.9), Word("off", 0.9, 1.3), Word("today", 1.8, 2.3),
+    )))
+
+
+def test_a_longer_line_runs_into_the_pause_after_it_without_asking(client, project, monkeypatch):
+    import app.api.main as main
+    voice = HeldTake(natural=1.3)   # 0.4 s longer than the 0.9 s selection; the pause is 0.5 s
+    monkeypatch.setattr(main, "voice", voice)
+    with_a_pause(monkeypatch)
+
+    result = preview(client)
+
+    assert result["type"] == "candidate"
+    assert [p.fit for p in voice.plans] == [None, "start"]
+    # The edit now covers the whole line, so its end is not cut off.
+    assert result["plan"]["selection"] == {"start": 0.4, "end": pytest.approx(1.7, abs=0.02)}
+
+
+def test_a_line_too_long_for_the_pause_still_asks(client, project, monkeypatch):
+    import app.api.main as main
+    voice = HeldTake(natural=2.0)   # 1.1 s over; only 0.5 s of pause
+    monkeypatch.setattr(main, "voice", voice)
+    with_a_pause(monkeypatch)
+
+    result = preview(client)
+
+    assert result["type"] == "question"
+    assert len(voice.plans) == 1
+
+
+def test_the_project_can_insist_on_being_asked(client, project, monkeypatch):
+    import app.api.main as main
+    voice = HeldTake(natural=1.3)
+    monkeypatch.setattr(main, "voice", voice)
+    with_a_pause(monkeypatch)
+    client.put("/projects/p1/settings", json={"long_lines": "ask"})
+
+    assert preview(client)["type"] == "question"
+    assert len(voice.plans) == 1
+
+
+def test_one_edit_can_choose_to_speed_up_instead(client, project, monkeypatch):
+    import app.api.main as main
+    voice = HeldTake(natural=1.3)
+    monkeypatch.setattr(main, "voice", voice)
+    with_a_pause(monkeypatch)
+
+    result = preview(client, on_long="stretch")
+
+    assert result["type"] == "candidate"
+    assert [p.fit for p in voice.plans] == [None, "stretch"]
+    assert result["plan"]["selection"] == {"start": 0.4, "end": 1.3}
+
+
+def test_a_short_line_always_asks(client, project, monkeypatch):
+    import app.api.main as main
+    voice = HeldTake(natural=0.2)
+    monkeypatch.setattr(main, "voice", voice)
+    with_a_pause(monkeypatch)
+    assert preview(client)["type"] == "question"
+
+
+def test_wording_suggestions_come_from_claude_and_are_metered(client, project, monkeypatch):
+    import app.api.main as main
+    from app.domain.models import Intent
+    reader = Reads(Intent("speak", new_text="Get 30% off."), tokens=(120, 10))
+    reader.identity = "claude"
+    monkeypatch.setattr(main, "interpreter", reader)
+
+    resp = client.post("/projects/p1/lines/reword",
+                       json={"start": 0.5, "end": 1.0, "draft": "Get thirty percent off"})
+
+    assert resp.status_code == 200
+    assert resp.json()["text"] == "Get 30% off."
+    assert resp.json()["selection"] == {"start": 0.4, "end": 1.3}
+    prompt, history, context = reader.seen[0]
+    assert "Get thirty percent off" in prompt and history == []
+    assert context.selected == "20% off"
+    lines = client.get("/projects/p1/usage").json()["lines"]
+    assert any(line["what"] == "wording" for line in lines)
+
+
+def test_wording_suggestions_need_claude(client, project):
+    resp = client.post("/projects/p1/lines/reword", json={"start": 0.5, "end": 1.0})
+    assert resp.status_code == 503
+    assert "ANTHROPIC_API_KEY" in resp.json()["detail"]
+
+
+def test_a_wording_request_claude_cannot_answer_is_a_422(client, project, monkeypatch):
+    import app.api.main as main
+    from app.domain.models import Intent
+    reader = Reads(Intent("clarify", reply="Which part should change?"))
+    reader.identity = "claude"
+    monkeypatch.setattr(main, "interpreter", reader)
+    resp = client.post("/projects/p1/lines/reword", json={"start": 0.5, "end": 1.0})
+    assert resp.status_code == 422 and resp.json()["detail"] == "Which part should change?"

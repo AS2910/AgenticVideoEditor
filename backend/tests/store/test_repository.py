@@ -126,3 +126,44 @@ def test_reset_clears_projects_and_counters():
 
     assert repo.get(pid) is None
     assert repo.next_id() == "p1"
+
+
+# ── revert and settings (Phase 12) ───────────────────────────────────────────
+
+def _approved(edit_id="e1"):
+    from app.domain.models import ApprovedEdit, EditPlan, MediaArtifact, Selection
+    media = MediaArtifact(kind="audio", sha256="a" * 64, path="/tmp/a.wav", duration=0.5, container="wav")
+    return ApprovedEdit(edit_id, "c1", EditPlan(Selection(0.4, 0.9), "x", "v"), media, media)
+
+
+def test_reverting_an_edit_keeps_it_but_marks_it():
+    from app.domain.models import Transcript
+    from tests.factories import make_source
+    repo = ProjectRepository()
+    repo.create(make_source(), Transcript(words=()))
+    repo.append_edit("p1", _approved("e1"))
+    repo.append_edit("p1", _approved("e2"))
+
+    assert repo.revert_edit("p1", "e1") is True
+
+    edits = repo.list_edits("p1")
+    assert [(e.edit_id, e.reverted) for e in edits] == [("e1", True), ("e2", False)]
+
+
+def test_reverting_an_unknown_edit_is_false():
+    from app.domain.models import Transcript
+    from tests.factories import make_source
+    repo = ProjectRepository()
+    repo.create(make_source(), Transcript(words=()))
+    assert repo.revert_edit("p1", "e9") is False
+
+
+def test_settings_default_empty_and_remember_changes():
+    from app.domain.models import Transcript
+    from tests.factories import make_source
+    repo = ProjectRepository()
+    repo.create(make_source(), Transcript(words=()))
+    assert repo.settings("p1") == {}
+    repo.set_settings("p1", long_lines="ask")
+    repo.set_settings("p1", long_lines=None)   # None leaves it alone
+    assert repo.settings("p1") == {"long_lines": "ask"}

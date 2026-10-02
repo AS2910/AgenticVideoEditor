@@ -1,7 +1,7 @@
 # Real Pipeline — Phased Roadmap
 
 **Date:** 2026-09-22
-**Status:** Phases 0–4a, 6a, 7, 8 and 9 done and clean (8 and 9 on 2026-09-26; 9c is a design). Phases 10 (editing UX) and 11 (multiple voices) done the same day; the editor was redesigned on 2026-09-26 (`docs/superpowers/specs/2026-09-26-editor-ui-redesign.md`). **Next: Phase 12 (the new agentic editor), then 13 (the agent)** — decided 2026-09-28, plan and mocks in `2026-09-28-phase-12-13-agentic-editor.md`. Phases 4b and 5 moved to the **Backlog** — both are blocked on vendor access, not on code.
+**Status:** Phases 0–4a, 6a, 7, 8 and 9 done and clean (8 and 9 on 2026-09-26; 9c is a design). Phases 10 (editing UX) and 11 (multiple voices) done the same day; the editor was redesigned on 2026-09-26 (`docs/superpowers/specs/2026-09-26-editor-ui-redesign.md`). Phase 12 (the agentic editor) done 2026-10-02. **Next: Phase 13 (the agent)** — plan and mocks in `2026-09-28-phase-12-13-agentic-editor.md`. Phases 4b and 5 moved to the **Backlog** — both are blocked on vendor access, not on code.
 **Supersedes nothing.** Builds on `2026-07-14-walking-skeleton.md` and `2026-07-17-voltage-frontend.md`.
 
 **Goal:** turn the mocked walking skeleton into a system that ingests a real video, produces a real re-voiced and lip-synced segment, verifies continuity with real signal analysis, and exports a real playable file — honoring the v1 design spec end-to-end.
@@ -177,8 +177,12 @@ Grouped into three milestones. Each milestone is independently useful — you ca
   - **Continuity per speaker:** the pitch/level reference is the edited speaker's own words.
   - **Exit met:** 368 backend + 113 frontend tests. Live on the Bhaji Cam clip: speakers A (customer) / B (shopkeeper) detected; the customer's line, blended-reference before → speaker-only now: Sarah 0.74 → 0.83, Brian 0.76 → **0.96**, both passing.
 
-- [ ] **Phase 12 · The new editor** *(next — plan: `2026-09-28-phase-12-13-agentic-editor.md`)*
-  - Modern layout: transcript as a document with inline tracked changes and per-line status, agent panel; hands-on inline editing; long lines run into the pause without asking (remembered per project); Revert an approved edit.
+- [x] **Phase 12 · The new editor** — **done 2026-10-02** (plan: `2026-09-28-phase-12-13-agentic-editor.md`)
+  - New visual system from the mocks (one sans, dark neutral surfaces, one blue accent, amber for "needs you"); the transcript as a document — time, speaker avatar, words, with approved edits as **inline tracked changes** (`src/transcript/changes.ts`, a word-level LCS diff that keeps the statement's punctuation) and a status chip per line being worked on; the Voltage panel on the right with the chat, takes and questions.
+  - **Hands-on editing in place:** wording, voice, "if it runs long" (use the pause / speed up / ask me), **Ask Voltage for wording** (`POST /lines/reword`, Claude, metered as `wording`), Preview.
+  - **Long lines run into the pause** without asking when the pause can hold the overrun (`room_after`, 50 ms slack); per-project `long_lines` setting (`PUT /settings`, SQLite `settings` column) with "Ask me each time instead" shown under a take that ran on. Only long lines are placed automatically; short ones still ask.
+  - **Revert:** `ApprovedEdit.reverted`, `POST /edits/{id}/revert`; the renderer skips reverted edits; reopen and the project list respect it.
+  - **Exit met:** 387 backend + 134 frontend tests; frontend lint and build clean. Live on the 49 s Bhaji Cam clip: "Bajicam" → "Bhaji Cam" came back 1.86 s for a 1.48 s line and **ran 0.38 s into the pause after it with no question** (fit `start`, edit grown to 7.54–9.40); approved, exported, reverted (export back to one original segment, list count 0); Claude reworded "These are regular ones." → "These are the regular ones." Layout checked by headless-Chrome screenshot at 1470 px and 420 px.
 
 - [ ] **Phase 13 · The agent** *(same plan)*
   - Claude plans edits across the whole video from a goal; autonomy switch (*Ask before running*, the default, with a cost estimate; or *Draft everything*); plan jobs with per-item status; the agent's own fixes and suggestions; review screen with an activity log.

@@ -62,4 +62,5 @@ def edit(d: dict) -> ApprovedEdit:
         edit_id=d["edit_id"], candidate_id=d["candidate_id"], plan=plan(d["plan"]),
         audio=artifact(d["audio"]), frames=artifact(d["frames"]),
         overridden=d.get("overridden", False),
+        reverted=d.get("reverted", False),
     )

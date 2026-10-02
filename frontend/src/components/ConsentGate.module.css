@@ -1,10 +1,13 @@
-.overlay { position: fixed; inset: 0; display: grid; place-items: center; background: var(--bay); padding: 24px; }
-.modal { width: min(460px, 100%); }
-.title { margin: 0 0 16px; font-size: 22px; font-weight: 600; }
-.consent { display: flex; gap: 12px; align-items: flex-start; margin-bottom: 20px; line-height: 1.5; }
-.consent input { margin-top: 4px; accent-color: var(--revision); }
-.continue {
-  padding: 10px 22px; border: none; border-radius: var(--radius);
-  background: var(--revision); color: #fff; font-weight: 500;
+.overlay { position: fixed; inset: 0; display: grid; place-items: center; background: var(--bg); padding: 24px; }
+.modal {
+  width: min(460px, 100%); padding: 20px; border-radius: 14px;
+  background: var(--surface); border: 1px solid var(--line);
 }
-.continue:disabled { background: var(--console-raised); color: var(--muted); }
+.title { margin: 0 0 14px; font-size: 20px; font-weight: 600; letter-spacing: -0.01em; }
+.consent { display: flex; gap: 12px; align-items: flex-start; margin-bottom: 18px; line-height: 1.5; }
+.consent input { margin-top: 4px; accent-color: var(--accent-fill); }
+.continue {
+  padding: 9px 16px; border: none; border-radius: 10px;
+  background: var(--accent-fill); color: #fff; font-weight: 600;
+}
+.continue:disabled { background: var(--raised); color: var(--muted); }

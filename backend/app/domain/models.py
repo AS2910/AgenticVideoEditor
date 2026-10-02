@@ -137,3 +137,6 @@ class ApprovedEdit:
     frames: MediaArtifact
     # Approved although continuity failed — the user chose to, for a trial.
     overridden: bool = False
+    # Undone after approval (Phase 12 Revert). Kept, not deleted — edits only
+    # ever append — but the render skips it and the transcript shows it undone.
+    reverted: bool = False

@@ -1,15 +1,16 @@
 /* In the header: where the edits fall, the export, and the file. */
 .bar { display: flex; align-items: center; gap: 10px; }
-.strip { width: 120px; height: 8px; display: flex; overflow: hidden; background: var(--console); }
-.original { background: var(--console-raised); }
-.edited { background: var(--revision-on-dark); }
+.strip { width: 120px; height: 6px; border-radius: 3px; display: flex; overflow: hidden; background: var(--surface); }
+.original { background: var(--raised); }
+.edited { background: var(--accent); }
 .export {
-  padding: 6px 14px; border-radius: var(--radius); font-weight: 500;
-  background: var(--console-raised); color: var(--text); border: 1px solid var(--rule);
+  padding: 7px 12px; border-radius: 8px; font-size: 13px; font-weight: 500;
+  background: var(--raised); color: var(--text); border: 1px solid var(--line);
 }
 .export:hover { border-color: var(--muted); }
 .download {
-  padding: 6px 14px; border-radius: var(--radius); font-weight: 500;
-  background: var(--revision); color: #fff; text-decoration: none; white-space: nowrap;
+  padding: 7px 12px; border-radius: 8px; font-size: 13px; font-weight: 500;
+  background: var(--accent-fill); color: #fff; text-decoration: none; white-space: nowrap;
 }
+.download:hover { color: #fff; }
 .inserts { color: var(--muted); font-size: 12px; }

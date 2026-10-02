@@ -1,5 +1,7 @@
 # Editor UI redesign
 
+> **Superseded 2026-10-02** by the agentic editor (Phase 12): `../plans/2026-09-28-phase-12-13-agentic-editor.md`. The script page, Courier and the paper surface are gone; what carried over is changes shown as revisions (now inline tracked changes) and speaker identity on every line.
+
 **Date:** 2026-09-26 · Method: the `frontend-design` skill — a plan, a critique of the plan, then the build.
 
 ## The subject

@@ -68,6 +68,13 @@ function routeFetch(approveStatus = 200, job: unknown = JOB_DONE) {
   return vi.fn(async (url: string, _init?: RequestInit) => {
     if (url.includes('/jobs/')) return ok(job)
     if (url.endsWith('/edits/preview')) return ok(JOB_ACCEPTED)
+    if (url.endsWith('/revert')) return ok({ edit_id: 'e1', reverted: true })
+    if (url.endsWith('/settings')) {
+      return ok({ settings: { long_lines: JSON.parse(String(_init?.body)).long_lines } })
+    }
+    if (url.endsWith('/lines/reword')) {
+      return ok({ text: 'Get 30% off today.', selection: { start: 0, end: 2.3 } })
+    }
     if (url.endsWith('/edits')) {
       if (approveStatus !== 200) {
         return {
@@ -407,7 +414,9 @@ describe('App projects (Phase 9a)', () => {
     await user.click(await screen.findByText('sample-ad.mp4'))
 
     await waitFor(() => expect(screen.getByText('Earlier reply.')).toBeInTheDocument())
-    expect(screen.getByText('20%')).toBeInTheDocument()
+    // The approved edit shows inline: the old words struck, the new ones added.
+    expect(screen.getByTestId('revision')).toHaveTextContent('Get 20% 30% off today only.')
+    expect(screen.getAllByText('20%').length).toBeGreaterThan(0)
     await waitFor(() => expect((container.querySelector('video') as HTMLVideoElement)
       .getAttribute('src')).toBe(`/api/projects/p1/artifacts/${'r'.repeat(64)}`))
     expect(f.mock.calls.some(([url]) => String(url).endsWith('/export'))).toBe(true)
@@ -436,7 +445,7 @@ describe('App projects (Phase 9a)', () => {
 
     await user.click(screen.getByRole('button', { name: /projects/i }))
 
-    expect(await screen.findByText(/your projects/i)).toBeInTheDocument()
+    expect(await screen.findByText(/recent/i)).toBeInTheDocument()
   })
 })
 
@@ -512,7 +521,7 @@ describe('App speakers (Phase 11)', () => {
 
     await user.click(screen.getByRole('button', { name: /detect speakers/i }))
     const name = await screen.findByRole('textbox', { name: 'Name for speaker A' })
-    expect(screen.getAllByText('Speaker A').length).toBeGreaterThan(0)   // chip on the statement
+    expect(screen.getAllByRole('img', { name: 'Speaker A' }).length).toBeGreaterThan(0)   // on the line
 
     await user.clear(name)
     await user.type(name, 'Presenter{Enter}')
@@ -535,5 +544,124 @@ describe('App reopening from the URL (redesign)', () => {
     render(<App />)
     expect(await screen.findByText('Get 20% off today only.')).toBeInTheDocument()
     expect(screen.queryByRole('checkbox')).not.toBeInTheDocument()
+  })
+})
+
+describe('App agentic editor (Phase 12)', () => {
+  const DETAIL = {
+    ...PROJECT,
+    created_at: '2026-09-26T08:00:00Z',
+    settings: { long_lines: 'pause' },
+    edits: [
+      { edit_id: 'e1', candidate_id: 'c1', new_text: '30% off',
+        selection: { start: 0.4, end: 0.9 }, mix: 'replace', overridden: false, reverted: false },
+      { edit_id: 'e2', candidate_id: 'c2', new_text: 'gone',
+        selection: { start: 0.9, end: 1.3 }, mix: 'replace', overridden: false, reverted: true },
+    ],
+    messages: [],
+  }
+
+  function withDetail(detail: unknown = DETAIL) {
+    const base = routeFetch()
+    const f = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.endsWith('/projects/p1') && init?.method !== 'DELETE') return ok(detail)
+      return base(url, init)
+    })
+    vi.stubGlobal('fetch', f)
+    return f
+  }
+
+  it('reverts an approved edit: the line reads as shot and the original plays', async () => {
+    const f = withDetail()
+    window.location.hash = 'p1'
+    const { container } = render(<App />)
+    await screen.findByTestId('revision')
+    // A reverted edit from before is not shown.
+    expect(screen.queryByText('gone')).not.toBeInTheDocument()
+    const video = () => container.querySelector('video') as HTMLVideoElement
+    await waitFor(() => expect(video().getAttribute('src')).toBe(`/api/projects/p1/artifacts/${'r'.repeat(64)}`))
+
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Revert' }))
+
+    await waitFor(() => expect(f.mock.calls.some(
+      ([url, init]) => String(url).endsWith('/edits/e1/revert') && init?.method === 'POST')).toBe(true))
+    await waitFor(() => expect(screen.queryByTestId('revision')).not.toBeInTheDocument())
+    expect(video().getAttribute('src')).toBe(`/api/projects/p1/artifacts/${'s'.repeat(64)}`)
+  })
+
+  it('sends how a long line should be placed, and remembers it for the project', async () => {
+    const bodies: Record<string, unknown>[] = []
+    const puts: Record<string, unknown>[] = []
+    const base = routeFetch()
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.endsWith('/edits/preview')) bodies.push(JSON.parse(String(init?.body)))
+      if (url.endsWith('/settings')) puts.push(JSON.parse(String(init?.body)))
+      return base(url, init)
+    }))
+    const user = userEvent.setup()
+    render(<App />)
+    await reachEditor(user)
+
+    await user.click(screen.getByText('Get 20% off today only.'))
+    await user.selectOptions(screen.getByRole('combobox', { name: /runs long/i }), 'stretch')
+    const box = screen.getByRole('textbox', { name: /new wording/i })
+    await user.clear(box)
+    await user.type(box, 'Get 30% off today only.{Enter}')
+
+    await waitFor(() => expect(bodies).toHaveLength(1))
+    expect(bodies[0]).toMatchObject({ text: 'Get 30% off today only.', on_long: 'stretch' })
+    expect(puts).toEqual([{ long_lines: 'stretch' }])
+  })
+
+  it('says when a take ran into the pause, and can go back to asking', async () => {
+    const puts: Record<string, unknown>[] = []
+    const ranOn = { ...CANDIDATE, plan: { ...CANDIDATE.plan, selection: { start: 0.4, end: 1.3 } } }
+    const base = routeFetch(200, { ...JOB_DONE, result: ranOn })
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.endsWith('/settings')) puts.push(JSON.parse(String(init?.body)))
+      return base(url, init)
+    }))
+    const user = userEvent.setup()
+    render(<App />)
+    await reachEditor(user)
+
+    await user.click(screen.getByText('20%'))   // 0.4–0.9; the take comes back 0.4–1.3
+    await user.type(screen.getByRole('textbox'), 'say 30% off{Enter}')
+
+    await waitFor(() => expect(screen.getByTestId('placement')).toHaveTextContent('Ran 0.4 s into the pause after it'))
+    expect(screen.getByText('Ready')).toBeInTheDocument()   // the line's status
+    await user.click(screen.getByRole('button', { name: /ask me each time/i }))
+    await waitFor(() => expect(puts).toEqual([{ long_lines: 'ask' }]))
+  })
+
+  it('asks Voltage for wording and puts the suggestion in the line', async () => {
+    const bodies: Record<string, unknown>[] = []
+    const base = routeFetch()
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.endsWith('/lines/reword')) bodies.push(JSON.parse(String(init?.body)))
+      return base(url, init)
+    }))
+    const user = userEvent.setup()
+    render(<App />)
+    await reachEditor(user)
+
+    await user.click(screen.getByText('Get 20% off today only.'))
+    await user.click(screen.getByRole('button', { name: /ask voltage for wording/i }))
+
+    await waitFor(() => expect(screen.getByRole('textbox', { name: /new wording/i })).toHaveValue('Get 30% off today.'))
+    expect(bodies[0]).toMatchObject({ start: 0, end: 2.3, draft: 'Get 20% off today only.' })
+  })
+
+  it('shows the line being worked on, then the question it needs you for', async () => {
+    const pendingJob = { ...JOB_ACCEPTED, status: 'running', progress: 0.3, step: 'Synthesizing the new line' }
+    vi.stubGlobal('fetch', routeFetch(200, pendingJob))
+    const user = userEvent.setup()
+    render(<App />)
+    await reachEditor(user)
+
+    await user.click(screen.getByText('20%'))
+    await user.type(screen.getByRole('textbox'), 'say 30% off{Enter}')
+
+    await waitFor(() => expect(screen.getByText('Working')).toBeInTheDocument())
   })
 })

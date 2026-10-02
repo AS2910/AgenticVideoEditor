@@ -9,16 +9,20 @@ import { QuestionCard } from './components/QuestionCard'
 import { ExportBar } from './components/ExportBar'
 import { ProjectList } from './components/ProjectList'
 import { SpendMeter } from './components/SpendMeter'
-import { TranscriptPanel } from './components/TranscriptPanel'
+import { TranscriptDoc } from './components/TranscriptDoc'
+import type { LineChange } from './components/TranscriptDoc'
 import { VoicePicker } from './components/VoicePicker'
 import { SpeakersBar } from './components/SpeakersBar'
+import { clock } from './transcript/format'
+import { speakerSlot } from './transcript/speakers'
 import {
   createProject, previewEdit, approveEdit, exportProject, artifactUrl,
   pollJob, PollCancelled, ApiError, listProjects, getProject, deleteProject, getUsage, listVoices, updateSpeaker, detectSpeakers,
+  revertEdit, updateSettings, rewordLine,
 } from './api'
 import type {
   Word, Selection, Candidate, Segment, Project, ChatMessage, Question, QuestionOption,
-  Fit, Mix, Insert, ProjectSummary, Usage, Statement, Voice, Revision,
+  Fit, Mix, Insert, ProjectSummary, Usage, Statement, Voice, Revision, LongLines, LineStatus,
 } from './types'
 import { renderTime, sourceTime } from './timeline/selection'
 import styles from './App.module.css'
@@ -29,9 +33,12 @@ const SAMPLE_URL = '/sample-ad.mp4'
 const DEFAULT_VOICE = 'speaker-1'
 
 /** An answer to a question: the line already read, and the choices so far. */
-interface Answer { text: string; fit?: Fit; mix?: Mix }
+interface Answer { text: string; fit?: Fit; mix?: Mix; on_long?: LongLines }
 
 type Stage = 'consent' | 'load' | 'editor'
+
+/** The chat's voice, or the speaker's own, named for a take. */
+const voiceName = (voices: Voice[], id: string) => voices.find((v) => v.voice_id === id)?.name
 
 export default function App() {
   const [stage, setStage] = useState<Stage>('consent')
@@ -45,12 +52,16 @@ export default function App() {
   const [currentTime, setCurrentTime] = useState(0)
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [candidate, setCandidate] = useState<Candidate | null>(null)
+  // The span the open take was asked for — a line that ran into the pause
+  // after it ends later than this.
+  const [asked, setAsked] = useState<Selection | null>(null)
   // The open question, with the request it is about — answering re-sends that
   // request for the same selection, plus the choice.
   const [question, setQuestion] = useState<
     { question: Question; prompt: string; selection: Selection } | null
   >(null)
   const [generating, setGenerating] = useState(false)
+  const [working, setWorking] = useState<Selection | null>(null)
   const [progress, setProgress] = useState<{ value: number; step: string } | null>(null)
   const [segments, setSegments] = useState<Segment[]>([])
   const [inserts, setInserts] = useState<Insert[]>([])
@@ -65,8 +76,10 @@ export default function App() {
   const [voiceId, setVoiceId] = useState(DEFAULT_VOICE)
   const [seekRequest, setSeekRequest] = useState<{ time: number; id: number } | null>(null)
   const [detecting, setDetecting] = useState(false)
-  // Approved edits, shown as revisions in the script.
+  // Approved edits still in force, shown as tracked changes in the transcript.
   const [approved, setApproved] = useState<Revision[]>([])
+  // How this project places a line that runs long; remembered on the server.
+  const [longLines, setLongLines] = useState<LongLines>('pause')
   const previewToken = useRef(0)
 
   const refreshProjects = useCallback(async () => {
@@ -99,8 +112,10 @@ export default function App() {
     setCurrentTime(0)
     setMessages([])
     setCandidate(null)
+    setAsked(null)
     setQuestion(null)
     setGenerating(false)
+    setWorking(null)
     setProgress(null)
     setSegments([])
     setInserts([])
@@ -110,6 +125,7 @@ export default function App() {
     setError(null)
     setUsage(null)
     setApproved([])
+    setLongLines('pause')
   }
 
   const projectId = project?.project_id ?? null
@@ -137,15 +153,19 @@ export default function App() {
       .catch(() => {}) // without the list, edits use the default voice
   }, [stage, voices.length])
 
+  const takeIn = (loaded: Project) => {
+    setProject(loaded)
+    setTranscript(loaded.transcript)
+    setLongLines(loaded.settings?.long_lines ?? 'pause')
+    setStage('editor')
+    window.location.hash = loaded.project_id
+  }
+
   const load = async (file: File) => {
     setLoading(true)
     setError(null)
     try {
-      const loaded = await createProject(file, consented)
-      setProject(loaded)
-      setTranscript(loaded.transcript)
-      setStage('editor')
-      window.location.hash = loaded.project_id
+      takeIn(await createProject(file, consented))
     } catch (e) {
       // The backend's rejection reason is the useful part — show it verbatim.
       setError(e instanceof ApiError ? e.message : 'Could not upload that video.')
@@ -174,6 +194,7 @@ export default function App() {
     answer?: Answer,
     at: Selection | null = selection,
     shown: string = prompt,
+    voice: string = voiceId,
   ) => {
     if (!projectId || !at) return
     say({ role: 'user', text: shown })
@@ -181,6 +202,8 @@ export default function App() {
     setQuestion(null)
     setError(null)
     setGenerating(true)
+    setWorking(at)
+    setAsked(at)
     setProgress({ value: 0, step: 'Queued' })
 
     // A newer prompt supersedes an older one; the stale poll stops rather than
@@ -193,7 +216,7 @@ export default function App() {
         prompt,
         start: at.start,
         end: at.end,
-        voice_profile_id: voiceId,
+        voice_profile_id: voice,
         ...(shown !== prompt ? { display: shown } : {}),
         ...answer,
       })
@@ -225,19 +248,51 @@ export default function App() {
     } finally {
       if (!superseded()) {
         setGenerating(false)
+        setWorking(null)
         setProgress(null)
       }
       void refreshUsage(projectId)
     }
   }
 
-  /** A statement rewritten in the transcript: an edit of its span with the
-   *  new wording given directly — there is nothing for Claude to interpret. */
-  const editStatement = (s: Statement, text: string) => {
+  /** A line rewritten in the transcript: an edit of its span with the new
+   *  wording given directly — there is nothing for Claude to interpret. */
+  const editStatement = (s: Statement, change: LineChange) => {
     const span = { start: s.start, end: s.end }
     setSelection(span)
-    void runPreview(`Replace this line with "${text}"`, { text, mix: 'replace' }, span,
-      `“${s.text}” → “${text}”`)
+    void runPreview(
+      `Replace this line with "${change.text}"`,
+      { text: change.text, mix: 'replace', on_long: change.onLong },
+      span,
+      `“${s.text}” → “${change.text}”`,
+      change.voiceId ?? voiceId,
+    )
+  }
+
+  /** Remember, for this project, what to do when a line runs long. */
+  const rememberLongLines = async (value: LongLines) => {
+    if (!projectId || value === longLines) return
+    setLongLines(value)
+    try {
+      await updateSettings(projectId, { long_lines: value })
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : 'Could not save that setting.')
+    }
+  }
+
+  /** Ask Claude for a wording of a line; the suggestion goes in the box. */
+  const reword = async (s: Statement, draft: string): Promise<string | null> => {
+    if (!projectId) return null
+    setError(null)
+    try {
+      const r = await rewordLine(projectId, { start: s.start, end: s.end, draft })
+      return r.text
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : 'Could not get a wording.')
+      return null
+    } finally {
+      void refreshUsage(projectId)
+    }
   }
 
   const findSpeakers = async () => {
@@ -290,10 +345,11 @@ export default function App() {
     if (!projectId || !candidate) return
     setError(null)
     try {
-      await approveEdit(projectId, candidate.candidate_id, override)
+      const result = await approveEdit(projectId, candidate.candidate_id, override)
       const { selection: at, new_text: text, mix = 'replace' } = candidate.plan
-      setApproved((a) => [...a, { start: at.start, end: at.end, text, mix }])
+      setApproved((a) => [...a, { edit_id: result.edit_id, start: at.start, end: at.end, text, mix }])
       setCandidate(null)
+      setAsked(null)
       setDownload(null) // the last render no longer includes every approved edit
       // Render straight away, so pressing Play hears the edit.
       if (await runExport()) setView('edited')
@@ -304,6 +360,30 @@ export default function App() {
       } else {
         setError('Approve failed.')
       }
+    }
+  }
+
+  /** Undo an approved edit: the transcript shows the line as shot, and the
+   *  render no longer includes it. */
+  const revert = async (editId: string) => {
+    if (!projectId) return
+    setError(null)
+    try {
+      await revertEdit(projectId, editId)
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : 'Could not revert that edit.')
+      return
+    }
+    const remaining = approved.filter((r) => r.edit_id !== editId)
+    setApproved(remaining)
+    setDownload(null)
+    if (remaining.length > 0) {
+      if (await runExport()) setView('edited')
+    } else {
+      setRendered(null)
+      setSegments([])
+      setInserts([])
+      setView('original')
     }
   }
 
@@ -333,16 +413,14 @@ export default function App() {
     setLoading(true)
     try {
       const opened = await getProject(id)
-      setProject(opened)
-      setTranscript(opened.transcript)
+      takeIn(opened)
       setMessages(opened.messages)
-      setApproved(opened.edits.map((e) => ({
-        start: e.selection.start, end: e.selection.end, text: e.new_text, mix: e.mix,
+      const live = opened.edits.filter((e) => !e.reverted)
+      setApproved(live.map((e) => ({
+        edit_id: e.edit_id, start: e.selection.start, end: e.selection.end, text: e.new_text, mix: e.mix,
       })))
-      setStage('editor')
-      window.location.hash = opened.project_id
       // Approved edits are rendered again, so Play hears them straight away.
-      if (opened.edits.length > 0 && await runExport(opened.project_id, opened.filename)) {
+      if (live.length > 0 && await runExport(opened.project_id, opened.filename)) {
         setView('edited')
       }
     } catch (e) {
@@ -386,6 +464,7 @@ export default function App() {
 
   const showEdited = view === 'edited' && rendered !== null
   const speakers = project.speakers ?? []
+  const statements = project.statements ?? []
   const leave = () => {
     clearEditor()
     window.location.hash = ''
@@ -393,17 +472,41 @@ export default function App() {
     setStage(consented ? 'load' : 'consent')
   }
 
+  // Where the editor stands on a line: working on it, a take ready, or a
+  // question waiting for you.
+  const pending: { selection: Selection; status: LineStatus } | null =
+    generating && working ? { selection: working, status: 'working' }
+    : question ? { selection: question.selection, status: 'needs-you' }
+    : candidate ? { selection: candidate.plan.selection, status: 'ready' }
+    : null
+
+  // The take's own details: whose line, in which voice, and whether it ran on.
+  const takeSpeakerLabel = candidate
+    ? statements.find((s) => s.start < candidate.plan.selection.end && candidate.plan.selection.start < s.end)?.speaker
+    : null
+  const takeSpeaker = speakers.find((s) => s.label === takeSpeakerLabel)
+  const takeVoice = candidate ? voiceName(voices, candidate.plan.voice_profile_id) : undefined
+  const overrun = candidate && asked ? candidate.plan.selection.end - asked.end : 0
+  const ranOn = candidate?.plan.mix !== 'concatenate' && overrun > 0.01
+
+  const sourceClock = showEdited ? sourceTime(currentTime, inserts) : currentTime
+  const marks = approved.map((r) => (showEdited ? renderTime(r.start, inserts) : r.start))
+
   return (
     <div className={styles.app}>
       <header className={styles.header}>
         <button className={styles.back} onClick={leave}>← Projects</button>
+        <span className={styles.slash}>/</span>
         <span className={styles.filename} title={project.filename}>{project.filename}</span>
+        <span className={styles.meta}>
+          {project.duration.toFixed(1)} s{speakers.length > 0 && `, ${speakers.length} ${speakers.length === 1 ? 'speaker' : 'speakers'}`}
+        </span>
         <span className={styles.spacer} />
         <SpendMeter usage={usage} />
         <ExportBar segments={segments} inserts={inserts} onExport={() => void runExport()} download={download} />
       </header>
 
-      <main className={styles.bay}>
+      <main className={styles.main}>
         <Player
           src={showEdited ? rendered.url : artifactUrl(project.project_id, project.media.sha256)}
           duration={showEdited ? rendered.duration : project.duration}
@@ -411,6 +514,7 @@ export default function App() {
           onSeek={setCurrentTime}
           onTimeUpdate={setCurrentTime}
           seekRequest={seekRequest}
+          marks={marks}
         >
           {rendered && (
             <div className={styles.versions} role="group" aria-label="Version">
@@ -432,44 +536,59 @@ export default function App() {
           words={transcript}
           duration={project.duration}
           selection={selection}
-          currentTime={showEdited ? sourceTime(currentTime, inserts) : currentTime}
+          currentTime={sourceClock}
           onSelect={setSelection}
         />
         {error && <div className={styles.error} role="alert">{error}</div>}
+        <SpeakersBar
+          speakers={speakers}
+          voices={voices}
+          hasSpeech={transcript.length > 0}
+          detecting={detecting}
+          onDetect={() => void findSpeakers()}
+          onRename={(label, name) => void changeSpeaker(label, { name })}
+          onVoice={(label, id) => void changeSpeaker(label, id ? { voice_id: id } : { clear_voice: true })}
+        />
+        <TranscriptDoc
+          statements={statements}
+          words={transcript}
+          speakers={speakers}
+          voices={voices}
+          revisions={approved}
+          selection={selection}
+          currentTime={sourceClock}
+          pending={pending}
+          longLines={longLines}
+          disabled={generating}
+          onSeek={seekToStatement}
+          onEdit={editStatement}
+          onRevert={(id) => void revert(id)}
+          onReword={reword}
+          onLongLinesChange={(v) => void rememberLongLines(v)}
+        />
       </main>
 
-      <aside className={styles.desk}>
-        <section className={styles.script} aria-label="Script">
-          <SpeakersBar
-            speakers={speakers}
-            voices={voices}
-            hasSpeech={transcript.length > 0}
-            detecting={detecting}
-            onDetect={() => void findSpeakers()}
-            onRename={(label, name) => void changeSpeaker(label, { name })}
-            onVoice={(label, voiceId) => void changeSpeaker(
-              label, voiceId ? { voice_id: voiceId } : { clear_voice: true })}
-          />
-          <TranscriptPanel
-            speakerNames={Object.fromEntries(speakers.map((sp) => [sp.label, sp.name]))}
-            statements={project.statements ?? []}
-            revisions={approved}
-            selection={selection}
-            currentTime={showEdited ? sourceTime(currentTime, inserts) : currentTime}
-            disabled={generating}
-            onSeek={seekToStatement}
-            onEdit={editStatement}
-          />
-        </section>
+      <aside className={styles.panel}>
         <ChatPanel
           messages={messages}
           canSubmit={selection !== null}
           onSubmit={(p) => void runPreview(p)}
           toolbar={<VoicePicker voices={voices} value={voiceId} onChange={setVoiceId} />}
+          header={
+            <div className={styles.panelHead}>
+              <span className={styles.panelTitle}>Voltage</span>
+              <span className={styles.panelNote}>
+                {selection ? `Talking about ${clock(selection.start)}` : 'Pick a line to talk about it'}
+              </span>
+            </div>
+          }
         >
           {generating && (
             <div className={styles.generating} data-testid="generating">
-              <div className={styles.generatingStep}>{progress?.step ?? 'Queued'}</div>
+              <div className={styles.generatingStep}>
+                <span className={styles.spinner} aria-hidden="true" />
+                {progress?.step ?? 'Queued'}
+              </div>
               <div className={styles.progressTrack}>
                 <div
                   data-testid="progress-bar"
@@ -481,13 +600,24 @@ export default function App() {
           )}
           {question && <QuestionCard question={question.question} onChoose={answer} />}
           {candidate && (
-            <CandidateCard
-              candidate={candidate}
-              onApprove={() => void approve()}
-              onApproveAnyway={() => void approve(true)}
-              onTryAgain={() => setCandidate(null)}
-              projectId={project.project_id}
-            />
+            <>
+              <CandidateCard
+                candidate={candidate}
+                onApprove={() => void approve()}
+                onApproveAnyway={() => void approve(true)}
+                onTryAgain={() => { setCandidate(null); setAsked(null) }}
+                projectId={project.project_id}
+                label={`The change at ${clock(candidate.plan.selection.start)}${takeVoice ? `, ${takeVoice}'s voice` : ''}`}
+                speaker={takeSpeaker ? { name: takeSpeaker.name, slot: speakerSlot(speakers, takeSpeaker.label) } : null}
+                note={ranOn ? `Ran ${overrun.toFixed(1)} s into the pause after it` : null}
+              />
+              {ranOn && longLines === 'pause' && (
+                <div className={styles.remembered}>
+                  Longer lines run into the pause after them in this project.{' '}
+                  <button onClick={() => void rememberLongLines('ask')}>Ask me each time instead</button>
+                </div>
+              )}
+            </>
           )}
         </ChatPanel>
       </aside>

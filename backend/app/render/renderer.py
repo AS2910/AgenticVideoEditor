@@ -41,7 +41,10 @@ def render(source: Source, edits: list[ApprovedEdit]) -> RenderManifest:
 
     Concatenated edits take no span of the source; they become inserts, in
     time order (approval order at the same point).
+
+    A reverted edit is skipped entirely: the source plays as shot there.
     """
+    edits = [e for e in edits if not e.reverted]
     inserts = sorted(
         (RenderInsert(min(e.plan.selection.end, source.duration), e.audio.duration, e)
          for e in edits if e.plan.mix == "concatenate"),

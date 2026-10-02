@@ -99,3 +99,18 @@ def test_edited_segments_carry_their_edit_for_the_audio():
     e1 = edit("e1", 1.0, 2.0)
     segment = next(s for s in render(SOURCE, [e1]).segments if s.kind == "edited")
     assert segment.edit is e1
+
+
+# ── reverted edits (Phase 12) ────────────────────────────────────────────────
+
+def test_a_reverted_edit_takes_no_part_in_the_render():
+    from dataclasses import replace
+    undone = replace(edit("e1", 1.0, 2.0), reverted=True)
+    manifest = render(SOURCE, [undone, edit("e2", 2.5, 2.8)])
+    assert edited(manifest) == [(2.5, 2.8, "e2")]
+
+
+def test_reverting_the_later_edit_gives_the_span_back_to_the_earlier_one():
+    from dataclasses import replace
+    e1, e2 = edit("e1", 1.0, 2.0), replace(edit("e2", 1.0, 2.0), reverted=True)
+    assert edited(render(SOURCE, [e1, e2])) == [(1.0, 2.0, "e1")]

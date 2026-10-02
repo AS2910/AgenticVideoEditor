@@ -1,24 +1,28 @@
-.screen {
-  min-height: 100vh; display: grid; place-content: center; justify-items: start;
-  gap: 14px; padding: 48px 24px; width: min(520px, 100%); margin: 0 auto;
+.screen { min-height: 100vh; display: flex; flex-direction: column; align-items: center; }
+.header { width: 100%; height: 56px; display: flex; align-items: center; padding: 0 24px; }
+.brand { font-weight: 700; letter-spacing: -0.01em; }
+.hero { width: min(760px, 100% - 32px); margin-top: clamp(32px, 12vh, 120px); display: flex; flex-direction: column; gap: 18px; }
+.title { margin: 0; font-size: clamp(26px, 4vw, 34px); font-weight: 600; letter-spacing: -0.02em; line-height: 1.15; }
+.tagline { margin: 0; color: var(--muted); font-size: 16px; line-height: 1.5; }
+.card {
+  display: flex; flex-direction: column; gap: 12px; padding: 14px;
+  border-radius: 14px; background: var(--surface); border: 1px solid var(--line);
 }
-.brand { font-size: 32px; font-weight: 600; letter-spacing: -0.01em; }
-.tagline { color: var(--muted); margin: 0 0 8px; font-size: 16px; }
+.actions { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; }
 .load {
-  padding: 10px 22px; border: none; border-radius: var(--radius);
-  background: var(--revision); color: #fff; font-weight: 500;
+  padding: 9px 16px; border: none; border-radius: 10px;
+  background: var(--accent-fill); color: #fff; font-weight: 600;
 }
-.load:disabled { background: var(--console-raised); color: var(--muted); }
+.load:disabled { background: var(--raised); color: var(--muted); }
 /* The real input is driven by the styled button above it. Kept interactive
    rather than `pointer-events: none` so assistive tech and tests can reach it. */
 .fileInput { position: absolute; width: 1px; height: 1px; opacity: 0; overflow: hidden; }
-.sample {
-  background: none; border: none; padding: 0;
-  color: var(--muted); font-size: 13px; text-decoration: underline;
-}
-.sample:disabled { color: var(--rule); }
+.sample { background: none; border: none; padding: 0; color: var(--muted); font-size: 13px; text-decoration: underline; }
+.sample:hover { color: var(--text); }
+.sample:disabled { color: var(--faint); }
 .hint { color: var(--muted); font-size: 12px; margin: 0; }
 .error {
-  color: var(--caution); font-size: 13px;
-  border-left: 3px solid var(--caution); padding: 6px 10px; background: var(--console);
+  color: var(--amber); font-size: 13px; padding: 8px 10px;
+  border-radius: 8px; background: var(--amber-tint); border: 1px solid var(--amber-line);
 }
+.recent { width: min(760px, 100% - 32px); margin: 48px 0; }

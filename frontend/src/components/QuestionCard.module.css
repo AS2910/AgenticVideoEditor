@@ -1,11 +1,16 @@
 /* A question back from the editor: the line in question, and the ways forward. */
-.card { display: flex; flex-direction: column; gap: 8px; }
-.line { font-family: var(--script); font-size: 15px; color: var(--text); }
-.options { display: flex; flex-direction: column; gap: 6px; }
+.card {
+  display: flex; flex-direction: column; gap: 10px; padding: 10px 12px;
+  border-radius: 10px; background: var(--amber-tint); border: 1px solid var(--amber-line);
+}
+.line { font-size: 15px; color: var(--text); }
+.options { display: flex; flex-wrap: wrap; gap: 6px; }
 .option {
   display: flex; flex-direction: column; gap: 2px; text-align: left;
-  padding: 8px 10px; border-radius: var(--radius);
-  background: var(--console-raised); color: var(--text); border: 1px solid var(--rule);
+  padding: 7px 12px; border-radius: 8px; font-size: 13px; font-weight: 500;
+  background: var(--raised); color: var(--text); border: 1px solid var(--line);
 }
-.option:hover { border-color: var(--revision-on-dark); }
-.warning { color: var(--caution); font-size: 12px; }
+.option:first-child { background: var(--accent-fill); border-color: var(--accent-fill); color: #fff; }
+.option:hover { border-color: var(--accent); }
+.warning { color: var(--amber); font-size: 12px; font-weight: 400; }
+.option:first-child .warning { color: #FFE3B0; }

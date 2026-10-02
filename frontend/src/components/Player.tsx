@@ -12,6 +12,8 @@ interface PlayerProps {
   /** A seek asked for from outside (e.g. the transcript). `id` makes asking
    *  for the same time twice still move the video. */
   seekRequest?: { time: number; id: number } | null
+  /** Moments to mark on the progress bar: where the changes are. */
+  marks?: number[]
   /** Shown at the end of the transport row (e.g. the Edited / Original switch). */
   children?: ReactNode
 }
@@ -25,7 +27,7 @@ const timecode = (t: number) => {
 }
 
 export function Player({
-  src, duration, currentTime, onSeek, onTimeUpdate, seekRequest, children,
+  src, duration, currentTime, onSeek, onTimeUpdate, seekRequest, marks = [], children,
 }: PlayerProps) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const [playing, setPlaying] = useState(false)
@@ -57,6 +59,7 @@ export function Player({
     onSeek(t)
   }
 
+  const played = length > 0 ? Math.min(100, (currentTime / length) * 100) : 0
   return (
     <div className={styles.player}>
       <div className={styles.stage}>
@@ -75,23 +78,32 @@ export function Player({
       </div>
       <div className={styles.controls}>
         <button className={styles.play} onClick={toggle} aria-label={playing ? 'Pause' : 'Play'}>
-          <span aria-hidden="true" className={playing ? styles.pauseIcon : styles.playIcon} />
-          {playing ? 'Pause' : 'Play'}
+          {playing ? (
+            <svg width="10" height="12" viewBox="0 0 10 12" aria-hidden="true"><path d="M1 1h3v10H1zM6 1h3v10H6z" fill="currentColor" /></svg>
+          ) : (
+            <svg width="10" height="12" viewBox="0 0 10 12" aria-hidden="true"><path d="M1 1l8 5-8 5z" fill="currentColor" /></svg>
+          )}
         </button>
         <span className={styles.timecode} data-testid="timecode">
           {timecode(currentTime)} <span className={styles.of}>/ {timecode(length)}</span>
         </span>
+        <div className={styles.bar}>
+          <div className={styles.played} style={{ width: `${played}%` }} />
+          {marks.filter((t) => t >= 0 && t <= length).map((t, i) => (
+            <span key={i} className={styles.mark} data-testid="mark" style={{ left: `${(t / length) * 100}%` }} />
+          ))}
+          <input
+            className={styles.scrubber}
+            type="range"
+            min={0}
+            max={length}
+            step={0.01}
+            value={Math.min(currentTime, length)}
+            onChange={(e) => seek(Number(e.target.value))}
+            aria-label="Seek"
+          />
+        </div>
         {children}
-        <input
-          className={styles.scrubber}
-          type="range"
-          min={0}
-          max={length}
-          step={0.01}
-          value={Math.min(currentTime, length)}
-          onChange={(e) => seek(Number(e.target.value))}
-          aria-label="Seek"
-        />
       </div>
     </div>
   )

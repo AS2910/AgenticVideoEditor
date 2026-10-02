@@ -8,15 +8,22 @@ interface ChatPanelProps {
   canSubmit: boolean
   onSubmit: (prompt: string) => void
   children?: ReactNode
-  /** Controls shown above the composer, e.g. the voice picker. */
+  /** Controls shown beside the composer, e.g. the voice picker. */
   toolbar?: ReactNode
+  /** The panel's header: who this is, and what it is doing. */
+  header?: ReactNode
+  placeholder?: string
 }
 
-// The dock shows the latest exchange; earlier messages open on request.
-const RECENT = 4
+// The panel shows the latest exchange; earlier messages open on request.
+const RECENT = 6
 
-/** Direction: what you ask for, and what comes back — a question, a take. */
-export function ChatPanel({ messages, canSubmit, onSubmit, children, toolbar }: ChatPanelProps) {
+/** The conversation with Voltage: what you ask for, and what comes back — a
+ *  reply, a question, a take. */
+export function ChatPanel({
+  messages, canSubmit, onSubmit, children, toolbar, header,
+  placeholder = 'Ask for a change, e.g. say "30% off" instead',
+}: ChatPanelProps) {
   const [prompt, setPrompt] = useState('')
   const [showAll, setShowAll] = useState(false)
   const list = useRef<HTMLDivElement>(null)
@@ -38,6 +45,7 @@ export function ChatPanel({ messages, canSubmit, onSubmit, children, toolbar }: 
   const hidden = showAll ? 0 : Math.max(0, messages.length - RECENT)
   return (
     <div className={styles.panel}>
+      {header}
       <div ref={list} className={styles.messages}>
         {hidden > 0 && (
           <button className={styles.earlier} onClick={() => setShowAll(true)}>
@@ -49,24 +57,30 @@ export function ChatPanel({ messages, canSubmit, onSubmit, children, toolbar }: 
         ))}
         {children}
       </div>
-      {toolbar}
-      <div className={styles.composer}>
-        <input
-          className={styles.input}
-          type="text"
-          aria-label="Describe a change"
-          placeholder='Ask for a change, e.g. say "30% off" instead'
-          value={prompt}
-          onChange={(e) => setPrompt(e.target.value)}
-          onKeyDown={(e) => { if (e.key === 'Enter') submit() }}
-        />
-        <button className={styles.preview} onClick={submit} disabled={disabled}>
-          Preview
-        </button>
+      <div className={styles.foot}>
+        <div className={styles.composer}>
+          <input
+            className={styles.input}
+            type="text"
+            aria-label="Describe a change"
+            placeholder={placeholder}
+            value={prompt}
+            onChange={(e) => setPrompt(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') submit() }}
+          />
+          <button className={styles.send} onClick={submit} disabled={disabled} aria-label="Preview" title="Preview">
+            <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
+              <path d="M8 13V3M3.5 7.5L8 3l4.5 4.5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </button>
+        </div>
+        <div className={styles.under}>
+          {toolbar}
+          {!canSubmit && (
+            <span className={styles.hint}>Pick a line in the transcript, or words on the timeline, then describe the change.</span>
+          )}
+        </div>
       </div>
-      {!canSubmit && (
-        <div className={styles.hint}>Pick a line in the script, or words on the timeline, then describe the change.</div>
-      )}
     </div>
   )
 }

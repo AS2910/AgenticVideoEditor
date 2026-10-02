@@ -1,5 +1,7 @@
 import { useState } from 'react'
 import type { Speaker, Voice } from '../types'
+import { speakerSlot } from '../transcript/speakers'
+import { Avatar } from './Avatar'
 import styles from './SpeakersBar.module.css'
 
 interface SpeakersBarProps {
@@ -13,7 +15,7 @@ interface SpeakersBarProps {
   onVoice: (label: string, voiceId: string | null) => void
 }
 
-// The default voice (the dock's picker), for a speaker without one of their own.
+// The default voice (the chat's picker), for a speaker without one of their own.
 const CHAT_VOICE = ''
 
 /** Who speaks in the video, what to call them, and each one's voice. */
@@ -45,8 +47,8 @@ export function SpeakersBar({
           setDrafts(({ [s.label]: _, ...rest }) => rest)
         }
         return (
-          <div key={s.label} className={styles.speaker} data-speaker={s.label}>
-            <span className={styles.dot} data-speaker={s.label} />
+          <div key={s.label} className={styles.speaker}>
+            <Avatar name={s.name} slot={speakerSlot(speakers, s.label)} size={20} />
             <input
               className={styles.name}
               value={draft}

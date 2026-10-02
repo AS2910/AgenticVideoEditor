@@ -14,8 +14,10 @@ export function SpendMeter({ usage }: { usage: Usage | null }) {
     .join(' · ')
   return (
     <div className={near ? styles.near : styles.meter} data-testid="spend" title={detail}>
-      ${usage.spent_usd.toFixed(2)} of ${usage.ceiling_usd.toFixed(2)} spent, {usage.voice_characters.toLocaleString()} of{' '}
-      {usage.voice_characters_ceiling.toLocaleString()} voice characters
+      ${usage.spent_usd.toFixed(2)} of ${usage.ceiling_usd.toFixed(2)} spent,{' '}
+      <span className={styles.detail}>
+        {usage.voice_characters.toLocaleString()} of {usage.voice_characters_ceiling.toLocaleString()} voice characters
+      </span>
     </div>
   )
 }

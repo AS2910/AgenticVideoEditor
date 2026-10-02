@@ -17,7 +17,7 @@ export function ProjectList({ projects, onOpen, onDelete }: ProjectListProps) {
   if (projects.length === 0) return null
   return (
     <div className={styles.list}>
-      <div className={styles.heading}>Your projects</div>
+      <div className={styles.heading}>Recent</div>
       {projects.map((p) => (
         <div key={p.project_id} className={styles.row}>
           <button className={styles.open} onClick={() => onOpen(p.project_id)}>

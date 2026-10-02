@@ -1,6 +1,6 @@
-# Phases 12–13 — The agentic editor (planned, not started)
+# Phases 12–13 — The agentic editor
 
-**Date:** 2026-09-28 · **Status:** direction decided, mocks approved in principle; **resume here with Phase 12.**
+**Date:** 2026-09-28 · **Status:** Phase 12 built 2026-10-02 (see *Phase 12 — as built* below); **resume with Phase 13.**
 
 ## Where this came from
 
@@ -35,6 +35,26 @@ After the 2026-09-26 redesign (an edit bay around a screenplay-style script page
 - Start screen from screen A's look (goal box may be inert until Phase 13).
 - Exit: suites green; lint/build clean; checked by screenshot at 1470 px and a narrow width; live on a real clip.
 
+## Phase 12 — as built (2026-10-02)
+
+What landed, and where:
+
+- **Visual system** — `frontend/src/styles/theme.css`: the mock's tokens (`--bg`, `--surface`, `--raised`, `--line`, `--text`, `--muted`, `--accent` / `--accent-fill`, `--amber`, speakers a–d), Instrument Sans only. Older components keep working through aliases.
+- **Layout** — `App.tsx` / `App.module.css`: header (← Projects / file · length, speakers · spend · Export MP4), main column (monitor with change markers on the progress bar, word timeline, cast, transcript), the Voltage panel on the right (chat bubbles, generating state, question, take, composer with the default-voice picker). Stacks under 960 px.
+- **Transcript as a document** — `components/TranscriptDoc.tsx`: time, speaker avatar (once per change of speaker), words. An approved edit shows as inline tracked changes (`<del>` / `<ins>`), computed by `transcript/changes.ts` — a word-level LCS diff that compares words without punctuation so "only." stays "only.", and reconstructs a partial revision from the timed words either side. Status chip per pending line: Working / Ready / Needs you. **Revert** beside a changed line.
+- **Hands-on editing** (screen E) — click a line: textarea, Voice (defaults to the speaker's own), If it runs long (Use the pause after it / Speed it up / Ask me — the choice is remembered for the project), Ask Voltage for wording, Cancel, Preview. Enter previews, Esc cancels.
+- **Everyday fixes** (canvas "Next steps" screen 1):
+  - Backend `_long_line_fit` in `app/api/main.py`: on a `SpanMismatch` with no `fit`, a *long* line is placed by the project's `long_lines` setting (or the request's `on_long`): `pause` → `fit="start"` when `room_after(selection)` + 50 ms holds the overrun; `stretch` → `fit="stretch"`; `ask` → the fit question as before. The held take is reused, so no extra spend. The take card says "Ran 0.4 s into the pause after it", with "Ask me each time instead" underneath.
+  - `PUT /projects/{id}/settings`, `settings` JSON column (migration), `settings` on `GET /projects/{id}`.
+  - **Revert**: `ApprovedEdit.reverted`, `repo.revert_edit`, `POST /projects/{id}/edits/{edit_id}/revert`; `render()` drops reverted edits; the project list counts only live ones; reopening hides them.
+  - **Ask Voltage for wording**: `POST /projects/{id}/lines/reword` → Claude via the existing interpreter, metered as anthropic/`wording`; 503 offline.
+- **Start screen** (screen A's look): wordmark, headline, upload card, Recent list. The goal box waits for Phase 13.
+- **Gone:** `TranscriptPanel`, Courier Prime, the paper page.
+
+**Exit:** 387 backend + 134 frontend tests (18 files); `npm run lint` and `npm run build` clean. Live on the Bhaji Cam clip (p3): the "Bajicam" line rewritten in place came back 1.86 s against 1.48 s and ran 0.38 s into the 0.36 s pause after it (within the slack) without a question; approved (overridden — Brian's stock voice is 6 semitones under the customer), exported at 7.54–9.40, reverted, exported again to a single original segment; Claude reworded a line. Screenshots: headless Chrome at 1470 px and 420 px. Phase cost ≈ $0.035.
+
+**Not in Phase 12, on purpose:** the autonomy switch and the goal box (Phase 13); the Chrome-extension walkthrough (the extension was not connected during the build — the layout was checked with headless Chrome instead).
+
 ## Phase 13 — The agent
 
 - **Planning across the whole video:** Claude reads the goal with the full transcript and speakers and returns a plan — a list of edits (line, new wording, mix, speaker/voice) — via structured output / tool use.
@@ -51,8 +71,8 @@ After the 2026-09-26 redesign (an edit bay around a screenplay-style script page
 - **5 — real lip-sync:** needs a vendor key; spike Sync.so / Hedra / Runway on one clip first. Mock: canvas screen 3.
 - **9c — sign-in:** designed; build when going public. Mock: canvas screen 4.
 
-## Picking this up
+## Picking this up (Phase 13)
 
 1. Start the app (README → *Running it*): backend `cd backend && .venv/bin/uvicorn app.api.main:app --reload`, front end `cd frontend && npm run dev`.
-2. Open the mocks link above.
-3. Write Phase 12's detailed task list from this file, then build.
+2. Open the mocks link above — screens A, B, C and D are Phase 13's.
+3. Write Phase 13's detailed task list from this file, then build. Phase 12 left the hooks it needs: `pending` / `LineStatus` on the transcript, `on_long` on preview requests, the `settings` column for the autonomy switch, and the usage ledger's `wording` line for the cost estimate.

@@ -34,7 +34,7 @@ export function ExportBar({ segments, onExport, download, inserts = [] }: Export
           {inserts.reduce((t, i) => t + i.duration, 0).toFixed(2)}s
         </div>
       )}
-      <button className={styles.export} onClick={onExport}>Export</button>
+      <button className={styles.export} onClick={onExport}>Export MP4</button>
       {download && (
         <a className={styles.download} href={download.url} download={download.filename}>
           Download MP4

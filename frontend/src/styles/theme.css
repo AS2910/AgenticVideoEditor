@@ -1,60 +1,62 @@
-/* Editor theme — see docs/superpowers/specs/2026-09-26-editor-ui-redesign.md.
-   An edit bay (graphite, quiet) around one light surface: the script page. */
+/* Editor theme — the agentic editor (Phase 12), from the approved mocks:
+   one sans, dark neutral surfaces, rounded panels, one blue accent, amber for
+   "needs you". No red/green status pairs. */
 :root {
-  /* the bay */
-  --bay: #15161A;
-  --console: #1F2127;
-  --console-raised: #272A31;
-  --rule: #30333B;
-  --text: #E9E9E6;
-  --muted: #9B9DA4;
+  --bg: #0E0F11;
+  --surface: #16171A;
+  --raised: #1E2024;
+  --line: #2A2C31;
+  --text: #ECECEA;
+  --muted: #9A9CA2;
+  --faint: #6C6F76;
 
-  /* the script page */
-  --paper: #F3F4F1;
-  --ink: #1E1F24;
-  --ink-muted: #6B6D74;
-  --paper-rule: #DADBD6;
+  --accent: #8AAAFF;            /* changed words, ready, links, focus */
+  --accent-fill: #3F6FE8;       /* the primary button */
+  --accent-tint: rgba(138, 170, 255, 0.14);
+  --amber: #E3A33D;             /* needs you */
+  --amber-tint: rgba(227, 163, 61, 0.12);
+  --amber-line: rgba(227, 163, 61, 0.35);
+  --speaker-a: #2BB3A0;
+  --speaker-b: #D66BA0;
+  --speaker-c: #8AAAFF;
+  --speaker-d: #E3A33D;
 
-  /* meaning */
-  --revision: #2E5BDB;        /* revised lines, approve, focus */
-  --revision-tint: #E3EBFB;   /* a revised line on the page */
-  --revision-on-dark: #7D9CF0;
-  --caution: #D9A441;         /* on the bay */
-  --caution-ink: #9A6412;     /* on the page */
-  --speaker-a: #0E8A7A;
-  --speaker-b: #B4467E;
-  --speaker-c: #6C5BBF;
-  --speaker-d: #8A6A12;
+  /* aliases older components still use */
+  --bay: var(--bg);
+  --console: var(--surface);
+  --console-raised: var(--raised);
+  --rule: var(--line);
+  --revision: var(--accent-fill);
+  --revision-on-dark: var(--accent);
+  --caution: var(--amber);
+  --electric: var(--accent-fill);
+  --cyan: var(--accent);
+  --warn: var(--amber);
+  --pass: var(--accent);
+  --border: var(--line);
 
-  /* aliases the components grew up with */
-  --bg: var(--bay);
-  --surface: var(--console);
-  --border: var(--rule);
-  --electric: var(--revision);
-  --cyan: var(--revision-on-dark);
-  --warn: var(--caution);
-  --pass: var(--revision-on-dark);
-
-  --radius: 6px;
+  --radius: 8px;
+  --radius-lg: 12px;
   --ui: 'Instrument Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
-  --script: 'Courier Prime', 'Courier New', Courier, monospace;
 }
 * { box-sizing: border-box; }
 html, body, #root { height: 100%; }
 body {
   margin: 0;
-  background: var(--bay);
+  background: var(--bg);
   color: var(--text);
   font-family: var(--ui);
   font-size: 14px;
-  line-height: 1.45;
+  line-height: 1.5;
   font-variant-numeric: tabular-nums;
   -webkit-font-smoothing: antialiased;
 }
 button, input, select, textarea { font: inherit; color: inherit; }
 button { cursor: pointer; }
 button:disabled { cursor: default; }
-:focus-visible { outline: 2px solid var(--revision-on-dark); outline-offset: 2px; }
+a { color: var(--accent); }
+a:hover { color: #B3C7FF; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { transition: none !important; animation: none !important; }
 }

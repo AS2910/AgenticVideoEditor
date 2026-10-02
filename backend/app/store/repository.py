@@ -210,11 +210,50 @@ class ProjectRepository:
             )
 
     def list_edits(self, project_id: str) -> list[ApprovedEdit]:
+        """Every approved edit in approval order, reverted ones included —
+        callers that render or count skip `reverted` themselves."""
         with self.db.tx() as c:
             rows = c.execute(
                 "SELECT body FROM edits WHERE project_id = ? ORDER BY seq", (project_id,),
             ).fetchall()
         return [codec.edit(json.loads(r["body"])) for r in rows]
+
+    def revert_edit(self, project_id: str, edit_id: str) -> bool:
+        """Mark an approved edit undone (Phase 12). The record stays — edits
+        only ever append — but the render skips it. False if there is no such
+        edit; reverting twice is harmless."""
+        with self.db.tx() as c:
+            rows = c.execute(
+                "SELECT seq, body FROM edits WHERE project_id = ? ORDER BY seq", (project_id,),
+            ).fetchall()
+            for row in rows:
+                body = json.loads(row["body"])
+                if body["edit_id"] == edit_id:
+                    body["reverted"] = True
+                    c.execute(
+                        "UPDATE edits SET body = ? WHERE project_id = ? AND seq = ?",
+                        (json.dumps(body), project_id, row["seq"]),
+                    )
+                    return True
+        return False
+
+    # ── settings ──
+
+    def settings(self, project_id: str) -> dict:
+        """Per-project preferences, e.g. how a long line is placed."""
+        with self.db.tx() as c:
+            row = c.execute("SELECT settings FROM projects WHERE id = ?", (project_id,)).fetchone()
+        return json.loads(row["settings"] or "{}") if row else {}
+
+    def set_settings(self, project_id: str, **changes) -> dict:
+        with self.db.tx() as c:
+            row = c.execute("SELECT settings FROM projects WHERE id = ?", (project_id,)).fetchone()
+            if row is None:
+                raise KeyError(project_id)
+            saved = json.loads(row["settings"] or "{}")
+            saved.update({k: v for k, v in changes.items() if v is not None})
+            c.execute("UPDATE projects SET settings = ? WHERE id = ?", (json.dumps(saved), project_id))
+        return saved
 
     # ── chat ──
 

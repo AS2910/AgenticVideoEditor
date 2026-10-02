@@ -75,3 +75,28 @@ def test_a_selection_over_two_speakers_or_none_has_no_speaker():
 
 def test_grouped_statements_break_where_the_speaker_changes():
     assert [(s.text, s.speaker) for s in statements_of(SPOKEN)] == [("Hi", "A"), ("Sure sir", "B")]
+
+
+# ── the pause after a selection (Phase 12) ───────────────────────────────────
+
+def test_room_after_is_the_gap_to_the_next_word():
+    from app.domain.models import Selection, Transcript, Word
+    from app.domain.transcript import room_after
+    t = Transcript(words=(Word("a", 0.0, 0.4), Word("b", 0.4, 0.9), Word("c", 1.4, 1.8)))
+    import pytest
+    assert room_after(t, Selection(0.4, 0.9), 5.0) == pytest.approx(0.5)
+
+
+def test_room_after_the_last_word_runs_to_the_end_of_the_video():
+    from app.domain.models import Selection, Transcript, Word
+    from app.domain.transcript import room_after
+    t = Transcript(words=(Word("a", 0.0, 0.4), Word("b", 0.4, 0.9)))
+    import pytest
+    assert room_after(t, Selection(0.4, 0.9), 2.3) == pytest.approx(1.4)
+
+
+def test_room_after_is_zero_when_speech_follows_at_once():
+    from app.domain.models import Selection, Transcript, Word
+    from app.domain.transcript import room_after
+    t = Transcript(words=(Word("a", 0.0, 0.4), Word("b", 0.4, 0.9)))
+    assert room_after(t, Selection(0.0, 0.4), 2.3) == 0.0

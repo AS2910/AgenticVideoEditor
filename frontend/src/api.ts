@@ -1,5 +1,6 @@
 import type {
   Project, ApprovedResult, ExportManifest, EditRequest, Job, ProjectSummary, ProjectDetail, Usage, Voice, Speaker,
+  ProjectSettings, LongLines, Rewording,
 } from './types'
 
 const BASE = '/api'
@@ -148,3 +149,22 @@ export const approveEdit = (id: string, candidateId: string, override = false) =
 
 export const exportProject = (id: string) =>
   post<ExportManifest>(`/projects/${id}/export`)
+
+/** Undoes an approved edit. The edit is kept and marked; the render skips it. */
+export const revertEdit = (id: string, editId: string) =>
+  post<{ edit_id: string; reverted: boolean }>(`/projects/${id}/edits/${editId}/revert`)
+
+/** Remembers how this project places a line that runs long. */
+export async function updateSettings(id: string, change: { long_lines: LongLines }): Promise<ProjectSettings> {
+  const res = await fetch(`${BASE}/projects/${id}/settings`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(change),
+  })
+  if (!res.ok) return failure(res)
+  return ((await res.json()) as { settings: ProjectSettings }).settings
+}
+
+/** Asks Claude for a new wording of the line in a span, given the draft so far. */
+export const rewordLine = (id: string, req: { start: number; end: number; draft?: string; instruction?: string }) =>
+  post<Rewording>(`/projects/${id}/lines/reword`, req)
