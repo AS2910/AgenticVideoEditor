@@ -1,6 +1,6 @@
 # Phases 12–13 — The agentic editor
 
-**Date:** 2026-09-28 · **Status:** Phase 12 built 2026-10-02 (see *Phase 12 — as built* below); **resume with Phase 13.**
+**Date:** 2026-09-28 · **Status:** both phases built 2026-10-02 (see *as built* sections). **Next: the roadmap backlog.**
 
 ## Where this came from
 
@@ -65,14 +65,24 @@ What landed, and where:
 - **Review screen** (C): before/after, Compare, Redo, Approve all and export; the activity log built from the chat, jobs and usage ledger.
 - Exit: as Phase 12, plus a live run of a multi-change goal on the Bhaji Cam clip.
 
+## Phase 13 — as built (2026-10-02)
+
+- **Planner** — `app/adapters/claude_planner.py`: one structured-output call (effort medium) reads the goal with every numbered line, its time and speaker name, and earlier goals; returns `summary`, `edits` and `suggestions` (`line`, `new_text`, `mix` replace / concatenate, `reason`). `shorten()` is the agent's own fix for a line that runs long (effort low). `RulePlanner` offline. Selected like every adapter (`select_planner`), reported by `/health` as `planner`.
+- **Plan model** — `app/domain/plan.py`: `Plan` (goal, summary, mode, status proposed / running / done, estimate, log) and `PlanItem` (line, old/new text, speaker, mix, kind planned / suggestion, enabled, status planned → working → ready / needs-you / failed → approved, candidate_id, edit_id, question, note). Stored whole in the `plans` table; items updated under the database lock so the job and the UI never overwrite each other.
+- **Routes** — `POST /plans` (synchronous Claude call, ~10 s; under `draft` it also starts the run), `GET /plans/{id}`, `PUT …/items/{id}` (untick, reword, add / leave a suggestion; the estimate is recomputed), `POST …/run` (one job, per-item status and progress "2 of 3: Checking continuity"), `…/answer`, `…/redo`, `…/approve` (approves every ready item, skips failed continuity unless `override`, renders). Approving a plan item's take through the ordinary `/edits` route marks the item too. The generation core is shared with previews (`_generate`), so plan items get the same long-line policy, budget checks and retries.
+- **Needs you, the agent's fix first** — `_agent_fix`: the fit question reworded ("The new line runs 1.2 s long and the pause after it is only 0.2 s."), with "Use a shorter line: “…”" inserted ahead of speed up / run past; the answer carries `text`.
+- **Front end** — `GoalBox` (screen A, in the Voltage panel until there is a plan; the composer also plans a goal typed with nothing selected), `AutonomySwitch` in the panel header, `PlanCard` (screen D while proposed: checkbox, editable wording, estimate, Run; screen B while running: icons, takes with "sounds right", needs-you options, Redo, suggestions), `ReviewPanel` (screen C: before / after as tracked changes, Compare seeks the original and plays the take, Redo, Approve all and export), `ActivityLog`. The transcript shows planned wording inline with Planned / Working / Ready / Needs you / Failed chips. The plan is re-read every few polls while a job runs, with a guard so a read in flight never overwrites the result.
+
+**Exit:** 412 backend + 148 frontend tests (19 files); lint and build clean. Live on the Bhaji Cam clip with the mock's own goal: 3 changes across both speakers + 2 suggestions planned in 9.7 s; voiced in 21 s; the bill line needed me, the agent's shorter line was picked and scored 0.99; approve-all exported two replaced spans and a 3.5 s insert; the log reads as the mock's. ≈ $0.10. The shopkeeper's added line failed continuity in the default (female) voice and was approved overridden — a voice per speaker is the fix, and it is already a setting.
+
+**Left for later:** replanning by conversation (a message after a plan makes a new plan with the earlier goal as context, rather than editing the plan in place); the goal box as a full screen after upload (it lives in the panel).
+
 ## Still blocked (roadmap backlog)
 
 - **4b — the speaker's own voice:** needs an ElevenLabs plan with instant voice cloning (free tier can't). Mock: canvas screen 2.
 - **5 — real lip-sync:** needs a vendor key; spike Sync.so / Hedra / Runway on one clip first. Mock: canvas screen 3.
 - **9c — sign-in:** designed; build when going public. Mock: canvas screen 4.
 
-## Picking this up (Phase 13)
+## Picking this up
 
-1. Start the app (README → *Running it*): backend `cd backend && .venv/bin/uvicorn app.api.main:app --reload`, front end `cd frontend && npm run dev`.
-2. Open the mocks link above — screens A, B, C and D are Phase 13's.
-3. Write Phase 13's detailed task list from this file, then build. Phase 12 left the hooks it needs: `pending` / `LineStatus` on the transcript, `on_long` on preview requests, the `settings` column for the autonomy switch, and the usage ledger's `wording` line for the cost estimate.
+Both phases are built. What remains is the roadmap backlog: 9c sign-in (designed, unblocked), then 4b and 5 when a vendor allows. Start the app as the README says; the Bhaji Cam clip is project p3 and holds a finished plan to look at.

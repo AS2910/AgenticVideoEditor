@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 
 from app.domain.models import ApprovedEdit, Consent, EditCandidate, Source, Transcript
+from app.domain.plan import Plan, plan_from_dict
 from app.store import codec
 from app.store.db import PROJECT_TABLES, Database
 
@@ -272,3 +273,87 @@ class ProjectRepository:
                 (project_id,),
             ).fetchall()
         return [Message(r["role"], r["text"], r["at"]) for r in rows]
+
+    # ── plans (Phase 13) ──
+
+    def next_plan_id(self, project_id: str) -> str:
+        with self.db.tx() as c:
+            row = c.execute(
+                "SELECT COALESCE(MAX(seq), 0) AS n FROM plans WHERE project_id = ?", (project_id,),
+            ).fetchone()
+        return f"plan{int(row['n']) + 1}"
+
+    def save_plan(self, plan: Plan) -> None:
+        """Insert or replace the whole plan — items change as the run goes."""
+        body = json.dumps(codec.dump(plan))
+        with self.db.tx() as c:
+            row = c.execute(
+                "SELECT seq FROM plans WHERE project_id = ? AND plan_id = ?",
+                (plan.project_id, plan.plan_id),
+            ).fetchone()
+            if row:
+                c.execute("UPDATE plans SET body = ? WHERE project_id = ? AND plan_id = ?",
+                          (body, plan.project_id, plan.plan_id))
+            else:
+                c.execute(
+                    "INSERT INTO plans (project_id, plan_id, seq, body) VALUES (?, ?, "
+                    "(SELECT COALESCE(MAX(seq), 0) + 1 FROM plans WHERE project_id = ?), ?)",
+                    (plan.project_id, plan.plan_id, plan.project_id, body),
+                )
+
+    def get_plan(self, project_id: str, plan_id: str) -> Plan | None:
+        with self.db.tx() as c:
+            row = c.execute(
+                "SELECT body FROM plans WHERE project_id = ? AND plan_id = ?", (project_id, plan_id),
+            ).fetchone()
+        return plan_from_dict(json.loads(row["body"])) if row else None
+
+    def latest_plan(self, project_id: str) -> Plan | None:
+        with self.db.tx() as c:
+            row = c.execute(
+                "SELECT body FROM plans WHERE project_id = ? ORDER BY seq DESC LIMIT 1", (project_id,),
+            ).fetchone()
+        return plan_from_dict(json.loads(row["body"])) if row else None
+
+    def update_item(self, project_id: str, plan_id: str, item_id: str, **changes) -> Plan | None:
+        """Change one item inside a transaction, so a running job and a
+        request editing another item never overwrite each other."""
+        with self.db.tx() as c:
+            row = c.execute(
+                "SELECT body FROM plans WHERE project_id = ? AND plan_id = ?", (project_id, plan_id),
+            ).fetchone()
+            if row is None:
+                return None
+            plan = plan_from_dict(json.loads(row["body"])).with_item(item_id, **changes)
+            c.execute("UPDATE plans SET body = ? WHERE project_id = ? AND plan_id = ?",
+                      (json.dumps(codec.dump(plan)), project_id, plan_id))
+        return plan
+
+    def update_plan(self, project_id: str, plan_id: str, **changes) -> Plan | None:
+        """Change the plan's own fields (status, log) under the same lock."""
+        from dataclasses import replace as _replace
+        with self.db.tx() as c:
+            row = c.execute(
+                "SELECT body FROM plans WHERE project_id = ? AND plan_id = ?", (project_id, plan_id),
+            ).fetchone()
+            if row is None:
+                return None
+            plan = _replace(plan_from_dict(json.loads(row["body"])), **changes)
+            c.execute("UPDATE plans SET body = ? WHERE project_id = ? AND plan_id = ?",
+                      (json.dumps(codec.dump(plan)), project_id, plan_id))
+        return plan
+
+    def append_log(self, project_id: str, plan_id: str, text: str, detail: str = "") -> None:
+        """Add a line to what Voltage did, under the same lock as item updates."""
+        from dataclasses import replace as _replace
+        entry = {"at": _now(), "text": text, "detail": detail}
+        with self.db.tx() as c:
+            row = c.execute(
+                "SELECT body FROM plans WHERE project_id = ? AND plan_id = ?", (project_id, plan_id),
+            ).fetchone()
+            if row is None:
+                return
+            plan = plan_from_dict(json.loads(row["body"]))
+            plan = _replace(plan, log=plan.log + (entry,))
+            c.execute("UPDATE plans SET body = ? WHERE project_id = ? AND plan_id = ?",
+                      (json.dumps(codec.dump(plan)), project_id, plan_id))

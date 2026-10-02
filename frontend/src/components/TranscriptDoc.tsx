@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useRef, useState } from 'react'
 import type {
-  LineStatus, LongLines, Revision, Selection, Speaker, Statement, Voice, Word,
+  ItemStatus, LineStatus, LongLines, Mix, Revision, Selection, Speaker, Statement, Voice, Word,
 } from '../types'
 import { trackedChanges } from '../transcript/changes'
 import { clock } from '../transcript/format'
@@ -10,6 +10,10 @@ import styles from './TranscriptDoc.module.css'
 
 /** What the inline editor hands back for a line. */
 export interface LineChange { text: string; voiceId: string | null; onLong: LongLines }
+
+/** A line the editor or the agent is working on: where it stands, and the
+ *  new words so far, shown as tracked changes before anything is approved. */
+export interface PendingLine { selection: Selection; status: LineStatus | ItemStatus; text?: string; mix?: Mix }
 
 interface TranscriptDocProps {
   statements: Statement[]
@@ -23,8 +27,8 @@ interface TranscriptDocProps {
   selection?: Selection | null
   /** Where playback is, on the source's clock — the line there is marked. */
   currentTime: number
-  /** The line the editor is working on, and how far it has got. */
-  pending?: { selection: Selection; status: LineStatus } | null
+  /** Lines being worked on — by you or the agent — and how far each has got. */
+  pendingLines?: PendingLine[]
   /** The project's answer to a line that runs long; the editor's default. */
   longLines?: LongLines
   disabled?: boolean
@@ -40,7 +44,9 @@ interface TranscriptDocProps {
 const overlaps = (a: { start: number; end: number }, b: { start: number; end: number }) =>
   a.start < b.end && b.start < a.end
 
-const STATUS: Record<LineStatus, string> = { working: 'Working', ready: 'Ready', 'needs-you': 'Needs you' }
+const STATUS: Record<string, string> = {
+  planned: 'Planned', working: 'Working', ready: 'Ready', 'needs-you': 'Needs you', failed: 'Failed',
+}
 
 const LONG_OPTIONS: { value: LongLines; label: string }[] = [
   { value: 'pause', label: 'Use the pause after it' },
@@ -63,7 +69,7 @@ const voiceLabel = (v: Voice) => (v.gender ? `${v.name} (${v.gender})` : v.name)
  *  wording. */
 export function TranscriptDoc({
   statements, words = [], speakers = [], voices = [], revisions = [], selection, currentTime,
-  pending, longLines = 'pause', disabled, onSeek, onEdit, onRevert, onReword, onLongLinesChange,
+  pendingLines = [], longLines = 'pause', disabled, onSeek, onEdit, onRevert, onReword, onLongLinesChange,
 }: TranscriptDocProps) {
   const [editing, setEditing] = useState<number | null>(null)
   const [draft, setDraft] = useState('')
@@ -111,7 +117,7 @@ export function TranscriptDoc({
         <span className={styles.title}>Transcript</span>
         <span className={styles.hint}>
           {editing === null
-            ? 'Changes show inline. Click any line to edit it yourself.'
+            ? `${pendingLines.some((p) => p.status === 'planned') ? 'Planned changes' : 'Changes'} show inline. Click any line to edit it yourself.`
             : `Editing ${clock(statements[editing].start)}. Enter to preview, Esc to cancel.`}
         </span>
       </div>
@@ -119,9 +125,13 @@ export function TranscriptDoc({
       {statements.map((s, i) => {
         const current = currentTime >= s.start && currentTime < s.end
         const selected = !!selection && overlaps(selection, s)
+        const pending = pendingLines.find((p) => overlaps(p.selection, s) && STATUS[p.status])
+        const status = pending?.status ?? null
         const live = revisions.filter((r) => overlaps(r, s))
-        const revision = live.length ? live[live.length - 1] : null
-        const status = pending && overlaps(pending.selection, s) ? pending.status : null
+        // A line being worked on shows its new words ahead of approval.
+        const revision: Revision | null = pending?.text
+          ? { start: pending.selection.start, end: pending.selection.end, text: pending.text, mix: pending.mix ?? 'replace' }
+          : live.length ? live[live.length - 1] : null
         const speaker = speakers.find((sp) => sp.label === s.speaker)
         const name = speaker?.name ?? (s.speaker ? `Speaker ${s.speaker}` : null)
         const newSpeaker = !!name && s.speaker !== statements[i - 1]?.speaker

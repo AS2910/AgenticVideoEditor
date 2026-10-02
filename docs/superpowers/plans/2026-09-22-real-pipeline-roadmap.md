@@ -1,7 +1,7 @@
 # Real Pipeline — Phased Roadmap
 
 **Date:** 2026-09-22
-**Status:** Phases 0–4a, 6a, 7, 8 and 9 done and clean (8 and 9 on 2026-09-26; 9c is a design). Phases 10 (editing UX) and 11 (multiple voices) done the same day; the editor was redesigned on 2026-09-26 (`docs/superpowers/specs/2026-09-26-editor-ui-redesign.md`). Phase 12 (the agentic editor) done 2026-10-02. **Next: Phase 13 (the agent)** — plan and mocks in `2026-09-28-phase-12-13-agentic-editor.md`. Phases 4b and 5 moved to the **Backlog** — both are blocked on vendor access, not on code.
+**Status:** Phases 0–4a, 6a, 7, 8 and 9 done and clean (8 and 9 on 2026-09-26; 9c is a design). Phases 10 (editing UX) and 11 (multiple voices) done the same day; the editor was redesigned on 2026-09-26 (`docs/superpowers/specs/2026-09-26-editor-ui-redesign.md`). Phases 12 (the agentic editor) and 13 (the agent) done 2026-10-02 (`2026-09-28-phase-12-13-agentic-editor.md`). **Next: the Backlog** — 9c sign-in is the only item not blocked on a vendor. Phases 4b and 5 moved to the **Backlog** — both are blocked on vendor access, not on code.
 **Supersedes nothing.** Builds on `2026-07-14-walking-skeleton.md` and `2026-07-17-voltage-frontend.md`.
 
 **Goal:** turn the mocked walking skeleton into a system that ingests a real video, produces a real re-voiced and lip-synced segment, verifies continuity with real signal analysis, and exports a real playable file — honoring the v1 design spec end-to-end.
@@ -184,8 +184,11 @@ Grouped into three milestones. Each milestone is independently useful — you ca
   - **Revert:** `ApprovedEdit.reverted`, `POST /edits/{id}/revert`; the renderer skips reverted edits; reopen and the project list respect it.
   - **Exit met:** 387 backend + 134 frontend tests; frontend lint and build clean. Live on the 49 s Bhaji Cam clip: "Bajicam" → "Bhaji Cam" came back 1.86 s for a 1.48 s line and **ran 0.38 s into the pause after it with no question** (fit `start`, edit grown to 7.54–9.40); approved, exported, reverted (export back to one original segment, list count 0); Claude reworded "These are regular ones." → "These are the regular ones." Layout checked by headless-Chrome screenshot at 1470 px and 420 px.
 
-- [ ] **Phase 13 · The agent** *(same plan)*
-  - Claude plans edits across the whole video from a goal; autonomy switch (*Ask before running*, the default, with a cost estimate; or *Draft everything*); plan jobs with per-item status; the agent's own fixes and suggestions; review screen with an activity log.
+- [x] **Phase 13 · The agent** — **done 2026-10-02** (same plan)
+  - `app/adapters/claude_planner.py` reads the goal with every line and speaker (structured output, effort medium) → edits + suggestions + a summary; `RulePlanner` offline (`change "X" to "Y"`). `app/domain/plan.py`; `plans` table; `POST /plans`, `GET /plans/{id}`, `PUT …/items/{id}`, `POST …/run`, `…/answer`, `…/redo`, `…/approve`.
+  - **Autonomy switch** per project (`settings.autonomy`): *Ask before running* (default) shows the plan with each change ticked and editable and an estimate (characters × ledger rate, 12 s a line); *Draft everything* runs at once.
+  - **Plan jobs:** one job, a status per item; the agent's own fix first on a long line (`planner.shorten`, metered as `wording`); unprompted suggestions with Add to plan / Leave it; Review screen (before / after, Compare, Redo, Approve all and export) and the "What Voltage did" log.
+  - **Exit met:** 412 backend + 148 frontend tests; lint and build clean. Live on the Bhaji Cam clip, goal *"Turn this into our Diwali ad: everything's 30% off, and say the brand name as Bhaji Cam"*: Claude planned 3 changes across both speakers plus 2 suggestions (9.7 s); Run voiced them in 21 s; the bill line ran 1.2 s long with a 0.2 s pause, so the agent offered *"Got the bill, 30% off, paying now."* first — picked, voiced, prosody 0.99; Approve all exported two replaced spans and a 3.5 s insert. Phase cost ≈ $0.10.
 
 ---
 

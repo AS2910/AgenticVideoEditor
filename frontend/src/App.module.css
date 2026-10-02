@@ -42,6 +42,10 @@
 .panelTitle { font-weight: 600; }
 .panelNote { color: var(--muted); font-size: 13px; }
 
+.reviewButton {
+  padding: 7px 12px; border-radius: 8px; font-size: 13px; font-weight: 500;
+  background: var(--accent-fill); color: #fff; border: 1px solid var(--accent-fill); white-space: nowrap;
+}
 .versions { display: flex; padding: 2px; border-radius: 8px; background: var(--surface); border: 1px solid var(--line); }
 .version, .versionOn { padding: 3px 10px; border-radius: 6px; font-size: 12px; border: none; }
 .version { background: transparent; color: var(--muted); }

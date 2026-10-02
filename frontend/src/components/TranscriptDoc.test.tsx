@@ -114,10 +114,18 @@ describe('TranscriptDoc', () => {
   it('marks the line the chat is talking about, and the one being worked on', () => {
     doc({
       selection: { start: 7.6, end: 8.0 },
-      pending: { selection: { start: 9.1, end: 9.8 }, status: 'needs-you' },
+      pendingLines: [{ selection: { start: 9.1, end: 9.8 }, status: 'needs-you' }],
     })
     expect(screen.getByText('Start a live Bajicam session.').closest('[data-selected]'))
       .toHaveAttribute('data-selected', 'true')
     expect(screen.getByText('Needs you')).toBeInTheDocument()
+  })
+
+  it('shows a planned change as tracked changes before it is voiced', () => {
+    doc({ pendingLines: [{ selection: { start: 7.54, end: 9.02 }, status: 'planned', text: 'Start a live Bhaji Cam session.' }] })
+    const line = screen.getByTestId('revision')
+    expect(within(line).getByText('Bhaji Cam').tagName).toBe('INS')
+    expect(screen.getByText('Planned')).toBeInTheDocument()
+    expect(screen.getByText(/planned changes show inline/i)).toBeInTheDocument()
   })
 })

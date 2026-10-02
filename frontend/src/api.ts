@@ -1,6 +1,6 @@
 import type {
   Project, ApprovedResult, ExportManifest, EditRequest, Job, ProjectSummary, ProjectDetail, Usage, Voice, Speaker,
-  ProjectSettings, LongLines, Rewording,
+  ProjectSettings, LongLines, Rewording, Autonomy, Plan, Fit, Mix,
 } from './types'
 
 const BASE = '/api'
@@ -154,8 +154,11 @@ export const exportProject = (id: string) =>
 export const revertEdit = (id: string, editId: string) =>
   post<{ edit_id: string; reverted: boolean }>(`/projects/${id}/edits/${editId}/revert`)
 
-/** Remembers how this project places a line that runs long. */
-export async function updateSettings(id: string, change: { long_lines: LongLines }): Promise<ProjectSettings> {
+/** Remembers how this project places a line that runs long, and how much
+ *  Voltage does on its own. */
+export async function updateSettings(
+  id: string, change: { long_lines?: LongLines; autonomy?: Autonomy },
+): Promise<ProjectSettings> {
   const res = await fetch(`${BASE}/projects/${id}/settings`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
@@ -168,3 +171,49 @@ export async function updateSettings(id: string, change: { long_lines: LongLines
 /** Asks Claude for a new wording of the line in a span, given the draft so far. */
 export const rewordLine = (id: string, req: { start: number; end: number; draft?: string; instruction?: string }) =>
   post<Rewording>(`/projects/${id}/lines/reword`, req)
+
+async function put<T>(path: string, body: unknown): Promise<T> {
+  const res = await fetch(`${BASE}${path}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  if (!res.ok) return failure(res)
+  return (await res.json()) as T
+}
+
+/** Plans edits across the whole video from a goal. Under "draft" the plan
+ *  comes back already running, with its `job_id`. */
+export const createPlan = (id: string, req: { goal: string; mode?: Autonomy }) =>
+  post<Plan>(`/projects/${id}/plans`, req)
+
+export const getPlan = (id: string, planId: string) => get<Plan>(`/projects/${id}/plans/${planId}`)
+
+/** Untick, reword, or add / leave a suggestion. */
+export const updateItem = (
+  id: string, planId: string, itemId: string,
+  change: { enabled?: boolean; new_text?: string; include?: boolean },
+) => put<Plan>(`/projects/${id}/plans/${planId}/items/${itemId}`, change)
+
+/** Voices the ticked items; returns the job to poll. */
+export const runPlan = (id: string, planId: string, items?: string[]) =>
+  post<Job>(`/projects/${id}/plans/${planId}/run`, items ? { items } : {})
+
+/** Answers a needs-you item and voices it again. */
+export const answerItem = (
+  id: string, planId: string, itemId: string, answer: { fit?: Fit; mix?: Mix; text?: string },
+) => post<Job>(`/projects/${id}/plans/${planId}/items/${itemId}/answer`, answer)
+
+export const redoItem = (id: string, planId: string, itemId: string) =>
+  post<Job>(`/projects/${id}/plans/${planId}/items/${itemId}/redo`)
+
+export interface PlanApproval {
+  approved: { item_id: string; edit_id: string; overridden: boolean }[]
+  skipped: { item_id: string; reason: string }[]
+  export: ExportManifest | null
+  plan: Plan
+}
+
+/** Approves every ready item and renders. */
+export const approvePlan = (id: string, planId: string, req: { items?: string[]; override?: boolean } = {}) =>
+  post<PlanApproval>(`/projects/${id}/plans/${planId}/approve`, req)

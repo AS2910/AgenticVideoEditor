@@ -13,6 +13,8 @@ interface ChatPanelProps {
   /** The panel's header: who this is, and what it is doing. */
   header?: ReactNode
   placeholder?: string
+  /** A line under the composer, when there is something to say. */
+  hint?: string
 }
 
 // The panel shows the latest exchange; earlier messages open on request.
@@ -21,7 +23,7 @@ const RECENT = 6
 /** The conversation with Voltage: what you ask for, and what comes back — a
  *  reply, a question, a take. */
 export function ChatPanel({
-  messages, canSubmit, onSubmit, children, toolbar, header,
+  messages, canSubmit, onSubmit, children, toolbar, header, hint,
   placeholder = 'Ask for a change, e.g. say "30% off" instead',
 }: ChatPanelProps) {
   const [prompt, setPrompt] = useState('')
@@ -76,9 +78,11 @@ export function ChatPanel({
         </div>
         <div className={styles.under}>
           {toolbar}
-          {!canSubmit && (
+          {!canSubmit ? (
             <span className={styles.hint}>Pick a line in the transcript, or words on the timeline, then describe the change.</span>
-          )}
+          ) : hint ? (
+            <span className={styles.hint}>{hint}</span>
+          ) : null}
         </div>
       </div>
     </div>

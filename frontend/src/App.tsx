@@ -10,7 +10,12 @@ import { ExportBar } from './components/ExportBar'
 import { ProjectList } from './components/ProjectList'
 import { SpendMeter } from './components/SpendMeter'
 import { TranscriptDoc } from './components/TranscriptDoc'
-import type { LineChange } from './components/TranscriptDoc'
+import type { LineChange, PendingLine } from './components/TranscriptDoc'
+import { PlanCard } from './components/PlanCard'
+import { ReviewPanel } from './components/ReviewPanel'
+import { ActivityLog } from './components/ActivityLog'
+import { GoalBox } from './components/GoalBox'
+import { AutonomySwitch } from './components/AutonomySwitch'
 import { VoicePicker } from './components/VoicePicker'
 import { SpeakersBar } from './components/SpeakersBar'
 import { clock } from './transcript/format'
@@ -19,10 +24,12 @@ import {
   createProject, previewEdit, approveEdit, exportProject, artifactUrl,
   pollJob, PollCancelled, ApiError, listProjects, getProject, deleteProject, getUsage, listVoices, updateSpeaker, detectSpeakers,
   revertEdit, updateSettings, rewordLine,
+  createPlan, getPlan, updateItem, runPlan, answerItem, redoItem, approvePlan,
 } from './api'
 import type {
   Word, Selection, Candidate, Segment, Project, ChatMessage, Question, QuestionOption,
-  Fit, Mix, Insert, ProjectSummary, Usage, Statement, Voice, Revision, LongLines, LineStatus,
+  Fit, Mix, Insert, ProjectSummary, Usage, Statement, Voice, Revision, LongLines,
+  Plan, PlanItem, Autonomy,
 } from './types'
 import { renderTime, sourceTime } from './timeline/selection'
 import styles from './App.module.css'
@@ -80,7 +87,16 @@ export default function App() {
   const [approved, setApproved] = useState<Revision[]>([])
   // How this project places a line that runs long; remembered on the server.
   const [longLines, setLongLines] = useState<LongLines>('pause')
+  // The agent (Phase 13): how much it does on its own, its latest plan, and
+  // the job voicing that plan.
+  const [autonomy, setAutonomy] = useState<Autonomy>('ask')
+  const [plan, setPlan] = useState<Plan | null>(null)
+  const [planning, setPlanning] = useState(false)
+  const [planBusy, setPlanBusy] = useState(false)
+  const [planProgress, setPlanProgress] = useState<{ value: number; step: string } | null>(null)
+  const [review, setReview] = useState(false)
   const previewToken = useRef(0)
+  const planToken = useRef(0)
 
   const refreshProjects = useCallback(async () => {
     try {
@@ -126,6 +142,13 @@ export default function App() {
     setUsage(null)
     setApproved([])
     setLongLines('pause')
+    planToken.current += 1
+    setAutonomy('ask')
+    setPlan(null)
+    setPlanning(false)
+    setPlanBusy(false)
+    setPlanProgress(null)
+    setReview(false)
   }
 
   const projectId = project?.project_id ?? null
@@ -157,6 +180,8 @@ export default function App() {
     setProject(loaded)
     setTranscript(loaded.transcript)
     setLongLines(loaded.settings?.long_lines ?? 'pause')
+    setAutonomy(loaded.settings?.autonomy ?? 'ask')
+    setPlan(loaded.plan ?? null)
     setStage('editor')
     window.location.hash = loaded.project_id
   }
@@ -240,6 +265,7 @@ export default function App() {
         setQuestion({ question: result, prompt, selection: at })
         return
       }
+      if (!('candidate_id' in result)) return   // a plan's job, not a preview's
       setSelection(result.plan.selection) // the backend's snapped range
       setCandidate(result)
     } catch (e) {
@@ -278,6 +304,145 @@ export default function App() {
     } catch (e) {
       setError(e instanceof ApiError ? e.message : 'Could not save that setting.')
     }
+  }
+
+  const rememberAutonomy = async (value: Autonomy) => {
+    if (!projectId || value === autonomy) return
+    setAutonomy(value)
+    try {
+      await updateSettings(projectId, { autonomy: value })
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : 'Could not save that setting.')
+    }
+  }
+
+  /** Follows a job voicing the plan, refreshing the plan as it goes. */
+  const followPlanJob = async (jobId: string, planId: string) => {
+    if (!projectId) return
+    const token = ++planToken.current
+    const superseded = () => planToken.current !== token
+    setPlanBusy(true)
+    setPlanProgress({ value: 0, step: 'Queued' })
+    let ticks = 0
+    let settled = false
+    try {
+      const finished = await pollJob(jobId, {
+        shouldStop: superseded,
+        onUpdate: (j) => {
+          setPlanProgress({ value: j.progress, step: j.step })
+          // The plan carries each line's status; re-read it now and then. A
+          // read still in flight when the job ends must not overwrite the result.
+          if (ticks++ % 4 === 0) {
+            getPlan(projectId, planId).then((p) => { if (!superseded() && !settled) setPlan(p) }).catch(() => {})
+          }
+        },
+      })
+      settled = true
+      if (superseded()) return
+      if (finished.status === 'failed') {
+        setError(finished.error ?? 'Voicing the plan failed. Try again.')
+      }
+      const result = finished.result
+      setPlan(result && 'type' in result && result.type === 'plan' ? result : await getPlan(projectId, planId))
+    } catch (e) {
+      if (e instanceof PollCancelled) return
+      setError(e instanceof ApiError ? e.message : 'Voicing the plan failed. Try again.')
+    } finally {
+      if (!superseded()) {
+        setPlanBusy(false)
+        setPlanProgress(null)
+      }
+      void refreshUsage(projectId)
+    }
+  }
+
+  /** A goal for the whole video: Voltage plans the edits. */
+  const makePlan = async (goal: string) => {
+    if (!projectId) return
+    say({ role: 'user', text: goal })
+    setError(null)
+    setPlanning(true)
+    setReview(false)
+    try {
+      const made = await createPlan(projectId, { goal })
+      setPlan(made)
+      say({ role: 'assistant', text: made.summary })
+      if (made.job_id) void followPlanJob(made.job_id, made.plan_id)
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : 'Could not plan that.')
+    } finally {
+      setPlanning(false)
+      void refreshUsage(projectId)
+    }
+  }
+
+  const changeItem = async (item: PlanItem, change: { enabled?: boolean; new_text?: string; include?: boolean }) => {
+    if (!projectId || !plan) return
+    try {
+      setPlan(await updateItem(projectId, plan.plan_id, item.item_id, change))
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : 'Could not change the plan.')
+    }
+  }
+
+  const startJob = async (start: () => Promise<{ job_id: string }>) => {
+    if (!projectId || !plan) return
+    setError(null)
+    try {
+      const job = await start()
+      void followPlanJob(job.job_id, plan.plan_id)
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : 'Could not start that.')
+    }
+  }
+
+  const runThePlan = () => startJob(() => runPlan(projectId!, plan!.plan_id))
+  const redoTheItem = (item: PlanItem) => startJob(() => redoItem(projectId!, plan!.plan_id, item.item_id))
+  const answerTheItem = (item: PlanItem, option: QuestionOption) => {
+    say({ role: 'user', text: option.label })
+    return startJob(() => answerItem(projectId!, plan!.plan_id, item.item_id, {
+      fit: option.fit ?? undefined, mix: option.mix ?? undefined, text: option.text ?? undefined,
+    }))
+  }
+
+  /** Approve every ready change and render. */
+  const approveAll = async () => {
+    if (!projectId || !plan) return
+    setError(null)
+    try {
+      const result = await approvePlan(projectId, plan.plan_id)
+      setPlan(result.plan)
+      const fresh = result.plan.items.filter((i) => i.status === 'approved' && i.edit_id
+        && !approved.some((r) => r.edit_id === i.edit_id))
+      setApproved((a) => [...a, ...fresh.map((i) => ({
+        edit_id: i.edit_id!, start: i.candidate?.plan.selection.start ?? i.selection.start,
+        end: i.candidate?.plan.selection.end ?? i.selection.end, text: i.new_text, mix: i.mix,
+      }))])
+      if (result.export) {
+        setSegments(result.export.segments)
+        setInserts(result.export.inserts ?? [])
+        const stem = (project?.filename ?? 'video').replace(/\.[^.]+$/, '')
+        const url = artifactUrl(projectId, result.export.render.sha256)
+        setDownload({ url, filename: `${stem}-edited.mp4` })
+        setRendered({ url, duration: result.export.render.duration })
+        setView('edited')
+      }
+      if (result.skipped.length > 0) {
+        setError(`${result.skipped.length} ${result.skipped.length === 1 ? 'change' : 'changes'} skipped: the sound check failed. Listen to them, then Redo or approve them one by one.`)
+      }
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : 'Approve failed.')
+    } finally {
+      void refreshUsage(projectId)
+    }
+  }
+
+  /** Compare: the original at that line, with the take a click away. */
+  const compareItem = (item: PlanItem) => {
+    setSelection(item.selection)
+    setView('original')
+    setSeekRequest((r) => ({ time: item.selection.start, id: (r?.id ?? 0) + 1 }))
+    setCurrentTime(item.selection.start)
   }
 
   /** Ask Claude for a wording of a line; the suggestion goes in the box. */
@@ -472,13 +637,20 @@ export default function App() {
     setStage(consented ? 'load' : 'consent')
   }
 
-  // Where the editor stands on a line: working on it, a take ready, or a
-  // question waiting for you.
-  const pending: { selection: Selection; status: LineStatus } | null =
-    generating && working ? { selection: working, status: 'working' }
-    : question ? { selection: question.selection, status: 'needs-you' }
-    : candidate ? { selection: candidate.plan.selection, status: 'ready' }
-    : null
+  // Where things stand line by line: the plan's items, and the one edit the
+  // chat may be working on.
+  const pendingLines: PendingLine[] = [
+    ...(plan?.items ?? [])
+      .filter((i) => i.kind === 'planned' && i.enabled && ['planned', 'working', 'ready', 'needs-you', 'failed'].includes(i.status))
+      .map((i) => ({ selection: i.selection, status: i.status, text: i.new_text, mix: i.mix })),
+    ...(generating && working ? [{ selection: working, status: 'working' as const }]
+      : question ? [{ selection: question.selection, status: 'needs-you' as const }]
+      : candidate ? [{ selection: candidate.plan.selection, status: 'ready' as const }]
+      : []),
+  ]
+  const readyCount = plan?.items.filter((i) => i.status === 'ready').length ?? 0
+  const reviewable = (plan?.items.filter((i) => i.status === 'ready' || i.status === 'approved').length ?? 0) > 0
+  const busy = generating || planBusy || planning
 
   // The take's own details: whose line, in which voice, and whether it ran on.
   const takeSpeakerLabel = candidate
@@ -503,6 +675,11 @@ export default function App() {
         </span>
         <span className={styles.spacer} />
         <SpendMeter usage={usage} />
+        {reviewable && !review && (
+          <button className={styles.reviewButton} onClick={() => setReview(true)}>
+            {readyCount > 0 ? `Review ${readyCount} ready ${readyCount === 1 ? 'change' : 'changes'}` : 'Review changes'}
+          </button>
+        )}
         <ExportBar segments={segments} inserts={inserts} onExport={() => void runExport()} download={download} />
       </header>
 
@@ -531,6 +708,20 @@ export default function App() {
             </div>
           )}
         </Player>
+        {error && <div className={styles.error} role="alert">{error}</div>}
+        {review && plan ? (
+          <ReviewPanel
+            plan={plan}
+            speakers={speakers}
+            projectId={project.project_id}
+            busy={busy}
+            onCompare={compareItem}
+            onRedo={(item) => void redoTheItem(item)}
+            onApproveAll={() => void approveAll()}
+            onBack={() => setReview(false)}
+          />
+        ) : (
+          <>
         <Timeline
           key={project.project_id}
           words={transcript}
@@ -539,7 +730,6 @@ export default function App() {
           currentTime={sourceClock}
           onSelect={setSelection}
         />
-        {error && <div className={styles.error} role="alert">{error}</div>}
         <SpeakersBar
           speakers={speakers}
           voices={voices}
@@ -557,32 +747,77 @@ export default function App() {
           revisions={approved}
           selection={selection}
           currentTime={sourceClock}
-          pending={pending}
+          pendingLines={pendingLines}
           longLines={longLines}
-          disabled={generating}
+          disabled={busy}
           onSeek={seekToStatement}
           onEdit={editStatement}
           onRevert={(id) => void revert(id)}
           onReword={reword}
           onLongLinesChange={(v) => void rememberLongLines(v)}
         />
+          </>
+        )}
       </main>
 
       <aside className={styles.panel}>
         <ChatPanel
           messages={messages}
-          canSubmit={selection !== null}
-          onSubmit={(p) => void runPreview(p)}
+          canSubmit
+          onSubmit={(p) => selection ? void runPreview(p) : void makePlan(p)}
+          placeholder={selection ? 'Ask for a change, e.g. say "30% off" instead'
+            : plan ? 'Change the plan, or ask for something else' : 'What should your video say?'}
+          hint={selection ? `Talking about the line at ${clock(selection.start)}.`
+            : 'A goal for the whole video is planned across every line it touches.'}
           toolbar={<VoicePicker voices={voices} value={voiceId} onChange={setVoiceId} />}
           header={
             <div className={styles.panelHead}>
               <span className={styles.panelTitle}>Voltage</span>
-              <span className={styles.panelNote}>
-                {selection ? `Talking about ${clock(selection.start)}` : 'Pick a line to talk about it'}
-              </span>
+              <span className={styles.spacer} />
+              <AutonomySwitch value={autonomy} onChange={(v) => void rememberAutonomy(v)} />
             </div>
           }
         >
+          {!plan && messages.length === 0 && !generating && (
+            <GoalBox
+              onPlan={(goal) => void makePlan(goal)}
+              busy={planning}
+              caption={`${project.filename}, ${project.duration.toFixed(1)} s${speakers.length ? `, ${speakers.length} ${speakers.length === 1 ? 'speaker' : 'speakers'}` : ''}`}
+            />
+          )}
+          {planning && (
+            <div className={styles.generating} data-testid="planning">
+              <div className={styles.generatingStep}><span className={styles.spinner} aria-hidden="true" />Reading every line</div>
+            </div>
+          )}
+          {plan && (
+            <PlanCard
+              plan={plan}
+              speakers={speakers}
+              voices={voices}
+              projectId={project.project_id}
+              busy={planBusy}
+              onToggle={(item, enabled) => void changeItem(item, { enabled })}
+              onReword={(item, text) => void changeItem(item, { new_text: text })}
+              onInclude={(item, include) => void changeItem(item, { include })}
+              onRun={() => void runThePlan()}
+              onAnswer={(item, option) => void answerTheItem(item, option)}
+              onRedo={(item) => void redoTheItem(item)}
+              onApproveAll={() => setReview(true)}
+            />
+          )}
+          {planBusy && (
+            <div className={styles.generating} data-testid="plan-progress">
+              <div className={styles.generatingStep}>
+                <span className={styles.spinner} aria-hidden="true" />
+                {planProgress?.step ?? 'Queued'}
+              </div>
+              <div className={styles.progressTrack}>
+                <div className={styles.progressFill} style={{ width: `${Math.round((planProgress?.value ?? 0) * 100)}%` }} />
+              </div>
+            </div>
+          )}
+          {plan && (review || plan.status === 'done') && <ActivityLog plan={plan} />}
           {generating && (
             <div className={styles.generating} data-testid="generating">
               <div className={styles.generatingStep}>

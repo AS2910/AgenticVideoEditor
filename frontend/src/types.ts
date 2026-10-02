@@ -10,8 +10,56 @@ export interface Revision { edit_id?: string; start: number; end: number; text: 
  *  run into the pause after them (when there is room), speed it up, or ask. */
 export type LongLines = 'pause' | 'stretch' | 'ask'
 
+/** How much Voltage does on its own: show the plan and wait for Run (the
+ *  controlled default), or voice it straight away. */
+export type Autonomy = 'ask' | 'draft'
+
 /** Per-project preferences, remembered on the server. */
-export interface ProjectSettings { long_lines: LongLines }
+export interface ProjectSettings { long_lines: LongLines; autonomy: Autonomy }
+
+/** Where a plan item stands. */
+export type ItemStatus =
+  | 'planned' | 'working' | 'ready' | 'needs-you' | 'failed' | 'approved' | 'suggested' | 'dismissed'
+
+/** One change in the agent's plan: a line and the new words for it. */
+export interface PlanItem {
+  item_id: string
+  selection: Selection
+  old_text: string
+  new_text: string
+  speaker: string | null
+  mix: Mix
+  reason: string
+  /** A suggestion is a change the goal implied but did not name; it joins
+   *  the plan only when added. */
+  kind: 'planned' | 'suggestion'
+  enabled: boolean
+  status: ItemStatus
+  fit: Fit | null
+  candidate: Candidate | null
+  edit_id: string | null
+  question: Question | null
+  error: string | null
+  note: string | null
+}
+
+export interface PlanLogEntry { at: string; text: string; detail: string }
+
+/** What the agent proposes for the whole video, and how far it has got. */
+export interface Plan {
+  type?: 'plan'
+  plan_id: string
+  goal: string
+  summary: string
+  mode: Autonomy
+  status: 'proposed' | 'running' | 'done'
+  created_at: string
+  estimate: { items: number; voice_characters: number; usd: number; seconds: number }
+  log: PlanLogEntry[]
+  items: PlanItem[]
+  /** Under "draft": the job already voicing the plan. */
+  job_id?: string
+}
 
 /** Where a line stands while the editor works on it. */
 export type LineStatus = 'working' | 'ready' | 'needs-you'
@@ -89,6 +137,8 @@ export interface Project {
   speakers?: Speaker[]
   /** Absent from responses of servers before Phase 12. */
   settings?: ProjectSettings
+  /** The latest plan, if the agent has made one (Phase 13). */
+  plan?: Plan | null
 }
 
 /** What a project has spent. USD is an estimate from list prices. */
@@ -173,6 +223,8 @@ export interface QuestionOption {
   label: string
   fit: Fit | null
   mix: Mix | null
+  /** The agent's own fix: a different wording to use instead. */
+  text?: string | null
   /** Shown with the option, e.g. a stretch far outside natural speech. */
   warning: string | null
 }
@@ -201,6 +253,6 @@ export interface Job {
   progress: number   // 0–1
   step: string       // human-readable, shown while waiting
   attempts: number
-  result: Candidate | Question | Reply | null
+  result: Candidate | Question | Reply | Plan | null
   error: string | null
 }

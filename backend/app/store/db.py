@@ -49,6 +49,13 @@ CREATE TABLE IF NOT EXISTS messages (
     at         TEXT NOT NULL,
     PRIMARY KEY (project_id, seq)
 );
+CREATE TABLE IF NOT EXISTS plans (
+    project_id TEXT NOT NULL,
+    plan_id    TEXT NOT NULL,
+    seq        INTEGER NOT NULL,       -- creation order
+    body       TEXT NOT NULL,          -- JSON
+    PRIMARY KEY (project_id, plan_id)
+);
 CREATE TABLE IF NOT EXISTS usage (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
     project_id TEXT NOT NULL,
@@ -62,7 +69,7 @@ CREATE TABLE IF NOT EXISTS usage (
 CREATE INDEX IF NOT EXISTS usage_by_project ON usage (project_id);
 """
 
-PROJECT_TABLES = ("candidates", "edits", "messages", "usage")
+PROJECT_TABLES = ("candidates", "edits", "messages", "usage", "plans")
 
 # Columns added after a table first shipped: (table, column, definition).
 # Applied to databases created before them; new databases get them from SCHEMA.
