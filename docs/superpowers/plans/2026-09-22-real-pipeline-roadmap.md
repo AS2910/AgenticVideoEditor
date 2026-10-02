@@ -1,7 +1,7 @@
 # Real Pipeline — Phased Roadmap
 
 **Date:** 2026-09-22
-**Status:** Phases 0–4a, 6a, 7, 8 and 9 done and clean (8 and 9 on 2026-09-26; 9c is a design). Phases 10 (editing UX) and 11 (multiple voices) done the same day; the editor was redesigned on 2026-09-26 (`docs/superpowers/specs/2026-09-26-editor-ui-redesign.md`). Phases 12 (the agentic editor) and 13 (the agent) done 2026-10-02 (`2026-09-28-phase-12-13-agentic-editor.md`). **Next: the Backlog** — 9c sign-in is the only item not blocked on a vendor. Phases 4b and 5 moved to the **Backlog** — both are blocked on vendor access, not on code.
+**Status:** Phases 0–4a, 6a, 7, 8 and 9 done and clean (8 and 9 on 2026-09-26; 9c is a design). Phases 10 (editing UX) and 11 (multiple voices) done the same day; the editor was redesigned on 2026-09-26 (`docs/superpowers/specs/2026-09-26-editor-ui-redesign.md`). Phases 12 (the agentic editor) and 13 (the agent) done 2026-10-02 (`2026-09-28-phase-12-13-agentic-editor.md`). **Next: video edits** — sequenced in `2026-10-02-video-edits-roadmap.md`: Phase 14 (cuts, ffmpeg only, no vendor) first, Phase 5 (lip-sync) when a key exists, Phase 15 (visual swap) after. 9c sign-in remains the other item not blocked on a vendor. Phases 4b and 5 are in the **Backlog** — both are blocked on vendor access, not on code.
 **Supersedes nothing.** Builds on `2026-07-14-walking-skeleton.md` and `2026-07-17-voltage-frontend.md`.
 
 **Goal:** turn the mocked walking skeleton into a system that ingests a real video, produces a real re-voiced and lip-synced segment, verifies continuity with real signal analysis, and exports a real playable file — honoring the v1 design spec end-to-end.
@@ -201,6 +201,7 @@ Parked 2026-09-23. Each is blocked on vendor access, not on code; nothing in the
   - The adapter reports `identity = "clone"`, which drops the stock-voice warning; voice-clone type is open decision 3
   - **Exit:** the edited span is genuinely the speaker's voice saying the new words.
 - [ ] **Phase 5 · Real lip-sync** — *unblocked by:* a lip-sync vendor key (open decision 1).
+  - Sequenced with the other video edits in `2026-10-02-video-edits-roadmap.md`.
   - Vendor spike first: same 10-second clip through each candidate, compare output and price
   - Face detection on the source (the missing half of spec §5.1)
   - Vendor adapter → real frames artifact for the affected range; settle open decision 4
