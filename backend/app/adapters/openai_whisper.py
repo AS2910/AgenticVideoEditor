@@ -15,6 +15,8 @@ from typing import Callable
 
 import httpx
 
+import re
+
 from app.adapters.base import VendorError
 from app.domain.models import Source, Statement, Transcript, Word
 from app.domain.transcript import assign_speakers
@@ -34,8 +36,63 @@ class TranscriptionError(VendorError):
     """The vendor call failed or returned something unusable."""
 
 
+# Whisper invents speech where there is none — wind, music, room noise — and
+# it invents the same few phrases, the sign-offs of the videos it learnt from.
+# A segment is dropped when Whisper's own numbers say it probably is not speech,
+# or when it is one of these phrases and Whisper is not sure of it either.
+NO_SPEECH_PROB_MAX = 0.6        # Whisper's own "this is not speech" probability
+AVG_LOGPROB_MIN = -1.0          # how unlikely the words were, per token
+COMPRESSION_RATIO_MAX = 2.4     # repeated text compresses too well
+KNOWN_PHRASE_NO_SPEECH = 0.2    # a known phrase needs this much doubt to go
+HALLUCINATIONS = {
+    "thank you for watching", "thanks for watching", "thank you for watching my video",
+    "thank you so much for watching", "thanks for watching bye", "see you in the next video",
+    "see you next time", "please subscribe", "like and subscribe", "subscribe to my channel",
+    "thank you", "thanks", "bye", "goodbye", "you", "the end", "music", "applause",
+    "subtitles by the amara org community", "www mooji org",
+}
+# Speech has to stand out from the recording's own noise by this much.
+SPEECH_ABOVE_FLOOR_DB = 8.0
+
+_PUNCT = re.compile(r"[^\w\s]")
+
+
+def _normal(text: str) -> str:
+    return re.sub(r"\s+", " ", _PUNCT.sub("", text.lower())).strip()
+
+
+def doubtful(segment: dict) -> str | None:
+    """Why a segment looks invented, or None when it looks like real speech."""
+    nsp = segment.get("no_speech_prob")
+    if nsp is not None and float(nsp) > NO_SPEECH_PROB_MAX:
+        return f"no_speech_prob {float(nsp):.2f}"
+    lp = segment.get("avg_logprob")
+    if lp is not None and float(lp) < AVG_LOGPROB_MIN:
+        return f"avg_logprob {float(lp):.2f}"
+    cr = segment.get("compression_ratio")
+    if cr is not None and float(cr) > COMPRESSION_RATIO_MAX:
+        return f"compression_ratio {float(cr):.2f}"
+    if _normal(segment.get("text") or "") in HALLUCINATIONS and (nsp is None or float(nsp) > KNOWN_PHRASE_NO_SPEECH):
+        return "a phrase Whisper invents on silence"
+    return None
+
+
 def to_transcript(payload: dict) -> Transcript:
-    """Turn a verbose_json response into the domain Transcript."""
+    """Turn a verbose_json response into the domain Transcript, leaving out
+    the segments (and their words) that Whisper most likely made up."""
+    dropped: list[tuple[float, float]] = []
+    for raw in payload.get("segments") or []:
+        why = doubtful(raw)
+        if why:
+            try:
+                dropped.append((float(raw["start"]), float(raw["end"])))
+            except (KeyError, TypeError, ValueError):
+                continue
+            log.info("dropped a doubtful segment %r: %s", (raw.get("text") or "").strip(), why)
+
+    def invented(start: float, end: float) -> bool:
+        return any(start < b and a < end for a, b in dropped)
+
     words: list[Word] = []
     for raw in payload.get("words") or []:
         text = (raw.get("word") or "").strip()
@@ -49,6 +106,8 @@ def to_transcript(payload: dict) -> Transcript:
             start, end = float(raw["start"]), float(raw["end"])
         except (KeyError, TypeError, ValueError):
             continue
+        if invented(start, end):
+            continue
         words.append(Word(text=text, start=start, end=end))
     statements = []
     for raw in payload.get("segments") or []:
@@ -57,9 +116,38 @@ def to_transcript(payload: dict) -> Transcript:
             start, end = float(raw["start"]), float(raw["end"])
         except (KeyError, TypeError, ValueError):
             continue
-        if text and end > start:
+        if text and end > start and not invented(start, end):
             statements.append(Statement(text=text, start=start, end=end))
     return Transcript(words=tuple(words), statements=tuple(statements))
+
+
+def without_silent_speech(transcript: Transcript, audio_path: Path) -> Transcript:
+    """Drop statements whose audio has no speech in it: nothing stands out
+    from the recording's own noise floor there. Whisper's numbers catch most
+    inventions; this catches the confident ones over wind or music."""
+    if not transcript.statements:
+        return transcript
+    from app.continuity import signals
+    try:
+        audio = signals.load(audio_path)
+    except Exception:  # noqa: BLE001 - a failed measurement must not fail the upload
+        return transcript
+    floor = signals.noise_floor_db(audio)
+    kept, dropped = [], []
+    for st in transcript.statements:
+        span = audio[int(st.start * signals.RATE): int(st.end * signals.RATE)]
+        level = signals.speech_level_db(span) if len(span) else None
+        if level is None or level - floor < SPEECH_ABOVE_FLOOR_DB:
+            dropped.append(st)
+            log.info("dropped %r: no speech energy there (%s dB over a %.0f dB floor)",
+                     st.text, "none" if level is None else f"{level - floor:.0f}", floor)
+        else:
+            kept.append(st)
+    if not dropped:
+        return transcript
+    words = tuple(w for w in transcript.words
+                  if not any(w.start < d.end and d.start < w.end for d in dropped))
+    return Transcript(words=words, statements=tuple(kept))
 
 
 def _post(audio_path: Path, api_key: str, timeout: float) -> dict:
@@ -142,11 +230,15 @@ class WhisperTranscriptionAdapter:
         post: Callable[[Path, str, float], dict] = _post,
         post_diarize: Callable[[Path, str, float], dict] = _post_diarize,
         timeout: float = DEFAULT_TIMEOUT,
+        # Drop statements with no speech energy behind them. Off only in
+        # tests that replay a recording over a silent fixture.
+        screen_silence: bool = True,
     ) -> None:
         self._api_key = api_key
         self._post = post
         self._post_diarize = post_diarize
         self._timeout = timeout
+        self._screen_silence = screen_silence
 
     def transcribe(self, source: Source) -> Transcript:
         """Words and statements, labelled by speaker when diarization works.
@@ -154,6 +246,10 @@ class WhisperTranscriptionAdapter:
         with tempfile.TemporaryDirectory() as tmp:
             audio = self._audio(source, Path(tmp))
             transcript = to_transcript(self._post(audio, self._api_key, self._timeout))
+            if self._screen_silence:
+                transcript = without_silent_speech(transcript, audio)
+            if not transcript.words:
+                return transcript
             try:
                 turns = to_turns(self._post_diarize(audio, self._api_key, self._timeout))
             except TranscriptionError as exc:

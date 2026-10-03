@@ -99,8 +99,8 @@ To see the continuity *failure* path, the voice profile has to be `unknown`, whi
 Both suites are offline and deterministic. No running server required.
 
 ```sh
-cd backend && .venv/bin/python -m pytest      # 447 tests
-cd frontend && npm test                        # 159 tests, 19 files
+cd backend && .venv/bin/python -m pytest      # 455 tests
+cd frontend && npm test                        # 161 tests, 19 files
 ```
 
 Backend tests write their media to a temp dir, never to `backend/var/`. Tests that
@@ -165,7 +165,7 @@ These are deliberate and documented, not oversights:
 
 - **Whisper drops symbols but keeps their time slot.** `"20%"` comes back as the word `20` followed by an *empty* word spanning the `%`. We drop empty words rather than render blank timeline cells, which leaves a small gap between `20` and `off`. Snapping handles gaps fine — real pauses make them anyway — but the gap is visible on the timeline.
 - **Only `whisper-1` can do this.** It is the one OpenAI transcription model that accepts `response_format=verbose_json`, which is what carries word timestamps; the `gpt-4o-transcribe` family rejects verbose_json outright. Verified against the live API, not assumed.
-- **Silent video is refused.** A dialogue editor has nothing to do with it — no speech to transcribe, no voice to clone, no line to change.
+- **Silent video is refused, and invented speech is dropped.** A file with no audio track is refused outright. A file with an audio track but no speech (wind, music, a beach) is worse: Whisper *invents* speech on it, and the same few phrases every time — "Thank you for watching." was planned, voiced and added to a silent beach clip on 2026-10-03. So a transcribed segment is dropped when Whisper's own numbers say it is probably not speech (`no_speech_prob`, `avg_logprob`, `compression_ratio`), when it is one of the known invented sign-offs and Whisper is not sure of it, or when the audio under it has no speech energy above the recording's noise floor. A clip that ends up with no words is told so in the editor: nothing to change, but a voice-over can be dragged onto the timeline.
 - **The sample clip is a generated placeholder.** `frontend/public/sample-ad.mp4` is a 2.3s H.264 title card whose soundtrack is macOS `say` reading the line on the card, so it genuinely transcribes. The "use the sample ad" button fetches it and uploads it through the same path as any other file. To regenerate it (macOS; needs ffmpeg):
 
   ```sh

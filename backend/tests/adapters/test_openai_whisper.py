@@ -162,7 +162,7 @@ def test_words_and_statements_are_labelled_by_speaker(tmp_path):
     if not ffmpeg.available():
         pytest.skip("ffmpeg not installed")
     adapter = WhisperTranscriptionAdapter(
-        "sk-test", post=lambda *a: TWO_SPEAKERS, post_diarize=lambda *a: TURNS,
+        "sk-test", post=lambda *a: TWO_SPEAKERS, post_diarize=lambda *a: TURNS, screen_silence=False,
     )
     t = adapter.transcribe(make_source(media=_artifact_for(_muxed(tmp_path))))
     assert [(w.text, w.speaker) for w in t.words] == [
@@ -178,7 +178,7 @@ def test_a_failed_diarization_keeps_the_words(tmp_path):
     def down(path, api_key, timeout):
         raise TranscriptionError("OpenAI diarization failed (500)")
 
-    adapter = WhisperTranscriptionAdapter("sk-test", post=lambda *a: TWO_SPEAKERS, post_diarize=down)
+    adapter = WhisperTranscriptionAdapter("sk-test", post=lambda *a: TWO_SPEAKERS, post_diarize=down, screen_silence=False)
     t = adapter.transcribe(make_source(media=_artifact_for(_muxed(tmp_path))))
     assert len(t.words) == 5 and all(w.speaker is None for w in t.words)
 
@@ -206,3 +206,71 @@ def test_segments_become_statements_with_their_punctuation():
                      {"text": " ", "start": 10.0, "end": 10.2}],
     })
     assert [(s.text, s.start, s.end) for s in t.statements] == [("Sure, sir.", 9.38, 9.88)]
+
+
+# ── invented speech (2026-10-03: "Thank you for watching." over a silent beach) ──
+
+from app.adapters.openai_whisper import doubtful, to_transcript, without_silent_speech  # noqa: E402
+
+
+def _segment(text, start, end, **fields):
+    return {"text": text, "start": start, "end": end, **fields}
+
+
+def test_whispers_own_doubt_drops_a_segment_and_its_words():
+    payload = {
+        "words": [{"word": "Thank", "start": 4.0, "end": 4.3}, {"word": "you", "start": 4.3, "end": 4.5},
+                  {"word": "Hello", "start": 0.0, "end": 0.5}],
+        "segments": [_segment("Hello", 0.0, 0.5, no_speech_prob=0.02, avg_logprob=-0.2),
+                     _segment("Thank you for watching.", 4.0, 4.5, no_speech_prob=0.81, avg_logprob=-0.9)],
+    }
+    t = to_transcript(payload)
+    assert [w.text for w in t.words] == ["Hello"]
+    assert [s.text for s in t.statements] == ["Hello"]
+
+
+@pytest.mark.parametrize("fields, why", [
+    ({"no_speech_prob": 0.7}, "no_speech_prob"),
+    ({"avg_logprob": -1.4}, "avg_logprob"),
+    ({"compression_ratio": 3.1}, "compression_ratio"),
+])
+def test_each_of_whispers_numbers_can_condemn_a_segment(fields, why):
+    assert doubtful(_segment("anything", 0, 1, **fields)).startswith(why)
+
+
+def test_a_known_sign_off_needs_only_a_little_doubt():
+    assert doubtful(_segment("Thank you for watching.", 0, 1, no_speech_prob=0.3)) is not None
+    assert doubtful(_segment("Thanks for watching!", 0, 1)) is not None          # no numbers at all
+    assert doubtful(_segment("Thank you for watching.", 0, 1, no_speech_prob=0.05)) is None   # confident speech stays
+    assert doubtful(_segment("Get 20% off today only.", 0, 1, no_speech_prob=0.3)) is None
+
+
+def test_a_response_without_segment_numbers_is_left_alone():
+    spoken = [w for w in FIXTURE["words"] if w["word"].strip()]
+    assert len(to_transcript(FIXTURE).words) == len(spoken)
+
+
+@pytest.mark.skipif(not ffmpeg.available(), reason="ffmpeg not installed")
+def test_speech_with_no_energy_behind_it_is_dropped(tmp_path):
+    from app.domain.models import Statement, Transcript, Word
+    silent, _ = ffmpeg.generate_silence(tmp_path / "wind.wav", 6.0)
+    t = Transcript(words=(Word("Thank", 4.0, 4.3), Word("you", 4.3, 4.5)),
+                   statements=(Statement("Thank you for watching.", 4.0, 4.5),))
+    cleaned = without_silent_speech(t, silent)
+    assert cleaned.words == () and cleaned.statements == ()
+
+
+@pytest.mark.skipif(not ffmpeg.available(), reason="ffmpeg not installed")
+def test_speech_that_stands_out_from_the_floor_is_kept(tmp_path):
+    import wave
+    import numpy as np
+    from app.domain.models import Statement, Transcript, Word
+    rate = 16000
+    t_ = np.arange(int(rate * 1.6)) / rate
+    x = np.concatenate([np.zeros(int(rate * 0.4)), 0.5 * np.sin(2 * np.pi * 220 * t_), np.zeros(int(rate * 0.4))])
+    path = tmp_path / "voice.wav"
+    with wave.open(str(path), "wb") as w:
+        w.setnchannels(1); w.setsampwidth(2); w.setframerate(rate)
+        w.writeframes((x * 32767).astype("<i2").tobytes())
+    t = Transcript(words=(Word("Hi", 0.4, 2.0),), statements=(Statement("Hi", 0.4, 2.0),))
+    assert without_silent_speech(t, path).statements == t.statements

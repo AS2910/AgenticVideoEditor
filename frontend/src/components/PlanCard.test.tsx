@@ -80,6 +80,9 @@ describe('PlanCard, proposed', () => {
       new_text: 'These are everyday ones.', reason: 'Reads oddly in a sale ad' })
     render(<PlanCard plan={plan({ status: 'done', items: [item({ status: 'ready', candidate: CANDIDATE }), noticed] })} speakers={SPEAKERS} voices={VOICES} projectId="p1" {...h} />)
     const box = screen.getByTestId('suggestion')
+    // A pending suggestion never comes after the action.
+    const wrap = screen.getByTestId('plan').parentElement as HTMLElement
+    expect(Array.from(wrap.children).map((c) => c.getAttribute('data-testid'))).toEqual(['plan', 'suggestion', 'next-action'])
     expect(box).toHaveTextContent('Noticed: at 0:23 Shopkeeper says “These are regular ones.”, reads oddly in a sale ad. Change it to “These are everyday ones.”?')
     await userEvent.click(within(box).getByRole('button', { name: 'Add to plan' }))
     expect(h.onInclude).toHaveBeenCalledWith(expect.objectContaining({ item_id: 'i2' }), true)
@@ -99,6 +102,9 @@ describe('PlanCard, running', () => {
     expect(screen.getByText('0.96')).toBeInTheDocument()
     expect(screen.getByLabelText('Play take')).toHaveAttribute('src', `/api/projects/p1/artifacts/${'a'.repeat(64)}`)
     expect(screen.getByText('Starting…')).toBeInTheDocument()
+    // What you do next is the last thing in the panel.
+    const wrap = screen.getByTestId('plan').parentElement as HTMLElement
+    expect(wrap.lastElementChild).toHaveAttribute('data-testid', 'next-action')
     await userEvent.click(screen.getByRole('button', { name: 'Review and ship' }))
     expect(h.onApproveAll).toHaveBeenCalled()
   })

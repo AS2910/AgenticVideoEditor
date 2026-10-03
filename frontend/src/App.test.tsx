@@ -951,3 +951,38 @@ describe('App fit notes (Phase 14)', () => {
     expect(screen.getByTestId('readout')).toHaveTextContent(/nearest of 3 takes.*trimmed 120 ms of pauses.*voice at natural speed/)
   })
 })
+
+describe('App panel order', () => {
+  it('puts the receipt above the plan and the action last', async () => {
+    const base = routeFetch()
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.endsWith('/projects/p1')) {
+        return ok({ ...PROJECT, created_at: '2026-10-02T08:00:00Z', edits: [], messages: [{ role: 'user', text: 'make it 30% off' }],
+          settings: { long_lines: 'pause', autonomy: 'ask' }, plan: PLAN_DONE })
+      }
+      return base(url, init)
+    }))
+    window.location.hash = 'p1'
+    render(<App />)
+    await screen.findByTestId('next-action')
+    const panel = screen.getByTestId('activity').parentElement as HTMLElement
+    const ids = Array.from(panel.querySelectorAll('[data-testid]')).map((e) => e.getAttribute('data-testid'))
+    expect(ids.indexOf('activity')).toBeLessThan(ids.indexOf('plan'))
+    expect(ids[ids.length - 1]).toBe('next-action')
+  })
+
+  it('tells you when a clip has no speech, instead of inviting a goal', async () => {
+    const base = routeFetch()
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.endsWith('/projects') && init?.method === 'POST') return ok({ ...PROJECT, transcript: [], statements: [] })
+      return base(url, init)
+    }))
+    const user = userEvent.setup()
+    render(<App />)
+    await user.click(screen.getByRole('checkbox'))
+    await user.click(screen.getByRole('button', { name: /continue/i }))
+    await user.click(screen.getByRole('button', { name: /sample ad/i }))
+    expect(await screen.findByText(/no speech in this clip/i)).toBeInTheDocument()
+    expect(screen.queryByText('What should this video say?')).not.toBeInTheDocument()
+  })
+})

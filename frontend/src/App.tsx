@@ -887,7 +887,9 @@ export default function App() {
         >
           {!plan && messages.length === 0 && !generating && !planning && (
             <div className={styles.welcome}>
-              Tell me what this video should say and I'll plan it across every line it touches. Or click any line to change it yourself; I'll stay out of the way.
+              {statements.length === 0
+                ? "There's no speech in this clip, so there's nothing for me to change. If you want a voice-over, drag across the timeline where it should go and tell me what to say."
+                : "Tell me what this video should say and I'll plan it across every line it touches. Or click any line to change it yourself; I'll stay out of the way."}
             </div>
           )}
           {(planning || clarifying) && (
@@ -932,6 +934,9 @@ export default function App() {
               Earlier: {plan.items.filter((i) => i.status === 'approved').length} changes shipped · Show
             </button>
           )}
+          {plan && (review || plan.status === 'done') && !(editingLine && plan.status === 'done' && !showPlanWhileEditing) && (
+            <ActivityLog plan={plan} />
+          )}
           {plan && !clarifying && !(editingLine && plan.status === 'done' && !showPlanWhileEditing) && (
             <PlanCard
               plan={plan}
@@ -959,7 +964,7 @@ export default function App() {
               </div>
             </div>
           )}
-          {plan && (review || plan.status === 'done') && <ActivityLog plan={plan} />}
+
           {generating && (
             <div className={styles.generating} data-testid="generating">
               <div className={styles.generatingStep}>
@@ -978,6 +983,12 @@ export default function App() {
           {question && <QuestionCard question={question.question} onChoose={answer} />}
           {candidate && (
             <>
+              {ranOn && longLines === 'pause' && (
+                <div className={styles.remembered}>
+                  Longer lines run into the pause after them in this project.{' '}
+                  <button onClick={() => void rememberLongLines('ask')}>Ask me each time instead</button>
+                </div>
+              )}
               <CandidateCard
                 candidate={candidate}
                 onApprove={() => void approve()}
@@ -988,12 +999,6 @@ export default function App() {
                 speaker={takeSpeaker ? { name: takeSpeaker.name, slot: speakerSlot(speakers, takeSpeaker.label) } : null}
                 note={ranOn ? `Ran ${overrun.toFixed(1)} s into the pause after it` : null}
               />
-              {ranOn && longLines === 'pause' && (
-                <div className={styles.remembered}>
-                  Longer lines run into the pause after them in this project.{' '}
-                  <button onClick={() => void rememberLongLines('ask')}>Ask me each time instead</button>
-                </div>
-              )}
             </>
           )}
         </ChatPanel>

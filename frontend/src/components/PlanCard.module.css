@@ -57,6 +57,11 @@
 .foot { display: flex; align-items: center; gap: 10px; padding-top: 12px; border-top: 1px solid var(--line); }
 .estimate { color: var(--muted); font-size: 13px; line-height: 1.4; }
 .aside { font-size: 12.5px; color: var(--muted); line-height: 1.5; }
+.action {
+  display: flex; align-items: center; gap: 12px; padding: 12px 14px;
+  border-radius: var(--radius-lg); background: var(--surface); border: 1px solid var(--accent-line); box-shadow: var(--shadow);
+}
+.actionText { flex: 1; font-size: 14px; }
 
 .suggestion {
   display: flex; gap: 10px; align-items: flex-start; padding: 12px;
