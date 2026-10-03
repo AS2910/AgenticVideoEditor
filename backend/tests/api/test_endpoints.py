@@ -1287,3 +1287,161 @@ def test_a_vendor_failure_fails_the_item_not_the_plan(client, project, monkeypat
     item = done["items"][0]
     assert item["status"] == "failed" and "Redo" in item["error"]
     assert done["status"] == "done"
+
+
+# ── the warm agentic pass: findings, one question, narration, shorten ─────────
+
+class Asks(Plans):
+    """A planner that first wants to know who carries the line."""
+
+    def __init__(self, edits, question):
+        super().__init__(edits)
+        from dataclasses import replace
+        self.question = question
+        self.proposal = replace(self.proposal, findings=("20 lines, two people.", "The offer is not said yet."),
+                                question=question)
+        self.answers = []
+
+    def plan(self, goal, lines, history=(), meter=None, answer=None):
+        from dataclasses import replace
+        self.answers.append(answer)
+        if answer is None:
+            return self.proposal
+        return replace(self.proposal, question=None, summary=f"Planned with: {answer[1]}")
+
+
+def test_the_planner_reports_findings_and_waits_on_one_question(client, project, monkeypatch):
+    import app.api.main as main
+    from app.orchestrator.planner import Question
+    asks = Asks([(1, "Get 30% off today only.", "replace", "The offer.")],
+                Question("Who speaks for the brand?", ("The Shopkeeper", "The Customer"), "The Shopkeeper"))
+    monkeypatch.setattr(main, "planner", asks)
+
+    plan = make_plan(client, goal="30% off")
+
+    assert plan["status"] == "clarifying"
+    assert plan["findings"] == ["20 lines, two people.", "The offer is not said yet."]
+    assert plan["question"] == {"text": "Who speaks for the brand?", "options": ["The Shopkeeper", "The Customer"],
+                                "guess": "The Shopkeeper"}
+    assert [i["new_text"] for i in plan["items"]] == ["Get 30% off today only."]   # built on the guess
+    assert client.post("/projects/p1/plans/plan1/run", json={}).status_code == 409
+    assert client.get("/projects/p1").json()["messages"][-1]["text"] == "Who speaks for the brand?"
+
+    answered = client.post("/projects/p1/plans/plan1/clarify", json={"answer": "The Customer"}).json()
+
+    assert answered["status"] == "proposed" and answered["question"] is None
+    assert answered["summary"] == "Planned with: The Customer"
+    assert asks.answers[-1] == ("Who speaks for the brand?", "The Customer")
+    assert [e["text"] for e in answered["log"]][1:3] == ["Asked: Who speaks for the brand?", "You said: The Customer"]
+    assert client.post("/projects/p1/plans/plan1/clarify", json={}).status_code == 409
+
+
+def test_saying_go_takes_the_planners_guess(client, project, monkeypatch):
+    import app.api.main as main
+    from app.orchestrator.planner import Question
+    asks = Asks([(1, "Get 30% off today only.", "replace", "")],
+                Question("Who speaks for the brand?", ("The Shopkeeper", "The Customer"), "The Shopkeeper"))
+    monkeypatch.setattr(main, "planner", asks)
+    make_plan(client, goal="30% off")
+    answered = client.post("/projects/p1/plans/plan1/clarify", json={}).json()
+    assert asks.answers[-1][1] == "The Shopkeeper" and answered["status"] == "proposed"
+
+
+def test_each_item_carries_what_is_happening_to_it_and_the_plans_spend(client, project, monkeypatch):
+    import app.api.main as main
+    seen = []
+    real_update = main.repo.update_item
+
+    def spy(project_id, plan_id, item_id, **changes):
+        if "progress" in changes and changes["progress"]:
+            seen.append(changes["progress"])
+        return real_update(project_id, plan_id, item_id, **changes)
+
+    monkeypatch.setattr(main.repo, "update_item", spy)
+    plan = make_plan(client)
+    done = run_plan(client, plan["plan_id"])
+    assert "Synthesizing the new line" in seen and "Checking continuity" in seen
+    assert done["items"][0]["progress"] is None          # cleared once ready
+    assert done["spend_usd"] == 0.0                      # the mock voice is free
+
+
+def test_prefer_a_shorter_wording_shortens_a_long_line_without_asking(client, project, monkeypatch):
+    import app.api.main as main
+    voice = LongUnlessShort()
+    monkeypatch.setattr(main, "voice", voice)
+    shortener = Plans([], shorter="Get 30% off.")
+    monkeypatch.setattr(main, "planner", shortener)
+    client.put("/projects/p1/settings", json={"long_lines": "shorten"})
+
+    result = preview(client, text="Get thirty percent off today only, friends.", mix="replace")
+
+    assert result["type"] == "candidate"
+    assert result["plan"]["new_text"] == "Get 30% off."
+    assert [p.new_text for p in voice.plans] == ["Get thirty percent off today only, friends.", "Get 30% off."]
+    usage = client.get("/projects/p1/usage").json()
+    assert not any(line["what"] == "wording" for line in usage["lines"])   # the fake does not meter
+
+
+def test_a_plan_item_that_was_shortened_says_so(client, project, monkeypatch):
+    import app.api.main as main
+    monkeypatch.setattr(main, "voice", LongUnlessShort())
+    monkeypatch.setattr(main, "planner", Plans(
+        [(1, "Get thirty percent off today only, friends.", "replace", "The offer.")], shorter="Get 30% off.",
+    ))
+    client.put("/projects/p1/settings", json={"long_lines": "shorten"})
+    make_plan(client, goal="30% off")
+
+    done = run_plan(client, "plan1")
+
+    item = done["items"][0]
+    assert item["status"] == "ready" and item["new_text"] == "Get 30% off." and item["note"] == "Shortened to fit"
+
+
+def test_a_redone_take_says_why_it_is_being_redone(client, project, monkeypatch):
+    import app.api.main as main
+    from app.continuity.engine import Assessment
+    from app.domain.models import ContinuityReport
+
+    class Picky:
+        """Fails the first take with a reason, passes the next."""
+
+        def __init__(self):
+            self.calls = 0
+
+        def assess(self, source, transcript, plan, audio):
+            self.calls += 1
+            if self.calls == 1:
+                return Assessment(report=ContinuityReport(None, 0.5, 0.9, None, False,
+                                  ("Pitch is -6.3 semitones off the surrounding speech.",), ("prosody",)), audio=audio)
+            return Assessment(report=ContinuityReport(None, 0.95, 0.9, None, True, (), ("prosody",)), audio=audio)
+
+    monkeypatch.setattr(main, "continuity", Picky())
+    monkeypatch.setattr(main.voice, "identity", "stock", raising=False)
+    steps = []
+    real = main.jobs.update
+
+    def spy(job_id, **changes):
+        if changes.get("step"):
+            steps.append(changes["step"])
+        return real(job_id, **changes)
+
+    monkeypatch.setattr(main.jobs, "update", spy)
+    preview(client)
+    assert any(s.startswith("Take 1: pitch is -6.3 semitones off the surrounding speech. Trying again (take 2 of 3)") for s in steps)
+
+
+def test_an_added_line_is_spoken_by_whoever_the_planner_says(client, project, monkeypatch):
+    import app.api.main as main
+    from app.orchestrator.planner import Change, Proposal
+
+    class Names(Plans):
+        def plan(self, goal, lines, history=(), meter=None, answer=None):
+            return Proposal("one", (Change(1, "Delivery is free.", "concatenate", "", speaker="Presenter"),))
+
+    monkeypatch.setattr(main, "planner", Names([]))
+    client.post("/projects/p1/speakers/detect")
+    client.put("/projects/p1/speakers/A", json={"name": "Presenter", "voice_id": "nPczCjzI2devNBz1zQrb"})
+    plan = make_plan(client, goal="free delivery")
+    assert plan["items"][0]["speaker"] == "A"
+    done = run_plan(client, "plan1")
+    assert done["items"][0]["candidate"]["plan"]["voice_profile_id"] == "nPczCjzI2devNBz1zQrb"

@@ -27,3 +27,9 @@ def test_a_change_nobody_says_plans_nothing():
 
 def test_the_rule_planner_offers_no_shorter_line():
     assert RulePlanner().shorten("a long line", 0.6, LINES[0]) is None
+
+
+def test_the_rule_planner_reports_what_it_read():
+    proposal = RulePlanner().plan('change "20% off" to "30% off"', LINES)
+    assert proposal.findings == ("3 lines", '"20% off" is said 1 time.')
+    assert proposal.question is None

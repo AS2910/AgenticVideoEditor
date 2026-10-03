@@ -15,7 +15,7 @@ const item = (over: Partial<PlanItem> = {}): PlanItem => ({
   item_id: 'i1', selection: { start: 7.54, end: 9.02 }, old_text: 'Start a live Bajicam session.',
   new_text: 'Start a live Bhaji Cam session.', speaker: 'A', mix: 'replace', reason: 'Brand name',
   kind: 'planned', enabled: true, status: 'planned', fit: null, candidate: null, edit_id: null,
-  question: null, error: null, note: null, ...over,
+  question: null, error: null, note: null, progress: null, ...over,
 })
 
 const CANDIDATE = {
@@ -29,7 +29,7 @@ const CANDIDATE = {
 const plan = (over: Partial<Plan> = {}): Plan => ({
   plan_id: 'plan1', goal: 'Say Bhaji Cam', summary: 'One change does it.', mode: 'ask', status: 'proposed',
   created_at: '2026-10-02T10:00:00Z', estimate: { items: 1, voice_characters: 31, usd: 0.0093, seconds: 12 },
-  log: [], items: [item()], ...over,
+  findings: [], question: null, spend_usd: 0, log: [], items: [item()], ...over,
 })
 
 const handlers = () => ({
@@ -43,7 +43,7 @@ describe('PlanCard, proposed', () => {
     expect(screen.getByText('1 change')).toBeInTheDocument()
     expect(screen.getByText('Customer, 0:07')).toBeInTheDocument()
     expect(screen.getByText('Brand name')).toBeInTheDocument()
-    expect(screen.getByText('About 31 voice characters and under $0.01. Ready in about 12 seconds.')).toBeInTheDocument()
+    expect(screen.getByText('≈ 31 voice characters · under $0.01 · ready in about 12 s')).toBeInTheDocument()
 
     await userEvent.click(screen.getByRole('checkbox', { name: 'Include the change at 0:07' }))
     expect(h.onToggle).toHaveBeenCalledWith(expect.objectContaining({ item_id: 'i1' }), false)
@@ -53,13 +53,24 @@ describe('PlanCard, proposed', () => {
     await userEvent.type(box, 'Start a Bhaji Cam session.{Enter}')
     expect(h.onReword).toHaveBeenCalledWith(expect.objectContaining({ item_id: 'i1' }), 'Start a Bhaji Cam session.')
 
-    await userEvent.click(screen.getByRole('button', { name: 'Run 1 change' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Go ahead' }))
     expect(h.onRun).toHaveBeenCalled()
   })
 
-  it('disables Run with nothing ticked', () => {
-    render(<PlanCard plan={plan({ items: [item({ enabled: false })] })} speakers={SPEAKERS} voices={VOICES} projectId="p1" {...handlers()} />)
-    expect(screen.getByRole('button', { name: 'Run 0 changes' })).toBeDisabled()
+  it('disables Go ahead with nothing ticked, and while a question is open', () => {
+    const { unmount } = render(<PlanCard plan={plan({ items: [item({ enabled: false })] })} speakers={SPEAKERS} voices={VOICES} projectId="p1" {...handlers()} />)
+    expect(screen.getByRole('button', { name: 'Go ahead' })).toBeDisabled()
+    unmount()
+    render(<PlanCard plan={plan({ status: 'clarifying' })} speakers={SPEAKERS} voices={VOICES} projectId="p1" {...handlers()} />)
+    expect(screen.getByRole('button', { name: 'Go ahead' })).toBeDisabled()
+  })
+
+  it('mentions a suggestion in a sentence until the plan has run', () => {
+    const noticed = item({ item_id: 'i2', kind: 'suggestion', enabled: false, status: 'suggested',
+      selection: { start: 23.4, end: 24.8 }, speaker: 'B', old_text: 'These are regular ones.', new_text: 'These are everyday ones.' })
+    render(<PlanCard plan={plan({ items: [item(), noticed] })} speakers={SPEAKERS} voices={VOICES} projectId="p1" {...handlers()} />)
+    expect(screen.getByText(/I also noticed/)).toHaveTextContent('“These are regular ones.” at 0:23. I\'ll ask about it after this one')
+    expect(screen.queryByTestId('suggestion')).not.toBeInTheDocument()
   })
 
   it('offers a suggestion to add or leave', async () => {
@@ -67,7 +78,7 @@ describe('PlanCard, proposed', () => {
     const noticed = item({ item_id: 'i2', kind: 'suggestion', enabled: false, status: 'suggested',
       selection: { start: 23.4, end: 24.8 }, speaker: 'B', old_text: 'These are regular ones.',
       new_text: 'These are everyday ones.', reason: 'Reads oddly in a sale ad' })
-    render(<PlanCard plan={plan({ items: [item(), noticed] })} speakers={SPEAKERS} voices={VOICES} projectId="p1" {...h} />)
+    render(<PlanCard plan={plan({ status: 'done', items: [item({ status: 'ready', candidate: CANDIDATE }), noticed] })} speakers={SPEAKERS} voices={VOICES} projectId="p1" {...h} />)
     const box = screen.getByTestId('suggestion')
     expect(box).toHaveTextContent('Noticed: at 0:23 Shopkeeper says “These are regular ones.”, reads oddly in a sale ad. Change it to “These are everyday ones.”?')
     await userEvent.click(within(box).getByRole('button', { name: 'Add to plan' }))
@@ -82,13 +93,20 @@ describe('PlanCard, running', () => {
     const h = handlers()
     const items = [item({ status: 'ready', candidate: CANDIDATE }), item({ item_id: 'i2', status: 'working', selection: { start: 9.38, end: 9.88 }, speaker: 'B' })]
     render(<PlanCard plan={plan({ status: 'running', items })} speakers={SPEAKERS} voices={VOICES} projectId="p1" {...h} />)
-    expect(screen.getByText('1 of 2 ready')).toBeInTheDocument()
-    expect(screen.getByText("Take, Brian's voice")).toBeInTheDocument()
+    expect(screen.getByText('1 of 2 done')).toBeInTheDocument()
+    expect(screen.getByText("Said “Start a live Bhaji Cam session.” at 0:07, in the Customer's own voice.")).toBeInTheDocument()
+    expect(screen.getByText("Take · Brian's voice")).toBeInTheDocument()
     expect(screen.getByText('0.96')).toBeInTheDocument()
     expect(screen.getByLabelText('Play take')).toHaveAttribute('src', `/api/projects/p1/artifacts/${'a'.repeat(64)}`)
-    expect(screen.getByText('Voicing the line…')).toBeInTheDocument()
-    await userEvent.click(screen.getByRole('button', { name: 'Approve 1 ready change' }))
+    expect(screen.getByText('Starting…')).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: 'Review and ship' }))
     expect(h.onApproveAll).toHaveBeenCalled()
+  })
+
+  it('narrates what is happening to a line while it is voiced', () => {
+    const working = item({ status: 'working', progress: 'Take 1: pitch is -6.3 semitones off the surrounding speech. Trying again (take 2 of 3)' })
+    render(<PlanCard plan={plan({ status: 'running', items: [working] })} speakers={SPEAKERS} voices={VOICES} projectId="p1" {...handlers()} />)
+    expect(screen.getByTestId('narration')).toHaveTextContent('Take 1: pitch is -6.3 semitones off')
   })
 
   it("puts the agent's own fix first when a line needs you", async () => {
@@ -102,10 +120,12 @@ describe('PlanCard, running', () => {
       ],
     } })
     render(<PlanCard plan={plan({ status: 'done', items: [needs] })} speakers={SPEAKERS} voices={VOICES} projectId="p1" {...h} />)
+    expect(screen.getByText(/runs 1.1 s long/)).toBeInTheDocument()
     const box = screen.getByTestId('needs-you')
-    expect(box).toHaveTextContent('runs 1.1 s long')
+    expect(box).toHaveTextContent('Voltage recommends')
     const buttons = within(box).getAllByRole('button')
     expect(buttons[0]).toHaveTextContent('Use a shorter line')
+    expect(buttons[0]).toHaveTextContent('Keeps the meaning, fits the gap')
     await userEvent.click(buttons[0])
     expect(h.onAnswer).toHaveBeenCalledWith(expect.objectContaining({ item_id: 'i1' }), expect.objectContaining({ text: 'Two kinds, both on sale.' }))
   })
@@ -120,8 +140,8 @@ describe('PlanCard, running', () => {
 
 describe('estimateText', () => {
   it('reads the estimate in words', () => {
-    expect(estimateText({ items: 3, voice_characters: 110, usd: 0.033, seconds: 36 })).toBe('About 110 voice characters and about $0.03. Ready in about 36 seconds.')
-    expect(estimateText({ items: 6, voice_characters: 400, usd: 0.12, seconds: 72 })).toBe('About 400 voice characters and about $0.12. Ready in about 1 minute.')
-    expect(estimateText({ items: 1, voice_characters: 0, usd: 0, seconds: 12 })).toBe('No paid voice. Ready in about 12 seconds.')
+    expect(estimateText({ items: 3, voice_characters: 110, usd: 0.033, seconds: 36 })).toBe('≈ 110 voice characters · about $0.03 · ready in about 36 s')
+    expect(estimateText({ items: 6, voice_characters: 400, usd: 0.12, seconds: 72 })).toBe('≈ 400 voice characters · about $0.12 · ready in about 1 minute')
+    expect(estimateText({ items: 1, voice_characters: 0, usd: 0, seconds: 12 })).toBe('no paid voice · ready in about 12 s')
   })
 })

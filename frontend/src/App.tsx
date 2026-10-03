@@ -10,12 +10,13 @@ import { ExportBar } from './components/ExportBar'
 import { ProjectList } from './components/ProjectList'
 import { SpendMeter } from './components/SpendMeter'
 import { TranscriptDoc } from './components/TranscriptDoc'
-import type { LineChange, PendingLine } from './components/TranscriptDoc'
+import type { LineChange, PendingLine, FitReadout } from './components/TranscriptDoc'
 import { PlanCard } from './components/PlanCard'
 import { ReviewPanel } from './components/ReviewPanel'
 import { ActivityLog } from './components/ActivityLog'
-import { GoalBox } from './components/GoalBox'
+import { GoalStage } from './components/GoalStage'
 import { AutonomySwitch } from './components/AutonomySwitch'
+import { Orb } from './components/Orb'
 import { VoicePicker } from './components/VoicePicker'
 import { SpeakersBar } from './components/SpeakersBar'
 import { clock } from './transcript/format'
@@ -24,7 +25,7 @@ import {
   createProject, previewEdit, approveEdit, exportProject, artifactUrl,
   pollJob, PollCancelled, ApiError, listProjects, getProject, deleteProject, getUsage, listVoices, updateSpeaker, detectSpeakers,
   revertEdit, updateSettings, rewordLine,
-  createPlan, getPlan, updateItem, runPlan, answerItem, redoItem, approvePlan,
+  createPlan, getPlan, updateItem, runPlan, answerItem, redoItem, approvePlan, clarifyPlan,
 } from './api'
 import type {
   Word, Selection, Candidate, Segment, Project, ChatMessage, Question, QuestionOption,
@@ -42,7 +43,10 @@ const DEFAULT_VOICE = 'speaker-1'
 /** An answer to a question: the line already read, and the choices so far. */
 interface Answer { text: string; fit?: Fit; mix?: Mix; on_long?: LongLines }
 
-type Stage = 'consent' | 'load' | 'editor'
+type Stage = 'consent' | 'load' | 'goal' | 'editor'
+
+/** Words that mean "take your guess" when Voltage has asked something. */
+const GO = /^(go|ok|okay|yes|sure|go ahead|fine|yep|do it)[.!]?$/i
 
 /** The chat's voice, or the speaker's own, named for a take. */
 const voiceName = (voices: Voice[], id: string) => voices.find((v) => v.voice_id === id)?.name
@@ -81,7 +85,7 @@ export default function App() {
   const [usage, setUsage] = useState<Usage | null>(null)
   const [voices, setVoices] = useState<Voice[]>([])
   const [voiceId, setVoiceId] = useState(DEFAULT_VOICE)
-  const [seekRequest, setSeekRequest] = useState<{ time: number; id: number } | null>(null)
+  const [seekRequest, setSeekRequest] = useState<{ time: number; id: number; play?: boolean; until?: number } | null>(null)
   const [detecting, setDetecting] = useState(false)
   // Approved edits still in force, shown as tracked changes in the transcript.
   const [approved, setApproved] = useState<Revision[]>([])
@@ -95,6 +99,14 @@ export default function App() {
   const [planBusy, setPlanBusy] = useState(false)
   const [planProgress, setPlanProgress] = useState<{ value: number; step: string } | null>(null)
   const [review, setReview] = useState(false)
+  // While Voltage reads, the transcript line it is "on" is lit in turn.
+  const [readingAt, setReadingAt] = useState(0)
+  // The line open in the hands-on editor, so the panel can stand by.
+  const [editingLine, setEditingLine] = useState<Statement | null>(null)
+  const [showPlanWhileEditing, setShowPlanWhileEditing] = useState(false)
+  // How the last take on each line was made to fit, for the editor's readout.
+  const [readouts, setReadouts] = useState<FitReadout[]>([])
+  const composerRef = useRef<HTMLInputElement>(null)
   const previewToken = useRef(0)
   const planToken = useRef(0)
 
@@ -107,7 +119,7 @@ export default function App() {
   }, [])
 
   useEffect(() => {
-    if (stage === 'load') void refreshProjects()
+    if (stage === 'load' || stage === 'goal') void refreshProjects()
   }, [stage, refreshProjects])
 
   // A reload keeps you in the project you had open: its id is the URL hash.
@@ -149,7 +161,18 @@ export default function App() {
     setPlanBusy(false)
     setPlanProgress(null)
     setReview(false)
+    setEditingLine(null)
+    setReadouts([])
   }
+
+  // Voltage's eye moves down the transcript while it reads.
+  useEffect(() => {
+    if (!planning) return
+    const n = project?.statements?.length ?? 0
+    if (n === 0) return
+    const timer = setInterval(() => setReadingAt((i) => (i + 1) % n), 350)
+    return () => clearInterval(timer)
+  }, [planning, project?.statements?.length])
 
   const projectId = project?.project_id ?? null
 
@@ -176,13 +199,15 @@ export default function App() {
       .catch(() => {}) // without the list, edits use the default voice
   }, [stage, voices.length])
 
-  const takeIn = (loaded: Project) => {
+  /** Into the project: fresh ones start by asking what the video should
+   *  say; ones with a plan or edits open straight in the editor. */
+  const takeIn = (loaded: Project, edited = false) => {
     setProject(loaded)
     setTranscript(loaded.transcript)
     setLongLines(loaded.settings?.long_lines ?? 'pause')
     setAutonomy(loaded.settings?.autonomy ?? 'ask')
     setPlan(loaded.plan ?? null)
-    setStage('editor')
+    setStage(loaded.plan || edited || (loaded.statements?.length ?? 0) === 0 ? 'editor' : 'goal')
     window.location.hash = loaded.project_id
   }
 
@@ -268,6 +293,14 @@ export default function App() {
       if (!('candidate_id' in result)) return   // a plan's job, not a preview's
       setSelection(result.plan.selection) // the backend's snapped range
       setCandidate(result)
+      const over = result.plan.selection.end - at.end
+      const tags = [
+        ...(result.plan.new_text !== (answer?.text ?? result.plan.new_text) ? ['shortened to fit'] : []),
+        ...(over > 0.01 && result.plan.mix !== 'concatenate' ? [`ran ${over.toFixed(1)} s into the pause`] : []),
+        result.plan.fit === 'stretch' ? 'voice sped up to fit' : 'voice at natural speed',
+        'picture untouched',
+      ]
+      setReadouts((rs) => [...rs.filter((r) => r.selection.start !== at.start || r.selection.end !== at.end), { selection: at, tags }])
     } catch (e) {
       if (e instanceof PollCancelled) return
       setError(e instanceof ApiError ? e.message : 'Preview failed. Try again.')
@@ -364,7 +397,28 @@ export default function App() {
     setPlanning(true)
     setReview(false)
     try {
+      setStage('editor')
       const made = await createPlan(projectId, { goal })
+      setPlan(made)
+      say({ role: 'assistant', text: made.question ? made.question.text : made.summary })
+      if (made.job_id) void followPlanJob(made.job_id, made.plan_id)
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : 'Could not plan that.')
+    } finally {
+      setPlanning(false)
+      void refreshUsage(projectId)
+    }
+  }
+
+  /** Answer Voltage's question (or take its guess); it plans again. */
+  const clarify = async (answer?: string) => {
+    if (!projectId || !plan?.question) return
+    const said_ = answer ?? plan.question.guess ?? plan.question.options[0]
+    say({ role: 'user', text: said_ })
+    setError(null)
+    setPlanning(true)
+    try {
+      const made = await clarifyPlan(projectId, plan.plan_id, answer)
       setPlan(made)
       say({ role: 'assistant', text: made.summary })
       if (made.job_id) void followPlanJob(made.job_id, made.plan_id)
@@ -374,6 +428,13 @@ export default function App() {
       setPlanning(false)
       void refreshUsage(projectId)
     }
+  }
+
+  /** What the composer does depends on where things stand. */
+  const submitComposer = (text: string) => {
+    if (plan?.status === 'clarifying') return void clarify(GO.test(text.trim()) ? undefined : text)
+    if (selection) return void runPreview(text)
+    return void makePlan(text)
   }
 
   const changeItem = async (item: PlanItem, change: { enabled?: boolean; new_text?: string; include?: boolean }) => {
@@ -437,24 +498,37 @@ export default function App() {
     }
   }
 
-  /** Compare: the original at that line, with the take a click away. */
+  /** Hear the seam: the edited video from a moment before the line to a
+   *  moment after, where a pasted edit gives itself away. Without a render
+   *  yet, the original at that line. */
   const compareItem = (item: PlanItem) => {
     setSelection(item.selection)
-    setView('original')
-    setSeekRequest((r) => ({ time: item.selection.start, id: (r?.id ?? 0) + 1 }))
-    setCurrentTime(item.selection.start)
+    const span = item.candidate?.plan.selection ?? item.selection
+    const edited = rendered !== null
+    setView(edited ? 'edited' : 'original')
+    const from = Math.max(0, (edited ? renderTime(span.start, inserts) : span.start) - 1.5)
+    const until = (edited ? renderTime(span.end, inserts) : span.end) + (item.mix === 'concatenate' && item.candidate ? item.candidate.audio.duration : 0) + 1.5
+    setSeekRequest((r) => ({ time: from, id: (r?.id ?? 0) + 1, play: true, until }))
+    setCurrentTime(from)
   }
 
-  /** Ask Claude for a wording of a line; the suggestion goes in the box. */
-  const reword = async (s: Statement, draft: string): Promise<string | null> => {
-    if (!projectId) return null
+  /** Ask Claude for tighter wordings of a line: two, for the editor to offer. */
+  const reword = async (s: Statement, draft: string): Promise<string[]> => {
+    if (!projectId) return []
     setError(null)
     try {
-      const r = await rewordLine(projectId, { start: s.start, end: s.end, draft })
-      return r.text
-    } catch (e) {
-      setError(e instanceof ApiError ? e.message : 'Could not get a wording.')
-      return null
+      const asks = [
+        rewordLine(projectId, { start: s.start, end: s.end, draft }),
+        rewordLine(projectId, { start: s.start, end: s.end, draft, instruction: 'so it is shorter while keeping every detail, name and number' }),
+      ]
+      const results = await Promise.allSettled(asks)
+      const texts = results.flatMap((r) => (r.status === 'fulfilled' ? [r.value.text] : []))
+      if (texts.length === 0) {
+        const failed = results.find((r) => r.status === 'rejected') as PromiseRejectedResult | undefined
+        const reason = failed?.reason
+        setError(reason instanceof ApiError ? reason.message : 'Could not get a wording.')
+      }
+      return Array.from(new Set(texts))
     } finally {
       void refreshUsage(projectId)
     }
@@ -578,9 +652,9 @@ export default function App() {
     setLoading(true)
     try {
       const opened = await getProject(id)
-      takeIn(opened)
-      setMessages(opened.messages)
       const live = opened.edits.filter((e) => !e.reverted)
+      takeIn(opened, live.length > 0 || opened.messages.length > 0)
+      setMessages(opened.messages)
       setApproved(live.map((e) => ({
         edit_id: e.edit_id, start: e.selection.start, end: e.selection.end, text: e.new_text, mix: e.mix,
       })))
@@ -626,6 +700,14 @@ export default function App() {
       </LoadScreen>
     )
   }
+  if (stage === 'goal') {
+    return (
+      <GoalStage project={project} busy={planning} onPlan={(goal) => void makePlan(goal)} onHandsOn={() => setStage('editor')}>
+        {error && <div className={styles.error} role="alert">{error}</div>}
+        <ProjectList projects={projects} onOpen={(id) => void openProject(id)} onDelete={(id) => void removeProject(id)} />
+      </GoalStage>
+    )
+  }
 
   const showEdited = view === 'edited' && rendered !== null
   const speakers = project.speakers ?? []
@@ -640,6 +722,7 @@ export default function App() {
   // Where things stand line by line: the plan's items, and the one edit the
   // chat may be working on.
   const pendingLines: PendingLine[] = [
+    ...(planning && statements.length > 0 ? [{ selection: { start: statements[readingAt % statements.length].start, end: statements[readingAt % statements.length].end }, status: 'reading' as const }] : []),
     ...(plan?.items ?? [])
       .filter((i) => i.kind === 'planned' && i.enabled && ['planned', 'working', 'ready', 'needs-you', 'failed'].includes(i.status))
       .map((i) => ({ selection: i.selection, status: i.status, text: i.new_text, mix: i.mix })),
@@ -651,6 +734,22 @@ export default function App() {
   const readyCount = plan?.items.filter((i) => i.status === 'ready').length ?? 0
   const reviewable = (plan?.items.filter((i) => i.status === 'ready' || i.status === 'approved').length ?? 0) > 0
   const busy = generating || planBusy || planning
+  const clarifying = plan?.status === 'clarifying'
+  const planned = plan?.items.filter((i) => i.kind === 'planned' && i.enabled) ?? []
+  const doneCount = planned.filter((i) => ['ready', 'approved', 'needs-you', 'failed'].includes(i.status)).length
+  const stateWord = planning ? 'reading the clip'
+    : clarifying ? 'has a question'
+    : planBusy ? `working · ${doneCount} of ${planned.length} done`
+    : editingLine ? 'standing by'
+    : plan?.status === 'proposed' ? 'has a plan'
+    : review ? 'ready to ship'
+    : 'ready'
+  const placeholder = clarifying ? 'Answer, or tell Voltage anything else'
+    : review ? "What's off?"
+    : selection ? 'Ask for a change, e.g. say "30% off" instead'
+    : plan ? 'Change the plan, or ask for something else'
+    : 'What should this video say?'
+  const secondsLeft = plan && planBusy ? Math.max(5, Math.round((plan.estimate.seconds || 12) * (1 - (planned.length ? doneCount / planned.length : 0)))) : 0
 
   // The take's own details: whose line, in which voice, and whether it ran on.
   const takeSpeakerLabel = candidate
@@ -668,6 +767,7 @@ export default function App() {
     <div className={styles.app}>
       <header className={styles.header}>
         <button className={styles.back} onClick={leave}>← Projects</button>
+        <span className={styles.brand}>Voltage</span>
         <span className={styles.slash}>/</span>
         <span className={styles.filename} title={project.filename}>{project.filename}</span>
         <span className={styles.meta}>
@@ -755,6 +855,8 @@ export default function App() {
           onRevert={(id) => void revert(id)}
           onReword={reword}
           onLongLinesChange={(v) => void rememberLongLines(v)}
+          onEditingChange={setEditingLine}
+          readouts={readouts}
         />
           </>
         )}
@@ -764,33 +866,71 @@ export default function App() {
         <ChatPanel
           messages={messages}
           canSubmit
-          onSubmit={(p) => selection ? void runPreview(p) : void makePlan(p)}
-          placeholder={selection ? 'Ask for a change, e.g. say "30% off" instead'
-            : plan ? 'Change the plan, or ask for something else' : 'What should your video say?'}
-          hint={selection ? `Talking about the line at ${clock(selection.start)}.`
+          onSubmit={submitComposer}
+          inputRef={composerRef}
+          placeholder={placeholder}
+          hint={clarifying ? 'Pick an answer above, or just say "go" and Voltage will use its guess.'
+            : selection ? `Talking about the line at ${clock(selection.start)}.`
             : 'A goal for the whole video is planned across every line it touches.'}
           toolbar={<VoicePicker voices={voices} value={voiceId} onChange={setVoiceId} />}
           header={
             <div className={styles.panelHead}>
+              <Orb size={26} working={busy} idle={!busy && !plan} />
               <span className={styles.panelTitle}>Voltage</span>
+              <span className={styles.panelNote}>{stateWord}</span>
               <span className={styles.spacer} />
               <AutonomySwitch value={autonomy} onChange={(v) => void rememberAutonomy(v)} />
             </div>
           }
         >
-          {!plan && messages.length === 0 && !generating && (
-            <GoalBox
-              onPlan={(goal) => void makePlan(goal)}
-              busy={planning}
-              caption={`${project.filename}, ${project.duration.toFixed(1)} s${speakers.length ? `, ${speakers.length} ${speakers.length === 1 ? 'speaker' : 'speakers'}` : ''}`}
-            />
-          )}
-          {planning && (
-            <div className={styles.generating} data-testid="planning">
-              <div className={styles.generatingStep}><span className={styles.spinner} aria-hidden="true" />Reading every line</div>
+          {!plan && messages.length === 0 && !generating && !planning && (
+            <div className={styles.welcome}>
+              Tell me what this video should say and I'll plan it across every line it touches. Or click any line to change it yourself; I'll stay out of the way.
             </div>
           )}
-          {plan && (
+          {(planning || clarifying) && (
+            <div className={styles.thinking} data-testid="thinking">
+              {(plan?.findings ?? []).map((f, i) => (
+                <div key={i} className={styles.thought} style={{ animationDelay: `${i * 220}ms` }}>
+                  <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
+                    <circle cx="8" cy="8" r="7.25" fill="none" stroke="var(--accent)" strokeWidth="1.5" />
+                    <path d="M5 8.2l2 2 4-4.4" fill="none" stroke="var(--accent)" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                  <span>{f}</span>
+                </div>
+              ))}
+              {planning && (
+                <div className={`${styles.thought} ${styles.thoughtLive}`} data-testid="planning">
+                  <span className={styles.spinner} aria-hidden="true" />
+                  <span>{plan?.question ? 'Planning with your answer…' : 'Reading every line, and who says it…'}<span className={styles.caret} aria-hidden="true" /></span>
+                </div>
+              )}
+            </div>
+          )}
+          {clarifying && plan?.question && !planning && (
+            <div className={styles.question} data-testid="clarify">
+              <div className={styles.questionText}>One thing before I plan. <strong>{plan.question.text}</strong></div>
+              <div className={styles.questionOptions}>
+                {plan.question.options.map((o) => (
+                  <button key={o} className={o === plan.question?.guess ? styles.optionOn : styles.option} onClick={() => void clarify(o)}>{o}</button>
+                ))}
+              </div>
+              <div className={styles.questionNote}>
+                {plan.question.guess ? `My guess is ${plan.question.guess}. ` : ''}Pick one, or just say "go" and I'll use that.
+              </div>
+            </div>
+          )}
+          {editingLine && !planBusy && (
+            <div className={styles.welcome}>
+              You're on {clock(editingLine.start)}. I'll stay out of the way while you write; ask for wording and I'll offer a couple of tighter lines.
+            </div>
+          )}
+          {plan && editingLine && plan.status === 'done' && !showPlanWhileEditing && (
+            <button className={styles.earlier} onClick={() => setShowPlanWhileEditing(true)}>
+              Earlier: {plan.items.filter((i) => i.status === 'approved').length} changes shipped · Show
+            </button>
+          )}
+          {plan && !clarifying && !(editingLine && plan.status === 'done' && !showPlanWhileEditing) && (
             <PlanCard
               plan={plan}
               speakers={speakers}
@@ -801,6 +941,7 @@ export default function App() {
               onReword={(item, text) => void changeItem(item, { new_text: text })}
               onInclude={(item, include) => void changeItem(item, { include })}
               onRun={() => void runThePlan()}
+              onAdjust={() => composerRef.current?.focus()}
               onAnswer={(item, option) => void answerTheItem(item, option)}
               onRedo={(item) => void redoTheItem(item)}
               onApproveAll={() => setReview(true)}
@@ -808,12 +949,11 @@ export default function App() {
           )}
           {planBusy && (
             <div className={styles.generating} data-testid="plan-progress">
-              <div className={styles.generatingStep}>
-                <span className={styles.spinner} aria-hidden="true" />
-                {planProgress?.step ?? 'Queued'}
-              </div>
-              <div className={styles.progressTrack}>
-                <div className={styles.progressFill} style={{ width: `${Math.round((planProgress?.value ?? 0) * 100)}%` }} />
+              <div className={styles.progressRow}>
+                <div className={styles.progressTrack}>
+                  <div className={styles.progressFill} style={{ width: `${Math.round((planProgress?.value ?? 0) * 100)}%` }} />
+                </div>
+                <span className={styles.progressNote}>about {secondsLeft} s left</span>
               </div>
             </div>
           )}

@@ -41,7 +41,10 @@
 .side { display: flex; align-items: center; min-height: 22px; }
 .chip { padding: 2px 8px; border-radius: 999px; font-size: 12px; white-space: nowrap; }
 .chip[data-status="working"] { color: var(--muted); background: var(--raised); }
-.chip[data-status="ready"] { color: var(--accent); background: var(--accent-tint); }
+.chip[data-status="reading"] { color: var(--accent); background: var(--accent-tint); }
+.row[data-status="reading"] { background: var(--accent-tint); transition: background 300ms ease; }
+.chip[data-status="failed"] { color: var(--amber); background: var(--amber-tint); }
+.chip[data-status="ready"] { color: var(--ok); background: var(--ok-tint); }
 .chip[data-status="needs-you"] { color: var(--amber); background: var(--amber-tint); }
 .revert {
   padding: 2px 8px; border-radius: 6px; font-size: 12px; opacity: 0.6;
@@ -51,9 +54,15 @@
 
 /* Editing a line in place. */
 .editor {
-  display: flex; flex-direction: column; gap: 10px; padding: 10px 12px;
-  border-radius: 10px; background: var(--surface); border: 1px solid var(--accent);
+  display: flex; flex-direction: column; gap: 10px; padding: 12px 14px;
+  border-radius: 14px; background: var(--surface); border: 1px solid var(--accent); box-shadow: var(--shadow);
 }
+.offers { display: flex; flex-direction: column; gap: 6px; padding-top: 8px; border-top: 1px solid var(--line); }
+.offersCaption { font-size: 12px; color: var(--muted); }
+.offer { text-align: left; padding: 9px 12px; border-radius: 10px; font-size: 14px; background: var(--raised); color: var(--text); border: 1px solid var(--line); }
+.offer:hover { border-color: var(--accent); }
+.readout { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding-top: 8px; border-top: 1px solid var(--line); font-size: 12px; color: var(--muted); }
+.fitTag { padding: 3px 9px; border-radius: 999px; font-size: 12px; color: var(--ok); background: var(--ok-tint); }
 .box {
   width: 100%; padding: 2px; resize: none;
   font-size: 15px; line-height: 1.5; background: transparent; color: var(--text); border: none;
@@ -69,7 +78,7 @@
 .ask { background: none; border: none; padding: 0; color: var(--accent); font-size: 12px; }
 .ask:hover { color: #B3C7FF; text-decoration: underline; }
 .ask:disabled { color: var(--muted); text-decoration: none; }
-.cancel, .preview { padding: 7px 12px; border-radius: 8px; font-size: 13px; font-weight: 500; }
+.cancel, .preview { padding: 8px 13px; border-radius: 10px; font-size: 13px; font-weight: 500; }
 .cancel { background: var(--raised); color: var(--text); border: 1px solid var(--line); }
-.preview { background: var(--accent-fill); color: #fff; border: 1px solid var(--accent-fill); }
+.preview { background: var(--accent); color: var(--accent-ink); border: 1px solid var(--accent); }
 .preview:disabled { background: var(--raised); color: var(--muted); border-color: var(--line); }

@@ -1,25 +1,31 @@
-/* Editor theme — the agentic editor (Phase 12), from the approved mocks:
-   one sans, dark neutral surfaces, rounded panels, one blue accent, amber for
-   "needs you". No red/green status pairs. */
+/* Editor theme — the warm agentic pass (2026-10-03), from the "Warm agentic"
+   mocks: a warm dark room, cream text, one amber accent, rose only for
+   "needs you", a serif for headings and for Voltage's name. */
 :root {
-  --bg: #0E0F11;
-  --surface: #16171A;
-  --raised: #1E2024;
-  --line: #2A2C31;
-  --text: #ECECEA;
-  --muted: #9A9CA2;
-  --faint: #6C6F76;
+  --bg: #171412;
+  --surface: #1F1B18;
+  --raised: #2A2522;
+  --line: #3A332E;
+  --text: #F3EDE4;
+  --muted: #A89F94;
+  --faint: #7A7168;
 
-  --accent: #8AAAFF;            /* changed words, ready, links, focus */
-  --accent-fill: #3F6FE8;       /* the primary button */
-  --accent-tint: rgba(138, 170, 255, 0.14);
-  --amber: #E3A33D;             /* needs you */
-  --amber-tint: rgba(227, 163, 61, 0.12);
-  --amber-line: rgba(227, 163, 61, 0.35);
-  --speaker-a: #2BB3A0;
-  --speaker-b: #D66BA0;
-  --speaker-c: #8AAAFF;
-  --speaker-d: #E3A33D;
+  --accent: #E9A860;            /* changed words, ready, links, focus */
+  --accent-fill: #C9823D;       /* deep amber */
+  --accent-ink: #1A1511;        /* text on an amber button */
+  --accent-tint: rgba(233, 168, 96, 0.14);
+  --accent-line: rgba(233, 168, 96, 0.4);
+  --amber: #E5897B;             /* needs you: rose, kept under the old name */
+  --amber-tint: rgba(229, 137, 123, 0.12);
+  --amber-line: rgba(229, 137, 123, 0.4);
+  --ok: #5FBFAD;
+  --ok-tint: rgba(95, 191, 173, 0.14);
+  --speaker-a: #5FBFAD;
+  --speaker-b: #D08BB8;
+  --speaker-c: #E9A860;
+  --speaker-d: #8FB3E8;
+
+  --shadow: 0 1px 0 rgba(255, 255, 255, 0.04) inset, 0 12px 32px rgba(0, 0, 0, 0.28);
 
   /* aliases older components still use */
   --bay: var(--bg);
@@ -35,9 +41,10 @@
   --pass: var(--accent);
   --border: var(--line);
 
-  --radius: 8px;
-  --radius-lg: 12px;
+  --radius: 10px;
+  --radius-lg: 16px;
   --ui: 'Instrument Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --serif: 'Fraunces', Georgia, 'Times New Roman', serif;
 }
 * { box-sizing: border-box; }
 html, body, #root { height: 100%; }
@@ -55,7 +62,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 button { cursor: pointer; }
 button:disabled { cursor: default; }
 a { color: var(--accent); }
-a:hover { color: #B3C7FF; }
+a:hover { color: #F2C08A; }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { transition: none !important; animation: none !important; }

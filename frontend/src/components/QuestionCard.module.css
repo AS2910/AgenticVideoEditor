@@ -10,7 +10,7 @@
   padding: 7px 12px; border-radius: 8px; font-size: 13px; font-weight: 500;
   background: var(--raised); color: var(--text); border: 1px solid var(--line);
 }
-.option:first-child { background: var(--accent-fill); border-color: var(--accent-fill); color: #fff; }
+.option:first-child { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
 .option:hover { border-color: var(--accent); }
 .warning { color: var(--amber); font-size: 12px; font-weight: 400; }
-.option:first-child .warning { color: #FFE3B0; }
+.option:first-child .warning { color: #6B3B2E; }

@@ -13,8 +13,8 @@ export const soundsRight = (item: PlanItem): number | null => {
 
 /** A rough reading of the estimate, in words. */
 export const estimateText = (e: Plan['estimate']) => {
-  const chars = e.voice_characters > 0 ? `About ${e.voice_characters} voice characters` : 'No paid voice'
-  const usd = e.usd >= 0.01 ? ` and about $${e.usd.toFixed(2)}` : e.voice_characters > 0 ? ' and under $0.01' : ''
-  const secs = e.seconds >= 60 ? `about ${Math.round(e.seconds / 60)} minute${e.seconds >= 90 ? 's' : ''}` : `about ${e.seconds} seconds`
-  return `${chars}${usd}. Ready in ${secs}.`
+  const chars = e.voice_characters > 0 ? `≈ ${e.voice_characters} voice characters` : 'no paid voice'
+  const usd = e.usd >= 0.01 ? ` · about $${e.usd.toFixed(2)}` : e.voice_characters > 0 ? ' · under $0.01' : ''
+  const secs = e.seconds >= 60 ? `about ${Math.round(e.seconds / 60)} minute${e.seconds >= 90 ? 's' : ''}` : `about ${e.seconds} s`
+  return `${chars}${usd} · ready in ${secs}`
 }

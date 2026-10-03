@@ -68,6 +68,15 @@ class Ledger:
             ).fetchone()
         return float(row["usd"])
 
+    def spent_usd_since(self, project_id: str, at: str) -> float:
+        """What one plan cost: everything recorded since it was made."""
+        with self.db.tx() as c:
+            row = c.execute(
+                "SELECT COALESCE(SUM(usd), 0) AS usd FROM usage WHERE project_id = ? AND at >= ?",
+                (project_id, at),
+            ).fetchone()
+        return float(row["usd"])
+
     def units(self, project_id: str, vendor: str, unit: str) -> float:
         with self.db.tx() as c:
             row = c.execute(
