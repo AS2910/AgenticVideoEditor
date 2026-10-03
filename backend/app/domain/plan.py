@@ -35,6 +35,7 @@ class PlanItem:
     question: dict | None = None   # the open question, the agent's own fix first
     error: str | None = None
     note: str | None = None        # e.g. "The shorter line you picked"
+    progress: str | None = None    # what is happening to it right now, in words
 
 
 @dataclass(frozen=True)
@@ -49,6 +50,10 @@ class Plan:
     created_at: str = ""
     log: tuple[dict, ...] = ()     # what Voltage did: {at, text, detail}
     estimate: dict = field(default_factory=dict)   # voice_characters, usd, seconds
+    findings: tuple[str, ...] = ()  # what the planner noticed while reading
+    # One thing the planner wants to know first: {text, options, guess}. The
+    # plan's status is "clarifying" until it is answered (or the guess taken).
+    question: dict | None = None
 
     def item(self, item_id: str) -> PlanItem | None:
         return next((i for i in self.items if i.item_id == item_id), None)
@@ -70,6 +75,7 @@ def item_from_dict(d: dict) -> PlanItem:
         reason=d.get("reason", ""), kind=d.get("kind", "planned"), enabled=d.get("enabled", True),
         status=d.get("status", "planned"), fit=d.get("fit"), candidate_id=d.get("candidate_id"),
         edit_id=d.get("edit_id"), question=d.get("question"), error=d.get("error"), note=d.get("note"),
+        progress=d.get("progress"),
     )
 
 
@@ -79,4 +85,5 @@ def plan_from_dict(d: dict) -> Plan:
         items=tuple(item_from_dict(i) for i in d["items"]), mode=d.get("mode", "ask"),
         status=d.get("status", "proposed"), created_at=d.get("created_at", ""),
         log=tuple(d.get("log", ())), estimate=d.get("estimate", {}),
+        findings=tuple(d.get("findings", ())), question=d.get("question"),
     )

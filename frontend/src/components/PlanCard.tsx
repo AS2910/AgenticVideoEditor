@@ -5,6 +5,7 @@ import { clock } from '../transcript/format'
 import { speakerSlot } from '../transcript/speakers'
 import { estimateText, soundsRight } from '../transcript/planText'
 import { Avatar } from './Avatar'
+import { Orb } from './Orb'
 import styles from './PlanCard.module.css'
 
 interface PlanCardProps {
@@ -18,19 +19,21 @@ interface PlanCardProps {
   onReword: (item: PlanItem, text: string) => void
   onInclude: (item: PlanItem, include: boolean) => void
   onRun: () => void
+  /** "Adjust": say what to change in the composer. */
+  onAdjust?: () => void
   onAnswer: (item: PlanItem, option: QuestionOption) => void
   onRedo: (item: PlanItem) => void
   onApproveAll: () => void
 }
 
-const MIX_NOTE: Record<string, string> = { replace: 'Replaces the line', concatenate: 'Added after the line', layer: 'Over the original sound' }
+const KIND: Record<string, string> = { replace: 'Replaces the line', concatenate: 'Added after the line', layer: 'Over the original sound' }
 
 const Icon = ({ status }: { status: PlanItem['status'] }) => {
   if (status === 'ready' || status === 'approved') {
     return (
       <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
-        <circle cx="8" cy="8" r="7.25" fill="none" stroke="var(--accent)" strokeWidth="1.5" />
-        <path d="M5 8.2l2 2 4-4.4" fill="none" stroke="var(--accent)" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+        <circle cx="8" cy="8" r="7.25" fill="none" stroke="var(--ok)" strokeWidth="1.5" />
+        <path d="M5 8.2l2 2 4-4.4" fill="none" stroke="var(--ok)" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
       </svg>
     )
   }
@@ -67,7 +70,7 @@ function Take({ item, projectId, voices }: { item: PlanItem; projectId: string; 
   return (
     <div className={styles.take}>
       <audio className={styles.audio} controls preload="none" src={artifactUrl(projectId, c.audio.sha256)} aria-label="Play take" />
-      <span className={styles.takeLabel}>Take{voice ? `, ${voice}'s voice` : ''}</span>
+      <span className={styles.takeLabel}>Take{voice ? ` · ${voice}'s voice` : ''}</span>
       <span className={styles.spacer} />
       {score !== null && (
         <span className={styles.score}>sounds right <strong>{score.toFixed(2)}</strong></span>
@@ -76,9 +79,18 @@ function Take({ item, projectId, voices }: { item: PlanItem; projectId: string; 
   )
 }
 
+/** What a finished line reads as, in Voltage's words. */
+const said = (item: PlanItem, who: string | null, voice?: string) => {
+  const at = clock(item.selection.start)
+  const by = who && voice ? `, in the ${who}'s own voice` : voice ? `, in ${voice}'s voice` : ''
+  return item.mix === 'concatenate'
+    ? `Added “${item.new_text}” after ${at}${by}.`
+    : `Said “${item.new_text}” at ${at}${by}.`
+}
+
 /** The agent's plan: what it will change, or is changing, line by line. */
 export function PlanCard({
-  plan, speakers, voices, projectId, busy, onToggle, onReword, onInclude, onRun, onAnswer, onRedo, onApproveAll,
+  plan, speakers, voices, projectId, busy, onToggle, onReword, onInclude, onRun, onAdjust, onAnswer, onRedo, onApproveAll,
 }: PlanCardProps) {
   const [drafts, setDrafts] = useState<Record<string, string>>({})
   const planned = plan.items.filter((i) => i.kind === 'planned' && i.status !== 'dismissed')
@@ -86,9 +98,11 @@ export function PlanCard({
   const ticked = planned.filter((i) => i.enabled)
   const ready = planned.filter((i) => i.status === 'ready')
   const settled = planned.filter((i) => ['ready', 'approved', 'needs-you', 'failed'].includes(i.status))
-  const proposed = plan.status === 'proposed'
+  const proposed = plan.status === 'proposed' || plan.status === 'clarifying'
   const who = (item: PlanItem) => speakers.find((s) => s.label === item.speaker)
   const name = (item: PlanItem) => who(item)?.name ?? (item.speaker ? `Speaker ${item.speaker}` : null)
+  const voiceOf = (item: PlanItem) => voices.find((v) => v.voice_id === item.candidate?.plan.voice_profile_id)?.name
+  const cast = new Set(planned.map((i) => i.speaker).filter(Boolean)).size
 
   const commit = (item: PlanItem) => {
     const text = (drafts[item.item_id] ?? item.new_text).trim()
@@ -100,11 +114,11 @@ export function PlanCard({
     <div className={styles.wrap}>
       <div className={styles.card} data-testid="plan">
         <div className={styles.head}>
-          <span className={styles.title}>Plan</span>
+          <span className={styles.title}>The plan</span>
           <span className={styles.count}>
             {proposed
-              ? `${planned.length} ${planned.length === 1 ? 'change' : 'changes'}`
-              : `${settled.length} of ${ticked.length} ready`}
+              ? `${planned.length} ${planned.length === 1 ? 'change' : 'changes'}${cast > 1 ? ` · ${cast} speakers` : ''}`
+              : `${settled.length} of ${ticked.length} done`}
           </span>
           {!proposed && (
             <>
@@ -133,47 +147,75 @@ export function PlanCard({
                 <span className={styles.icon}><Icon status={item.status} /></span>
               )}
               <div className={styles.body}>
-                <div className={styles.meta}>
-                  {label && <Avatar name={label} slot={speakerSlot(speakers, item.speaker)} size={18} />}
-                  <span>{label ? `${label}, ${at}` : at}</span>
-                  <span className={styles.spacer} />
-                  <span>{item.note ?? item.reason ?? MIX_NOTE[item.mix]}</span>
-                </div>
                 {proposed ? (
-                  <input
-                    className={styles.wording}
-                    aria-label={`New wording at ${at}`}
-                    value={drafts[item.item_id] ?? item.new_text}
-                    onChange={(e) => setDrafts((d) => ({ ...d, [item.item_id]: e.target.value }))}
-                    onBlur={() => commit(item)}
-                    onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur() }}
-                  />
-                ) : (
-                  <div className={styles.line}>
-                    {item.mix === 'concatenate' ? <>{item.old_text} <ins className={styles.ins}>{item.new_text}</ins></> : item.new_text}
-                  </div>
-                )}
-                {item.status === 'working' && <div className={styles.quiet}>Voicing the line…</div>}
-                {item.status === 'ready' && <Take item={item} projectId={projectId} voices={voices} />}
-                {item.status === 'approved' && <div className={styles.quiet}>Approved</div>}
-                {item.status === 'needs-you' && item.question && (
-                  <div className={styles.needs} data-testid="needs-you">
-                    <div>{item.question.question}</div>
-                    <div className={styles.options}>
-                      {item.question.options.map((o, k) => (
-                        <button key={k} className={k === 0 ? styles.primary : styles.secondary} onClick={() => onAnswer(item, o)} disabled={busy}>
-                          {o.label}
-                          {o.warning && <span className={styles.warning}> {o.warning}</span>}
-                        </button>
-                      ))}
+                  <>
+                    <div className={styles.meta}>
+                      {label && <Avatar name={label} slot={speakerSlot(speakers, item.speaker)} size={18} />}
+                      <span>{label ? `${label}, ${at}` : at}</span>
+                      <span className={styles.spacer} />
+                      <span>{KIND[item.mix]}</span>
                     </div>
-                  </div>
-                )}
-                {item.status === 'failed' && (
-                  <div className={styles.failed}>
-                    <span>{item.error ?? 'This line could not be voiced.'}</span>
-                    <button className={styles.secondary} onClick={() => onRedo(item)} disabled={busy}>Redo</button>
-                  </div>
+                    <input
+                      className={styles.wording}
+                      aria-label={`New wording at ${at}`}
+                      value={drafts[item.item_id] ?? item.new_text}
+                      onChange={(e) => setDrafts((d) => ({ ...d, [item.item_id]: e.target.value }))}
+                      onBlur={() => commit(item)}
+                      onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur() }}
+                    />
+                    {(item.note ?? item.reason) && <div className={styles.why}>{item.note ?? item.reason}</div>}
+                  </>
+                ) : (
+                  <>
+                    {item.status === 'ready' && (
+                      <>
+                        <div className={styles.line}>{said(item, label, voiceOf(item))}</div>
+                        {item.note && <div className={styles.quiet}>{item.note}.</div>}
+                        <Take item={item} projectId={projectId} voices={voices} />
+                      </>
+                    )}
+                    {item.status === 'approved' && (
+                      <div className={styles.line}>{said(item, label, voiceOf(item))} <span className={styles.quiet}>Approved.</span></div>
+                    )}
+                    {item.status === 'planned' && (
+                      <div className={styles.quietLine}>{item.mix === 'concatenate' ? `Add “${item.new_text}” after ${at}` : `Say “${item.new_text}” at ${at}`}</div>
+                    )}
+                    {item.status === 'working' && (
+                      <>
+                        <div className={styles.line}>{item.mix === 'concatenate' ? `Adding “${item.new_text}” after ${at}.` : `Voicing “${item.new_text}” at ${at}.`}</div>
+                        <div className={styles.quiet} data-testid="narration">{item.progress ?? 'Starting…'}</div>
+                      </>
+                    )}
+                    {item.status === 'needs-you' && item.question && (
+                      <>
+                        <div className={styles.line}>{item.question.question}</div>
+                        <div className={styles.needs} data-testid="needs-you">
+                          <div className={styles.recommends}><Orb size={14} /><span>Voltage recommends</span></div>
+                          {item.question.options.map((o, k) => k === 0 ? (
+                            <button key={k} className={styles.recommended} onClick={() => onAnswer(item, o)} disabled={busy}>
+                              <span className={styles.recommendedLabel}>{o.label}</span>
+                              <span className={styles.recommendedWhy}>
+                                {o.text ? 'Keeps the meaning, fits the gap, nothing else changes.' : o.warning ?? 'The simplest change.'}
+                              </span>
+                            </button>
+                          ) : null)}
+                          <div className={styles.options}>
+                            {item.question.options.slice(1).map((o, k) => (
+                              <button key={k} className={styles.secondary} onClick={() => onAnswer(item, o)} disabled={busy}>
+                                {o.label}{o.warning && <span className={styles.warning}> {o.warning}</span>}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      </>
+                    )}
+                    {item.status === 'failed' && (
+                      <div className={styles.failed}>
+                        <span>{item.error ?? 'This line could not be voiced.'}</span>
+                        <button className={styles.secondary} onClick={() => onRedo(item)} disabled={busy}>Redo</button>
+                      </div>
+                    )}
+                  </>
                 )}
               </div>
             </div>
@@ -184,21 +226,27 @@ export function PlanCard({
           <div className={styles.foot}>
             <span className={styles.estimate}>{estimateText(plan.estimate)}</span>
             <span className={styles.spacer} />
-            <button className={styles.primary} onClick={onRun} disabled={busy || ticked.length === 0}>
-              Run {ticked.length} {ticked.length === 1 ? 'change' : 'changes'}
+            {onAdjust && <button className={styles.secondary} onClick={onAdjust}>Adjust</button>}
+            <button className={styles.primary} onClick={onRun} disabled={busy || ticked.length === 0 || plan.status === 'clarifying'}>
+              Go ahead
             </button>
           </div>
         ) : ready.length > 0 && !busy ? (
           <div className={styles.foot}>
             <span className={styles.spacer} />
-            <button className={styles.primary} onClick={onApproveAll}>
-              Approve {ready.length} ready {ready.length === 1 ? 'change' : 'changes'}
-            </button>
+            <button className={styles.primary} onClick={onApproveAll}>Review and ship</button>
           </div>
         ) : null}
       </div>
 
-      {suggestions.map((item) => (
+      {proposed && suggestions.length > 0 && (
+        <div className={styles.aside}>
+          I also noticed {suggestions.map((s, k) => (
+            <span key={s.item_id}>{k > 0 && ' and '}“{s.old_text}” at {clock(s.selection.start)}</span>
+          ))}. I'll ask about {suggestions.length === 1 ? 'it' : 'those'} after {planned.length === 1 ? 'this one' : `these ${planned.length}`}, so you can see {planned.length === 1 ? 'it' : 'them'} first.
+        </div>
+      )}
+      {!proposed && suggestions.map((item) => (
         <div key={item.item_id} className={styles.suggestion} data-testid="suggestion">
           <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
             <path d="M8 1.5a4.5 4.5 0 0 0-2.6 8.2V12h5.2V9.7A4.5 4.5 0 0 0 8 1.5zM6 14h4" fill="none" stroke="var(--muted)" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
@@ -206,7 +254,7 @@ export function PlanCard({
           <div className={styles.body}>
             <div className={styles.noticed}>
               <strong>Noticed:</strong> at {clock(item.selection.start)} {name(item) ?? 'the line'} says “{item.old_text}”
-              {item.reason ? `, ${item.reason.charAt(0).toLowerCase()}${item.reason.slice(1)}` : ''}.
+              {item.reason ? `, ${item.reason.charAt(0).toLowerCase()}${item.reason.slice(1).replace(/\.$/, '')}` : ''}.
               {' '}Change it to “{item.new_text}”?
             </div>
             <div className={styles.options}>

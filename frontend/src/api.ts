@@ -189,6 +189,10 @@ export const createPlan = (id: string, req: { goal: string; mode?: Autonomy }) =
 
 export const getPlan = (id: string, planId: string) => get<Plan>(`/projects/${id}/plans/${planId}`)
 
+/** Answers the planner's question (empty = take its guess); it plans again. */
+export const clarifyPlan = (id: string, planId: string, answer?: string) =>
+  post<Plan>(`/projects/${id}/plans/${planId}/clarify`, answer ? { answer } : {})
+
 /** Untick, reword, or add / leave a suggestion. */
 export const updateItem = (
   id: string, planId: string, itemId: string,

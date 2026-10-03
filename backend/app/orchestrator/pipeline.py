@@ -68,8 +68,13 @@ def run_edit(
     for take in range(1, takes + 1):
         span = 0.6 / takes
         base = 0.1 + span * (take - 1)
-        report(base, "Synthesizing the new line" if take == 1
-               else f"Regenerating the line (take {take} of {takes})")
+        if take == 1:
+            report(base, "Synthesizing the new line")
+        else:
+            why = next((w for w in best.report.warnings), None) if best else None
+            report(base, (f"Take {take - 1}: {why[0].lower() + why[1:].rstrip('.')}. "
+                          f"Trying again (take {take} of {takes})") if why
+                   else f"Regenerating the line (take {take} of {takes})")
         try:
             audio = voice.synthesize(source, plan, transcript)
         except BudgetExceeded:

@@ -8,7 +8,7 @@ export interface Revision { edit_id?: string; start: number; end: number; text: 
 
 /** What happens when a new line runs longer than the words it replaces:
  *  run into the pause after them (when there is room), speed it up, or ask. */
-export type LongLines = 'pause' | 'stretch' | 'ask'
+export type LongLines = 'pause' | 'shorten' | 'stretch' | 'ask'
 
 /** How much Voltage does on its own: show the plan and wait for Run (the
  *  controlled default), or voice it straight away. */
@@ -41,7 +41,12 @@ export interface PlanItem {
   question: Question | null
   error: string | null
   note: string | null
+  /** What is happening to it right now, in words, while the plan runs. */
+  progress: string | null
 }
+
+/** One thing the planner wants to know first, with its own guess. */
+export interface PlanQuestion { text: string; options: string[]; guess: string | null }
 
 export interface PlanLogEntry { at: string; text: string; detail: string }
 
@@ -52,9 +57,14 @@ export interface Plan {
   goal: string
   summary: string
   mode: Autonomy
-  status: 'proposed' | 'running' | 'done'
+  status: 'clarifying' | 'proposed' | 'running' | 'done'
   created_at: string
   estimate: { items: number; voice_characters: number; usd: number; seconds: number }
+  /** What the planner noticed while reading, in order. */
+  findings: string[]
+  question: PlanQuestion | null
+  /** What this plan has cost so far, estimated. */
+  spend_usd: number
   log: PlanLogEntry[]
   items: PlanItem[]
   /** Under "draft": the job already voicing the plan. */

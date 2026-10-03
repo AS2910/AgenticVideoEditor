@@ -13,14 +13,17 @@ interface ReviewPanelProps {
   speakers: Speaker[]
   projectId: string
   busy?: boolean
-  /** Jump the player to the line, so Compare has the original a click away. */
+  /** Play the edited video across the seam: a moment before the line to a
+   *  moment after, where a pasted edit gives itself away. */
   onCompare: (item: PlanItem) => void
   onRedo: (item: PlanItem) => void
   onApproveAll: () => void
   onBack: () => void
 }
 
-/** Screen C: every finished change, before and after, with its take; one
+const WORDS: Record<number, string> = { 1: 'One', 2: 'Two', 3: 'Three', 4: 'Four', 5: 'Five', 6: 'Six' }
+
+/** Screen W5: every finished change, before and after, with its take; one
  *  button approves them all and exports. */
 export function ReviewPanel({ plan, speakers, projectId, busy, onCompare, onRedo, onApproveAll, onBack }: ReviewPanelProps) {
   const [open, setOpen] = useState<string | null>(null)
@@ -36,19 +39,19 @@ export function ReviewPanel({ plan, speakers, projectId, busy, onCompare, onRedo
       <div className={styles.head}>
         <h1 className={styles.title}>
           {ready.length > 0
-            ? `${ready.length} ${ready.length === 1 ? 'change is' : 'changes are'} ready`
-            : `${items.length} ${items.length === 1 ? 'change' : 'changes'} approved`}
+            ? `${WORDS[ready.length] ?? ready.length} ${ready.length === 1 ? 'change' : 'changes'}, ready to ship`
+            : `${WORDS[items.length] ?? items.length} ${items.length === 1 ? 'change' : 'changes'} shipped`}
         </h1>
         <span className={styles.sub}>
           {ready.length === 0 ? 'Export when you are happy with it.'
-            : passed === ready.length ? 'All passed the sound check. Listen to any of them, then approve.'
-            : `${passed} of ${ready.length} passed the sound check. Listen before you approve.`}
+            : passed === ready.length ? `${ready.length === 1 ? 'It sounds' : 'All of them sound'} right. Hear each seam, then ship.`
+            : `${passed} of ${ready.length} sound right. Hear each seam before you ship.`}
         </span>
         <span className={styles.spacer} />
         <button className={styles.back} onClick={onBack}>Back to the transcript</button>
         {ready.length > 0 && (
           <button className={styles.approve} onClick={onApproveAll} disabled={busy}>
-            Approve all {ready.length} and export
+            Ship it: approve all and export
           </button>
         )}
       </div>
@@ -81,7 +84,7 @@ export function ReviewPanel({ plan, speakers, projectId, busy, onCompare, onRedo
               {item.mix === 'concatenate' && item.candidate && (
                 <span className={styles.note}>Added after the line; the video holds the frame for {item.candidate.audio.duration.toFixed(1)} s.</span>
               )}
-              {item.note && item.mix !== 'concatenate' && <span className={styles.note}>{item.note}.</span>}
+              {item.note && item.mix !== 'concatenate' && <span className={styles.note}>{item.note}{/[.!?]$/.test(item.note) ? '' : '.'}</span>}
             </div>
             <div className={styles.actions}>
               <div className={styles.buttons}>
@@ -91,7 +94,7 @@ export function ReviewPanel({ plan, speakers, projectId, busy, onCompare, onRedo
                   onClick={() => { setOpen(open === item.item_id ? null : item.item_id); onCompare(item) }}
                 >
                   <svg width="10" height="12" viewBox="0 0 10 12" aria-hidden="true"><path d="M1 1l8 5-8 5z" fill="currentColor" /></svg>
-                  Compare
+                  Hear the seam
                 </button>
                 {item.status === 'ready' && (
                   <button className={styles.redo} onClick={() => onRedo(item)} disabled={busy}>Redo</button>
@@ -100,9 +103,14 @@ export function ReviewPanel({ plan, speakers, projectId, busy, onCompare, onRedo
               {open === item.item_id && item.candidate && (
                 <audio controls autoPlay className={styles.audio} src={artifactUrl(projectId, item.candidate.audio.sha256)} aria-label="The take" />
               )}
-              <span className={styles.score}>
-                {item.status === 'approved' ? 'Approved' : score !== null ? <>Sounds right <strong>{score.toFixed(2)}</strong></> : 'Not measured'}
-              </span>
+              {item.status === 'approved' ? (
+                <span className={styles.score}>Shipped</span>
+              ) : score !== null ? (
+                <div className={styles.meter}>
+                  <div className={styles.meterTrack}><div className={styles.meterFill} style={{ width: `${Math.round(score * 100)}%` }} /></div>
+                  <span className={styles.score}><strong>{score.toFixed(2)}</strong></span>
+                </div>
+              ) : <span className={styles.score}>Not measured</span>}
             </div>
           </div>
         )

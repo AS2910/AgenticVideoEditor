@@ -69,13 +69,44 @@ describe('TranscriptDoc', () => {
     expect(onEdit).toHaveBeenCalledWith(STATEMENTS[2], expect.objectContaining({ onLong: 'stretch' }))
   })
 
-  it('asks Voltage for wording and puts the suggestion in the box', async () => {
-    const onReword = vi.fn(async () => 'Sure, sir — right away.')
+  it('asks Voltage for wording and puts a lone suggestion in the box', async () => {
+    const onReword = vi.fn(async () => ['Sure, sir — right away.'])
     doc({ onReword })
     await userEvent.click(screen.getByText('Sure, sir.'))
     await userEvent.click(screen.getByRole('button', { name: /ask voltage for wording/i }))
     expect(onReword).toHaveBeenCalledWith(STATEMENTS[2], 'Sure, sir.')
     expect(await screen.findByRole('textbox', { name: /new wording/i })).toHaveValue('Sure, sir — right away.')
+  })
+
+  it('offers two tighter wordings to choose from', async () => {
+    const onReword = vi.fn(async () => ['Sure, right away.', 'Of course, sir.'])
+    doc({ onReword })
+    await userEvent.click(screen.getByText('Sure, sir.'))
+    await userEvent.click(screen.getByRole('button', { name: /ask voltage for wording/i }))
+    const offers = await screen.findByTestId('offers')
+    expect(offers).toHaveTextContent('Tighter wordings')
+    await userEvent.click(within(offers).getByRole('button', { name: 'Of course, sir.' }))
+    expect(screen.getByRole('textbox', { name: /new wording/i })).toHaveValue('Of course, sir.')
+    expect(screen.queryByTestId('offers')).not.toBeInTheDocument()
+  })
+
+  it('shows how the last take on a line was fitted, and tells the panel what is open', async () => {
+    const onEditingChange = vi.fn()
+    doc({ onEditingChange, readouts: [{ selection: { start: 9.1, end: 9.8 }, tags: ['ran 0.2 s into the pause', 'picture untouched'] }] })
+    await userEvent.click(screen.getByText('Sure, sir.'))
+    expect(screen.getByTestId('readout')).toHaveTextContent(/Last take fit by:.*ran 0\.2 s into the pause.*picture untouched/)
+    expect(onEditingChange).toHaveBeenLastCalledWith(STATEMENTS[2])
+    await userEvent.keyboard('{Escape}')
+    expect(onEditingChange).toHaveBeenLastCalledWith(null)
+  })
+
+  it('offers "prefer a shorter wording" for a line that runs long', async () => {
+    const onEdit = vi.fn()
+    doc({ onEdit })
+    await userEvent.click(screen.getByText('Sure, sir.'))
+    await userEvent.selectOptions(screen.getByRole('combobox', { name: /runs long/i }), 'shorten')
+    await userEvent.type(screen.getByRole('textbox', { name: /new wording/i }), ' Right away.{Enter}')
+    expect(onEdit).toHaveBeenCalledWith(STATEMENTS[2], expect.objectContaining({ onLong: 'shorten' }))
   })
 
   it('does not preview an unchanged line', async () => {
@@ -127,5 +158,11 @@ describe('TranscriptDoc', () => {
     expect(within(line).getByText('Bhaji Cam').tagName).toBe('INS')
     expect(screen.getByText('Planned')).toBeInTheDocument()
     expect(screen.getByText(/planned changes show inline/i)).toBeInTheDocument()
+  })
+
+  it('lights the line Voltage is reading', () => {
+    doc({ pendingLines: [{ selection: { start: 7.54, end: 9.02 }, status: 'reading' }] })
+    expect(screen.getByText('Reading')).toBeInTheDocument()
+    expect(screen.getByText(/voltage is reading/i)).toBeInTheDocument()
   })
 })

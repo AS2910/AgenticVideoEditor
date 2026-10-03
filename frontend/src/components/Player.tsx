@@ -10,12 +10,19 @@ interface PlayerProps {
   /** Called as the video plays, with its own clock. */
   onTimeUpdate?: (t: number) => void
   /** A seek asked for from outside (e.g. the transcript). `id` makes asking
-   *  for the same time twice still move the video. */
-  seekRequest?: { time: number; id: number } | null
+   *  for the same time twice still move the video. With `play`, playback
+   *  starts there; with `until`, it stops at that moment. */
+  seekRequest?: { time: number; id: number; play?: boolean; until?: number } | null
   /** Moments to mark on the progress bar: where the changes are. */
   marks?: number[]
   /** Shown at the end of the transport row (e.g. the Edited / Original switch). */
   children?: ReactNode
+}
+
+/** play() returns a promise in browsers and nothing in jsdom; neither may throw. */
+const playSafely = (video: HTMLVideoElement) => {
+  const p = video.play() as Promise<void> | undefined
+  if (p && typeof p.catch === 'function') p.catch(() => {})
 }
 
 /** m:ss.cc — hundredths, because edits land between words. */
@@ -41,15 +48,23 @@ export function Player({
     setLength(duration)
   }, [src, duration])
 
+  const stopAt = useRef<number | null>(null)
   useEffect(() => {
-    if (seekRequest && videoRef.current) videoRef.current.currentTime = seekRequest.time
+    const video = videoRef.current
+    if (!seekRequest || !video) return
+    video.currentTime = seekRequest.time
+    stopAt.current = seekRequest.until ?? null
+    if (seekRequest.play) {
+      playSafely(video)
+      setPlaying(true)
+    }
   }, [seekRequest])
 
   const toggle = () => {
     const video = videoRef.current
     if (video) {
       if (playing) video.pause()
-      else void video.play().catch(() => {})
+      else playSafely(video)
     }
     setPlaying((p) => !p)
   }
@@ -72,7 +87,15 @@ export function Player({
             const d = e.currentTarget.duration
             if (Number.isFinite(d) && d > 0) setLength(d)
           }}
-          onTimeUpdate={(e) => onTimeUpdate?.(e.currentTarget.currentTime)}
+          onTimeUpdate={(e) => {
+            const t = e.currentTarget.currentTime
+            onTimeUpdate?.(t)
+            if (stopAt.current !== null && t >= stopAt.current) {
+              stopAt.current = null
+              e.currentTarget.pause()
+              setPlaying(false)
+            }
+          }}
           onEnded={() => setPlaying(false)}
         />
       </div>

@@ -31,7 +31,7 @@ from app.adapters.selection import (
 from app.errors import NonRetryableError
 from app.budget import VoiceBudget, BudgetExceeded
 from app.orchestrator.intent import Turn, edit_context
-from app.orchestrator.planner import Line, Proposal
+from app.orchestrator.planner import Line, Proposal, Question
 from app.orchestrator.questions import fit_question, mix_question
 from app.media.ffmpeg import SpanMismatch
 from app.orchestrator.pipeline import run_edit
@@ -106,7 +106,7 @@ class EditRequest(BaseModel):
     # What to do when the line runs longer than the selection (Phase 12):
     # "pause" runs it into the pause after the selection when there is room,
     # "stretch" speeds it up, "ask" asks. Unset = the project's setting.
-    on_long: Literal["pause", "stretch", "ask"] | None = None
+    on_long: Literal["pause", "shorten", "stretch", "ask"] | None = None
 
 
 # How a line longer than its selection is placed, unless the project says
@@ -372,7 +372,7 @@ def get_usage(project_id: str, owner: str = Depends(current_owner)) -> dict:
 
 
 class SettingsUpdate(BaseModel):
-    long_lines: Literal["pause", "stretch", "ask"] | None = None
+    long_lines: Literal["pause", "shorten", "stretch", "ask"] | None = None
     autonomy: Literal["ask", "draft"] | None = None
 
 
@@ -559,10 +559,12 @@ def _meter(project_id: str, what: str):
     return meter
 
 
-def _voice_for(project_id: str, record: ProjectRecord, selection: Selection, requested: str) -> str:
+def _voice_for(project_id: str, record: ProjectRecord, selection: Selection, requested: str,
+               speaker: str | None = None) -> str:
     """A line in one speaker's words is spoken in that speaker's voice, if
-    one is set; otherwise in the voice asked for."""
-    speaker = speaker_of(record.transcript, selection)
+    one is set; otherwise in the voice asked for. `speaker` names who says it
+    when that is not the selection's speaker (an added line)."""
+    speaker = speaker or speaker_of(record.transcript, selection)
     voices = {s.label: s.voice_id for s in repo.speakers(project_id)}
     return voices.get(speaker) or requested
 
@@ -594,10 +596,20 @@ def _generate(
         # A longer line is placed without asking when the project says how
         # (Phase 12). The take that did not fit is held by the adapter, so
         # placing it costs nothing more.
-        placed = _long_line_fit(
-            on_long or _settings(project_id)["long_lines"], exc, selection,
-            record.transcript, record.source.duration,
-        )
+        policy = on_long or _settings(project_id)["long_lines"]
+        placed = _long_line_fit(policy, exc, selection, record.transcript, record.source.duration)
+        if placed is None and policy == "shorten" and exc.natural > exc.target:
+            # Prefer a shorter wording: the agent's own fix, without asking.
+            report(0.1, "Asking for a shorter line")
+            shorter = _shorter_line(project_id, record, selection, text, exc.target / exc.natural)
+            if shorter:
+                report(0.12, "Voicing the shorter line")
+                try:
+                    candidate = generate(replace(plan, new_text=shorter))
+                except SpanMismatch:
+                    raise exc from None
+                repo.save_candidate(project_id, candidate)
+                return candidate
         if placed is None:
             raise
         report(0.1, "Placing the line")
@@ -606,6 +618,19 @@ def _generate(
     # generation, which real vendors would not reproduce byte-for-byte.
     repo.save_candidate(project_id, candidate)
     return candidate
+
+
+def _shorter_line(project_id: str, record: ProjectRecord, selection: Selection,
+                  text: str, share: float) -> str | None:
+    """A shorter wording from the planner, or None (offline, or nothing better)."""
+    names = {s.label: s.name for s in repo.speakers(project_id)}
+    speaker = speaker_of(record.transcript, selection)
+    context = edit_context(record.transcript, selection, record.source.duration)
+    line = Line(0, selection.start, selection.end, names.get(speaker or ""), context.selected)
+    try:
+        return planner.shorten(text, share, line, meter=_meter(project_id, "wording"))
+    except (VendorError, NonRetryableError):
+        return None
 
 
 def _long_line_fit(policy: str, exc: SpanMismatch, selection: Selection,
@@ -617,7 +642,7 @@ def _long_line_fit(policy: str, exc: SpanMismatch, selection: Selection,
     "pause" lets it run into the pause after the selection if that pause (plus
     a little slack) can hold the overrun and the video does not end first.
     """
-    if exc.natural <= exc.target or policy == "ask":
+    if exc.natural <= exc.target or policy in ("ask", "shorten"):
         return None
     if policy == "stretch":
         return "stretch"
@@ -825,6 +850,7 @@ def _item_dict(project_id: str, item: PlanItem) -> dict:
         "question": item.question,
         "error": item.error,
         "note": item.note,
+        "progress": item.progress,
     }
 
 
@@ -840,6 +866,9 @@ def _plan_dict(plan: Plan | None) -> dict | None:
         "status": plan.status,
         "created_at": plan.created_at,
         "estimate": plan.estimate,
+        "findings": list(plan.findings),
+        "question": plan.question,
+        "spend_usd": round(ledger.spent_usd_since(plan.project_id, plan.created_at), 4) if plan.created_at else 0.0,
         "log": list(plan.log),
         "items": [_item_dict(plan.project_id, i) for i in plan.items],
     }
@@ -866,14 +895,18 @@ def _estimate(project_id: str, items: tuple[PlanItem, ...]) -> dict:
     }
 
 
-def _items_of(proposal: Proposal, statements) -> tuple[PlanItem, ...]:
+def _items_of(proposal: Proposal, statements, names: dict[str, str] | None = None) -> tuple[PlanItem, ...]:
+    """`names` maps a speaker's display name (lower-cased) to their label, so a
+    change that names who says it lands on the right person."""
+    names = names or {}
     items: list[PlanItem] = []
     for kind, changes in (("planned", proposal.edits), ("suggestion", proposal.suggestions)):
         for change in changes:
             st = statements[change.line - 1]
+            speaker = names.get((change.speaker or "").lower(), st.speaker)
             items.append(PlanItem(
                 item_id=f"i{len(items) + 1}", selection=Selection(st.start, st.end),
-                old_text=st.text, new_text=change.new_text, speaker=st.speaker,
+                old_text=st.text, new_text=change.new_text, speaker=speaker,
                 mix=change.mix, reason=change.reason, kind=kind,
                 enabled=kind == "planned", status="planned" if kind == "planned" else "suggested",
             ))
@@ -908,27 +941,77 @@ def create_plan(project_id: str, req: PlanRequest, owner: str = Depends(current_
         raise HTTPException(status_code=502, detail=str(exc)) from exc
     except VendorError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
-    items = _items_of(proposal, statements_of(record.transcript))
-    planned = [i for i in items if i.kind == "planned"]
-    speakers = {i.speaker for i in planned if i.speaker}
     plan = Plan(
         plan_id=repo.next_plan_id(project_id), project_id=project_id, goal=goal,
-        summary=proposal.summary, items=items, mode=mode, status="proposed", created_at=_now(),
-        estimate=_estimate(project_id, items),
+        summary=proposal.summary, items=(), mode=mode, status="proposed", created_at=_now(),
     )
     repo.save_plan(plan)
     repo.append_log(project_id, plan.plan_id, f"Read your goal and all {len(lines)} lines",
                     "Claude" if planner_label.startswith("anthropic") else "")
-    repo.append_log(project_id, plan.plan_id,
+    return _take_proposal(project_id, record, plan.plan_id, proposal, mode)
+
+
+def _take_proposal(project_id: str, record: ProjectRecord, plan_id: str, proposal: Proposal, mode: str) -> dict:
+    """Store what the planner proposed. With a question open, the plan waits
+    as "clarifying" (the items are kept, built on the planner's guess); else it
+    is proposed, and under "draft" it starts running."""
+    names = {s.name.lower(): s.label for s in repo.speakers(project_id)}
+    items = _items_of(proposal, statements_of(record.transcript), names)
+    planned = [i for i in items if i.kind == "planned"]
+    speakers = {i.speaker for i in planned if i.speaker}
+    question = ({"text": proposal.question.text, "options": list(proposal.question.options),
+                 "guess": proposal.question.guess} if proposal.question else None)
+    plan = repo.update_plan(
+        project_id, plan_id, summary=proposal.summary, items=items, findings=proposal.findings,
+        question=question, status="clarifying" if question else "proposed",
+        estimate=_estimate(project_id, items),
+    )
+    if question:
+        repo.append_log(project_id, plan_id, f"Asked: {question['text']}")
+        repo.add_message(project_id, "assistant", question["text"])
+        return _plan_dict(repo.get_plan(project_id, plan_id))
+    repo.append_log(project_id, plan_id,
                     f"Planned {len(planned)} {'change' if len(planned) == 1 else 'changes'}"
                     + (f" across {len(speakers)} speakers" if len(speakers) > 1 else ""))
     repo.add_message(project_id, "assistant", proposal.summary)
-    out = _plan_dict(repo.get_plan(project_id, plan.plan_id))
+    out = _plan_dict(repo.get_plan(project_id, plan_id))
     if mode == "draft" and plan.runnable:
-        job = _run_plan(project_id, record, plan.plan_id, [i.item_id for i in plan.runnable])
+        job = _run_plan(project_id, record, plan_id, [i.item_id for i in plan.runnable])
         out["job_id"] = job.job_id
         out["status"] = "running"
     return out
+
+
+class ClarifyRequest(BaseModel):
+    # One of the question's options, or the user's own words. Empty = the guess.
+    answer: str | None = None
+
+
+@app.post("/projects/{project_id}/plans/{plan_id}/clarify")
+def clarify_plan(
+    project_id: str, plan_id: str, req: ClarifyRequest, owner: str = Depends(current_owner),
+) -> dict:
+    """Answer the planner's question; it plans again with the answer."""
+    record = _owned(project_id, owner)
+    plan = _plan_or_404(project_id, plan_id)
+    if not plan.question:
+        raise HTTPException(status_code=409, detail="This plan has no open question.")
+    answer = (req.answer or "").strip() or plan.question.get("guess") or plan.question["options"][0]
+    repo.add_message(project_id, "user", answer)
+    repo.append_log(project_id, plan_id, f"You said: {answer}")
+    try:
+        ledger.ensure_can_spend(project_id)
+        proposal = planner.plan(plan.goal, _lines(record), [], meter=_meter(project_id, "planning"),
+                                answer=(plan.question["text"], answer))
+    except SpendCeilingReached as exc:
+        raise HTTPException(status_code=402, detail=str(exc)) from exc
+    except NonRetryableError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    except VendorError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    # Asking twice is not allowed: a second question is dropped, the guess stands.
+    proposal = replace(proposal, question=None) if proposal.question else proposal
+    return _take_proposal(project_id, record, plan_id, proposal, plan.mode)
 
 
 @app.get("/projects/{project_id}/plans/{plan_id}")
@@ -1030,13 +1113,15 @@ def _run_plan(project_id: str, record: ProjectRecord, plan_id: str, item_ids: li
             repo.update_item(project_id, plan_id, item.item_id, status="working", error=None)
             base = n / total
 
-            def step(progress: float, text: str, n=n, base=base) -> None:
+            def step(progress: float, text: str, n=n, base=base, item_id=item.item_id) -> None:
                 report(base + progress / total, f"{n + 1} of {total}: {text}")
+                repo.update_item(project_id, plan_id, item_id, progress=text)
 
             step(0.05, "Synthesizing the new line")
             try:
                 ledger.ensure_can_spend(project_id)
-                voice_id = _voice_for(project_id, record, item.selection, getattr(voice, "default_voice", "speaker-1"))
+                voice_id = _voice_for(project_id, record, item.selection, getattr(voice, "default_voice", "speaker-1"),
+                                      speaker=item.speaker)
                 candidate_id = repo.next_candidate_id(project_id)
                 candidate = with_retries(lambda: _generate(
                     project_id, record, candidate_id, item.selection, item.new_text, voice_id,
@@ -1044,27 +1129,31 @@ def _run_plan(project_id: str, record: ProjectRecord, plan_id: str, item_ids: li
                 ))
             except SpanMismatch as exc:
                 question = _agent_fix(project_id, record, item, exc, step)
-                repo.update_item(project_id, plan_id, item.item_id, status="needs-you", question=question)
+                repo.update_item(project_id, plan_id, item.item_id, status="needs-you", question=question,
+                                 progress=None)
                 repo.append_log(project_id, plan_id,
                                 f"Needs you: the line at {_clock(item.selection.start)} does not fit")
                 continue
             except (BudgetExceeded, SpendCeilingReached) as exc:
-                repo.update_item(project_id, plan_id, item.item_id, status="failed", error=str(exc))
+                repo.update_item(project_id, plan_id, item.item_id, status="failed", error=str(exc), progress=None)
                 repo.append_log(project_id, plan_id, "Stopped: the project's budget is used up")
                 break
             except NonRetryableError as exc:
-                repo.update_item(project_id, plan_id, item.item_id, status="failed", error=str(exc))
+                repo.update_item(project_id, plan_id, item.item_id, status="failed", error=str(exc), progress=None)
                 continue
             except VendorError:
-                repo.update_item(project_id, plan_id, item.item_id, status="failed",
+                repo.update_item(project_id, plan_id, item.item_id, status="failed", progress=None,
                                  error="Generation failed after several attempts. Redo to try again.")
                 continue
             retried = next((w for w in candidate.continuity.warnings if w.startswith("Regenerated")), None)
             takes = 1 + (int(retried.split()[1].rstrip("×")) if retried else 0)
             cost = voice.cost_of(candidate.plan)
+            shortened = candidate.plan.new_text != item.new_text
             repo.update_item(project_id, plan_id, item.item_id, status="ready", candidate_id=candidate_id,
-                             question=None, error=None,
-                             note=_placement_note(candidate, item.selection) or item.note)
+                             question=None, error=None, progress=None,
+                             new_text=candidate.plan.new_text,
+                             note=("Shortened to fit" if shortened else None)
+                             or _placement_note(candidate, item.selection) or item.note)
             repo.append_log(project_id, plan_id,
                             f"Voiced the line at {_clock(item.selection.start)}"
                             + (f" ({retried.rstrip('.').lower()})" if retried else ""),
@@ -1088,6 +1177,8 @@ def run_plan(
     if record.consent is None:
         raise HTTPException(status_code=403, detail=CONSENT_REQUIRED)
     plan = _plan_or_404(project_id, plan_id)
+    if plan.status == "clarifying":
+        raise HTTPException(status_code=409, detail="Answer Voltage's question first (or take its guess).")
     ids = req.items or [i.item_id for i in plan.runnable]
     if not ids:
         raise HTTPException(status_code=422, detail="Nothing is ticked to run.")

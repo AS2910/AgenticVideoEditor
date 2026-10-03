@@ -1,4 +1,5 @@
 import type { Plan } from '../types'
+import { Orb } from './Orb'
 import styles from './ActivityLog.module.css'
 
 /** Seconds since the plan was made, as m:ss. */
@@ -12,7 +13,12 @@ export function ActivityLog({ plan }: { plan: Plan }) {
   if (plan.log.length === 0) return null
   return (
     <div className={styles.log} data-testid="activity">
-      <span className={styles.title}>What Voltage did</span>
+      <div className={styles.head}>
+        <Orb size={20} idle />
+        <span className={styles.title}>What I did</span>
+        <span className={styles.spacer} />
+        {plan.spend_usd > 0 && <span className={styles.cost}>${plan.spend_usd.toFixed(2)} for this plan</span>}
+      </div>
       {plan.log.map((e, i) => (
         <div key={i} className={styles.entry}>
           <span className={styles.at}>{since(e.at, plan.created_at)}</span>

@@ -26,6 +26,7 @@
   position: absolute; top: -3px; width: 3px; height: 10px; margin-left: -1px;
   border-radius: 2px; background: var(--accent); pointer-events: none;
 }
+.stage { box-shadow: var(--shadow); }
 .scrubber {
   position: absolute; left: 0; top: -8px; width: 100%; height: 20px; margin: 0;
   opacity: 0; cursor: pointer;

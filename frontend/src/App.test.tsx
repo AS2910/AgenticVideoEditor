@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import App from './App'
 
@@ -49,17 +49,20 @@ const ok = (body: unknown) =>
 
 const PLAN_ITEM = {
   item_id: 'i1', selection: { start: 0, end: 2.3 }, old_text: 'Get 20% off today only.',
-  new_text: 'Get 30% off today only.', speaker: null, mix: 'replace', reason: 'The offer',
+  new_text: 'Get 30% off today only.', speaker: null, mix: 'replace', reason: 'The offer is said here.',
   kind: 'planned', enabled: true, status: 'planned', fit: null, candidate: null, edit_id: null,
-  question: null, error: null, note: null,
+  question: null, error: null, note: null, progress: null,
 }
 const PLAN = {
   type: 'plan', plan_id: 'plan1', goal: 'make it 30% off', summary: 'I read 1 line. One change does it.',
   mode: 'ask', status: 'proposed', created_at: '2026-10-02T10:00:00Z',
   estimate: { items: 1, voice_characters: 23, usd: 0.0069, seconds: 12 },
+  findings: ['One line, one speaker.', 'The offer is said once, at 0:00.'], question: null, spend_usd: 0.01,
   log: [{ at: '2026-10-02T10:00:00Z', text: 'Read your goal and all 1 lines', detail: 'Claude' }],
   items: [PLAN_ITEM],
 }
+const PLAN_CLARIFYING = { ...PLAN, status: 'clarifying',
+  question: { text: 'Who speaks for the brand?', options: ['The Shopkeeper', 'The Customer'], guess: 'The Shopkeeper' } }
 const BRIAN_TAKE = { ...CANDIDATE, plan: { ...CANDIDATE.plan, voice_profile_id: 'nPczCjzI2devNBz1zQrb' } }
 const PLAN_DONE = { ...PLAN, status: 'done', items: [{ ...PLAN_ITEM, status: 'ready', candidate: BRIAN_TAKE }] }
 const PLAN_APPROVED = { ...PLAN, status: 'done', items: [{ ...PLAN_ITEM, status: 'approved', candidate: BRIAN_TAKE, edit_id: 'e1' }],
@@ -97,6 +100,7 @@ function routeFetch(approveStatus = 200, job: unknown = JOB_DONE) {
     if (/\/plans\/plan1$/.test(url)) return ok(PLAN)
     if (url.includes('/plans/plan1/items/') && _init?.method === 'PUT') return ok(PLAN)
     if (url.endsWith('/plans/plan1/run') || url.endsWith('/answer') || url.endsWith('/redo')) return ok({ ...JOB_ACCEPTED, kind: 'plan' })
+    if (url.endsWith('/plans/plan1/clarify')) return ok(PLAN)
     if (url.endsWith('/plans/plan1/approve')) {
       return ok({ approved: [{ item_id: 'i1', edit_id: 'e1', overridden: false }], skipped: [],
         export: { segments: SEGMENTS, render: RENDER }, plan: PLAN_APPROVED })
@@ -132,11 +136,18 @@ function routeFetch(approveStatus = 200, job: unknown = JOB_DONE) {
   })
 }
 
-/** consent -> load -> editor, leaving the app on the editor screen. */
-async function reachEditor(user: ReturnType<typeof userEvent.setup>) {
+/** consent -> load -> the goal stage, where Voltage has read the clip. */
+async function reachGoal(user: ReturnType<typeof userEvent.setup>) {
   await user.click(screen.getByRole('checkbox'))
   await user.click(screen.getByRole('button', { name: /continue/i }))
   await user.click(screen.getByRole('button', { name: /sample ad/i }))
+  await screen.findByText('What should this video say?')
+}
+
+/** consent -> load -> goal -> editor, hands-on, leaving the app on the editor screen. */
+async function reachEditor(user: ReturnType<typeof userEvent.setup>) {
+  await reachGoal(user)
+  await user.click(screen.getByRole('button', { name: /edit a line yourself/i }))
   await waitFor(() => expect(screen.getByText('20%')).toBeInTheDocument())
 }
 
@@ -571,8 +582,11 @@ describe('App reopening from the URL (redesign)', () => {
     }))
     window.location.hash = 'p1'
     render(<App />)
-    expect(await screen.findByText('Get 20% off today only.')).toBeInTheDocument()
+    // A fresh project opens on the goal stage; hands-on is one click away.
+    expect(await screen.findByText('What should this video say?')).toBeInTheDocument()
     expect(screen.queryByRole('checkbox')).not.toBeInTheDocument()
+    await userEvent.setup().click(screen.getByRole('button', { name: /edit a line yourself/i }))
+    expect(await screen.findByText('Get 20% off today only.')).toBeInTheDocument()
   })
 })
 
@@ -707,6 +721,7 @@ describe('App the agent (Phase 13)', () => {
       if (/\/plans\/plan1$/.test(url)) return ok(current)
       if (url.includes('/plans/plan1/items/') && init?.method === 'PUT') { calls.push({ url, body }); return ok(current) }
       if (url.endsWith('/run') || url.endsWith('/answer') || url.endsWith('/redo')) { calls.push({ url, body }); current = result; return ok({ ...JOB_ACCEPTED, kind: 'plan' }) }
+      if (url.endsWith('/clarify')) { calls.push({ url, body }); current = PLAN; return ok(PLAN) }
       if (url.endsWith('/approve')) { calls.push({ url, body }); current = PLAN_APPROVED }
       if (url.endsWith('/settings')) calls.push({ url, body })
       return base(url, init)
@@ -719,38 +734,39 @@ describe('App the agent (Phase 13)', () => {
     const calls = agent()
     const user = userEvent.setup()
     const { container } = render(<App />)
-    await reachEditor(user)
+    await reachGoal(user)
 
-    // Screen A: the goal.
-    expect(screen.getByText('What should your video say?')).toBeInTheDocument()
-    await user.type(screen.getByRole('textbox', { name: /your goal/i }), 'make it 30% off')
-    await user.click(screen.getByRole('button', { name: /plan the edits/i }))
+    // W1: the goal, on its own stage.
+    await user.type(screen.getByRole('textbox', { name: /what the video should say/i }), 'make it 30% off')
+    await user.click(screen.getByRole('button', { name: /plan it with me/i }))
 
-    // Screen D: the plan waits.
+    // W3: the plan waits, with what Voltage noticed.
     expect(await screen.findByText('I read 1 line. One change does it.')).toBeInTheDocument()
     expect(calls[0]).toMatchObject({ body: { goal: 'make it 30% off' } })
     expect(screen.getByRole('checkbox', { name: 'Include the change at 0:00' })).toBeChecked()
-    expect(screen.getByText(/about 23 voice characters/i)).toBeInTheDocument()
+    expect(screen.getByText('The offer is said here.')).toBeInTheDocument()
+    expect(screen.getByText(/23 voice characters/)).toBeInTheDocument()
     expect(screen.getByText('Planned')).toBeInTheDocument()   // on the transcript line
     expect(screen.queryByText(/approve/i)).not.toBeInTheDocument()
 
-    // Run it.
-    await user.click(screen.getByRole('button', { name: 'Run 1 change' }))
-    await waitFor(() => expect(screen.getByText("Take, Brian's voice")).toBeInTheDocument())
+    // Go ahead.
+    await user.click(screen.getByRole('button', { name: 'Go ahead' }))
+    await waitFor(() => expect(screen.getByText("Take · Brian's voice")).toBeInTheDocument())
     expect(calls.some((c) => c.url.endsWith('/plans/plan1/run'))).toBe(true)
     expect(screen.getByText('Ready')).toBeInTheDocument()
     expect(screen.getByTestId('activity')).toHaveTextContent('Read your goal and all 1 lines')
+    expect(screen.getByTestId('activity')).toHaveTextContent('$0.01 for this plan')
 
-    // Screen C: review and ship.
+    // W5: review and ship.
     await user.click(screen.getByRole('button', { name: 'Review 1 ready change' }))
-    expect(screen.getByText('1 change is ready')).toBeInTheDocument()
+    expect(screen.getByText('One change, ready to ship')).toBeInTheDocument()
     expect(screen.getByTestId('review-row')).toHaveTextContent('Before')
-    await user.click(screen.getByRole('button', { name: 'Approve all 1 and export' }))
+    await user.click(screen.getByRole('button', { name: /ship it/i }))
 
     await waitFor(() => expect((container.querySelector('video') as HTMLVideoElement).getAttribute('src'))
       .toBe(`/api/projects/p1/artifacts/${'r'.repeat(64)}`))
     expect(calls.some((c) => c.url.endsWith('/plans/plan1/approve'))).toBe(true)
-    expect(screen.getAllByText('Approved').length).toBeGreaterThan(0)
+    expect(screen.getByText('Shipped')).toBeInTheDocument()
     expect(screen.getByTestId('activity')).toHaveTextContent('Rendered the edited video')
   })
 
@@ -758,8 +774,8 @@ describe('App the agent (Phase 13)', () => {
     const calls = agent()
     const user = userEvent.setup()
     render(<App />)
-    await reachEditor(user)
-    await user.type(screen.getByRole('textbox', { name: /your goal/i }), 'make it 30% off{Enter}')
+    await reachGoal(user)
+    await user.type(screen.getByRole('textbox', { name: /what the video should say/i }), 'make it 30% off{Enter}')
     await screen.findByRole('checkbox', { name: 'Include the change at 0:00' })
 
     await user.click(screen.getByRole('checkbox', { name: 'Include the change at 0:00' }))
@@ -782,10 +798,11 @@ describe('App the agent (Phase 13)', () => {
     const calls = agent(needs, PLAN_DONE)
     const user = userEvent.setup()
     render(<App />)
-    await reachEditor(user)
-    await user.type(screen.getByRole('textbox', { name: /your goal/i }), 'make it 30% off{Enter}')
+    await reachGoal(user)
+    await user.type(screen.getByRole('textbox', { name: /what the video should say/i }), 'make it 30% off{Enter}')
 
     expect(await screen.findByText('Needs you')).toBeInTheDocument()
+    expect(screen.getByText('Voltage recommends')).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: /use a shorter line/i }))
 
     await waitFor(() => expect(calls.some((c) => c.url.endsWith('/items/i1/answer'))).toBe(true))
@@ -796,32 +813,108 @@ describe('App the agent (Phase 13)', () => {
   it('adds a suggestion to the plan', async () => {
     const suggestion = { ...PLAN_ITEM, item_id: 'i2', kind: 'suggestion', enabled: false, status: 'suggested',
       new_text: 'Get 30% off this week only.', reason: 'Reads better' }
-    const calls = agent({ ...PLAN, items: [PLAN_ITEM, suggestion] })
+    const calls = agent({ ...PLAN, status: 'done', items: [{ ...PLAN_ITEM, status: 'ready', candidate: BRIAN_TAKE }, suggestion] })
     const user = userEvent.setup()
     render(<App />)
-    await reachEditor(user)
-    await user.type(screen.getByRole('textbox', { name: /your goal/i }), 'make it 30% off{Enter}')
+    await reachGoal(user)
+    await user.type(screen.getByRole('textbox', { name: /what the video should say/i }), 'make it 30% off{Enter}')
 
     await user.click(await screen.findByRole('button', { name: 'Add to plan' }))
 
     await waitFor(() => expect(calls.find((c) => c.url.endsWith('/items/i2'))?.body).toEqual({ include: true }))
   })
 
-  it('remembers Draft everything, and a drafted plan runs at once', async () => {
-    const drafted = { ...PLAN, mode: 'draft', status: 'running', job_id: 'j1', items: [{ ...PLAN_ITEM, status: 'working' }] }
+  it('remembers Just do it, and a drafted plan runs at once', async () => {
+    const drafted = { ...PLAN, mode: 'draft', status: 'running', job_id: 'j1', items: [{ ...PLAN_ITEM, status: 'working', progress: 'Synthesizing the new line' }] }
     const calls = agent(drafted, PLAN_DONE)
     const user = userEvent.setup()
     render(<App />)
     await reachEditor(user)
 
-    await user.click(screen.getByRole('button', { name: 'Draft everything' }))
+    await user.click(screen.getByRole('button', { name: 'Just do it' }))
     expect(calls.find((c) => c.url.endsWith('/settings'))?.body).toEqual({ autonomy: 'draft' })
-    expect(screen.getByRole('button', { name: 'Draft everything' })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByRole('button', { name: 'Just do it' })).toHaveAttribute('aria-pressed', 'true')
 
-    await user.type(screen.getByRole('textbox', { name: /your goal/i }), 'make it 30% off{Enter}')
+    await user.type(screen.getByRole('textbox', { name: /describe a change/i }), 'make it 30% off{Enter}')
 
-    await waitFor(() => expect(screen.getByText("Take, Brian's voice")).toBeInTheDocument())
-    expect(calls.some((c) => c.url.endsWith('/run'))).toBe(false)   // no Run needed
+    await waitFor(() => expect(screen.getByText("Take · Brian's voice")).toBeInTheDocument())
+    expect(calls.some((c) => c.url.endsWith('/run'))).toBe(false)   // no Go ahead needed
+  })
+
+  it('shows what Voltage noticed, asks one thing, and plans with the answer', async () => {
+    const calls = agent(PLAN_CLARIFYING)
+    const user = userEvent.setup()
+    render(<App />)
+    await reachGoal(user)
+    await user.type(screen.getByRole('textbox', { name: /what the video should say/i }), 'make it 30% off{Enter}')
+
+    const thinking = await screen.findByTestId('thinking')
+    expect(thinking).toHaveTextContent('The offer is said once, at 0:00.')
+    const ask = screen.getByTestId('clarify')
+    expect(ask).toHaveTextContent('Who speaks for the brand?')
+    expect(ask).toHaveTextContent('My guess is The Shopkeeper.')
+    expect(screen.queryByRole('button', { name: 'Go ahead' })).not.toBeInTheDocument()   // the plan waits behind the question
+
+    await user.click(within(ask).getByRole('button', { name: 'The Customer' }))
+
+    await waitFor(() => expect(calls.find((c) => c.url.endsWith('/clarify'))?.body).toEqual({ answer: 'The Customer' }))
+    expect(await screen.findByText('I read 1 line. One change does it.')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Go ahead' })).toBeEnabled()
+  })
+
+  it('saying "go" takes the guess', async () => {
+    const calls = agent(PLAN_CLARIFYING)
+    const user = userEvent.setup()
+    render(<App />)
+    await reachGoal(user)
+    await user.type(screen.getByRole('textbox', { name: /what the video should say/i }), 'make it 30% off{Enter}')
+    await screen.findByTestId('clarify')
+
+    await user.type(screen.getByRole('textbox', { name: /describe a change/i }), 'go{Enter}')
+
+    await waitFor(() => expect(calls.find((c) => c.url.endsWith('/clarify'))?.body).toEqual({}))
+  })
+
+  it('hears the seam: plays the edited video across the change', async () => {
+    const calls = agent()
+    const user = userEvent.setup()
+    const { container } = render(<App />)
+    await reachGoal(user)
+    await user.type(screen.getByRole('textbox', { name: /what the video should say/i }), 'make it 30% off{Enter}')
+    await user.click(await screen.findByRole('button', { name: 'Go ahead' }))
+    await user.click(await screen.findByRole('button', { name: 'Review 1 ready change' }))
+
+    await user.click(screen.getByRole('button', { name: /hear the seam/i }))
+
+    // No render yet, so the original at that line, from a moment before it.
+    const video = container.querySelector('video') as HTMLVideoElement
+    expect(video.currentTime).toBe(0)   // 0.4 - 1.5, clamped
+    expect(calls.length).toBeGreaterThan(0)
+  })
+
+  it('offers tighter wordings while you edit a line, and Voltage stands by', async () => {
+    const asks: Record<string, unknown>[] = []
+    const base = routeFetch()
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.endsWith('/lines/reword')) {
+        const body = JSON.parse(String(init?.body))
+        asks.push(body)
+        return ok({ text: body.instruction ? 'Get 30% off, today.' : 'Get 30% off today.', selection: { start: 0, end: 2.3 } })
+      }
+      return base(url, init)
+    }))
+    const user = userEvent.setup()
+    render(<App />)
+    await reachEditor(user)
+
+    await user.click(screen.getByText('Get 20% off today only.'))
+    expect(screen.getByText(/standing by/)).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: /ask voltage for wording/i }))
+
+    const offers = await screen.findByTestId('offers')
+    expect(asks).toHaveLength(2)
+    await user.click(within(offers).getByRole('button', { name: 'Get 30% off, today.' }))
+    expect(screen.getByRole('textbox', { name: /new wording/i })).toHaveValue('Get 30% off, today.')
   })
 
   it('reopens a project with its plan', async () => {
@@ -835,7 +928,7 @@ describe('App the agent (Phase 13)', () => {
     }))
     window.location.hash = 'p1'
     render(<App />)
-    expect(await screen.findByText("Take, Brian's voice")).toBeInTheDocument()
-    expect(screen.queryByText('What should your video say?')).not.toBeInTheDocument()
+    expect(await screen.findByText("Take · Brian's voice")).toBeInTheDocument()
+    expect(screen.queryByText('What should this video say?')).not.toBeInTheDocument()
   })
 })

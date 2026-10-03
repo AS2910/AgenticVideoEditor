@@ -13,7 +13,10 @@ export interface LineChange { text: string; voiceId: string | null; onLong: Long
 
 /** A line the editor or the agent is working on: where it stands, and the
  *  new words so far, shown as tracked changes before anything is approved. */
-export interface PendingLine { selection: Selection; status: LineStatus | ItemStatus; text?: string; mix?: Mix }
+export interface PendingLine { selection: Selection; status: LineStatus | ItemStatus | 'reading'; text?: string; mix?: Mix }
+
+/** How the last take of a line was made to fit, for the readout under the editor. */
+export interface FitReadout { selection: Selection; tags: string[] }
 
 interface TranscriptDocProps {
   statements: Statement[]
@@ -35,8 +38,12 @@ interface TranscriptDocProps {
   onSeek: (statement: Statement) => void
   onEdit: (statement: Statement, change: LineChange) => void
   onRevert?: (editId: string) => void
-  /** Asks for a wording; resolves to the suggestion, or null when there is none. */
-  onReword?: (statement: Statement, draft: string) => Promise<string | null>
+  /** Asks for tighter wordings; resolves to the suggestions (none when offline). */
+  onReword?: (statement: Statement, draft: string) => Promise<string[]>
+  /** Which line is open for editing, so the panel can stand by. */
+  onEditingChange?: (statement: Statement | null) => void
+  /** How the last take on a line was fitted, shown under the editor. */
+  readouts?: FitReadout[]
   /** The "if it runs long" choice is remembered for the project. */
   onLongLinesChange?: (value: LongLines) => void
 }
@@ -45,11 +52,12 @@ const overlaps = (a: { start: number; end: number }, b: { start: number; end: nu
   a.start < b.end && b.start < a.end
 
 const STATUS: Record<string, string> = {
-  planned: 'Planned', working: 'Working', ready: 'Ready', 'needs-you': 'Needs you', failed: 'Failed',
+  reading: 'Reading', planned: 'Planned', working: 'Working', ready: 'Ready', 'needs-you': 'Needs you', failed: 'Failed',
 }
 
 const LONG_OPTIONS: { value: LongLines; label: string }[] = [
-  { value: 'pause', label: 'Use the pause after it' },
+  { value: 'pause', label: 'Let Voltage fit it' },
+  { value: 'shorten', label: 'Prefer a shorter wording' },
   { value: 'stretch', label: 'Speed it up' },
   { value: 'ask', label: 'Ask me' },
 ]
@@ -70,15 +78,18 @@ const voiceLabel = (v: Voice) => (v.gender ? `${v.name} (${v.gender})` : v.name)
 export function TranscriptDoc({
   statements, words = [], speakers = [], voices = [], revisions = [], selection, currentTime,
   pendingLines = [], longLines = 'pause', disabled, onSeek, onEdit, onRevert, onReword, onLongLinesChange,
+  onEditingChange, readouts = [],
 }: TranscriptDocProps) {
   const [editing, setEditing] = useState<number | null>(null)
   const [draft, setDraft] = useState('')
   const [voiceId, setVoiceId] = useState('')
   const [onLong, setOnLong] = useState<LongLines>(longLines)
   const [asking, setAsking] = useState(false)
+  const [offers, setOffers] = useState<string[]>([])
   const box = useRef<HTMLTextAreaElement>(null)
 
   useEffect(() => { box.current?.focus() }, [editing])
+  useEffect(() => { onEditingChange?.(editing === null ? null : statements[editing]) }, [editing, statements, onEditingChange])
 
   if (statements.length === 0) {
     return <p className={styles.empty}>No lines to show. This video has no transcribed speech.</p>
@@ -88,6 +99,7 @@ export function TranscriptDoc({
     const s = statements[i]
     setEditing(i)
     setDraft(s.text)
+    setOffers([])
     setVoiceId(speakers.find((sp) => sp.label === s.speaker)?.voice_id ?? '')
     setOnLong(longLines)
   }
@@ -100,8 +112,9 @@ export function TranscriptDoc({
     if (!onReword) return
     setAsking(true)
     try {
-      const text = await onReword(s, draft.trim())
-      if (text) setDraft(text)
+      const texts = await onReword(s, draft.trim())
+      if (texts.length === 1) setDraft(texts[0])
+      else setOffers(texts)
     } finally {
       setAsking(false)
     }
@@ -116,9 +129,10 @@ export function TranscriptDoc({
       <div className={styles.heading}>
         <span className={styles.title}>Transcript</span>
         <span className={styles.hint}>
-          {editing === null
-            ? `${pendingLines.some((p) => p.status === 'planned') ? 'Planned changes' : 'Changes'} show inline. Click any line to edit it yourself.`
-            : `Editing ${clock(statements[editing].start)}. Enter to preview, Esc to cancel.`}
+          {editing !== null ? `Editing ${clock(statements[editing].start)}. Enter to preview, Esc to cancel.`
+            : pendingLines.some((p) => p.status === 'reading') ? "Voltage is reading. The line it's on is lit."
+            : pendingLines.some((p) => p.status === 'working') ? 'Voltage is working. Lines light up as they finish.'
+            : `${pendingLines.some((p) => p.status === 'planned') ? 'Planned changes' : 'Changes'} show inline. Click any line to edit it yourself.`}
         </span>
       </div>
 
@@ -199,6 +213,23 @@ export function TranscriptDoc({
                       Preview
                     </button>
                   </div>
+                  {offers.length > 0 && (
+                    <div className={styles.offers} data-testid="offers">
+                      <span className={styles.offersCaption}>Tighter wordings that fit the gap as it is</span>
+                      {offers.map((o) => (
+                        <button key={o} type="button" className={styles.offer} onClick={() => { setDraft(o); setOffers([]) }}>{o}</button>
+                      ))}
+                    </div>
+                  )}
+                  {(() => {
+                    const r = readouts.find((x) => overlaps(x.selection, s))
+                    return r && r.tags.length > 0 ? (
+                      <div className={styles.readout} data-testid="readout">
+                        <span>Last take fit by:</span>
+                        {r.tags.map((t) => <span key={t} className={styles.fitTag}>{t}</span>)}
+                      </div>
+                    ) : null
+                  })()}
                 </div>
               ) : (
                 <button

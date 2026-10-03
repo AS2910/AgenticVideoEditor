@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import type { ReactNode } from 'react'
+import type { ReactNode, RefObject } from 'react'
 import type { ChatMessage } from '../types'
 import styles from './ChatPanel.module.css'
 
@@ -15,6 +15,8 @@ interface ChatPanelProps {
   placeholder?: string
   /** A line under the composer, when there is something to say. */
   hint?: string
+  /** The composer's input, so "Adjust" can put the cursor there. */
+  inputRef?: RefObject<HTMLInputElement | null>
 }
 
 // The panel shows the latest exchange; earlier messages open on request.
@@ -23,7 +25,7 @@ const RECENT = 6
 /** The conversation with Voltage: what you ask for, and what comes back — a
  *  reply, a question, a take. */
 export function ChatPanel({
-  messages, canSubmit, onSubmit, children, toolbar, header, hint,
+  messages, canSubmit, onSubmit, children, toolbar, header, hint, inputRef,
   placeholder = 'Ask for a change, e.g. say "30% off" instead',
 }: ChatPanelProps) {
   const [prompt, setPrompt] = useState('')
@@ -62,6 +64,7 @@ export function ChatPanel({
       <div className={styles.foot}>
         <div className={styles.composer}>
           <input
+            ref={inputRef}
             className={styles.input}
             type="text"
             aria-label="Describe a change"
