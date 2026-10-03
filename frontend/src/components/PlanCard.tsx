@@ -112,6 +112,13 @@ export function PlanCard({
 
   return (
     <div className={styles.wrap}>
+      {proposed && suggestions.length > 0 && (
+        <div className={styles.aside}>
+          I also noticed {suggestions.map((s, k) => (
+            <span key={s.item_id}>{k > 0 && ' and '}“{s.old_text}” at {clock(s.selection.start)}</span>
+          ))}. I'll ask about {suggestions.length === 1 ? 'it' : 'those'} after {planned.length === 1 ? 'this one' : `these ${planned.length}`}, so you can see {planned.length === 1 ? 'it' : 'them'} first.
+        </div>
+      )}
       <div className={styles.card} data-testid="plan">
         <div className={styles.head}>
           <span className={styles.title}>The plan</span>
@@ -222,7 +229,7 @@ export function PlanCard({
           )
         })}
 
-        {proposed ? (
+        {proposed && (
           <div className={styles.foot}>
             <span className={styles.estimate}>{estimateText(plan.estimate)}</span>
             <span className={styles.spacer} />
@@ -231,21 +238,9 @@ export function PlanCard({
               Go ahead
             </button>
           </div>
-        ) : ready.length > 0 && !busy ? (
-          <div className={styles.foot}>
-            <span className={styles.spacer} />
-            <button className={styles.primary} onClick={onApproveAll}>Review and ship</button>
-          </div>
-        ) : null}
+        )}
       </div>
 
-      {proposed && suggestions.length > 0 && (
-        <div className={styles.aside}>
-          I also noticed {suggestions.map((s, k) => (
-            <span key={s.item_id}>{k > 0 && ' and '}“{s.old_text}” at {clock(s.selection.start)}</span>
-          ))}. I'll ask about {suggestions.length === 1 ? 'it' : 'those'} after {planned.length === 1 ? 'this one' : `these ${planned.length}`}, so you can see {planned.length === 1 ? 'it' : 'them'} first.
-        </div>
-      )}
       {!proposed && suggestions.map((item) => (
         <div key={item.item_id} className={styles.suggestion} data-testid="suggestion">
           <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
@@ -264,6 +259,16 @@ export function PlanCard({
           </div>
         </div>
       ))}
+
+      {/* The last thing in the panel is what you do next. */}
+      {!proposed && ready.length > 0 && !busy && (
+        <div className={styles.action} data-testid="next-action">
+          <span className={styles.actionText}>
+            {ready.length === 1 ? 'One change is' : `${ready.length} changes are`} ready to hear and ship.
+          </span>
+          <button className={styles.primary} onClick={onApproveAll}>Review and ship</button>
+        </div>
+      )}
     </div>
   )
 }
