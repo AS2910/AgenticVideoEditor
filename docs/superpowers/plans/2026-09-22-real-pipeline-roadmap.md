@@ -1,7 +1,7 @@
 # Real Pipeline — Phased Roadmap
 
 **Date:** 2026-09-22
-**Status:** Phases 0–4a, 6a, 7, 8 and 9 done and clean (8 and 9 on 2026-09-26; 9c is a design). Phases 10 (editing UX) and 11 (multiple voices) done the same day; the editor was redesigned on 2026-09-26 (`docs/superpowers/specs/2026-09-26-editor-ui-redesign.md`). Phases 12 (the agentic editor) and 13 (the agent) done 2026-10-02 (`2026-09-28-phase-12-13-agentic-editor.md`). **Next: the Backlog** — 9c sign-in is the only item not blocked on a vendor. Phases 4b and 5 moved to the **Backlog** — both are blocked on vendor access, not on code.
+**Status:** Phases 0–4a, 6a, 7, 8 and 9 done and clean (8 and 9 on 2026-09-26; 9c is a design). Phases 10 (editing UX) and 11 (multiple voices) done the same day; the editor was redesigned on 2026-09-26 (`docs/superpowers/specs/2026-09-26-editor-ui-redesign.md`). Phases 12 (the agentic editor) and 13 (the agent) done 2026-10-02 (`2026-09-28-phase-12-13-agentic-editor.md`). **Next: the natural-fit roadmap**, `2026-10-03-natural-fit-roadmap.md` (phases 14–19: fit by writing and generation, the speaker's own voice and room, picture that flexes, the mouth, inpainting-grade editing, the bench) — it absorbs backlog items 4b, 5 and 6b. 9c sign-in stays for when the product goes public. Phases 4b and 5 moved to the **Backlog** — both are blocked on vendor access, not on code.
 **Supersedes nothing.** Builds on `2026-07-14-walking-skeleton.md` and `2026-07-17-voltage-frontend.md`.
 
 **Goal:** turn the mocked walking skeleton into a system that ingests a real video, produces a real re-voiced and lip-synced segment, verifies continuity with real signal analysis, and exports a real playable file — honoring the v1 design spec end-to-end.

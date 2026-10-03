@@ -1,0 +1,85 @@
+# Making an edit *belong*: the natural-fit roadmap
+
+**Date:** 2026-10-03 · **Status:** researched and proposed; nothing built. Phases 14–19 below are the proposal; each gets its own task plan when started.
+
+## The question
+
+A new line rarely takes exactly the time the old one took. Today the editor has four answers: speed the audio up or down (0.8–1.25×), run into the pause after the line, hold the last frame while an added line plays, or ask. The user's question was: should we pause the video, or extend it by slowing it during that word? This document answers that, and goes wider: what would make a replaced line *indistinguishable* from the shot, and what does the best product in this space look like.
+
+The short answer: **never a hard freeze if anything else will do**, and the order of preference is *change the words → change the take → make room in the sound → make room in the picture → change the mouth*. Each rung is less perceptible than the one after it, and the research on automatic dubbing backs that order.
+
+## What the field does
+
+| Who | How they handle a line that doesn't fit | Lesson |
+|---|---|---|
+| Automatic-dubbing research (isochrony) | Paraphrase first: an LLM rewrites the line to a phoneme budget derived from the slot's duration, iterating until the predicted length fits; then phonetic alignment chooses words whose vowels match the original mouth shapes. Up to 24% better overlap than unconstrained translation. [EMNLP 2025](https://aclanthology.org/2025.emnlp-demos.37.pdf), [PS-TTS 2026](https://arxiv.org/abs/2604.09111), [VideoDubber](https://arxiv.org/html/2211.16934) | Wording is the cheapest and most natural lever. We only use it as a fallback today. |
+| Descript *Audio Regenerate* | Treats editing as **inpainting**: a neural codec + flow-matching transformer regenerates only the changed region, conditioned on the untouched audio either side, so the new words inherit the speaker's timbre, pacing, noise and room tone. Identity from 5–6 s of adjacent audio. [uvm-v2](https://descriptinc.github.io/uvm-v2/) | This is the end state: regenerate *within* the recording rather than splice a studio take into it. Closed, but open models now do it (below). |
+| HeyGen video translate | "Dynamic duration": the picture's length flexes slightly to fit the new speech, plus lip-sync. [HeyGen](https://www.heygen.com/translate) | Shipping products retime the picture, gently. |
+| ElevenLabs | TTS `speed` 0.7–1.2 at generation (model-native, better than post-hoc stretching); word timestamps; v3 audio tags for pauses; **Voice Changer** (speech-to-speech) keeps the *performance* — timing, emotion, accent — of a source recording while swapping the voice; a Dubbing API that paraphrases and times. [Models](https://elevenlabs.io/docs/overview/models), [Voice Changer](https://elevenlabs.io/blog/speech-to-speech) | Native speed and performance transfer are both unused by us today. |
+| sync.so | Lip-sync models from $0.02/s (lipsync-1.9) to $0.133/s (sync-3, 4K, handles angles and obstructions); up to 30 min; `lipsync-2` "preserves speaking style". [docs](https://sync.so/docs/), [comparison](https://lipsync.com/compare/sync-so-vs-hedra) | Once the mouth follows the audio, a line running onto silent frames is no longer a visual problem. |
+| Open models | **MAGIC-TTS** (token-level duration and pause control, code released), **F5-TTS** (infill a masked span conditioned on both sides; duration by ratio or predictor), **dots.tts.edit** (transcript-grounded edits with local preservation), **Chatterbox** / **Fish S2** (zero-shot cloning; Fish led a 2026 similarity benchmark at 4.03). [MAGIC-TTS](https://arxiv.org/abs/2604.21164), [F5-TTS](https://github.com/SWivid/F5-TTS/issues/993), [dots.tts.edit](https://arxiv.org/abs/2608.02673), [benchmark](https://www.marktechpost.com/2026/09/21/best-voice-cloning-apis-in-2026-speaker-similarity-consent-checks-and-price-per-1m-characters/) | Exact-duration, in-context regeneration is available self-hosted. |
+| Frame interpolation | RIFE (real-time, arbitrary timestep) and FILM (better on large motion) synthesize in-between frames, so slowing a shot 10–20% stays smooth instead of stuttering. [RIFE](https://arxiv.org/abs/2011.06294), [RIFE vs FILM](https://www.apatero.com/blog/rife-vs-film-video-frame-interpolation-comparison-2025) | The picture can be stretched without the viewer noticing, within limits. |
+| Generative video | Veo 3.1 extends a clip in 7 s steps; Kling extends 4–5 s per pass (own clips today, uploads "coming soon"); Runway retired extend. [extenders 2026](https://www.atlascloud.ai/blog/tips/best-ai-video-extender) | Real extension exists for the rare big gap, but it is the last rung: cost, latency and fidelity risk. |
+| Acoustic matching | Room impulse response estimation and learned reverb matching make new speech sit in the original space; enhanced speech "sounds overly dry" without it. [FDN matching](https://arxiv.org/html/2510.23158), [Gencho](https://arxiv.org/pdf/2602.09233) | We add room tone; we do not yet add the room. |
+| Music beds | Demucs v4 separates vocals from music and effects, so dialogue can be edited on its own stem and the mix rebuilt. [Demucs](https://github.com/facebookresearch/demucs) | Ads have music under the voice; editing the mix as one track is why some edits sound pasted. |
+| Evaluation | Dubbing papers converged on **SIM-o** (WavLM/ECAPA speaker similarity), **UTMOS** (naturalness), **LSE-C/LSE-D** (SyncNet lip-sync). [DeepDubber](https://arxiv.org/pdf/2503.23660), [FlowDubber](https://arxiv.org/pdf/2505.01263) | Our scorecard measures two of six things. |
+
+## The fit ladder
+
+What the editor should try, in order, for a line of natural length *N* in a slot of length *T*. Each rung has a budget it may spend before handing to the next; the sum of small, imperceptible adjustments beats one large visible one.
+
+1. **Write it to length.** Before voicing, the planner gets a *syllable budget* from the slot (English speech ≈ 4–5 syllables/s, measured per speaker from the transcript) and writes to it. When a take comes back long, the shorter rewrite is offered *first* (built in Phase 13); this phase makes it the default path, with three candidate wordings ranked by predicted length. Zero cost, zero artefact.
+2. **Generate to length.** ElevenLabs takes vary ±15% per call; voice **three takes in parallel** and keep the one nearest *T* (characters are cheap; the budget already caps them). Use the model-native `speed` (0.7–1.2) rather than post-hoc `atempo` for the residual, and v3's pause tags where the slot has a breath in it. Ask for **word timestamps** so the next rungs know where words and gaps are.
+3. **Make room in the sound.** With timestamps, stretch *gaps and vowels*, not consonants: an elastic time-map that leaves transients alone is inaudible where a uniform stretch is not. Replace `atempo` (WSOLA) with Rubber Band R3 for pitch-preserving quality. Borrow up to 150 ms from each neighbouring pause, and micro-stretch the adjacent *original* speech by ≤4% so the join is shared across more time. Run into the pause after (built).
+4. **Make room in the picture.** Only now touch the frames, and never with a hard freeze while someone is on camera:
+   - *Absorb into a cutaway.* If the shot changes, or B-roll covers the region, lengthen the cutaway; no mouth is visible, nothing to notice.
+   - *Elastic retime.* Slow the picture over the edit region by up to 12% (speed up to 10% for a short line), with optical-flow interpolation (RIFE on CPU for our 3-minute clips) so motion stays smooth. Allocate the slowdown where motion is lowest, measured per frame, so a hand gesture is not the thing that stretches.
+   - *Living hold.* For an added line with no cutaway, replace today's frozen frame with a slowed tail (interpolated to 25–30% speed) and, past that, a generated "breathing" still (image-to-video at low motion). A freeze reads as a glitch; slow motion reads as emphasis.
+   - *Generative extension.* Last rung, opt-in, for gaps over ~2 s: Veo 3.1 extend (7 s steps) or Kling once uploads are supported. Costly and the look can drift; the UI must show it as a choice.
+5. **Move the mouth.** Lip-sync (Phase 17) makes the mouth follow whatever audio the ladder produced, which relaxes rungs 3–4: a line that runs 0.4 s onto originally-silent frames is fine once the lips speak it. Use `lipsync-2` for talking heads, `sync-3` for angles and obstructions; the mouth region is composited back over the original frames.
+
+The question "pause or slow?" resolves to: **slow, smoothly, a little, where it moves least — and pause only as a living hold for added lines, never a dead frame.**
+
+## Making the audio belong
+
+Fit is half of it. The other half is why a stock voice in a dry studio sounds pasted even when the timing is perfect.
+
+- **Identity.** Instant voice cloning needs 1–2 minutes of clean speech and the ElevenLabs Starter plan ($6/month); the reference extraction is already built (`app/media/reference.py`). Cross-check against Fish Audio S2-pro and self-hosted Chatterbox on our corpus before committing; the 2026 benchmarks rank them differently on similarity versus naturalness. [plans](https://magichour.ai/blog/elevenlabs-pricing), [cloning guide](https://toolcrush.io/blog/how-to-clone-your-voice-with-elevenlabs)
+- **Performance.** Two routes to the speaker's own delivery rather than a model's guess: (a) **speech-to-speech from the original line** — when the edit changes a few words, voice the new line, then run Voice Changer with the *original* recording's prosody as the guide, so pace and emphasis survive; (b) **the user performs it** — record the line on the phone, Voice Changer puts it in the speaker's voice. Both preserve timing, emotion and accent by design.
+- **Minimal edit radius.** Regenerate only the changed words and keep the original audio for the rest of the sentence (the Descript idea). With word timestamps on both sides this is a crossfade problem today; with an infill model (Phase 18) it becomes seamless.
+- **The room.** Estimate the recording's reverb from the speaker's own speech (RIR / learned reverb matching), apply it to the dry take, then level, then room tone. Match the long-term spectrum of the take to the speaker's (a 10-band EQ fit), so a phone-mic original and a studio-grade take share a colour.
+- **The mix.** Separate the source into dialogue / music / effects stems (Demucs `htdemucs_ft`), edit the dialogue stem, and remix with the original music and effects untouched. This alone fixes the "music dips under the new line" tell in ads.
+- **Measure all six.** Add SIM-o (speaker similarity) and UTMOS to the scorecard now that a clone makes them meaningful; add LSE-C/D with Phase 17. Keep the seam-discontinuity metric. Gate approval on measured scores only, as today.
+
+## Product shape
+
+- **One control per line: *Fit*.** Auto (the ladder) by default; or *prefer wording* / *prefer sound* / *prefer picture* for people who care. The take card says what was done in plain words: "Shortened by 2 words · picture slowed 6% over 2.1 s · ran 0.2 s into the pause."
+- **Before / after at the seam.** Compare plays 1.5 s either side of the join, original then edited, since that is where a pasted edit gives itself away.
+- **A style per project.** How much the picture may flex, whether generative extension is allowed, which voice route (clone / performed / stock), remembered like `long_lines` is.
+- **The agent plans with the ladder.** Phase 13's planner gets the syllable budget per line and the project's style, so most lines fit at rung 1 and "needs you" becomes rare.
+- **Honesty.** Every rung that changed the picture is marked on the timeline; every clone is consented (already enforced) and disclosed in the export's metadata.
+
+## Phases
+
+Each phase ships on its own and is independently useful. Costs are per edit at list prices; times are rough.
+
+- **Phase 14 · Fit by writing and generation** *(no new vendors; ~2 days)* — syllable budget in the planner and the reword prompt; three-take sampling by duration; ElevenLabs `speed` and word timestamps; elastic (gap-and-vowel) stretch with Rubber Band; borrowing from neighbouring pauses. **Exit:** on a 20-line corpus, ≥90% of edits fit within ±5% of the slot with no question asked, and a listening panel cannot pick the stretched ones above chance.
+- **Phase 15 · The speaker's own voice and room** *(unblocks roadmap 4b and 6b; Starter plan)* — instant clone from the reference extraction; Voice Changer route from the original line; Demucs stems and remix; reverb and spectral matching; SIM-o and UTMOS measured. **Exit:** SIM-o ≥ 0.75 against the speaker on every take; the stock-voice warning disappears; music beds unchanged bit-for-bit outside the edit.
+- **Phase 16 · Picture that flexes** *(self-hosted RIFE; ~3 days)* — cutaway detection (shot boundaries), elastic retime with motion-aware allocation, living hold replacing the frozen frame, picture speed-up for short lines. **Exit:** a 12% slowdown over 2 s on the Bhaji Cam clip is not detected by a 5-person panel; no edit ever ships a frozen frame while a face is on screen.
+- **Phase 17 · The mouth** *(roadmap 5; sync.so)* — spike `lipsync-2` vs `sync-3` on three clips; face and active-speaker detection; mouth-region composite; LSE-C/D in the scorecard. **Exit:** LSE-D on edited spans within 1.0 of the original footage's own score.
+- **Phase 18 · Inpainting-grade editing** *(self-hosted GPU)* — evaluate MAGIC-TTS, F5-TTS infill and dots.tts.edit on the corpus; if any reaches SIM-o/UTMOS parity with the clone, make "regenerate the changed words in context" the default for edits under ~6 words. **Exit:** a word-level edit with no audible seam in a blind A/B against the original.
+- **Phase 19 · The bench** *(runs from Phase 14 on)* — a 20-clip golden corpus with labelled good/bad edits; every metric computed in CI; a quality gate per rung so the ladder chooses by *predicted* score, not fixed order. **Exit:** a change that lowers any metric on the corpus fails the build.
+- **Later** — generative extension as an opt-in rung; multi-speaker crosstalk; non-English (ElevenLabs v3 covers 70+ languages; the planner's syllable budget becomes a phoneme budget).
+
+## Decisions to make now
+
+1. **Vendor for lip-sync:** sync.so, on API maturity and the explicit style-preservation of `lipsync-2`; Hedra has no API. Spike before committing (Phase 17).
+2. **Clone vendor:** start with ElevenLabs IVC (one key, already integrated); benchmark Fish S2-pro and Chatterbox in Phase 15 and keep the adapter seam.
+3. **Picture retime runs locally.** RIFE on CPU is fine for sub-3-minute clips and keeps footage off third parties; a GPU box is only for Phase 18.
+4. **No dead freezes.** The living hold replaces `concatenate`'s held frame as soon as Phase 16 lands.
+
+## Sources
+
+Research: [End-to-end dubbing with duration-based translation (EMNLP 2025)](https://aclanthology.org/2025.emnlp-demos.37.pdf) · [PS-TTS phonetic synchronization (2026)](https://arxiv.org/abs/2604.09111) · [VideoDubber](https://arxiv.org/html/2211.16934) · [DubWise](https://arxiv.org/pdf/2406.08802) · [MAGIC-TTS local duration control](https://arxiv.org/abs/2604.21164) · [dots.tts.edit](https://arxiv.org/abs/2608.02673) · [F5-TTS duration predictor](https://github.com/SWivid/F5-TTS/issues/993) · [Speech editing survey](https://arxiv.org/pdf/2407.17172) · [JUST-DUB-IT joint audio-visual diffusion](https://arxiv.org/pdf/2601.22143) · [Reverb matching with learned embeddings](https://arxiv.org/html/2510.23158) · [Gencho RIR generation](https://arxiv.org/pdf/2602.09233) · [RIFE](https://arxiv.org/abs/2011.06294) · [RIFE vs FILM](https://www.apatero.com/blog/rife-vs-film-video-frame-interpolation-comparison-2025) · [DeepDubber metrics](https://arxiv.org/pdf/2503.23660) · [FlowDubber](https://arxiv.org/pdf/2505.01263) · [VoiceCraft-Dub](https://arxiv.org/pdf/2504.02386).
+
+Products: [Descript Audio Regenerate](https://descriptinc.github.io/uvm-v2/) · [ElevenLabs models and speed](https://elevenlabs.io/docs/overview/models) · [ElevenLabs Voice Changer](https://elevenlabs.io/blog/speech-to-speech) · [ElevenLabs plans and cloning](https://magichour.ai/blog/elevenlabs-pricing) · [sync.so docs](https://sync.so/docs/) · [Lip-sync tool comparison 2026](https://magichour.ai/blog/best-ai-lip-sync-tools) · [sync vs Hedra](https://lipsync.com/compare/sync-so-vs-hedra) · [Open-source lip-sync models](https://instavar.com/research/ai-video/open-source-lip-sync-models) · [Voice cloning API benchmark 2026](https://www.marktechpost.com/2026/09/21/best-voice-cloning-apis-in-2026-speaker-similarity-consent-checks-and-price-per-1m-characters/) · [Voice cloning APIs for developers](https://www.veed.io/learn/best-voice-cloning-apis) · [HeyGen video translate](https://www.heygen.com/translate) · [AI video extenders 2026](https://www.atlascloud.ai/blog/tips/best-ai-video-extender) · [Demucs](https://github.com/facebookresearch/demucs).
