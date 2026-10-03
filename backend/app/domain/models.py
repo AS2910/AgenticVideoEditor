@@ -126,6 +126,9 @@ class EditCandidate:
     audio: MediaArtifact
     frames: MediaArtifact
     continuity: ContinuityReport
+    # What was done to make the take fit its slot, in words (Phase 14):
+    # "nearest of 3 takes", "trimmed 120 ms of pauses", "speech at 1.08× speed".
+    fit_notes: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)

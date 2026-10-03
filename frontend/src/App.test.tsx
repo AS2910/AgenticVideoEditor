@@ -932,3 +932,22 @@ describe('App the agent (Phase 13)', () => {
     expect(screen.queryByText('What should this video say?')).not.toBeInTheDocument()
   })
 })
+
+describe('App fit notes (Phase 14)', () => {
+  it('shows how the take was fitted under the line', async () => {
+    const fitted = { ...CANDIDATE, fit_notes: ['nearest of 3 takes', 'trimmed 120 ms of pauses'] }
+    vi.stubGlobal('fetch', routeFetch(200, { ...JOB_DONE, result: fitted }))
+    const user = userEvent.setup()
+    render(<App />)
+    await reachEditor(user)
+
+    await user.click(screen.getByText('Get 20% off today only.'))
+    const box = screen.getByRole('textbox', { name: /new wording/i })
+    await user.clear(box)
+    await user.type(box, 'Get 30% off today only.{Enter}')
+    await waitFor(() => expect(screen.getByText(/continuity checked/i)).toBeInTheDocument())
+
+    await user.click(screen.getByText('Get 20% off today only.'))
+    expect(screen.getByTestId('readout')).toHaveTextContent(/nearest of 3 takes.*trimmed 120 ms of pauses.*voice at natural speed/)
+  })
+})

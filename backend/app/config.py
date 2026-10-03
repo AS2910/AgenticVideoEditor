@@ -39,6 +39,10 @@ DEFAULT_VOICE_BUDGET_CHARS = 2000
 DEFAULT_MAX_REGENERATIONS = 2
 # Per-project ceiling on estimated spend across every paid vendor (Phase 9b).
 DEFAULT_PROJECT_BUDGET_USD = 2.0
+# Phase 14: when the first take misses its slot, how many takes to voice in
+# all and keep the nearest; and how far off the slot counts as a miss.
+DEFAULT_TAKES_PER_LINE = 3
+DEFAULT_FIT_TOLERANCE = 0.05
 # ElevenLabs bills by plan; this is the rate used for the USD estimate only.
 # 0.30 per 1k characters is roughly Creator-plan overage.
 DEFAULT_ELEVENLABS_USD_PER_1K = 0.30
@@ -64,6 +68,8 @@ class Settings:
     anthropic_workspace_id: str | None = None
     project_budget_usd: float = DEFAULT_PROJECT_BUDGET_USD
     elevenlabs_usd_per_1k: float = DEFAULT_ELEVENLABS_USD_PER_1K
+    takes_per_line: int = DEFAULT_TAKES_PER_LINE
+    fit_tolerance: float = DEFAULT_FIT_TOLERANCE
 
     @property
     def has_anthropic(self) -> bool:
@@ -119,4 +125,6 @@ def load_settings() -> Settings:
         anthropic_workspace_id=os.environ.get("ANTHROPIC_WORKSPACE_ID") or None,
         project_budget_usd=_amount("AVE_PROJECT_BUDGET_USD", DEFAULT_PROJECT_BUDGET_USD),
         elevenlabs_usd_per_1k=_amount("AVE_ELEVENLABS_USD_PER_1K", DEFAULT_ELEVENLABS_USD_PER_1K),
+        takes_per_line=max(1, _whole_number("AVE_TAKES_PER_LINE", DEFAULT_TAKES_PER_LINE)),
+        fit_tolerance=_amount("AVE_FIT_TOLERANCE", DEFAULT_FIT_TOLERANCE),
     )

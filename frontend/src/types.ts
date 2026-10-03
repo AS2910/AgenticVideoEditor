@@ -128,6 +128,8 @@ export interface Candidate {
   audio: MediaArtifact
   frames: MediaArtifact
   continuity: ContinuityReport
+  /** What was done to make the take fit its slot, in words (Phase 14). */
+  fit_notes?: string[]
 }
 
 /** Recorded when the uploader confirms rights; null until they do. */

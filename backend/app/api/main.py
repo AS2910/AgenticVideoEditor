@@ -18,8 +18,9 @@ from app.domain.models import (
 )
 from app.domain.plan import Plan, PlanItem
 from app.domain.transcript import (
-    assign_speakers, room_after, snap_to_word_boundaries, speaker_of, statements_of,
+    assign_speakers, room_after, room_before, snap_to_word_boundaries, speaker_of, statements_of,
 )
+from app.media.fit import speaking_rate, syllable_budget, syllables
 from app.config import load_settings
 from app.media import ffmpeg, ingest
 from app.adapters.base import VendorError
@@ -120,6 +121,9 @@ SECONDS_PER_ITEM = 12
 # Slack allowed when the overrun is judged against the pause: timings are
 # Whisper's, and a line a few hundredths long is not worth a question.
 PAUSE_SLACK = 0.05
+# Phase 14: a long line may also start a little early, into the pause before
+# it, when the pause after is not quite enough.
+BORROW_BEFORE = 0.15
 
 
 class ApproveRequest(BaseModel):
@@ -173,6 +177,7 @@ def _candidate_dict(candidate: EditCandidate) -> dict:
         "audio": _artifact_dict(candidate.audio),
         "frames": _artifact_dict(candidate.frames),
         "continuity": _continuity_dict(candidate.continuity),
+        "fit_notes": list(candidate.fit_notes),
     }
 
 
@@ -597,7 +602,11 @@ def _generate(
         # (Phase 12). The take that did not fit is held by the adapter, so
         # placing it costs nothing more.
         policy = on_long or _settings(project_id)["long_lines"]
-        placed = _long_line_fit(policy, exc, selection, record.transcript, record.source.duration)
+        placed, early = _long_line_fit(policy, exc, selection, record.transcript, record.source.duration)
+        if early > 0:
+            # Start a touch early, into the pause before the line.
+            selection = Selection(selection.start - early, selection.end)
+            plan = replace(plan, selection=selection)
         if placed is None and policy == "shorten" and exc.natural > exc.target:
             # Prefer a shorter wording: the agent's own fix, without asking.
             report(0.1, "Asking for a shorter line")
@@ -634,23 +643,31 @@ def _shorter_line(project_id: str, record: ProjectRecord, selection: Selection,
 
 
 def _long_line_fit(policy: str, exc: SpanMismatch, selection: Selection,
-                   transcript, duration: float) -> str | None:
-    """How to place a line that ran long, or None to ask the user.
+                   transcript, duration: float) -> tuple[str | None, float]:
+    """How to place a line that ran long — (fit, seconds to start early) — or
+    (None, 0) to ask the user.
 
     Only a *long* line is placed automatically — a short one always asks,
     since silence or a slowed line is a real choice. "stretch" speeds it up;
     "pause" lets it run into the pause after the selection if that pause (plus
-    a little slack) can hold the overrun and the video does not end first.
+    a little slack) can hold the overrun and the video does not end first;
+    when it is not quite enough, up to BORROW_BEFORE of the pause before the
+    line is used too (Phase 14).
     """
     if exc.natural <= exc.target or policy in ("ask", "shorten"):
-        return None
+        return None, 0.0
     if policy == "stretch":
-        return "stretch"
+        return "stretch", 0.0
     overrun = exc.natural - exc.target
     room = room_after(transcript, selection, duration)
-    if overrun <= room + PAUSE_SLACK and selection.start + exc.natural <= duration + PAUSE_SLACK:
-        return "start"
-    return None
+    if selection.start + exc.natural > duration + PAUSE_SLACK:
+        return None, 0.0
+    if overrun <= room + PAUSE_SLACK:
+        return "start", 0.0
+    before = min(BORROW_BEFORE, room_before(transcript, selection))
+    if overrun <= room + before + PAUSE_SLACK:
+        return "start", round(min(before, max(0.0, overrun - room)), 3)
+    return None, 0.0
 
 
 @app.get("/jobs/{job_id}")
@@ -746,11 +763,16 @@ def reword_line(
     context = edit_context(record.transcript, selection, record.source.duration)
     how = (req.instruction or "").strip() or DEFAULT_REWORD
     draft = (req.draft or "").strip()
+    rate = speaking_rate(record.transcript, speaker_of(record.transcript, selection))
+    room = room_after(record.transcript, selection, record.source.duration)
+    budget = syllable_budget(rate, selection.end - selection.start + min(room, 1.0))
+    limit = (f" It must be no more than {budget} syllables, so it can be spoken in the time "
+             f"the line has (the original is {syllables(context.selected)}).")
     if draft and draft != context.selected:
         prompt = (f'The user has drafted this wording for the selected line: "{draft}". '
-                  f"Improve the draft {how}. Reply with the full new line.")
+                  f"Improve the draft {how}.{limit} Reply with the full new line.")
     else:
-        prompt = f"Rewrite the selected line {how}. Reply with the full new line."
+        prompt = f"Rewrite the selected line {how}.{limit} Reply with the full new line."
 
     def meter(model: str, input_tokens: int, output_tokens: int) -> None:
         ledger.record(project_id, "anthropic", "wording", input_tokens + output_tokens, "tokens",
@@ -876,10 +898,18 @@ def _plan_dict(plan: Plan | None) -> dict | None:
 
 def _lines(record: ProjectRecord) -> list[Line]:
     names = {s.label: s.name for s in repo.speakers(record.source.project_id)}
-    return [
-        Line(i + 1, st.start, st.end, names.get(st.speaker) if st.speaker else None, st.text)
-        for i, st in enumerate(statements_of(record.transcript))
-    ]
+    rates: dict[str | None, float] = {}
+    out = []
+    for i, st in enumerate(statements_of(record.transcript)):
+        if st.speaker not in rates:
+            rates[st.speaker] = speaking_rate(record.transcript, st.speaker)
+        room = room_after(record.transcript, Selection(st.start, st.end), record.source.duration)
+        out.append(Line(
+            i + 1, st.start, st.end, names.get(st.speaker) if st.speaker else None, st.text,
+            syllables=syllables(st.text),
+            budget=syllable_budget(rates[st.speaker], st.end - st.start + min(room, 1.0)),
+        ))
+    return out
 
 
 def _estimate(project_id: str, items: tuple[PlanItem, ...]) -> dict:

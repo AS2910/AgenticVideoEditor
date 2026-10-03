@@ -100,3 +100,12 @@ def test_room_after_is_zero_when_speech_follows_at_once():
     from app.domain.transcript import room_after
     t = Transcript(words=(Word("a", 0.0, 0.4), Word("b", 0.4, 0.9)))
     assert room_after(t, Selection(0.0, 0.4), 2.3) == 0.0
+
+
+def test_room_before_is_the_gap_since_the_last_word():
+    import pytest
+    from app.domain.models import Selection, Transcript, Word
+    from app.domain.transcript import room_before
+    t = Transcript(words=(Word("a", 0.0, 0.4), Word("b", 0.9, 1.3)))
+    assert room_before(t, Selection(0.9, 1.3)) == pytest.approx(0.5)
+    assert room_before(t, Selection(0.0, 0.4)) == 0.0

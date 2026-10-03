@@ -70,7 +70,7 @@ function Take({ item, projectId, voices }: { item: PlanItem; projectId: string; 
   return (
     <div className={styles.take}>
       <audio className={styles.audio} controls preload="none" src={artifactUrl(projectId, c.audio.sha256)} aria-label="Play take" />
-      <span className={styles.takeLabel}>Take{voice ? ` · ${voice}'s voice` : ''}</span>
+      <span className={styles.takeLabel}>Take{voice ? ` · ${voice}'s voice` : ''}{c.fit_notes?.length ? ` · ${c.fit_notes.join(', ')}` : ''}</span>
       <span className={styles.spacer} />
       {score !== null && (
         <span className={styles.score}>sounds right <strong>{score.toFixed(2)}</strong></span>

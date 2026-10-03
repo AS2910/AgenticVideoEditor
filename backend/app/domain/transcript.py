@@ -58,6 +58,15 @@ def room_after(transcript: Transcript, selection: Selection, duration: float) ->
     return max(0.0, until - selection.end)
 
 
+def room_before(transcript: Transcript, selection: Selection) -> float:
+    """Seconds of pause before the selection since the last word ended — or
+    since the start of the video."""
+    earlier = [w.end for w in transcript.words if w.end <= selection.start + 1e-6
+               and w.start < selection.start]
+    since = max(earlier) if earlier else 0.0
+    return max(0.0, selection.start - since)
+
+
 def statements_of(transcript: Transcript) -> tuple[Statement, ...]:
     """The transcript's statements — Whisper's, or grouped from its words."""
     if transcript.statements:

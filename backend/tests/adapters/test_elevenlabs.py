@@ -272,3 +272,77 @@ def test_voices_are_listed_once_and_named_plainly():
     [brian] = voice.voices()
     assert (brian["name"], brian["description"], brian["gender"]) == (
         "Brian", "Deep, Resonant and Comforting", "male")
+
+
+# --- Phase 14: takes by duration, the model's own speed ------------------------
+
+class Takes(FakePost):
+    """Returns a different-length take each call: `seconds` in turn."""
+
+    def __init__(self, seconds):
+        super().__init__()
+        self.seconds = list(seconds)
+
+    def __call__(self, voice_id, body, api_key, timeout):
+        self.calls.append((voice_id, body))
+        n = min(len(self.calls), len(self.seconds)) - 1
+        samples = int(self.seconds[n] * SAMPLE_RATE)
+        import numpy as np
+        t = np.arange(samples) / SAMPLE_RATE
+        pcm = (0.5 * np.sin(2 * np.pi * 300 * t) * 32767).astype("<i2").tobytes()
+        return 200, pcm, ""
+
+
+@needs_ffmpeg
+def test_a_first_take_within_tolerance_is_the_only_one_paid_for(store):
+    post = Takes([0.92])
+    budget = VoiceBudget(ceiling=1000)
+    voice = adapter(store, post=post, budget=budget)
+    voice._takes = 3
+    voice.synthesize(SOURCE, PLAN, TRANSCRIPT)       # a 0.9 s slot
+    assert len(post.calls) == 1
+    assert budget.spent("p1") == billed_characters("30% off", "eleven_multilingual_v2")
+
+
+@needs_ffmpeg
+def test_a_take_that_misses_gets_more_takes_and_the_nearest_wins(store):
+    post = Takes([1.3, 0.75, 0.95])
+    budget = VoiceBudget(ceiling=1000)
+    voice = adapter(store, post=post, budget=budget)
+    voice._takes = 3
+    artifact = voice.synthesize(SOURCE, PLAN, TRANSCRIPT)
+    assert len(post.calls) == 3
+    assert budget.spent("p1") == 3 * billed_characters("30% off", "eleven_multilingual_v2")
+    assert artifact.duration == pytest.approx(0.9, abs=0.02)
+    assert "nearest of 3 takes" in voice.last_notes
+
+
+@needs_ffmpeg
+def test_when_every_take_is_too_long_the_model_is_asked_to_speak_faster(store):
+    # 1.3 s against 0.9 s is 1.44×: past atempo's 1.25, inside 1.25 × 1.2.
+    post = Takes([1.3, 1.3, 1.3, 1.0])
+    voice = adapter(store, post=post)
+    voice._takes = 3
+    artifact = voice.synthesize(SOURCE, PLAN, TRANSCRIPT)
+    assert len(post.calls) == 4
+    assert post.calls[3][1]["voice_settings"] == {"speed": 1.2}
+    assert artifact.duration == pytest.approx(0.9, abs=0.02)
+    assert any("by the model" in n for n in voice.last_notes)
+
+
+@needs_ffmpeg
+def test_an_explicit_fit_or_an_added_line_takes_one_take(store):
+    from dataclasses import replace
+    post = Takes([2.0])
+    voice = adapter(store, post=post)
+    voice._takes = 3
+    voice.synthesize(SOURCE, replace(PLAN, fit="stretch"), TRANSCRIPT)
+    voice.synthesize(SOURCE, replace(PLAN, mix="concatenate"), TRANSCRIPT)
+    assert len(post.calls) == 2
+    assert "voice_settings" not in post.calls[0][1]
+
+
+def test_speed_goes_in_the_request_within_the_apis_limits():
+    assert to_request(PLAN, None, "m", speed=1.1)["voice_settings"] == {"speed": 1.1}
+    assert to_request(PLAN, None, "m", speed=1.9)["voice_settings"] == {"speed": 1.2}
+    assert "voice_settings" not in to_request(PLAN, None, "m")

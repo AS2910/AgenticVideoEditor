@@ -36,6 +36,7 @@ def select_voice(settings: Settings, store: ArtifactStore, budget: VoiceBudget):
         adapter = ElevenLabsVoiceAdapter(
             settings.elevenlabs_api_key, store, budget,
             model=settings.elevenlabs_model, voice_id=settings.elevenlabs_voice_id,
+            takes_per_line=settings.takes_per_line, fit_tolerance=settings.fit_tolerance,
         )
         return adapter, f"elevenlabs:{settings.elevenlabs_model}:{adapter.identity}"
     return MockVoiceAdapter(store), "mock"

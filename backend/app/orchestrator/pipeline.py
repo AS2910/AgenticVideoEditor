@@ -63,6 +63,7 @@ def run_edit(
     best: Assessment | None = None
     made = 0
     notes: list[str] = []
+    fit_notes: tuple[str, ...] = ()
     unfitted: SpanMismatch | None = None
 
     for take in range(1, takes + 1):
@@ -97,6 +98,7 @@ def run_edit(
         assessed = continuity.assess(source, transcript, plan, audio)
         if best is None or _score(assessed.report) > _score(best.report):
             best = assessed
+            fit_notes = tuple(getattr(voice, "last_notes", ()))
         if assessed.report.passed:
             break
 
@@ -127,5 +129,5 @@ def run_edit(
 
     return EditCandidate(
         candidate_id=candidate_id, plan=plan, audio=best.audio, frames=frames,
-        continuity=replace(best.report, warnings=tuple(warnings)),
+        continuity=replace(best.report, warnings=tuple(warnings)), fit_notes=fit_notes,
     )

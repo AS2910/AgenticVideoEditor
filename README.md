@@ -40,6 +40,8 @@ AVE_VOICE_BUDGET_CHARS=2000               # per-project ElevenLabs ceiling
 AVE_MAX_REGENERATIONS=2                   # extra paid takes when continuity fails
 AVE_PROJECT_BUDGET_USD=2.00               # per-project ceiling on estimated spend, all vendors
 AVE_ELEVENLABS_USD_PER_1K=0.30            # rate for ElevenLabs cost estimates (plan-dependent)
+AVE_TAKES_PER_LINE=3                      # takes voiced when the first misses its slot; the nearest is kept
+AVE_FIT_TOLERANCE=0.05                    # how far off the slot counts as a miss
 AVE_DRY_RUN=1                             # never call a paid vendor
 ```
 
@@ -97,8 +99,8 @@ To see the continuity *failure* path, the voice profile has to be `unknown`, whi
 Both suites are offline and deterministic. No running server required.
 
 ```sh
-cd backend && .venv/bin/python -m pytest      # 424 tests
-cd frontend && npm test                        # 158 tests, 19 files
+cd backend && .venv/bin/python -m pytest      # 447 tests
+cd frontend && npm test                        # 159 tests, 19 files
 ```
 
 Backend tests write their media to a temp dir, never to `backend/var/`. Tests that
@@ -174,6 +176,7 @@ These are deliberate and documented, not oversights:
   macOS versions. It is a placeholder, not a fixture.
 - **The generated media is real but meaningless.** The mock voice adapter encodes a sine tone; the mock lip-sync adapter encodes a flat colour. Both are real, decodable files of the right length, keyed to their inputs so different prompts yield different media — they just are not speech or faces. Real vendors slot in behind the same adapter interfaces.
 - **The voice is real but it is not the speaker.** ElevenLabs free tier refuses voice cloning, so the new line is spoken by a premade voice. Every such candidate carries the warning *"Stock voice — this is not the speaker's voice yet."* Phase 4b swaps in a clone once the plan is upgraded; the reference-audio extraction it needs is already built.
+- **Lines are written and voiced to fit (Phase 14).** Every line the planner sees carries a syllable budget — how many fit its slot at that speaker's own rate — and the planner and the reword prompt write to it. A take that misses the slot by more than 5% is voiced again (up to `AVE_TAKES_PER_LINE`, default 3) and the nearest kept, each take charged; when all are too long for a tempo change but within reach of the model's own `speed` control, one more is spoken faster. A take is then fitted **pauses first**: silence between words and at the edges is trimmed (or opened, for a short line) before any speech is sped up or slowed, so the words themselves barely move. A long line may also start up to 150 ms early, into the pause before it, when the pause after is not quite enough.
 - **A longer line runs into the pause after it.** When a take is longer than the words it replaces and the pause before the next word (plus 50 ms of slack) can hold the overrun, the edit grows to cover the whole line and nobody is asked — the take that did not fit is held by the voice adapter, so placing it costs nothing more. A shorter line still asks (silence or a slowed line is a real choice), as does a long one with nowhere to go. Per project: `pause` (default), `stretch`, or `ask`.
 - **Speech is time-fitted, within limits.** A line too long for the selection is sped up by at most 1.25×; one too short is slowed by at most 0.8× and centred in a little silence (which room tone then fills). ElevenLabs' take length varies per call, so a take that cannot be fitted is regenerated like one that fails continuity; the job fails — asking you to widen or narrow the selection — only if no take fits. Every take is a paid call.
 - **The export re-voices the audio; the video is the original.** Lip-sync is backlogged (Phase 5), and the mock frames are a flat colour, so the render keeps the source's own frames everywhere: the new words play over the old mouth movements. H.264 sources are stream-copied; anything else is re-encoded to H.264 so the download plays everywhere. Seams get 20 ms equal-power crossfades; everything outside an edit is the source's audio, re-encoded to AAC.

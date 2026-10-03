@@ -23,6 +23,10 @@ class Line:
     end: float
     speaker: str | None   # display name
     text: str
+    # Phase 14: how many syllables the line has, and how many its slot can
+    # hold at this speaker's rate (the pause after it included). None = unknown.
+    syllables: int | None = None
+    budget: int | None = None
 
 
 @dataclass(frozen=True)

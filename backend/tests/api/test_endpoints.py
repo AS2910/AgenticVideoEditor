@@ -1445,3 +1445,71 @@ def test_an_added_line_is_spoken_by_whoever_the_planner_says(client, project, mo
     assert plan["items"][0]["speaker"] == "A"
     done = run_plan(client, "plan1")
     assert done["items"][0]["candidate"]["plan"]["voice_profile_id"] == "nPczCjzI2devNBz1zQrb"
+
+
+# ── Phase 14: fit by writing and generation ──────────────────────────────────
+
+def test_a_long_line_may_start_a_little_early_into_the_pause_before(client, project, monkeypatch):
+    import app.api.main as main
+    from app.domain.models import Transcript, Word
+    # "20% off" at 0.5–1.3 with 0.1 s before it and 0.4 s after; 0.5 s over.
+    speechless(monkeypatch, main, Transcript(words=(
+        Word("Get", 0.0, 0.4), Word("20%", 0.5, 0.9), Word("off", 0.9, 1.3), Word("today", 1.7, 2.3),
+    )))
+    voice = HeldTake(natural=1.3)   # 0.5 s over an 0.8 s slot: 0.4 after + 0.1 before (≤ 0.15) covers it
+    monkeypatch.setattr(main, "voice", voice)
+
+    result = preview(client)
+
+    assert result["type"] == "candidate"
+    assert [p.fit for p in voice.plans] == [None, "start"]
+    assert result["plan"]["selection"]["start"] == pytest.approx(0.4, abs=0.02)   # started 0.1 s early
+    assert result["plan"]["selection"]["end"] == pytest.approx(0.4 + 1.3, abs=0.02)
+
+
+def test_a_line_too_long_even_with_the_pause_before_still_asks(client, project, monkeypatch):
+    import app.api.main as main
+    from app.domain.models import Transcript, Word
+    speechless(monkeypatch, main, Transcript(words=(
+        Word("Get", 0.0, 0.4), Word("20%", 0.5, 0.9), Word("off", 0.9, 1.3), Word("today", 1.7, 2.3),
+    )))
+    monkeypatch.setattr(main, "voice", HeldTake(natural=1.6))   # 0.8 s over; only 0.5 to borrow
+    assert preview(client)["type"] == "question"
+
+
+def test_the_planner_gets_a_syllable_budget_per_line(client, project, monkeypatch):
+    import app.api.main as main
+    planner = Plans([(1, "Get 30% off today only.", "replace", "")])
+    monkeypatch.setattr(main, "planner", planner)
+    make_plan(client, goal="30% off")
+    line = planner.seen[0][1][0]
+    assert line.syllables == 10 and line.budget >= 10
+
+
+def test_the_reword_prompt_carries_the_budget(client, project, monkeypatch):
+    import app.api.main as main
+    from app.domain.models import Intent
+    reader = Reads(Intent("speak", new_text="Get 30% off."))
+    reader.identity = "claude"
+    monkeypatch.setattr(main, "interpreter", reader)
+    client.post("/projects/p1/lines/reword", json={"start": 0.5, "end": 1.0})
+    prompt = reader.seen[0][0]
+    assert "no more than" in prompt and "syllables" in prompt
+
+
+def test_takes_and_tolerance_come_from_the_environment(monkeypatch):
+    from app.config import load_settings
+    monkeypatch.setenv("AVE_TAKES_PER_LINE", "2")
+    monkeypatch.setenv("AVE_FIT_TOLERANCE", "0.1")
+    s = load_settings()
+    assert (s.takes_per_line, s.fit_tolerance) == (2, 0.1)
+    monkeypatch.setenv("AVE_TAKES_PER_LINE", "0")
+    assert load_settings().takes_per_line == 1
+
+
+def test_fit_notes_reach_the_candidate_and_survive_reopening(client, project, monkeypatch):
+    import app.api.main as main
+    monkeypatch.setattr(main.voice, "last_notes", ["trimmed 90 ms of pauses"], raising=False)
+    candidate = preview(client)
+    assert candidate["fit_notes"] == ["trimmed 90 ms of pauses"]
+    assert main.repo.get_candidate("p1", candidate["candidate_id"]).fit_notes == ("trimmed 90 ms of pauses",)
