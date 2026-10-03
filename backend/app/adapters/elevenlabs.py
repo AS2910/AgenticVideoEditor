@@ -24,7 +24,7 @@ from app.adapters.base import VendorError
 from app.budget import VoiceBudget
 from app.domain.models import EditPlan, MediaArtifact, Source, Transcript
 from app.errors import NonRetryableError
-from app.media import ffmpeg
+from app.media import ffmpeg, fit
 from app.store.artifacts import ArtifactStore
 
 ENDPOINT = "https://api.elevenlabs.io/v1/text-to-speech/{voice_id}"
@@ -39,6 +39,9 @@ DEFAULT_TIMEOUT = 60.0
 # Longest context sent either side of the edit. Enough for a sentence of
 # prosody; more buys nothing and slows the request.
 CONTEXT_CHARS = 200
+# The model's own speed control (Phase 14): applied at generation, which
+# sounds better than stretching afterwards. These are the API's limits.
+SPEED_MIN, SPEED_MAX = 0.7, 1.2
 
 # Character-cost multipliers, as reported by GET /v1/models. Unlisted models
 # bill at 1.0, which over-estimates rather than under-estimates spend.
@@ -104,8 +107,10 @@ def _context(words: list[str], from_end: bool) -> str:
     return " ".join(reversed(picked) if from_end else picked)
 
 
-def to_request(plan: EditPlan, transcript: Transcript | None, model: str) -> dict:
+def to_request(plan: EditPlan, transcript: Transcript | None, model: str, speed: float = 1.0) -> dict:
     body: dict = {"text": plan.new_text, "model_id": model}
+    if abs(speed - 1.0) > 1e-3:
+        body["voice_settings"] = {"speed": round(min(SPEED_MAX, max(SPEED_MIN, speed)), 2)}
     if transcript is None:
         return body
     start, end = plan.selection.start, plan.selection.end
@@ -163,6 +168,8 @@ class ElevenLabsVoiceAdapter:
         post: PostFn = _post,
         get_voices: Callable[[str, float], list[dict]] = _get_voices,
         timeout: float = DEFAULT_TIMEOUT,
+        takes_per_line: int = 1,
+        fit_tolerance: float = fit.DEFAULT_TOLERANCE,
     ) -> None:
         self._api_key = api_key
         self._store = store
@@ -177,6 +184,10 @@ class ElevenLabsVoiceAdapter:
         # user answers how to place it, that same take is used — the question
         # costs nothing, and they hear the line they were asked about.
         self._held: dict[str, bytes] = {}
+        self._takes = max(1, takes_per_line)
+        self._tolerance = fit_tolerance
+        # What was done to the last line to make it fit, in words.
+        self.last_notes: list[str] = []
 
     def cost_of(self, plan: EditPlan) -> int:
         return billed_characters(plan.new_text, self._model)
@@ -196,30 +207,66 @@ class ElevenLabsVoiceAdapter:
         wanted = plan.voice_profile_id
         return wanted if _VOICE_ID.fullmatch(wanted) else self._voice_id
 
+    def _take(self, project_id: str, voice_id: str, body: dict, plan: EditPlan) -> bytes:
+        # Charged per attempt, before the call: a retry is real spend.
+        self._budget.charge(project_id, self.cost_of(plan))
+        status, audio, text = self._post(voice_id, body, self._api_key, self._timeout)
+        if status != 200:
+            _raise_for(status, text.replace(self._api_key, "***"))
+        return audio
+
+    def _choose(self, project_id: str, voice_id: str, body: dict, plan: EditPlan,
+                target: float, notes: list[str]) -> bytes:
+        """Takes by duration (Phase 14): the first take is kept when it is
+        within tolerance of the slot; otherwise more takes are voiced and the
+        nearest kept, and when even that is too far for a tempo change the
+        model's own speed control is tried once."""
+        takes = [self._take(project_id, voice_id, body, plan)]
+        ratio = lambda pcm: (len(pcm) / 2 / SAMPLE_RATE) / target   # noqa: E731
+        if abs(ratio(takes[0]) - 1) <= self._tolerance:
+            return takes[0]
+        for _ in range(self._takes - 1):
+            takes.append(self._take(project_id, voice_id, body, plan))
+        best = min(takes, key=lambda pcm: abs(ratio(pcm) - 1))
+        if len(takes) > 1:
+            notes.append(f"nearest of {len(takes)} takes")
+        r = ratio(best)
+        # Too far for a tempo change, but within the model's speed range once
+        # the two are combined: generate again at that speed.
+        if (r > ffmpeg.MAX_TEMPO and r <= ffmpeg.MAX_TEMPO * SPEED_MAX) or \
+           (r < ffmpeg.MIN_TEMPO and r >= ffmpeg.MIN_TEMPO * SPEED_MIN):
+            speed = min(SPEED_MAX, max(SPEED_MIN, r))
+            faster = self._take(project_id, voice_id, {**body, "voice_settings": {"speed": round(speed, 2)}}, plan)
+            if abs(ratio(faster) - 1) < abs(r - 1):
+                notes.append(f"spoken at {speed:.2f}× by the model")
+                return faster
+        return best
+
     def synthesize(
         self, source: Source, plan: EditPlan, transcript: Transcript | None = None,
     ) -> MediaArtifact:
         body = to_request(plan, transcript, self._model)
         voice_id = self.voice_for(plan)
         key = f"{source.project_id}|{voice_id}|{json.dumps(body, sort_keys=True)}"
+        target = plan.selection.end - plan.selection.start
+        notes: list[str] = []
         audio = self._held.pop(key, None)
         if audio is None:
-            # Charged per attempt, before the call: a retry is real spend.
-            self._budget.charge(source.project_id, self.cost_of(plan))
-            status, audio, text = self._post(voice_id, body, self._api_key, self._timeout)
-            if status != 200:
-                _raise_for(status, text.replace(self._api_key, "***"))
+            if plan.fit is None and plan.mix != "concatenate":
+                audio = self._choose(source.project_id, voice_id, body, plan, target, notes)
+            else:
+                audio = self._take(source.project_id, voice_id, body, plan)
 
-        target = plan.selection.end - plan.selection.start
         with tempfile.TemporaryDirectory() as tmp:
             raw, _ = ffmpeg.pcm_to_wav(audio, Path(tmp) / "raw.wav", SAMPLE_RATE)
             try:
-                placed, duration = ffmpeg.place(
-                    raw, Path(tmp) / "voice.wav", target, plan.fit, plan.mix,
+                placed, duration, fitted = fit.place(
+                    raw, Path(tmp) / "voice.wav", target, plan.fit, plan.mix, self._tolerance,
                 )
             except ffmpeg.SpanMismatch:
                 self._held[key] = audio
                 raise
+            self.last_notes = notes + fitted
             return self._store.put_file(
                 source.project_id, placed, kind="audio", container="wav", duration=duration,
             )

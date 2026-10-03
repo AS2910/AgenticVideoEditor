@@ -34,9 +34,10 @@ Rules:
 - `edits` are the changes the goal asks for. Keep each as close to the original \
 line as the goal allows; change only what the goal needs. For a replaced line \
 write the full new line. Keep each speaker's own way of talking.
-- A replaced line is spoken in the same time as the original, with a little \
-room to run on; keep new wording about the same length or shorter. An added \
-line can be any length but should be short.
+- A replaced line has to be spoken in the time its slot allows. Each line \
+shows its syllables now and how many fit ("7 syl now, up to 9 fit"): keep a \
+replacement within that budget, counting syllables as you write. An added \
+line can be any length but should stay under about 12 syllables.
 - `suggestions` are changes the goal implies but did not name — a word that \
 reads oddly once the goal is applied, a line that now contradicts it. Offer at \
 most three, and only when genuinely useful. They are not applied unless the \
@@ -105,10 +106,12 @@ def render_plan_request(goal: str, lines: Sequence[Line], history: Sequence[str]
     if answer:
         out += [f"You asked: {answer[0]}", f"The user answered: {answer[1]}",
                 "Plan with that answer and ask nothing more.", ""]
-    out.append("Transcript:")
+    out.append("Transcript (each line's syllables now, and how many its slot can hold):")
     for line in lines:
         who = f" {line.speaker}:" if line.speaker else ""
-        out.append(f"{line.index}. [{line.start:.1f}s]{who} {line.text}")
+        fits = (f"  ({line.syllables} syl now, up to {line.budget} fit)"
+                if line.syllables is not None and line.budget is not None else "")
+        out.append(f"{line.index}. [{line.start:.1f}s]{who} {line.text}{fits}")
     out += ["", f"Goal: {goal}"]
     return "\n".join(out)
 

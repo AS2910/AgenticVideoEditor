@@ -294,10 +294,12 @@ export default function App() {
       setSelection(result.plan.selection) // the backend's snapped range
       setCandidate(result)
       const over = result.plan.selection.end - at.end
+      const notes = result.fit_notes ?? []
       const tags = [
         ...(result.plan.new_text !== (answer?.text ?? result.plan.new_text) ? ['shortened to fit'] : []),
+        ...notes,
         ...(over > 0.01 && result.plan.mix !== 'concatenate' ? [`ran ${over.toFixed(1)} s into the pause`] : []),
-        result.plan.fit === 'stretch' ? 'voice sped up to fit' : 'voice at natural speed',
+        ...(result.plan.fit === 'stretch' ? ['voice sped up to fit'] : notes.some((n) => n.includes('speed')) ? [] : ['voice at natural speed']),
         'picture untouched',
       ]
       setReadouts((rs) => [...rs.filter((r) => r.selection.start !== at.start || r.selection.end !== at.end), { selection: at, tags }])

@@ -242,3 +242,15 @@ def test_an_insert_keeps_its_selection(store):
     plan = EditPlan(Selection(0.4, 1.3), "30% off", "speaker-1", mix="concatenate")
     candidate = run_edit("c1", plan, SOURCE, LongVoice(store), MockLipSyncAdapter(store), ContinuityEngine())
     assert candidate.plan.selection == Selection(0.4, 1.3)
+
+
+def test_the_candidate_carries_how_its_take_was_fitted(store):
+    from app.adapters.mock import MockLipSyncAdapter, MockVoiceAdapter
+    from app.continuity.engine import ContinuityEngine
+    from app.domain.models import EditPlan, Selection
+    from tests.factories import make_source
+    voice = MockVoiceAdapter(store)
+    voice.last_notes = ["nearest of 3 takes", "trimmed 120 ms of pauses"]
+    candidate = run_edit("c1", EditPlan(Selection(0.4, 1.3), "x", "speaker-1"), make_source(),
+                         voice, MockLipSyncAdapter(store), ContinuityEngine())
+    assert candidate.fit_notes == ("nearest of 3 takes", "trimmed 120 ms of pauses")

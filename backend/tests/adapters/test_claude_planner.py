@@ -112,3 +112,9 @@ def test_an_added_line_can_name_who_says_it():
     edits = to_proposal(reading, LINES).edits
     assert (edits[0].new_text, edits[0].speaker) == ("Delivery is free.", "Shopkeeper")
     assert edits[1].speaker is None    # an unknown name is ignored
+
+
+def test_each_line_shows_its_syllables_and_its_budget():
+    lines = [Line(1, 5.2, 6.9, "Customer", "Hi, I want to buy groceries.", syllables=8, budget=10)]
+    text = render_plan_request("goal", lines, [])
+    assert "1. [5.2s] Customer: Hi, I want to buy groceries.  (8 syl now, up to 10 fit)" in text
