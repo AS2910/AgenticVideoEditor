@@ -1089,3 +1089,77 @@ describe('App: the line is the unit (UX-1)', () => {
     expect(within(take).getByRole('button', { name: /play take 1 in the video/i })).toHaveAttribute('aria-pressed', 'true')
   })
 })
+
+describe('App: moving audio on the timeline (UX-1b)', () => {
+  it('moves a take to a typed time and shows the moved take under the line', async () => {
+    const calls: { url: string; body: unknown }[] = []
+    const base = routeFetch()
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.endsWith('/candidates/c1/move')) {
+        calls.push({ url, body: JSON.parse(String(init?.body)) })
+        return ok({ ...CANDIDATE, candidate_id: 'c2', plan: { ...CANDIDATE.plan, selection: { start: 1.5, end: 2.0 }, fit: 'start' }, fit_notes: ['moved to 0:01'] })
+      }
+      return base(url, init)
+    }))
+    const user = userEvent.setup()
+    render(<App />)
+    await reachEditor(user)
+    await user.click(screen.getByText('Get 20% off today only.'))
+    const box = screen.getByRole('textbox', { name: /new wording/i })
+    await user.clear(box)
+    await user.type(box, 'Get 30% off today only.{Enter}')
+    const place = within(await screen.findByTestId('take')).getByTestId('place')
+
+    await user.click(within(place).getByRole('button', { name: 'Move' }))
+    expect(screen.getByRole('slider', { name: 'Where the take starts' })).toBeInTheDocument()
+    const field = within(screen.getByTestId('place')).getByRole('textbox', { name: 'Starts at' })
+    await user.clear(field)
+    await user.type(field, '1.5{Enter}')
+
+    await waitFor(() => expect(calls).toEqual([{ url: '/api/projects/p1/candidates/c1/move', body: { start: 1.5 } }]))
+    await waitFor(() => expect(screen.getByTestId('place')).toHaveTextContent('Starts at 0:01.50'))
+    expect(screen.queryByRole('slider', { name: 'Where the take starts' })).not.toBeInTheDocument()
+  })
+
+  it('moves a kept line in one step and re-renders', async () => {
+    const calls: string[] = []
+    const base = routeFetch()
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.endsWith('/edits/e1/move')) {
+        calls.push(String(init?.body))
+        return ok({ edit_id: 'e2', reverted: 'e1', candidate: { ...CANDIDATE, candidate_id: 'c3', plan: { ...CANDIDATE.plan, selection: { start: 1.3, end: 1.8 } } } })
+      }
+      if (url.endsWith('/projects/p1')) {
+        return ok({ ...PROJECT, created_at: '2026-10-02T08:00:00Z', messages: [{ role: 'user', text: 'x' }], settings: { long_lines: 'pause', autonomy: 'ask' },
+          edits: [{ edit_id: 'e1', candidate_id: 'c1', new_text: '30% off', selection: { start: 0.4, end: 0.9 }, mix: 'replace', overridden: false, reverted: false }] })
+      }
+      return base(url, init)
+    }))
+    window.location.hash = 'p1'
+    const user = userEvent.setup()
+    render(<App />)
+    const place = await screen.findByTestId('place')
+    await user.click(within(place).getByRole('button', { name: 'Move' }))
+    await user.click(within(screen.getByTestId('place')).getByRole('button', { name: 'Put it here' }))
+
+    await waitFor(() => expect(calls).toEqual(['{"start":0.4}']))
+    await waitFor(() => expect(screen.getByTestId('place')).toHaveTextContent('Starts at 0:01.30'))
+  })
+
+  it('adds a line at a chosen time: layered there at its natural length', async () => {
+    const bodies: Record<string, unknown>[] = []
+    const base = routeFetch()
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.endsWith('/edits/preview')) bodies.push(JSON.parse(String(init?.body)))
+      return base(url, init)
+    }))
+    const user = userEvent.setup()
+    render(<App />)
+    await reachEditor(user)
+    await user.click(screen.getByRole('button', { name: /add a line here/i }))
+    await user.type(screen.getByRole('textbox', { name: 'Starts at' }), '1.1')
+    await user.type(screen.getByRole('textbox', { name: /words for the new line/i }), 'Welcome.{Enter}')
+    await waitFor(() => expect(bodies).toHaveLength(1))
+    expect(bodies[0]).toMatchObject({ text: 'Welcome.', mix: 'layer', fit: 'start', start: 1.1 })
+  })
+})

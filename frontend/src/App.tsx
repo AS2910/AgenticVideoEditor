@@ -26,7 +26,7 @@ import { speakerSlot } from './transcript/speakers'
 import {
   createProject, previewEdit, approveEdit, exportProject, artifactUrl,
   pollJob, PollCancelled, ApiError, listProjects, getProject, deleteProject, getUsage, listVoices, updateSpeaker, detectSpeakers,
-  revertEdit, updateSettings, rewordLine, removeLine,
+  revertEdit, updateSettings, rewordLine, removeLine, moveCandidate, moveEdit,
   createPlan, getPlan, updateItem, runPlan, answerItem, redoItem, approvePlan, clarifyPlan,
 } from './api'
 import type {
@@ -115,6 +115,8 @@ export default function App() {
   const takeAudio = useRef<HTMLAudioElement | null>(null)
   // The word timeline is for exact spans; hidden until asked for.
   const [precise, setPrecise] = useState(false)
+  // A take or kept line being dragged to a new start on the bar.
+  const [placing, setPlacing] = useState<{ id: string; start: number; duration: number } | null>(null)
   const composerRef = useRef<HTMLInputElement>(null)
   const previewToken = useRef(0)
   const planToken = useRef(0)
@@ -174,6 +176,7 @@ export default function App() {
     setReadouts([])
     setLines({})
     setPlayingTake(null)
+    setPlacing(null)
     takeAudio.current?.pause()
   }
 
@@ -358,11 +361,41 @@ export default function App() {
     const display = request.mix === 'replace'
       ? `“${s?.text ?? ''}” → “${request.text}”`
       : `Add after ${clock(request.selection.start)}: “${request.text}”`
+    // A chosen start: the line goes there, at its natural length — over the
+    // sound there, or with the picture held there.
+    const placed = request.mix !== 'replace' && request.at != null
+    const span = placed ? { start: request.at!, end: request.at! + 0.05 } : request.selection
+    const mix = placed ? (request.mix === 'concatenate' ? 'concatenate' : 'layer') : request.mix
     void runPreview(
       request.mix === 'replace' ? `Replace this line with "${request.text}"` : `Add the line "${request.text}"`,
-      { text: request.text, mix: request.mix, on_long: request.onLong, ...(request.delivery ? { delivery: request.delivery } : {}) },
-      request.selection, display, request.voiceId ?? voiceId, { key, request },
+      { text: request.text, mix, on_long: request.onLong, ...(placed ? { fit: 'start' as const } : {}), ...(request.delivery ? { delivery: request.delivery } : {}) },
+      span, display, request.voiceId ?? voiceId, { key, request },
     )
+  }
+  /** A take dragged to a new start: the same audio, placed again, replaces it under the line. */
+  const moveTake = async (key: LineKey, c: Candidate, start: number) => {
+    if (!projectId) return
+    setError(null)
+    try {
+      const moved = await moveCandidate(projectId, c.candidate_id, { start })
+      setLines((all) => ({ ...all, [key]: { ...all[key], takes: all[key].takes.map((t) => (t.candidate_id === c.candidate_id ? moved : t)) } }))
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : 'Could not move the take.')
+    }
+  }
+  /** A kept line dragged to a new start: reverted and re-kept there, in one step. */
+  const moveKept = async (editId: string, start: number) => {
+    if (!projectId) return
+    setError(null)
+    try {
+      const r = await moveEdit(projectId, editId, { start })
+      const { selection: at, new_text: text, mix = 'replace' } = r.candidate.plan
+      setApproved((a) => a.map((rev) => (rev.edit_id === editId ? { edit_id: r.edit_id, start: at.start, end: at.end, text, mix } : rev)))
+      setDownload(null)
+      if (await runExport()) setView('edited')
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : 'Could not move the line.')
+    }
   }
   const statementsNow = () => project?.statements ?? []
 
@@ -913,6 +946,8 @@ export default function App() {
           marks={marks}
           compact={!review}
           muted={playingTake !== null && playingMix === 'replace'}
+          placing={placing}
+          onPlace={(start) => setPlacing((p) => (p ? { ...p, start } : p))}
         >
           <button className={precise ? styles.preciseOn : styles.precise} aria-pressed={precise} onClick={() => setPrecise((p) => !p)}>Precise</button>
           {rendered && (
@@ -987,6 +1022,10 @@ export default function App() {
           onRemove={(s) => void removeStatement(s)}
           onPlayTake={playTake}
           onDismiss={(key) => setLine(key, null)}
+          onMove={(key, c, start) => void moveTake(key, c, start)}
+          onMoveKept={(id, start) => void moveKept(id, start)}
+          placing={placing}
+          onPlacing={setPlacing}
           onReword={reword}
           onLongLinesChange={(v) => void rememberLongLines(v)}
           onEditingChange={setEditingLine}

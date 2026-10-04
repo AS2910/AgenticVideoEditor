@@ -10,6 +10,8 @@
 
 **The panel does less.** Takes, questions and errors no longer appear there; what you must do next is the panel's last element ("One line needs you, at 0:17 · Go to it"), and *Go to it* scrolls the line into view. The chat box is for the whole video; a selection on the *Precise* word timeline (hidden by default) still previews through it, as a fallback.
 
+**Audio goes where you put it (UX-1b, same day).** The user asked to "pick an audio and move it anywhere in the timeline (edited or otherwise)". Every take and every kept line shows "Starts at 0:04.96 · Move": Move puts a draggable block of the take's length on the monitor's bar (arrow keys nudge it, Shift for a second), with a typed time and ◀ ▶ nudges beside the line; *Put it here* re-places the same audio without voicing it again (`POST /candidates/{id}/move`, or `POST /edits/{id}/move` for a kept line, which reverts and re-keeps in one step). The add editor has *Starts at*: empty follows the line; a time puts the new line there, over the sound at its natural length (or with the picture held there).
+
 **Play in place.** A take plays over the video from its line, with the original's words muted for a replacement and left alone under an added line, and stops at the end of the take.
 
 ## Where

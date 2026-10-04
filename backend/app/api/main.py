@@ -1400,3 +1400,70 @@ def remove_line(project_id: str, req: RemoveRequest, owner: str = Depends(curren
         "edit_id": edit_id, "candidate_id": candidate_id,
         "selection": {"start": selection.start, "end": selection.end}, "mix": "remove",
     }
+
+
+# ── UX-1b: move a take or a kept line anywhere on the timeline ────────────────
+
+class MoveRequest(BaseModel):
+    # Where the audio should start, in seconds of the source.
+    start: float
+    # Change how it meets the sound there too, if asked.
+    mix: Literal["replace", "layer", "concatenate"] | None = None
+
+
+def _moved(project_id: str, record: ProjectRecord, source: EditCandidate, start: float, mix: str | None) -> EditCandidate:
+    """The same take at a new place: nothing is voiced again. A held line
+    (concatenate) keeps no span of the source, so its selection is the point
+    it is inserted at; anything else covers its own length from `start`."""
+    duration = record.source.duration
+    start = round(min(max(0.0, start), duration), 3)
+    mix = mix or source.plan.mix
+    if mix == "concatenate":
+        selection = Selection(start, start)
+    else:
+        selection = Selection(start, round(min(duration, start + source.audio.duration), 3))
+    candidate_id = repo.next_candidate_id(project_id)
+    moved = EditCandidate(
+        candidate_id=candidate_id,
+        plan=replace(source.plan, selection=selection, mix=mix, fit="start"),
+        audio=source.audio, frames=source.frames, continuity=source.continuity,
+        fit_notes=tuple(n for n in source.fit_notes if not n.startswith("moved")) + (f"moved to {_clock(start)}",),
+    )
+    repo.save_candidate(project_id, moved)
+    return moved
+
+
+@app.post("/projects/{project_id}/candidates/{candidate_id}/move")
+def move_candidate(
+    project_id: str, candidate_id: str, req: MoveRequest, owner: str = Depends(current_owner),
+) -> dict:
+    """A take, placed somewhere else on the timeline. Returns the new
+    candidate; the old one is kept, as every candidate is."""
+    record = _owned(project_id, owner)
+    source = repo.get_candidate(project_id, candidate_id)
+    if source is None:
+        raise HTTPException(status_code=404, detail="candidate not found")
+    if source.plan.mix == "remove":
+        raise HTTPException(status_code=422, detail="A removal has no audio to move.")
+    return _candidate_dict(_moved(project_id, record, source, req.start, req.mix))
+
+
+@app.post("/projects/{project_id}/edits/{edit_id}/move")
+def move_edit(
+    project_id: str, edit_id: str, req: MoveRequest, owner: str = Depends(current_owner),
+) -> dict:
+    """A kept line, placed somewhere else: the old edit is reverted and the
+    same take approved at the new place, in one step."""
+    record = _owned(project_id, owner)
+    edit = next((e for e in repo.list_edits(project_id) if e.edit_id == edit_id and not e.reverted), None)
+    if edit is None:
+        raise HTTPException(status_code=404, detail="edit not found")
+    if edit.plan.mix == "remove":
+        raise HTTPException(status_code=422, detail="A removal has no audio to move.")
+    source = repo.get_candidate(project_id, edit.candidate_id) or EditCandidate(
+        edit.candidate_id, edit.plan, edit.audio, edit.frames, ContinuityReport(None, None, None, None, True, (), ()),
+    )
+    moved = _moved(project_id, record, source, req.start, req.mix)
+    repo.revert_edit(project_id, edit_id)
+    new_id = _approve_candidate(project_id, moved, overridden=edit.overridden)
+    return {"edit_id": new_id, "reverted": edit_id, "candidate": _candidate_dict(moved)}

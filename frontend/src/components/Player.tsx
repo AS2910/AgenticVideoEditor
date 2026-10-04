@@ -21,6 +21,9 @@ interface PlayerProps {
   compact?: boolean
   /** The original's sound off while a replacement take plays over it. */
   muted?: boolean
+  /** A take being placed: a block of its length on the bar, draggable. */
+  placing?: { start: number; duration: number } | null
+  onPlace?: (start: number) => void
 }
 
 /** play() returns a promise in browsers and nothing in jsdom; neither may throw. */
@@ -38,8 +41,27 @@ const timecode = (t: number) => {
 }
 
 export function Player({
-  src, duration, currentTime, onSeek, onTimeUpdate, seekRequest, marks = [], children, compact, muted,
+  src, duration, currentTime, onSeek, onTimeUpdate, seekRequest, marks = [], children, compact, muted, placing, onPlace,
 }: PlayerProps) {
+  const barRef = useRef<HTMLDivElement>(null)
+
+  // Drag the block along the bar; the pointer's offset inside it is kept.
+  const startPlacing = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!placing || !onPlace || !barRef.current) return
+    e.preventDefault()
+    const rect = barRef.current.getBoundingClientRect()
+    const grabbed = (e.clientX - rect.left) / rect.width * length - placing.start
+    const move = (ev: PointerEvent) => {
+      const t = (ev.clientX - rect.left) / rect.width * length - grabbed
+      onPlace(Math.round(Math.min(Math.max(0, t), Math.max(0, length - placing.duration)) * 100) / 100)
+    }
+    const end = () => {
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', end)
+    }
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', end)
+  }
   const videoRef = useRef<HTMLVideoElement>(null)
   const [playing, setPlaying] = useState(false)
   // The playing file's own length: an edit that adds a line makes the render
@@ -115,8 +137,27 @@ export function Player({
         <span className={styles.timecode} data-testid="timecode">
           {timecode(currentTime)} <span className={styles.of}>/ {timecode(length)}</span>
         </span>
-        <div className={styles.bar}>
+        <div className={styles.bar} ref={barRef}>
           <div className={styles.played} style={{ width: `${played}%` }} />
+          {placing && length > 0 && (
+            <div
+              className={styles.placing}
+              data-testid="placing"
+              role="slider"
+              aria-label="Where the take starts"
+              aria-valuemin={0}
+              aria-valuemax={length}
+              aria-valuenow={placing.start}
+              tabIndex={0}
+              style={{ left: `${(placing.start / length) * 100}%`, width: `${Math.max(0.5, (placing.duration / length) * 100)}%` }}
+              onPointerDown={startPlacing}
+              onKeyDown={(e) => {
+                if (!onPlace) return
+                if (e.key === 'ArrowLeft') onPlace(Math.max(0, placing.start - (e.shiftKey ? 1 : 0.1)))
+                if (e.key === 'ArrowRight') onPlace(Math.min(length - placing.duration, placing.start + (e.shiftKey ? 1 : 0.1)))
+              }}
+            />
+          )}
           {marks.filter((t) => t >= 0 && t <= length).map((t, i) => (
             <span key={i} className={styles.mark} data-testid="mark" style={{ left: `${(t / length) * 100}%` }} />
           ))}
