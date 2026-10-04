@@ -98,6 +98,7 @@ export default function App() {
   const [segments, setSegments] = useState<Segment[]>([])
   const [inserts, setInserts] = useState<Insert[]>([])
   const [download, setDownload] = useState<{ url: string; filename: string } | null>(null)
+  const [exporting, setExporting] = useState(false)
   // The latest render of the approved edits, and which version the player shows.
   const [rendered, setRendered] = useState<{ url: string; duration: number } | null>(null)
   const [view, setView] = useState<'original' | 'edited'>('original')
@@ -968,6 +969,7 @@ export default function App() {
   ): Promise<boolean> => {
     if (!id) return false
     setError(null)
+    setExporting(true)
     try {
       const manifest = await exportProject(id)
       setSegments(manifest.segments)
@@ -980,6 +982,8 @@ export default function App() {
     } catch {
       setError('Export failed.')
       return false
+    } finally {
+      setExporting(false)
     }
   }
 
@@ -1153,7 +1157,7 @@ export default function App() {
             {readyCount > 0 ? `Review ${readyCount} ready ${readyCount === 1 ? 'change' : 'changes'}` : 'Review changes'}
           </button>
         )}
-        <ExportBar segments={segments} inserts={inserts} onExport={() => void runExport()} download={download} />
+        <ExportBar segments={segments} inserts={inserts} onExport={() => void runExport()} download={download} busy={exporting} />
       </header>
 
       <main id="main" className={styles.main} aria-busy={planBusy || undefined}>

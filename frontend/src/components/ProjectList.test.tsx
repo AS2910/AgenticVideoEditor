@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { ProjectList } from './ProjectList'
 
@@ -19,11 +19,14 @@ describe('ProjectList', () => {
 
   it('asks once more before deleting', async () => {
     const onDelete = vi.fn()
-    render(<ProjectList projects={PROJECTS} onOpen={() => {}} onDelete={onDelete} />)
+    render(<ProjectList projects={PROJECTS} onOpen={() => {}} onDelete={onDelete} undoMs={50} />)
     await userEvent.click(screen.getByRole('button', { name: 'Delete crow.mp4' }))
     expect(onDelete).not.toHaveBeenCalled()
+    // The confirm is a strip across the row, with Keep focused first: a second tap where Delete was cannot delete.
+    expect(screen.getByRole('button', { name: 'Keep' })).toHaveFocus()
     await userEvent.click(screen.getByRole('button', { name: /delete for good/i }))
-    expect(onDelete).toHaveBeenCalledWith('p1')
+    expect(screen.getByRole('status')).toHaveTextContent('Deleted crow.mp4')
+    await waitFor(() => expect(onDelete).toHaveBeenCalledWith('p1'))
   })
 
   it('can back out of a delete', async () => {
@@ -48,8 +51,18 @@ describe('ProjectList', () => {
     expect(screen.getByText('variant of bhaji.mp4')).toBeInTheDocument()
   })
 
-  it('shows nothing when there are no projects', () => {
-    const { container } = render(<ProjectList projects={[]} onOpen={() => {}} onDelete={() => {}} />)
-    expect(container).toBeEmptyDOMElement()
+  it('undoes a delete within the grace period', async () => {
+    const onDelete = vi.fn()
+    render(<ProjectList projects={PROJECTS} onOpen={() => {}} onDelete={onDelete} undoMs={5000} />)
+    await userEvent.click(screen.getByRole('button', { name: 'Delete crow.mp4' }))
+    await userEvent.click(screen.getByRole('button', { name: /delete for good/i }))
+    await userEvent.click(screen.getByRole('button', { name: 'Undo' }))
+    expect(screen.getByText('crow.mp4')).toBeInTheDocument()
+    expect(onDelete).not.toHaveBeenCalled()
+  })
+
+  it('says where projects will appear when there are none yet', () => {
+    render(<ProjectList projects={[]} onOpen={() => {}} onDelete={() => {}} />)
+    expect(screen.getByText(/your projects will show here/i)).toBeInTheDocument()
   })
 })

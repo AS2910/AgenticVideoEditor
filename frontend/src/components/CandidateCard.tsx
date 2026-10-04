@@ -106,6 +106,9 @@ export function CandidateCard({
         </ul>
       )}
 
+      {!c.passed && !onApproveAnyway && (
+        <div className={styles.media}>Below the threshold, so it can't be approved as it is. Try again for another take.</div>
+      )}
       <div className={styles.actions}>
         <button className={styles.tryAgain} onClick={onTryAgain}>Try again</button>
         {c.passed || !onApproveAnyway ? (
