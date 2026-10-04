@@ -1274,11 +1274,15 @@ describe('App: shifting original speech (UX-1c)', () => {
 
     await waitFor(() => expect(f.mock.calls.some(([url, init]) => String(url).endsWith('/lines/shift')
       && JSON.parse(String(init?.body)).to === 1)).toBe(true))
-    expect(await screen.findByText('Moved')).toBeInTheDocument()
+    // Where it was, and its own row where it now plays.
+    expect(await screen.findByText('Moved away')).toBeInTheDocument()
     expect(screen.getByText(/Moved to 0:01\.00/)).toBeInTheDocument()
-    await user.click(screen.getByRole('button', { name: 'Undo' }))
+    expect(screen.getByRole('row', { name: 'Moved line at 0:01' })).toHaveTextContent('Get 20% off today only.')
+    expect(screen.getByText('Moved')).toBeInTheDocument()
+    await user.click(screen.getAllByRole('button', { name: 'Undo' })[0])
     await waitFor(() => expect(f.mock.calls.some(([url]) => String(url).endsWith('/edits/e8/revert'))).toBe(true))
     await waitFor(() => expect(screen.queryByText('Moved')).not.toBeInTheDocument())
+    expect(screen.queryByText('Moved away')).not.toBeInTheDocument()
   })
 })
 

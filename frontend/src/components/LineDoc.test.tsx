@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { act, render, screen, within, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, within, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { LineDoc } from './LineDoc'
 import { keyOf, addKeyOf } from '../transcript/keys'
@@ -337,21 +337,51 @@ describe('LineDoc: shifting a line of the original speech (UX-1c)', () => {
     expect(onShift).toHaveBeenCalledWith(STATEMENTS[1], 12.3)
   })
 
-  it('shows a moved line as moved, with where it went, Undo and Move', () => {
+  it('shows a moved line where it was, and as its own row where it now plays', () => {
     doc({
       onMoveKept: vi.fn(),
+      onShift: vi.fn(),
+      onPlacing: vi.fn(),
       revisions: [
         { edit_id: 'e1', start: 7.54, end: 9.02, text: '', mix: 'remove', partner: 'e2' },
         { edit_id: 'e2', start: 12.3, end: 13.78, text: 'Start a live Bajicam session.', mix: 'layer', partner: 'e1' },
       ],
     })
-    expect(screen.getByText('Moved')).toBeInTheDocument()
-    expect(screen.getByText(/Moved to 0:12\.30, as spoken/)).toBeInTheDocument()
-    expect(screen.getByText('Start a live Bajicam session.').tagName).toBe('DEL')
-    expect(screen.getByRole('button', { name: 'Undo' })).toBeInTheDocument()
+    // Where it was: struck through, with where it went and Undo.
+    expect(screen.getByText(/Moved to 0:12\.30/)).toBeInTheDocument()
+    const texts = screen.getAllByText('Start a live Bajicam session.')
+    expect(texts.map((t) => t.tagName)).toEqual(['DEL', 'SPAN'])
+    // Where it plays now: its own row, last in time order, with Move and a grip.
+    const rows = screen.getAllByRole('row').map((r) => r.getAttribute('aria-label'))
+    expect(rows).toEqual(['Line at 0:05, the Customer', 'Line at 0:07, the Customer', 'Line at 0:09, the Shopkeeper', 'Moved line at 0:12, the Customer'])
+    expect(screen.getByText(/Moved from 0:07, as spoken/)).toBeInTheDocument()
     expect(screen.getByText('Starts at 0:12.30')).toBeInTheDocument()
+    expect(screen.getAllByRole('button', { name: 'Undo' })).toHaveLength(2)
+    expect(screen.getByRole('button', { name: 'Drag to move the line at 0:12' })).toBeInTheDocument()
     // The line it landed on is left alone.
     expect(screen.queryByText('Kept')).not.toBeInTheDocument()
-    expect(screen.queryByText(/Removed\./)).not.toBeInTheDocument()
+  })
+
+  it('drags a row down the transcript: the drop shows the time, and the line lands where the row above ends', async () => {
+    const onShift = vi.fn()
+    const onPlacing = vi.fn()
+    doc({ onShift, onPlacing })
+    // jsdom has no layout: give each row a box, top to bottom.
+    const rowsEls = screen.getAllByRole('row')
+    rowsEls.forEach((el, k) => {
+      el.getBoundingClientRect = () => ({ top: k * 100, height: 100, bottom: k * 100 + 100, left: 0, right: 500, width: 500, x: 0, y: k * 100, toJSON: () => ({}) })
+    })
+    const grip = screen.getByRole('button', { name: 'Drag to move the line at 0:05' })
+    fireEvent.pointerDown(grip, { clientY: 50, pointerId: 1 })
+    expect(onPlacing).toHaveBeenCalledWith({ id: KEY0, start: 5.2, duration: expect.closeTo(1.74, 2) })
+    // Below the third row's midpoint: it would start where that row ends.
+    fireEvent.pointerMove(window, { clientY: 280 })
+    expect(await screen.findByTestId('drop-line')).toHaveTextContent('Starts at 0:09.88')
+    expect(onPlacing).toHaveBeenLastCalledWith({ id: KEY0, start: 9.88, duration: expect.closeTo(1.74, 2) })
+    fireEvent.pointerUp(window)
+    expect(onShift).toHaveBeenCalledWith(STATEMENTS[0], 9.88)
+    expect(onPlacing).toHaveBeenLastCalledWith(null)
+    expect(screen.queryByTestId('drop-line')).not.toBeInTheDocument()
   })
 })
+const KEY0 = keyOf({ start: 5.2, end: 6.94 })

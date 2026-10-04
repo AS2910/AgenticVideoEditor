@@ -135,7 +135,9 @@ export function LineDoc({
   const [offers, setOffers] = useState<string[]>([])
   // A row has keyboard focus: the heading shows the keys.
   const [focusedRow, setFocusedRow] = useState<number | null>(null)
-  const box = useRef<HTMLTextAreaElement>(null)
+  // A row being dragged up or down to shift it in time (UX-1c).
+  const [drag, setDrag] = useState<{ key: string; label: string; duration: number; at: number; to: number; apply: (to: number) => void } | null>(null)
+const box = useRef<HTMLTextAreaElement>(null)
 
   useEffect(() => { box.current?.focus() }, [editing])
   // The row to put focus back on when its editor closes, so the keys keep working.
@@ -480,6 +482,239 @@ export function LineDoc({
     )
   }
 
+  /** The rows in time order: every line of the transcript, and for a line
+   *  that was shifted, a second row where its words now play. */
+  type Row = { kind: 'line'; s: Statement; i: number; start: number; end: number }
+    | { kind: 'moved'; s: Statement; i: number; rev: Revision; from: Revision; start: number; end: number }
+  const rows: Row[] = statements.map((s, i): Row => ({ kind: 'line', s, i, start: s.start, end: s.end }))
+  for (const from of revisions) {
+    if (from.mix !== 'remove' || !from.partner) continue
+    const rev = revisions.find((r) => r.edit_id === from.partner)
+    const i = statements.findIndex((s) => overlaps(from, s))
+    if (!rev || i < 0) continue
+    rows.push({ kind: 'moved', s: statements[i], i, rev, from, start: rev.start, end: rev.end })
+  }
+  rows.sort((a, b) => a.start - b.start || (a.kind === 'moved' ? 1 : 0) - (b.kind === 'moved' ? 1 : 0))
+  const rowKey = (r: Row) => (r.kind === 'moved' ? `moved-${r.rev.edit_id}` : keyOf({ start: r.s.start, end: r.s.end }))
+
+  /** Start dragging a row up or down; the drop puts its words where the
+   *  row above ends. The bar above shows the block as it goes. */
+  const startDrag = (e: React.PointerEvent, key: string, label: string, at: number, duration: number, apply: (to: number) => void) => {
+    if (!onPlacing) return
+    e.preventDefault()
+    setDrag({ key, label, duration, at, to: at, apply })
+    onPlacing({ id: key, start: at, duration })
+    const move = (ev: PointerEvent) => {
+      const els = Array.from(document.querySelectorAll<HTMLElement>('[data-row-key]')).filter((el) => el.dataset.rowKey !== key)
+      let to = 0
+      for (const el of els) {
+        const box = el.getBoundingClientRect()
+        if (ev.clientY > box.top + box.height / 2) to = Number(el.dataset.rowEnd)
+      }
+      to = Math.round(to * 100) / 100
+      setDrag((d) => (d ? { ...d, to } : d))
+      onPlacing({ id: key, start: to, duration })
+    }
+    const up = () => {
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', up)
+      setDrag((d) => {
+        if (d && Math.abs(d.to - d.at) > 0.005) d.apply(d.to)
+        return null
+      })
+      onPlacing(null)
+    }
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', up)
+  }
+
+  /** The row the drag would drop before, for the marker. */
+  const dropIndexFor = (to: number) => {
+    const others = rows.filter((r) => rowKey(r) !== drag?.key)
+    const target = others.find((r) => r.end > to + 0.001)
+    return target ? rows.indexOf(target) : rows.length
+  }
+  const dropMarker = () => drag && (
+    <div className={styles.dropLine} data-testid="drop-line">
+      <span>Starts at {timecode(drag.to)}</span>
+    </div>
+  )
+
+  /** A line's words where they now play, after a shift: its own row, with
+   *  where it came from, Undo, Move, and a grip to drag it again. */
+  const movedRow = (entry: Extract<Row, { kind: 'moved' }>, order: number) => {
+    const { s, rev, from } = entry
+    const label = name(s.speaker)
+    const key = `moved-${rev.edit_id}`
+    return (
+      <Fragment key={key}>
+        {drag && dropIndexFor(drag.to) === order && dropMarker()}
+        <div
+          id={key}
+          className={styles.row}
+          data-state="moved"
+          data-row-key={key}
+          data-row-end={rev.end}
+          data-dragging={drag?.key === key || undefined}
+          tabIndex={0}
+          role="row"
+          aria-label={`Moved line at ${clock(rev.start)}${label ? `, ${label}` : ''}`}
+        >
+          <button className={styles.time} onClick={() => onSeek({ ...s, start: rev.start, end: rev.end })} aria-label={`Go to ${clock(rev.start)}`}>{clock(rev.start)}</button>
+          <span className={styles.who}>{label && <Avatar name={label} slot={speakerSlot(speakers, s.speaker)} />}</span>
+          <div className={styles.body}>
+            <div className={styles.lineWrap}>
+              <span className={styles.line}>{s.text}</span>
+              <div className={styles.meta}>
+                Moved from {clock(from.start)}, as spoken, over the sound here.
+                {rev.edit_id && <> <button className={styles.undo} onClick={() => onUndo(rev.edit_id!)}>Undo</button></>}
+              </div>
+              {rev.edit_id && onMoveKept && placeControl(`edit-${rev.edit_id}`, rev.start, Math.max(0.05, rev.end - rev.start), (t) => onMoveKept(rev.edit_id!, t))}
+            </div>
+          </div>
+          <span className={styles.side}>
+            <span className={styles.chip} data-tone="ok">Moved</span>
+            {rev.edit_id && onMoveKept && onPlacing && (
+              <button
+                type="button"
+                className={styles.grip}
+                aria-label={`Drag to move the line at ${clock(rev.start)}`}
+                onPointerDown={(e) => startDrag(e, key, s.text, rev.start, Math.max(0.05, rev.end - rev.start), (t) => onMoveKept(rev.edit_id!, t))}
+              >⋮⋮</button>
+            )}
+          </span>
+        </div>
+      </Fragment>
+    )
+  }
+
+  /** One line of the transcript, as a row with everything about it inside. */
+  const lineRow = (s: Statement, i: number, order: number) => {
+    const key = keyOf({ start: s.start, end: s.end })
+    const addKey = addKeyOf(s)
+    const current = currentTime >= s.start && currentTime < s.end
+    const selected = !!selection && overlaps(selection, s)
+    const pending = pendingLines.find((p) => overlaps(p.selection, s) && STATUS[p.status])
+    // The placed half of a shifted line belongs to the line it came from, not the one it lands on.
+    const live = revisions.filter((r) => overlaps(r, s) && !(r.mix === 'layer' && r.partner))
+    const revision = live.length ? live[live.length - 1] : null
+    const removed = revision?.mix === 'remove'
+    const movedTo = removed && revision?.partner ? revisions.find((r) => r.edit_id === revision.partner) ?? null : null
+    const shown: Revision | null = pending?.text
+      ? { start: pending.selection.start, end: pending.selection.end, text: pending.text, mix: pending.mix ?? 'replace' }
+      : revision && !removed ? revision : null
+    const state = lines[key]
+    const status: string | null = state?.status ?? pending?.status ?? (removed ? 'removed' : revision ? 'kept' : null)
+    const label = name(s.speaker)
+    const newSpeaker = !!label && s.speaker !== statements[i - 1]?.speaker
+    const isEditing = editing?.index === i && editing.mode === 'edit'
+    const isAdding = editing?.index === i && editing.mode === 'add'
+    const added = lines[addKey]
+    return (
+      <Fragment key={`${s.start}-${i}`}>
+        {drag && dropIndexFor(drag.to) === order && dropMarker()}
+        <div
+          id={`line-${i}`}
+          className={styles.row}
+          data-current={current}
+          data-selected={selected}
+          data-state={status ?? undefined}
+          data-row-key={key}
+          data-row-end={s.end}
+          data-dragging={drag?.key === key || undefined}
+          tabIndex={0}
+          role="row"
+          aria-label={`Line at ${clock(s.start)}${label ? `, ${label}` : ''}`}
+          onKeyDown={(e) => onRowKey(e, i)}
+          onFocus={(e) => { if (e.target === e.currentTarget) setFocusedRow(i) }}
+          onBlur={(e) => { if (e.target === e.currentTarget) setFocusedRow((f) => (f === i ? null : f)) }}
+        >
+          <button className={styles.time} onClick={() => onSeek(s)} aria-label={`Go to ${clock(s.start)}`}>{clock(s.start)}</button>
+          <span className={styles.who}>{newSpeaker && label && <Avatar name={label} slot={speakerSlot(speakers, s.speaker)} />}</span>
+          <div className={styles.body}>
+            {isEditing ? editor(s, 'edit') : (
+              <div className={styles.lineWrap}>
+                <button className={styles.line} onClick={() => open(i, 'edit')} title="Change the words" data-testid={shown ? 'revision' : undefined}>
+                  {removed ? <del className={styles.del}>{s.text}</del>
+                    : shown ? trackedChanges(s, shown, words).map((run, k) => (
+                      <Fragment key={k}>{k > 0 && ' '}
+                        {run.kind === 'same' ? <span>{run.text}</span> : run.kind === 'del' ? <del className={styles.del}>{run.text}</del> : <ins className={styles.ins}>{run.text}</ins>}
+                      </Fragment>
+                    )) : s.text}
+                </button>
+                {(revision || removed) && (
+                  <div className={styles.meta}>
+                    {movedTo ? `Moved to ${timecode(movedTo.start)}; the room's own sound stays here.`
+                      : removed ? "Removed. The gap is closed with the room's own sound; the picture is untouched." : `Kept${shown && MIX_NOTE[shown.mix] ? ` · ${MIX_NOTE[shown.mix]}` : ''}.`}
+                    {revision?.edit_id && <> <button className={styles.undo} onClick={() => onUndo(revision.edit_id!)}>Undo</button></>}
+                  </div>
+                )}
+                {revision && !removed && revision.edit_id && onMoveKept && (
+                  placeControl(`edit-${revision.edit_id}`, revision.start, Math.max(0.05, revision.end - revision.start), (t) => onMoveKept(revision.edit_id!, t))
+                )}
+{!revision && onShift && placing?.id === `shift-${key}` && (
+                  placeControl(`shift-${key}`, s.start, Math.max(0.05, s.end - s.start), (t) => onShift(s, t))
+                )}
+                {pending && !revision && pending.text && MIX_NOTE[pending.mix ?? 'replace'] && (
+                  <div className={styles.meta}>Added · {MIX_NOTE[pending.mix ?? 'replace']}</div>
+                )}
+                {!isEditing && lineBlock(key, s, i)}
+              </div>
+            )}
+          </div>
+          <span className={styles.side}>
+            {status && STATUS[status] && <span className={styles.chip} data-tone={TONE[status]}>{STATUS[status]}</span>}
+            {status === 'kept' && <span className={styles.chip} data-tone="ok">Kept</span>}
+            {status === 'removed' && <span className={styles.chip} data-tone="muted">{movedTo ? 'Moved away' : 'Removed'}</span>}
+            {!isEditing && !isAdding && (
+              <span className={styles.actions} role="group" aria-label={`Actions for ${clock(s.start)}`}>
+                <button className={styles.action} onClick={() => open(i, 'edit')}>Change the words</button>
+                <button className={styles.action} onClick={() => open(i, 'edit', true)}>Change the delivery</button>
+                <button className={styles.action} onClick={() => open(i, 'add')}>Add a line after</button>
+                {!removed && <button className={styles.action} onClick={() => onRemove(s)}>Remove</button>}
+                {!revision && onShift && onPlacing && (
+                  <button className={styles.action} onClick={() => { onPlacing({ id: `shift-${key}`, start: s.start, duration: Math.max(0.05, s.end - s.start) }); setPlaceText(timecode(s.start)) }}>Shift</button>
+                )}
+                <button className={styles.action} onClick={() => onSeek(s)}>Play original</button>
+                </span>
+                )}
+                {!revision && !isEditing && !isAdding && onShift && onPlacing && (
+                <button
+                type="button"
+                className={styles.grip}
+                aria-label={`Drag to move the line at ${clock(s.start)}`}
+                onPointerDown={(e) => startDrag(e, key, s.text, s.start, Math.max(0.05, s.end - s.start), (t) => onShift(s, t))}
+                >⋮⋮</button>
+                )}
+                </span>
+        </div>
+        {isAdding && (
+          <div className={styles.row} data-state="adding">
+            <span className={styles.time} />
+            <span className={styles.who} />
+            <div className={styles.body}>{editor(s, 'add')}</div>
+          </div>
+        )}
+        {added && !isAdding && (
+          <div className={styles.row} data-state={added.status}>
+            <span className={styles.time}>{clock(s.end)}</span>
+            <span className={styles.who} />
+            <div className={styles.body}>
+              <div className={styles.meta}>New line after {clock(s.start)}{added.request ? ` · ${added.request.mix === 'over' ? 'plays over the picture' : 'the picture holds'}` : ''}</div>
+              {lineBlock(addKey, s, i)}
+            </div>
+            <span className={styles.side}>{STATUS[added.status] && <span className={styles.chip} data-tone={TONE[added.status]}>{STATUS[added.status]}</span>}</span>
+          </div>
+        )}
+        {!isAdding && !added && i === statements.length - 1 && (
+          <div className={styles.addRow}>
+            <button className={styles.add} onClick={() => open(i, 'add')}><span aria-hidden="true">+</span> Add a line here</button>
+          </div>
+        )}
+      </Fragment>
+    )
+  }
+
   return (
     <section className={styles.doc} aria-label="Transcript">
       <div className={styles.heading}>
@@ -487,127 +722,13 @@ export function LineDoc({
         <span className={styles.hint}>
           {editing ? (editing.mode === 'edit' ? `Editing ${clock(statements[editing.index].start)}. Enter to hear it, Esc to cancel.` : `Adding a line after ${clock(statements[editing.index].start)}. Esc to cancel.`)
             : pendingLines.some((p) => p.status === 'reading') ? "Voltage is reading. The line it's on is lit."
-            : focusedRow !== null ? <span className={styles.keys} data-testid="keys"><kbd>↑</kbd><kbd>↓</kbd> move · <kbd>Enter</kbd> change the words · <kbd>Space</kbd> play · <kbd>A</kbd> add after · <kbd>S</kbd> shift · <kbd>K</kbd> keep · <kbd>U</kbd> undo · <kbd>/</kbd> ask Voltage</span>
+            : focusedRow !== null ? <span className={styles.keys} data-testid="keys"><kbd>↑</kbd><kbd>↓</kbd> move · <kbd>Enter</kbd> change the words · <kbd>Space</kbd> play · <kbd>A</kbd> add after · <kbd>S</kbd> shift (or drag ⋮⋮) · <kbd>K</kbd> keep · <kbd>U</kbd> undo · <kbd>/</kbd> ask Voltage</span>
             : 'Each line carries its own state. Hover a line, or press ↑ ↓ to move between them.'}
         </span>
       </div>
 
-      {statements.map((s, i) => {
-        const key = keyOf({ start: s.start, end: s.end })
-        const addKey = addKeyOf(s)
-        const current = currentTime >= s.start && currentTime < s.end
-        const selected = !!selection && overlaps(selection, s)
-        const pending = pendingLines.find((p) => overlaps(p.selection, s) && STATUS[p.status])
-        // The placed half of a shifted line belongs to the line it came from, not the one it lands on.
-        const live = revisions.filter((r) => overlaps(r, s) && !(r.mix === 'layer' && r.partner))
-        const revision = live.length ? live[live.length - 1] : null
-        const removed = revision?.mix === 'remove'
-        const movedTo = removed && revision?.partner ? revisions.find((r) => r.edit_id === revision.partner) ?? null : null
-        const shown: Revision | null = pending?.text
-          ? { start: pending.selection.start, end: pending.selection.end, text: pending.text, mix: pending.mix ?? 'replace' }
-          : revision && !removed ? revision : null
-        const state = lines[key]
-        const status: string | null = state?.status ?? pending?.status ?? (removed ? 'removed' : revision ? 'kept' : null)
-        const label = name(s.speaker)
-        const newSpeaker = !!label && s.speaker !== statements[i - 1]?.speaker
-        const isEditing = editing?.index === i && editing.mode === 'edit'
-        const isAdding = editing?.index === i && editing.mode === 'add'
-        const added = lines[addKey]
-        return (
-          <Fragment key={`${s.start}-${i}`}>
-            <div
-              id={`line-${i}`}
-              className={styles.row}
-              data-current={current}
-              data-selected={selected}
-              data-state={status ?? undefined}
-              tabIndex={0}
-              role="row"
-              aria-label={`Line at ${clock(s.start)}${label ? `, ${label}` : ''}`}
-              onKeyDown={(e) => onRowKey(e, i)}
-              onFocus={(e) => { if (e.target === e.currentTarget) setFocusedRow(i) }}
-              onBlur={(e) => { if (e.target === e.currentTarget) setFocusedRow((f) => (f === i ? null : f)) }}
-            >
-              <button className={styles.time} onClick={() => onSeek(s)} aria-label={`Go to ${clock(s.start)}`}>{clock(s.start)}</button>
-              <span className={styles.who}>{newSpeaker && label && <Avatar name={label} slot={speakerSlot(speakers, s.speaker)} />}</span>
-              <div className={styles.body}>
-                {isEditing ? editor(s, 'edit') : (
-                  <div className={styles.lineWrap}>
-                    <button className={styles.line} onClick={() => open(i, 'edit')} title="Change the words" data-testid={shown ? 'revision' : undefined}>
-                      {removed ? <del className={styles.del}>{s.text}</del>
-                        : shown ? trackedChanges(s, shown, words).map((run, k) => (
-                          <Fragment key={k}>{k > 0 && ' '}
-                            {run.kind === 'same' ? <span>{run.text}</span> : run.kind === 'del' ? <del className={styles.del}>{run.text}</del> : <ins className={styles.ins}>{run.text}</ins>}
-                          </Fragment>
-                        )) : s.text}
-                    </button>
-                    {(revision || removed) && (
-                      <div className={styles.meta}>
-                        {movedTo ? `Moved to ${timecode(movedTo.start)}, as spoken, over the sound there; the room's own sound stays here.`
-                          : removed ? "Removed. The gap is closed with the room's own sound; the picture is untouched." : `Kept${shown && MIX_NOTE[shown.mix] ? ` · ${MIX_NOTE[shown.mix]}` : ''}.`}
-                        {revision?.edit_id && <> <button className={styles.undo} onClick={() => onUndo(revision.edit_id!)}>Undo</button></>}
-                      </div>
-                    )}
-                    {revision && !removed && revision.edit_id && onMoveKept && (
-                      placeControl(`edit-${revision.edit_id}`, revision.start, Math.max(0.05, revision.end - revision.start), (t) => onMoveKept(revision.edit_id!, t))
-                    )}
-                    {movedTo?.edit_id && onMoveKept && (
-                      placeControl(`edit-${movedTo.edit_id}`, movedTo.start, Math.max(0.05, movedTo.end - movedTo.start), (t) => onMoveKept(movedTo.edit_id!, t))
-                    )}
-                    {!revision && onShift && placing?.id === `shift-${key}` && (
-                      placeControl(`shift-${key}`, s.start, Math.max(0.05, s.end - s.start), (t) => onShift(s, t))
-                    )}
-                    {pending && !revision && pending.text && MIX_NOTE[pending.mix ?? 'replace'] && (
-                      <div className={styles.meta}>Added · {MIX_NOTE[pending.mix ?? 'replace']}</div>
-                    )}
-                    {!isEditing && lineBlock(key, s, i)}
-                  </div>
-                )}
-              </div>
-              <span className={styles.side}>
-                {status && STATUS[status] && <span className={styles.chip} data-tone={TONE[status]}>{STATUS[status]}</span>}
-                {status === 'kept' && <span className={styles.chip} data-tone="ok">Kept</span>}
-                {status === 'removed' && <span className={styles.chip} data-tone="muted">{movedTo ? 'Moved' : 'Removed'}</span>}
-                {!isEditing && !isAdding && (
-                  <span className={styles.actions} role="group" aria-label={`Actions for ${clock(s.start)}`}>
-                    <button className={styles.action} onClick={() => open(i, 'edit')}>Change the words</button>
-                    <button className={styles.action} onClick={() => open(i, 'edit', true)}>Change the delivery</button>
-                    <button className={styles.action} onClick={() => open(i, 'add')}>Add a line after</button>
-                    {!removed && <button className={styles.action} onClick={() => onRemove(s)}>Remove</button>}
-                    {!revision && onShift && onPlacing && (
-                      <button className={styles.action} onClick={() => { onPlacing({ id: `shift-${key}`, start: s.start, duration: Math.max(0.05, s.end - s.start) }); setPlaceText(timecode(s.start)) }}>Shift</button>
-                    )}
-                    <button className={styles.action} onClick={() => onSeek(s)}>Play original</button>
-                  </span>
-                )}
-              </span>
-            </div>
-            {isAdding && (
-              <div className={styles.row} data-state="adding">
-                <span className={styles.time} />
-                <span className={styles.who} />
-                <div className={styles.body}>{editor(s, 'add')}</div>
-              </div>
-            )}
-            {added && !isAdding && (
-              <div className={styles.row} data-state={added.status}>
-                <span className={styles.time}>{clock(s.end)}</span>
-                <span className={styles.who} />
-                <div className={styles.body}>
-                  <div className={styles.meta}>New line after {clock(s.start)}{added.request ? ` · ${added.request.mix === 'over' ? 'plays over the picture' : 'the picture holds'}` : ''}</div>
-                  {lineBlock(addKey, s, i)}
-                </div>
-                <span className={styles.side}>{STATUS[added.status] && <span className={styles.chip} data-tone={TONE[added.status]}>{STATUS[added.status]}</span>}</span>
-              </div>
-            )}
-            {!isAdding && !added && i === statements.length - 1 && (
-              <div className={styles.addRow}>
-                <button className={styles.add} onClick={() => open(i, 'add')}><span aria-hidden="true">+</span> Add a line here</button>
-              </div>
-            )}
-          </Fragment>
-        )
-      })}
+      {rows.map((entry, order) => (entry.kind === 'moved' ? movedRow(entry, order) : lineRow(entry.s, entry.i, order)))}
+      {drag && dropIndexFor(drag.to) === rows.length && dropMarker()}
     </section>
   )
 }
