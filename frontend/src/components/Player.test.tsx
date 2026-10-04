@@ -60,3 +60,19 @@ describe('Player transport (redesign)', () => {
     expect(screen.getByRole('button', { name: 'Edited' })).toBeInTheDocument()
   })
 })
+
+describe('Player placing (UX-1b)', () => {
+  it('shows the take being placed as a block on the bar, nudged with the arrow keys', async () => {
+    const onPlace = vi.fn()
+    render(<Player src="/a.mp4" duration={10} currentTime={0} onSeek={() => {}} placing={{ start: 2, duration: 1 }} onPlace={onPlace} />)
+    const block = screen.getByRole('slider', { name: 'Where the take starts' })
+    expect(block).toHaveAttribute('aria-valuenow', '2')
+    expect(block.style.left).toBe('20%')
+    expect(block.style.width).toBe('10%')
+    block.focus()
+    fireEvent.keyDown(block, { key: 'ArrowRight' })
+    expect(onPlace).toHaveBeenCalledWith(2.1)
+    fireEvent.keyDown(block, { key: 'ArrowLeft', shiftKey: true })
+    expect(onPlace).toHaveBeenCalledWith(1)
+  })
+})

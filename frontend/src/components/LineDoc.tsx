@@ -6,6 +6,7 @@ import { diffWords, lineAfter, trackedChanges } from '../transcript/changes'
 import { clock } from '../transcript/format'
 import { speakerSlot } from '../transcript/speakers'
 import { verdict } from '../transcript/verdict'
+import { parseTime, timecode } from '../transcript/time'
 import { Avatar } from './Avatar'
 import styles from './LineDoc.module.css'
 
@@ -20,6 +21,8 @@ export interface LineRequest {
   onLong: LongLines
   delivery: string | null
   mix: 'replace' | 'over' | 'concatenate'
+  /** For an added line: a chosen start on the timeline instead of "after this line". */
+  at?: number | null
 }
 
 /** Where a line stands while Voltage works on it, and the takes to choose from. */
@@ -67,6 +70,13 @@ interface LineDocProps {
   onRemove: (statement: Statement) => void
   onPlayTake: (candidate: Candidate) => void
   onDismiss: (key: LineKey) => void
+  /** A take dragged to a new start; the moved take replaces it under the line. */
+  onMove?: (key: LineKey, candidate: Candidate, start: number) => void
+  /** A kept line dragged to a new start. */
+  onMoveKept?: (editId: string, start: number) => void
+  /** While a take or kept line is being placed: its start, for the bar. */
+  placing?: { id: string; start: number; duration: number } | null
+  onPlacing?: (placing: { id: string; start: number; duration: number } | null) => void
   onReword?: (statement: Statement, draft: string) => Promise<string[]>
   onLongLinesChange?: (value: LongLines) => void
   onEditingChange?: (statement: Statement | null) => void
@@ -107,8 +117,10 @@ export function LineDoc({
   statements, words = [], speakers = [], voices = [], revisions = [], selection, currentTime,
   pendingLines = [], lines = {}, longLines = 'pause', disabled, usdPerChar, playing, readouts = [],
   onSeek, onHear, onKeep, onAnother, onAnswer, onUndo, onRemove, onPlayTake, onDismiss, onReword,
-  onLongLinesChange, onEditingChange,
+  onLongLinesChange, onEditingChange, onMove, onMoveKept, placing, onPlacing,
 }: LineDocProps) {
+  const [at, setAt] = useState<string>('')          // the add editor's "starts at", as typed
+  const [placeText, setPlaceText] = useState('')     // the placing control's time, as typed
   const [editing, setEditing] = useState<{ index: number; mode: 'edit' | 'add' } | null>(null)
   const [draft, setDraft] = useState('')
   const [voiceId, setVoiceId] = useState('')
@@ -161,15 +173,18 @@ export function LineDoc({
     setDelivery(known)
     setOwnWords(focusDelivery && !last?.delivery ? '' : last?.delivery && !known ? last.delivery : null)
     setMix(last?.mix === 'concatenate' ? 'concatenate' : 'over')
+    setAt(last?.at != null ? timecode(last.at) : '')
   }
   const close = () => setEditing(null)
   const hear = (s: Statement) => {
     const text = draft.trim()
     if (!editing || !text || (editing.mode === 'edit' && text === standing(s))) return
     const key = editing.mode === 'edit' ? keyOf(s) : addKeyOf(s)
+    const chosen = editing.mode === 'add' && at.trim() ? parseTime(at) : null
     onHear(key, {
       selection: { start: s.start, end: s.end }, text, voiceId: voiceId || null, onLong,
       delivery: (ownWords?.trim() || delivery) ?? null, mix: editing.mode === 'edit' ? 'replace' : mix,
+      ...(chosen !== null ? { at: chosen } : {}),
     })
     close()
   }
@@ -239,6 +254,13 @@ export function LineDoc({
           </div>
         )}
         {mode === 'add' && (
+          <div className={styles.control}>
+            <span className={styles.controlLabel}>Starts at</span>
+            <input className={styles.ownWords} aria-label="Starts at" placeholder={`after this line (${timecode(s.end)})`} value={at} onChange={(e) => setAt(e.target.value)} />
+            <span className={styles.faint}>{at.trim() && parseTime(at) === null ? 'A time like 0:04.96' : 'Leave it empty to follow this line; or any time, like 0:04.96'}</span>
+          </div>
+        )}
+        {mode === 'add' && (
           <div className={styles.control} role="group" aria-label="Sound meets picture">
             <span className={styles.controlLabel}>Sound meets picture</span>
             <button type="button" className={mix === 'over' ? styles.pillOn : styles.pill} aria-pressed={mix === 'over'} onClick={() => setMix('over')}>Over the picture</button>
@@ -289,6 +311,37 @@ export function LineDoc({
     )
   }
 
+  /** "Starts at 0:04.96 · Move": opens a control to drag it on the bar or type a time. */
+  const placeControl = (id: string, start: number, duration: number, apply: (start: number) => void) => {
+    const open = placing?.id === id
+    const current = open ? placing!.start : start
+    return (
+      <div className={styles.place} data-testid="place">
+        {!open ? (
+          <>
+            <span className={styles.faint}>Starts at {timecode(start)}</span>
+            {onPlacing && <button type="button" className={styles.link} onClick={() => { onPlacing({ id, start, duration }); setPlaceText(timecode(start)) }}>Move</button>}
+          </>
+        ) : (
+          <>
+            <span className={styles.faint}>Drag it on the bar above, or type a time:</span>
+            <input
+              className={styles.ownWords}
+              aria-label="Starts at"
+              value={placeText}
+              onChange={(e) => { setPlaceText(e.target.value); const t = parseTime(e.target.value); if (t !== null) onPlacing?.({ id, start: t, duration }) }}
+              onKeyDown={(e) => { if (e.key === 'Enter') { apply(current); onPlacing?.(null) } if (e.key === 'Escape') onPlacing?.(null) }}
+            />
+            <button type="button" className={styles.secondary} aria-label="Nudge earlier" onClick={() => { const t = Math.round(Math.max(0, current - 0.1) * 100) / 100; onPlacing?.({ id, start: t, duration }); setPlaceText(timecode(t)) }}>◀</button>
+            <button type="button" className={styles.secondary} aria-label="Nudge later" onClick={() => { const t = Math.round((current + 0.1) * 100) / 100; onPlacing?.({ id, start: t, duration }); setPlaceText(timecode(t)) }}>▶</button>
+            <button type="button" className={styles.primary} onClick={() => { apply(current); onPlacing?.(null) }} disabled={disabled}>Put it here</button>
+            <button type="button" className={styles.ghost} onClick={() => onPlacing?.(null)}>Cancel</button>
+          </>
+        )}
+      </div>
+    )
+  }
+
   const takeCard = (key: LineKey, c: Candidate, s: Statement, n: number, total: number, state: LineState) => {
     const v = verdict(c, name(s.speaker))
     const voice = voices.find((x) => x.voice_id === c.plan.voice_profile_id)?.name
@@ -302,6 +355,7 @@ export function LineDoc({
           {v.score !== null && <span className={styles.score}>{v.score.toFixed(2)}</span>}
         </div>
         <div className={styles.verdict}>{v.text}{held ? ' Held the picture: no room to play over it.' : ''}</div>
+        {onMove && placeControl(c.candidate_id, c.plan.selection.start, c.audio.duration, (t) => onMove(key, c, t))}
         {total === 1 && (
           <div className={styles.takeButtons}>
             <button className={styles.primary} onClick={() => onKeep(key, c)} disabled={disabled}>Keep</button>
@@ -416,6 +470,9 @@ export function LineDoc({
                         {removed ? "Removed. The gap is closed with the room's own sound; the picture is untouched." : `Kept${shown && MIX_NOTE[shown.mix] ? ` · ${MIX_NOTE[shown.mix]}` : ''}.`}
                         {revision?.edit_id && <> <button className={styles.undo} onClick={() => onUndo(revision.edit_id!)}>Undo</button></>}
                       </div>
+                    )}
+                    {revision && !removed && revision.edit_id && onMoveKept && (
+                      placeControl(`edit-${revision.edit_id}`, revision.start, Math.max(0.05, revision.end - revision.start), (t) => onMoveKept(revision.edit_id!, t))
                     )}
                     {pending && !revision && pending.text && MIX_NOTE[pending.mix ?? 'replace'] && (
                       <div className={styles.meta}>Added · {MIX_NOTE[pending.mix ?? 'replace']}</div>

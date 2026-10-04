@@ -1603,3 +1603,52 @@ def test_a_plan_item_can_be_given_a_delivery_and_a_placement(client, project, mo
     make_plan(client, goal="urgent")
     plan = client.put("/projects/p1/plans/plan1/items/i1", json={"delivery": "warmer", "mix": "concatenate"}).json()
     assert (plan["items"][0]["delivery"], plan["items"][0]["mix"]) == ("warmer", "concatenate")
+
+
+# ── UX-1b: move a take or a kept line ────────────────────────────────────────
+
+def test_a_take_can_be_moved_without_voicing_it_again(client, project):
+    first = preview(client)
+    moved = client.post(f"/projects/p1/candidates/{first['candidate_id']}/move", json={"start": 1.0}).json()
+    assert moved["candidate_id"] != first["candidate_id"]
+    assert moved["audio"]["sha256"] == first["audio"]["sha256"]           # the same audio
+    assert moved["plan"]["selection"] == {"start": 1.0, "end": pytest.approx(1.0 + first["audio"]["duration"], abs=0.01)}
+    assert moved["plan"]["fit"] == "start" and moved["fit_notes"][-1] == "moved to 0:01"
+    assert client.get("/projects/p1/usage").json()["voice_characters"] == 0
+
+
+def test_a_move_can_change_how_it_meets_the_sound(client, project):
+    first = preview(client)
+    layered = client.post(f"/projects/p1/candidates/{first['candidate_id']}/move", json={"start": 0.2, "mix": "layer"}).json()
+    assert layered["plan"]["mix"] == "layer"
+    held = client.post(f"/projects/p1/candidates/{first['candidate_id']}/move", json={"start": 2.0, "mix": "concatenate"}).json()
+    assert held["plan"]["mix"] == "concatenate" and held["plan"]["selection"] == {"start": 2.0, "end": 2.0}
+
+
+def test_a_move_is_clamped_to_the_video(client, project):
+    first = preview(client)
+    moved = client.post(f"/projects/p1/candidates/{first['candidate_id']}/move", json={"start": 9.0}).json()
+    assert moved["plan"]["selection"]["start"] == pytest.approx(2.3)
+    assert client.post("/projects/p1/candidates/c99/move", json={"start": 1.0}).status_code == 404
+
+
+def test_a_kept_line_moves_in_one_step(client, project):
+    first = preview(client)
+    client.post("/projects/p1/edits", json={"candidate_id": first["candidate_id"]})
+
+    resp = client.post("/projects/p1/edits/e1/move", json={"start": 1.3})
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["reverted"] == "e1" and body["edit_id"] == "e2"
+    edits = client.get("/projects/p1").json()["edits"]
+    assert [(e["edit_id"], e["reverted"]) for e in edits] == [("e1", True), ("e2", False)]
+    assert edits[1]["selection"]["start"] == pytest.approx(1.3)
+    segments = client.post("/projects/p1/export").json()["segments"]
+    edited = [s for s in segments if s["kind"] == "edited"]
+    assert len(edited) == 1 and edited[0]["start"] == pytest.approx(1.3)
+
+
+def test_a_removal_cannot_be_moved(client, project):
+    rm = client.post("/projects/p1/lines/remove", json={"start": 0.5, "end": 1.0}).json()
+    assert client.post(f"/projects/p1/edits/{rm['edit_id']}/move", json={"start": 1.0}).status_code == 422

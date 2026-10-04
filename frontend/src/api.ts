@@ -1,6 +1,6 @@
 import type {
   Project, ApprovedResult, ExportManifest, EditRequest, Job, ProjectSummary, ProjectDetail, Usage, Voice, Speaker,
-  ProjectSettings, LongLines, Rewording, Autonomy, Plan, Fit, Mix, Selection,
+  ProjectSettings, LongLines, Rewording, Autonomy, Plan, Fit, Mix, Selection, Candidate,
 } from './types'
 
 const BASE = '/api'
@@ -167,6 +167,14 @@ export async function updateSettings(
   if (!res.ok) return failure(res)
   return ((await res.json()) as { settings: ProjectSettings }).settings
 }
+
+/** The same take placed somewhere else on the timeline; nothing is voiced again. */
+export const moveCandidate = (id: string, candidateId: string, req: { start: number; mix?: Mix }) =>
+  post<Candidate>(`/projects/${id}/candidates/${candidateId}/move`, req)
+
+/** A kept line placed somewhere else: reverted and re-kept at the new place in one step. */
+export const moveEdit = (id: string, editId: string, req: { start: number; mix?: Mix }) =>
+  post<{ edit_id: string; reverted: string; candidate: Candidate }>(`/projects/${id}/edits/${editId}/move`, req)
 
 /** Takes a line out: its words go, the room's own sound stays. Approved at once. */
 export const removeLine = (id: string, span: { start: number; end: number }) =>

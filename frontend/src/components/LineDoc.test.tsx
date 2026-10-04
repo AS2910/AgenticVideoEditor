@@ -225,3 +225,48 @@ describe('LineDoc: editing starts from where the line stands', () => {
     expect(screen.getByRole('textbox', { name: /words for the new line/i })).toHaveValue('Everything is 30% off.')
   })
 })
+
+describe('LineDoc: a take can go anywhere on the timeline', () => {
+  it('shows where a take starts and lets you move it: drag on the bar, or type a time', async () => {
+    const onPlacing = vi.fn()
+    const onMove = vi.fn()
+    const first = doc({ lines: { [KEY]: { status: 'ready', takes: [take()] } }, onPlacing, onMove })
+    const place = screen.getByTestId('place')
+    expect(place).toHaveTextContent('Starts at 0:07.54')
+    await userEvent.click(within(place).getByRole('button', { name: 'Move' }))
+    expect(onPlacing).toHaveBeenCalledWith({ id: 'c1', start: 7.54, duration: 1.5 })
+    void first
+  })
+
+  it('applies the placed start to the take', async () => {
+    const onMove = vi.fn()
+    const onPlacing = vi.fn()
+    doc({ lines: { [KEY]: { status: 'ready', takes: [take()] } }, onMove, onPlacing, placing: { id: 'c1', start: 9.2, duration: 1.5 } })
+    const place = screen.getByTestId('place')
+    await userEvent.click(within(place).getByRole('button', { name: 'Nudge later' }))
+    expect(onPlacing).toHaveBeenCalledWith({ id: 'c1', start: 9.3, duration: 1.5 })
+    const field = within(place).getByRole('textbox', { name: 'Starts at' })
+    await userEvent.clear(field)
+    await userEvent.type(field, '0:10.00')
+    expect(onPlacing).toHaveBeenLastCalledWith({ id: 'c1', start: 10, duration: 1.5 })
+    await userEvent.click(within(place).getByRole('button', { name: 'Put it here' }))
+    expect(onMove).toHaveBeenCalledWith(KEY, expect.objectContaining({ candidate_id: 'c1' }), 9.2)   // the prop's start wins until re-rendered
+    expect(onPlacing).toHaveBeenLastCalledWith(null)
+  })
+
+  it('moves a kept line too', async () => {
+    const onMoveKept = vi.fn()
+    doc({ revisions: [{ edit_id: 'e1', start: 7.54, end: 9.02, text: 'Start a live Bhaji Cam session.', mix: 'replace' }],
+      onMoveKept, onPlacing: vi.fn(), placing: { id: 'edit-e1', start: 8.0, duration: 1.48 } })
+    await userEvent.click(within(screen.getByTestId('place')).getByRole('button', { name: 'Put it here' }))
+    expect(onMoveKept).toHaveBeenCalledWith('e1', 8.0)
+  })
+
+  it('lets an added line start at a chosen time', async () => {
+    const h = doc()
+    await userEvent.click(screen.getByRole('button', { name: /add a line here/i }))
+    await userEvent.type(screen.getByRole('textbox', { name: 'Starts at' }), '0:03.50')
+    await userEvent.type(screen.getByRole('textbox', { name: /words for the new line/i }), 'Welcome to Goa.{Enter}')
+    expect(h.onHear).toHaveBeenCalledWith(addKeyOf(STATEMENTS[2]), expect.objectContaining({ text: 'Welcome to Goa.', mix: 'over', at: 3.5 }))
+  })
+})
