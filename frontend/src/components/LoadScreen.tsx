@@ -63,7 +63,12 @@ export function LoadScreen({ onLoad, onLoadSample, loading, error, children, who
             </button>
           </div>
           <p className={styles.hint}>Up to 3 minutes, English, one speaker on camera.</p>
-          {loading && <p className={styles.hint} role="status">Uploading and transcribing. This takes a little while for a long clip.</p>}
+          {loading && (
+            <div className={styles.progress} role="status">
+              <span className={styles.progressTrack} role="progressbar" aria-label="Uploading" aria-valuemin={0} aria-valuemax={100}><span className={styles.progressFill} /></span>
+              <span className={styles.hint}>Uploading and transcribing. This takes a little while for a long clip.</span>
+            </div>
+          )}
           {error && <div className={styles.error} role="alert">{error}</div>}
         </div>
       </div>

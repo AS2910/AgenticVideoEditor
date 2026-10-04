@@ -17,6 +17,8 @@ interface ChatPanelProps {
   hint?: string
   /** The composer's input, so "Adjust" can put the cursor there. */
   inputRef?: RefObject<HTMLInputElement | null>
+  /** What the send button will do: Plan it, Change the plan, Answer… */
+  sendLabel?: string
 }
 
 // The panel shows the latest exchange; earlier messages open on request.
@@ -25,7 +27,7 @@ const RECENT = 6
 /** The conversation with Voltage: what you ask for, and what comes back — a
  *  reply, a question, a take. */
 export function ChatPanel({
-  messages, canSubmit, onSubmit, children, toolbar, header, hint, inputRef,
+  messages, canSubmit, onSubmit, children, toolbar, header, hint, inputRef, sendLabel = 'Send',
   placeholder = 'Ask for a change, e.g. say "30% off" instead',
 }: ChatPanelProps) {
   const [prompt, setPrompt] = useState('')
@@ -76,7 +78,7 @@ export function ChatPanel({
             onChange={(e) => setPrompt(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Enter') submit() }}
           />
-          <button className={styles.send} onClick={submit} disabled={disabled} aria-label="Send">
+          <button className={styles.send} onClick={submit} disabled={disabled} aria-label={sendLabel} title={sendLabel}>
             <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
               <path d="M8 13V3M3.5 7.5L8 3l4.5 4.5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
             </svg>

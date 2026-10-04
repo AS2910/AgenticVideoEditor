@@ -335,6 +335,9 @@ export default function App() {
   }
 
   const say = (message: ChatMessage) => setMessages((m) => [...m, message])
+  /** A failure in the plan or the conversation is Voltage's reply, in the thread,
+   *  where it was asked (UX-6); the strip under the player is for the engine. */
+  const tell = (text: string) => say({ role: 'assistant', text })
 
   /** Whose voice a span belongs to, for the consent sentence: "the Shopkeeper". */
   const whoAt = (at: Selection | null | undefined) => {
@@ -600,7 +603,7 @@ export default function App() {
     try {
       await updateSettings(projectId, { long_lines: value })
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : 'Could not save that setting.')
+      tell(e instanceof ApiError ? e.message : "I couldn't save that setting. Try it again.")
     }
   }
 
@@ -610,7 +613,7 @@ export default function App() {
     try {
       await updateSettings(projectId, { autonomy: value })
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : 'Could not save that setting.')
+      tell(e instanceof ApiError ? e.message : "I couldn't save that setting. Try it again.")
     }
   }
 
@@ -638,13 +641,13 @@ export default function App() {
       settled = true
       if (superseded()) return
       if (finished.status === 'failed') {
-        setError(finished.error ?? 'Voicing the plan failed. Try again.')
+        tell(finished.error ?? 'Voicing the plan failed. Say go again and I\'ll retry it.')
       }
       const result = finished.result
       setPlan(result && 'type' in result && result.type === 'plan' ? result : await getPlan(projectId, planId))
     } catch (e) {
       if (e instanceof PollCancelled) return
-      setError(e instanceof ApiError ? e.message : 'Voicing the plan failed. Try again.')
+      tell(e instanceof ApiError ? e.message : 'Voicing the plan failed. Say go again and I\'ll retry it.')
     } finally {
       if (!superseded()) {
         setPlanBusy(false)
@@ -671,7 +674,7 @@ export default function App() {
       say({ role: 'assistant', text: made.question ? made.question.text : made.summary })
       if (made.job_id) void followPlanJob(made.job_id, made.plan_id)
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : 'Could not plan that.')
+      tell(e instanceof ApiError ? e.message : "I couldn't plan that. Try saying it another way.")
     } finally {
       setPlanning(false)
       void refreshUsage(projectId)
@@ -691,7 +694,7 @@ export default function App() {
       say({ role: 'assistant', text: made.summary })
       if (made.job_id) void followPlanJob(made.job_id, made.plan_id)
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : 'Could not plan that.')
+      tell(e instanceof ApiError ? e.message : "I couldn't plan with that answer. Pick one of the options, or say go.")
     } finally {
       setPlanning(false)
       void refreshUsage(projectId)
@@ -712,7 +715,7 @@ export default function App() {
       say({ role: 'assistant', text: revised.question ? revised.question.text : revised.summary })
       if (revised.job_id) void followPlanJob(revised.job_id, revised.plan_id)
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : 'Could not change the plan.')
+      tell(e instanceof ApiError ? e.message : "I couldn't change the plan that way. Try saying it another way.")
     } finally {
       setPlanning(false)
       void refreshUsage(projectId)
@@ -725,7 +728,7 @@ export default function App() {
     try {
       setPlan(await stopPlan(projectId, plan.plan_id))
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : 'Could not stop the plan.')
+      tell(e instanceof ApiError ? e.message : "I couldn't stop the plan. It will finish the line it's on.")
     }
   }
 
@@ -743,7 +746,7 @@ export default function App() {
     try {
       setPlan(await updateItem(projectId, plan.plan_id, item.item_id, change))
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : 'Could not change the plan.')
+      tell(e instanceof ApiError ? e.message : "I couldn't change that item. Try it again.")
     }
   }
 
@@ -758,7 +761,7 @@ export default function App() {
       const job = await start()
       void followPlanJob(job.job_id, plan.plan_id)
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : 'Could not start that.')
+      tell(e instanceof ApiError ? e.message : "I couldn't start that. Say go again.")
     }
   }
 
@@ -859,7 +862,7 @@ export default function App() {
       if (texts.length === 0) {
         const failed = results.find((r) => r.status === 'rejected') as PromiseRejectedResult | undefined
         const reason = failed?.reason
-        setError(reason instanceof ApiError ? reason.message : 'Could not get a wording.')
+        tell(reason instanceof ApiError ? reason.message : "I couldn't come up with a wording just now. Try again in a moment.")
       }
       return Array.from(new Set(texts))
     } finally {
@@ -1094,6 +1097,10 @@ export default function App() {
     : plan?.status === 'proposed' ? 'has a plan'
     : review ? 'ready to ship'
     : 'ready'
+  const sendLabel = clarifying ? 'Answer'
+    : selection ? 'Preview the change'
+    : plan && plan.status !== 'running' && plan.status !== 'stopping' ? 'Change the plan'
+    : 'Plan it'
   const placeholder = clarifying ? 'Answer, or tell Voltage anything else'
     : review ? "What's off?"
     : selection ? 'Ask for a change, e.g. say "30% off" instead'
@@ -1241,7 +1248,7 @@ export default function App() {
           readouts={readouts}
           onSeek={seekToStatement}
           onHear={hearLine}
-          onKeep={(key, c) => void keepTake(key, c)}
+          onKeep={(key, c) => keepTake(key, c)}
           onAnother={anotherTake}
           onAnswer={answerLine}
           onUndo={(id) => void revert(id)}
@@ -1268,6 +1275,7 @@ export default function App() {
           onSubmit={submitComposer}
           inputRef={composerRef}
           placeholder={placeholder}
+          sendLabel={sendLabel}
           hint={clarifying ? 'Pick an answer above, or just say "go" and Voltage will use its guess.'
             : selection && precise ? `Talking about the words at ${clock(selection.start)}.`
             : 'For the whole video: a goal, or a change to the plan. To change one line, click it.'}
@@ -1287,6 +1295,11 @@ export default function App() {
               {statements.length === 0
                 ? "There's no speech in this clip, so there's nothing for me to change. If you want a voice-over, drag across the timeline where it should go and tell me what to say."
                 : "Tell me what this video should say and I'll plan it across every line it touches. Or click any line to change it yourself; I'll stay out of the way."}
+            </div>
+          )}
+          {planning && !plan && (
+            <div className={styles.skeleton} aria-hidden="true" data-testid="skeleton">
+              <span /><span /><span />
             </div>
           )}
           {(planning || clarifying) && (
@@ -1353,17 +1366,17 @@ export default function App() {
               voices={voices}
               projectId={project.project_id}
               busy={planBusy}
-              onToggle={(item, enabled) => void changeItem(item, { enabled })}
-              onReword={(item, text) => void changeItem(item, { new_text: text })}
-              onInclude={(item, include) => void changeItem(item, { include })}
-              onRun={() => void runThePlan()}
+              onToggle={(item, enabled) => changeItem(item, { enabled })}
+              onReword={(item, text) => changeItem(item, { new_text: text })}
+              onInclude={(item, include) => changeItem(item, { include })}
+              onRun={() => runThePlan()}
               onAdjust={() => composerRef.current?.focus()}
-              onAnswer={(item, option) => void answerTheItem(item, option)}
-              onRedo={(item) => void redoTheItem(item)}
+              onAnswer={(item, option) => answerTheItem(item, option)}
+              onRedo={(item) => redoTheItem(item)}
               onApproveAll={() => setReview(true)}
-              onDelivery={(item, delivery) => void changeItem(item, { delivery: delivery ?? '' })}
-              onMix={(item, mix) => void changeItem(item, { mix })}
-              onStop={() => void stop()}
+              onDelivery={(item, delivery) => changeItem(item, { delivery: delivery ?? '' })}
+              onMix={(item, mix) => changeItem(item, { mix })}
+              onStop={() => stop()}
             />
           )}
           {planBusy && (
@@ -1403,8 +1416,8 @@ export default function App() {
               )}
               <CandidateCard
                 candidate={candidate}
-                onApprove={() => void approve()}
-                onApproveAnyway={() => void approve(true)}
+                onApprove={() => approve()}
+                onApproveAnyway={() => approve(true)}
                 onTryAgain={() => { setCandidate(null); setAsked(null) }}
                 projectId={project.project_id}
                 label={`The change at ${clock(candidate.plan.selection.start)}${takeVoice ? `, ${takeVoice}'s voice` : ''}`}

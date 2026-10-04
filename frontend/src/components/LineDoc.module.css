@@ -162,3 +162,11 @@
   .row[data-actions-open] .actions { display: flex; }
   .more { display: inline-flex; align-items: center; justify-content: center; }
 }
+
+/* UX-6: a take, a question or an editor unfolds its row instead of snapping it open. */
+.reveal { display: grid; grid-template-rows: 1fr; animation: unfold var(--t-open) var(--ease) both; }
+.reveal:empty { display: none; }
+.reveal > * { min-height: 0; }
+@keyframes unfold { from { grid-template-rows: 0fr; opacity: 0; } to { grid-template-rows: 1fr; opacity: 1; } }
+/* A warning on the amber option reads in ink, never in rose on amber. */
+.primary .warning { color: var(--accent-ink); opacity: 0.8; }

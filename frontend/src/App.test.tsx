@@ -179,7 +179,7 @@ describe('App full journey', () => {
     // Select a word, then prompt
     await user.click(screen.getByText('20%'))
     await user.type(screen.getByRole('textbox', { name: /describe a change/i }), 'change "20% off" to "30% off"')
-    await user.click(screen.getByRole('button', { name: /send/i }))
+    await user.click(screen.getByRole('button', { name: /send|plan it|change the plan|answer|preview the change/i }))
 
     await waitFor(() => expect(screen.getByText('30% off')).toBeInTheDocument())
     expect(screen.getByText(/continuity checked/i)).toBeInTheDocument()
@@ -205,7 +205,7 @@ describe('App full journey', () => {
 
     await user.click(screen.getByText('20%'))
     await user.type(screen.getByRole('textbox', { name: /describe a change/i }), 'change "20% off" to "30% off"')
-    await user.click(screen.getByRole('button', { name: /send/i }))
+    await user.click(screen.getByRole('button', { name: /send|plan it|change the plan|answer|preview the change/i }))
 
     await waitFor(() =>
       expect(screen.getByText(/matching mouth movement/i)).toBeInTheDocument())
@@ -222,7 +222,7 @@ describe('App full journey', () => {
 
     await user.click(screen.getByText('20%'))
     await user.type(screen.getByRole('textbox', { name: /describe a change/i }), 'change "20% off" to "30% off"')
-    await user.click(screen.getByRole('button', { name: /send/i }))
+    await user.click(screen.getByRole('button', { name: /send|plan it|change the plan|answer|preview the change/i }))
 
     await waitFor(() =>
       expect(screen.getByText(/failed after several attempts/i)).toBeInTheDocument())
@@ -248,7 +248,7 @@ describe('App full journey', () => {
 
     await user.click(screen.getByText('20%'))
     await user.type(screen.getByRole('textbox', { name: /describe a change/i }), 'change "20% off" to "30% off"')
-    await user.click(screen.getByRole('button', { name: /send/i }))
+    await user.click(screen.getByRole('button', { name: /send|plan it|change the plan|answer|preview the change/i }))
 
     // Nothing is voiced until the question is answered.
     const sheet = await screen.findByRole('dialog')
@@ -259,7 +259,7 @@ describe('App full journey', () => {
     expect(f.mock.calls.some(([url]) => String(url).endsWith('/edits/preview'))).toBe(false)
 
     await user.type(screen.getByRole('textbox', { name: /describe a change/i }), 'change "20% off" to "30% off"')
-    await user.click(screen.getByRole('button', { name: /send/i }))
+    await user.click(screen.getByRole('button', { name: /send|plan it|change the plan|answer|preview the change/i }))
     await user.click(await screen.findByRole('button', { name: 'Yes, I have it' }))
     await waitFor(() => expect(granted).toHaveLength(1))
     await waitFor(() => expect(f.mock.calls.some(([url]) => String(url).endsWith('/edits/preview'))).toBe(true))
@@ -290,7 +290,7 @@ describe('App full journey', () => {
 
     await user.click(screen.getByText('20%'))
     await user.type(screen.getByRole('textbox', { name: /describe a change/i }), 'change "20% off" to "30% off"')
-    await user.click(screen.getByRole('button', { name: /send/i }))
+    await user.click(screen.getByRole('button', { name: /send|plan it|change the plan|answer|preview the change/i }))
 
     await waitFor(() =>
       expect(screen.getByText(/right to edit and clone/i)).toBeInTheDocument())
@@ -324,7 +324,7 @@ describe('App full journey', () => {
 
     await user.click(screen.getByText('20%'))
     await user.type(screen.getByRole('textbox', { name: /describe a change/i }), 'change "20% off" to "30% off"')
-    await user.click(screen.getByRole('button', { name: /send/i }))
+    await user.click(screen.getByRole('button', { name: /send|plan it|change the plan|answer|preview the change/i }))
     await waitFor(() => expect(screen.getByText('30% off')).toBeInTheDocument())
 
     await user.click(screen.getByRole('button', { name: /approve/i }))
@@ -344,7 +344,7 @@ describe('App full journey', () => {
 
     await user.click(screen.getByText('Get')) // 0.0–0.4
     await user.type(screen.getByRole('textbox', { name: /describe a change/i }), 'change it')
-    await user.click(screen.getByRole('button', { name: /send/i }))
+    await user.click(screen.getByRole('button', { name: /send|plan it|change the plan|answer|preview the change/i }))
 
     // Backend returns 0.4–0.9; the timeline region must follow it.
     await waitFor(() => {

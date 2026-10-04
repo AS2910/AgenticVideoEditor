@@ -24,12 +24,13 @@ export function VoicePicker({ voices, value, onChange }: VoicePickerProps) {
         className={styles.select}
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        title={current?.description}
+        aria-describedby={current?.description ? 'voice-about' : undefined}
       >
         {voices.map((v) => (
           <option key={v.voice_id} value={v.voice_id}>{label(v)}</option>
         ))}
       </select>
+      {current?.description && <span id="voice-about" className={styles.about}>{current.description}</span>}
     </label>
   )
 }
