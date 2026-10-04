@@ -1,5 +1,6 @@
 .list { width: 100%; display: flex; flex-direction: column; }
-.heading { color: var(--muted); font-size: 13px; margin-bottom: 6px; }
+.heading { margin: 0 0 6px; color: var(--muted); font-size: var(--fs-13); font-weight: 400; font-family: var(--ui); }
+.rows { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; }
 .row { display: flex; gap: 8px; align-items: center; border-top: 1px solid var(--line); }
 .open {
   flex: 1; min-width: 0; display: flex; gap: 12px; align-items: center; text-align: left;

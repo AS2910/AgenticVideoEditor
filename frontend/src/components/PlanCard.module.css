@@ -4,14 +4,15 @@
   border-radius: var(--radius-lg); background: var(--surface); border: 1px solid var(--line); box-shadow: var(--shadow);
 }
 .head { display: flex; align-items: center; gap: 10px; padding: 12px 0 8px; }
-.title { font-family: var(--serif); font-size: 16px; font-weight: 600; }
+.title { margin: 0; font-family: var(--serif); font-size: 16px; font-weight: 600; }
 .count { color: var(--muted); font-size: var(--fs-13); white-space: nowrap; }
 .spacer { flex: 1; }
 .progress { width: 120px; height: 5px; border-radius: 3px; background: var(--line); }
 .progressFill { width: 100%; height: 5px; border-radius: 3px; transform-origin: left; background: linear-gradient(90deg, var(--accent-fill), var(--accent)); transition: transform var(--t-open) var(--ease); }
 
 .item { display: flex; gap: 12px; align-items: flex-start; padding: 12px 0; border-top: 1px solid var(--line); }
-.tick { margin-top: 5px; width: 16px; height: 16px; flex: none; accent-color: var(--accent-fill); }
+.tick { display: flex; align-items: center; justify-content: center; width: var(--target); height: var(--target); margin: -10px 0 0 -12px; flex: none; cursor: pointer; }
+.tick input { width: 20px; height: 20px; margin: 0; accent-color: var(--accent-fill); cursor: pointer; }
 .icon { padding-top: 2px; display: flex; flex: none; }
 .spin { animation: spin 900ms linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }

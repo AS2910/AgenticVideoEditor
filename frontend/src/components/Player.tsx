@@ -148,6 +148,7 @@ export function Player({
               aria-valuemin={0}
               aria-valuemax={length}
               aria-valuenow={placing.start}
+              aria-valuetext={`${placing.start.toFixed(2)} seconds`}
               tabIndex={0}
               style={{ left: `${(placing.start / length) * 100}%`, width: `${Math.max(0.5, (placing.duration / length) * 100)}%` }}
               onPointerDown={startPlacing}
@@ -170,6 +171,7 @@ export function Player({
             value={Math.min(currentTime, length)}
             onChange={(e) => seek(Number(e.target.value))}
             aria-label="Seek"
+            aria-valuetext={`${timecode(currentTime)} of ${timecode(length)}`}
           />
         </div>
         {children}

@@ -137,7 +137,9 @@ export function LineDoc({
   const [focusedRow, setFocusedRow] = useState<number | null>(null)
   // A row being dragged up or down to shift it in time (UX-1c).
   const [drag, setDrag] = useState<{ key: string; label: string; duration: number; at: number; to: number; apply: (to: number) => void } | null>(null)
-const box = useRef<HTMLTextAreaElement>(null)
+  const box = useRef<HTMLTextAreaElement>(null)
+  // A grip drag that moved must not also count as a click on the grip.
+  const dragged = useRef(false)
 
   useEffect(() => { box.current?.focus() }, [editing])
   // The row to put focus back on when its editor closes, so the keys keep working.
@@ -244,6 +246,7 @@ const box = useRef<HTMLTextAreaElement>(null)
     if (!editing || !text || (editing.mode === 'edit' && text === standing(s))) return
     const key = editing.mode === 'edit' ? keyOf(s) : addKeyOf(s)
     const chosen = editing.mode === 'add' && at.trim() ? parseTime(at) : null
+    if (editing.mode === 'add' && at.trim() && chosen === null) return   // an unreadable time is never dropped silently
     onHear(key, {
       selection: { start: s.start, end: s.end }, text, voiceId: voiceId || null, onLong,
       delivery: (ownWords?.trim() || delivery) ?? null, mix: editing.mode === 'edit' ? 'replace' : mix,
@@ -268,6 +271,7 @@ const box = useRef<HTMLTextAreaElement>(null)
     const chars = draft.trim().length
     const cost = usdPerChar ? ` · about ${Math.max(1, Math.round(chars * usdPerChar * 100))}¢` : ''
     const base = mode === 'edit' ? standing(s) : ''
+    const badAt = mode === 'add' && at.trim() !== '' && parseTime(at) === null
     const preview = mode === 'edit' && draft.trim() && draft.trim() !== base
       ? diffWords(base, draft.trim()) : null
     return (
@@ -297,9 +301,9 @@ const box = useRef<HTMLTextAreaElement>(null)
         )}
         <div className={styles.control}>
           <span className={styles.controlLabel}>Delivery</span>
-          <button type="button" className={delivery === null && ownWords === null ? styles.pillOn : styles.pill} onClick={() => { setDelivery(null); setOwnWords(null) }}>As spoken</button>
+          <button type="button" className={delivery === null && ownWords === null ? styles.pillOn : styles.pill} aria-pressed={delivery === null && ownWords === null} onClick={() => { setDelivery(null); setOwnWords(null) }}>As spoken</button>
           {DELIVERIES.map((d) => (
-            <button key={d} type="button" className={delivery === d ? styles.pillOn : styles.pill} onClick={() => { setDelivery(d); setOwnWords(null) }}>
+            <button key={d} type="button" className={delivery === d ? styles.pillOn : styles.pill} aria-pressed={delivery === d} onClick={() => { setDelivery(d); setOwnWords(null) }}>
               {d.charAt(0).toUpperCase() + d.slice(1)}
             </button>
           ))}
@@ -319,8 +323,8 @@ const box = useRef<HTMLTextAreaElement>(null)
         {mode === 'add' && (
           <div className={styles.control}>
             <span className={styles.controlLabel}>Starts at</span>
-            <input className={styles.ownWords} aria-label="Starts at" placeholder={`after this line (${timecode(s.end)})`} value={at} onChange={(e) => setAt(e.target.value)} />
-            <span className={styles.faint}>{at.trim() && parseTime(at) === null ? 'A time like 0:04.96' : 'Leave it empty to follow this line; or any time, like 0:04.96'}</span>
+            <input className={styles.ownWords} aria-label="Starts at" aria-invalid={badAt || undefined} aria-describedby="starts-at-help" placeholder={`after this line (${timecode(s.end)})`} value={at} onChange={(e) => setAt(e.target.value)} />
+            <span id="starts-at-help" className={badAt ? styles.invalid : styles.faint} role={badAt ? 'alert' : undefined}>{badAt ? 'A time like 0:04.96, or leave it empty to follow this line.' : 'Leave it empty to follow this line; or any time, like 0:04.96'}</span>
           </div>
         )}
         {mode === 'add' && (
@@ -350,7 +354,7 @@ const box = useRef<HTMLTextAreaElement>(null)
             type="button"
             className={styles.primary}
             aria-label="Hear it"
-            disabled={disabled || !draft.trim() || (mode === 'edit' && draft.trim() === base)}
+            disabled={disabled || !draft.trim() || badAt || (mode === 'edit' && draft.trim() === base)}
             onClick={() => hear(s)}
           >
             Hear it
@@ -433,11 +437,11 @@ const box = useRef<HTMLTextAreaElement>(null)
     const state = lines[key]
     if (!state) return null
     if (state.status === 'working') {
-      return <div className={styles.working} data-testid="line-working"><Spinner /><span>{state.progress ?? 'Voicing the line…'}</span></div>
+      return <div className={styles.working} data-testid="line-working" role="status"><Spinner /><span>{state.progress ?? 'Voicing the line…'}</span></div>
     }
     if (state.status === 'failed') {
       return (
-        <div className={styles.failed} data-testid="line-error">
+        <div className={styles.failed} data-testid="line-error" role="alert">
           <span className={styles.spacer}>{state.error ?? "Couldn't voice it."}</span>
           {state.request && <button className={styles.secondary} onClick={() => onHear(key, state.request!)} disabled={disabled}>Try again</button>}
           <button className={styles.ghost} onClick={() => onDismiss(key)}>Dismiss</button>
@@ -447,7 +451,7 @@ const box = useRef<HTMLTextAreaElement>(null)
     if (state.status === 'needs-you' && state.question) {
       const q = state.question
       return (
-        <div className={styles.needs} data-testid="line-needs-you">
+        <div className={styles.needs} data-testid="line-needs-you" role="status">
           <div>{q.question}</div>
           <div className={styles.options}>
             {q.options.map((o, k) => (
@@ -502,6 +506,7 @@ const box = useRef<HTMLTextAreaElement>(null)
   const startDrag = (e: React.PointerEvent, key: string, label: string, at: number, duration: number, apply: (to: number) => void) => {
     if (!onPlacing) return
     e.preventDefault()
+    dragged.current = false
     setDrag({ key, label, duration, at, to: at, apply })
     onPlacing({ id: key, start: at, duration })
     const move = (ev: PointerEvent) => {
@@ -512,6 +517,7 @@ const box = useRef<HTMLTextAreaElement>(null)
         if (ev.clientY > box.top + box.height / 2) to = Number(el.dataset.rowEnd)
       }
       to = Math.round(to * 100) / 100
+      dragged.current = true
       setDrag((d) => (d ? { ...d, to } : d))
       onPlacing({ id: key, start: to, duration })
     }
@@ -535,7 +541,7 @@ const box = useRef<HTMLTextAreaElement>(null)
     return target ? rows.indexOf(target) : rows.length
   }
   const dropMarker = () => drag && (
-    <div className={styles.dropLine} data-testid="drop-line">
+    <div className={styles.dropLine} data-testid="drop-line" role="presentation">
       <span>Starts at {timecode(drag.to)}</span>
     </div>
   )
@@ -557,7 +563,7 @@ const box = useRef<HTMLTextAreaElement>(null)
           data-row-end={rev.end}
           data-dragging={drag?.key === key || undefined}
           tabIndex={0}
-          role="row"
+          role="listitem"
           aria-label={`Moved line at ${clock(rev.start)}${label ? `, ${label}` : ''}`}
         >
           <button className={styles.time} onClick={() => onSeek({ ...s, start: rev.start, end: rev.end })} aria-label={`Go to ${clock(rev.start)}`}>{clock(rev.start)}</button>
@@ -578,8 +584,9 @@ const box = useRef<HTMLTextAreaElement>(null)
               <button
                 type="button"
                 className={styles.grip}
-                aria-label={`Drag to move the line at ${clock(rev.start)}`}
+                aria-label={`Move the line at ${clock(rev.start)}: drag it, or press Enter to type a time`}
                 onPointerDown={(e) => startDrag(e, key, s.text, rev.start, Math.max(0.05, rev.end - rev.start), (t) => onMoveKept(rev.edit_id!, t))}
+                onClick={() => { if (dragged.current) { dragged.current = false; return } onPlacing({ id: `edit-${rev.edit_id}`, start: rev.start, duration: Math.max(0.05, rev.end - rev.start) }); setPlaceText(timecode(rev.start)) }}
               >⋮⋮</button>
             )}
           </span>
@@ -623,7 +630,7 @@ const box = useRef<HTMLTextAreaElement>(null)
           data-row-end={s.end}
           data-dragging={drag?.key === key || undefined}
           tabIndex={0}
-          role="row"
+          role="listitem"
           aria-label={`Line at ${clock(s.start)}${label ? `, ${label}` : ''}`}
           onKeyDown={(e) => onRowKey(e, i)}
           onFocus={(e) => { if (e.target === e.currentTarget) setFocusedRow(i) }}
@@ -663,7 +670,7 @@ const box = useRef<HTMLTextAreaElement>(null)
             )}
           </div>
           <span className={styles.side}>
-            {status && STATUS[status] && <span className={styles.chip} data-tone={TONE[status]}>{STATUS[status]}</span>}
+            {status && STATUS[status] && <span className={styles.chip} data-tone={TONE[status]} role="status">{STATUS[status]}</span>}
             {status === 'kept' && <span className={styles.chip} data-tone="ok">Kept</span>}
             {status === 'removed' && <span className={styles.chip} data-tone="muted">{movedTo ? 'Moved away' : 'Removed'}</span>}
             {!isEditing && !isAdding && (
@@ -682,32 +689,33 @@ const box = useRef<HTMLTextAreaElement>(null)
                 <button
                 type="button"
                 className={styles.grip}
-                aria-label={`Drag to move the line at ${clock(s.start)}`}
+                aria-label={`Move the line at ${clock(s.start)}: drag it, or press Enter to type a time`}
                 onPointerDown={(e) => startDrag(e, key, s.text, s.start, Math.max(0.05, s.end - s.start), (t) => onShift(s, t))}
+                onClick={() => { if (dragged.current) { dragged.current = false; return } onPlacing({ id: `shift-${key}`, start: s.start, duration: Math.max(0.05, s.end - s.start) }); setPlaceText(timecode(s.start)) }}
                 >⋮⋮</button>
                 )}
                 </span>
         </div>
         {isAdding && (
-          <div className={styles.row} data-state="adding">
+          <div className={styles.row} data-state="adding" role="listitem" aria-label={`New line after ${clock(s.start)}`}>
             <span className={styles.time} />
             <span className={styles.who} />
             <div className={styles.body}>{editor(s, 'add')}</div>
           </div>
         )}
         {added && !isAdding && (
-          <div className={styles.row} data-state={added.status}>
+          <div className={styles.row} data-state={added.status} role="listitem" aria-label={`New line after ${clock(s.start)}`}>
             <span className={styles.time}>{clock(s.end)}</span>
             <span className={styles.who} />
             <div className={styles.body}>
               <div className={styles.meta}>New line after {clock(s.start)}{added.request ? ` · ${added.request.mix === 'over' ? 'plays over the picture' : 'the picture holds'}` : ''}</div>
               {lineBlock(addKey, s, i)}
             </div>
-            <span className={styles.side}>{STATUS[added.status] && <span className={styles.chip} data-tone={TONE[added.status]}>{STATUS[added.status]}</span>}</span>
+            <span className={styles.side}>{STATUS[added.status] && <span className={styles.chip} data-tone={TONE[added.status]} role="status">{STATUS[added.status]}</span>}</span>
           </div>
         )}
         {!isAdding && !added && i === statements.length - 1 && (
-          <div className={styles.addRow}>
+          <div className={styles.addRow} role="listitem">
             <button className={styles.add} onClick={() => open(i, 'add')}><span aria-hidden="true">+</span> Add a line here</button>
           </div>
         )}
@@ -718,7 +726,7 @@ const box = useRef<HTMLTextAreaElement>(null)
   return (
     <section className={styles.doc} aria-label="Transcript">
       <div className={styles.heading}>
-        <span className={styles.title}>Transcript</span>
+        <h2 className={styles.title}>Transcript</h2>
         <span className={styles.hint}>
           {editing ? (editing.mode === 'edit' ? `Editing ${clock(statements[editing.index].start)}. Enter to hear it, Esc to cancel.` : `Adding a line after ${clock(statements[editing.index].start)}. Esc to cancel.`)
             : pendingLines.some((p) => p.status === 'reading') ? "Voltage is reading. The line it's on is lit."
@@ -727,8 +735,10 @@ const box = useRef<HTMLTextAreaElement>(null)
         </span>
       </div>
 
-      {rows.map((entry, order) => (entry.kind === 'moved' ? movedRow(entry, order) : lineRow(entry.s, entry.i, order)))}
-      {drag && dropIndexFor(drag.to) === rows.length && dropMarker()}
+      <div role="list" className={styles.doc}>
+        {rows.map((entry, order) => (entry.kind === 'moved' ? movedRow(entry, order) : lineRow(entry.s, entry.i, order)))}
+        {drag && dropIndexFor(drag.to) === rows.length && dropMarker()}
+      </div>
     </section>
   )
 }

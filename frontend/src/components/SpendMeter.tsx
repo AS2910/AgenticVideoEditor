@@ -16,8 +16,20 @@ export function SpendMeter({ usage }: { usage: Usage | null }) {
     `${usage.voice_characters.toLocaleString()} of ${usage.voice_characters_ceiling.toLocaleString()} voice characters`,
   ].join(' · ')
   return (
-    <div className={near ? styles.near : styles.meter} data-testid="spend" title={detail}>
+    <div
+      className={near ? styles.near : styles.meter}
+      data-testid="spend"
+      title={detail}
+      role="meter"
+      aria-label="Spend on this project"
+      aria-valuemin={0}
+      aria-valuemax={usage.ceiling_usd}
+      aria-valuenow={usage.spent_usd}
+      aria-valuetext={`Spent $${usage.spent_usd.toFixed(2)} of $${usage.ceiling_usd.toFixed(2)}${near ? ', near the cap' : ''}. ${detail}`}
+    >
+      <span className="srOnly">Spent </span>
       <span className={styles.label}>${usage.spent_usd.toFixed(2)} of ${usage.ceiling_usd.toFixed(2)}</span>
+      {near && <span className={styles.nearWord} role="status">near the cap</span>}
       <span className={styles.track} aria-hidden="true"><span className={styles.fill} style={{ transform: `scaleX(${share})` }} /></span>
       {' '}
       <span className={styles.detail}>{usage.voice_characters.toLocaleString()} of {usage.voice_characters_ceiling.toLocaleString()} voice characters</span>

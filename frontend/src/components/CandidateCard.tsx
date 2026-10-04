@@ -63,7 +63,7 @@ export function CandidateCard({
       {c.passed ? (
         <div className={styles.badge}>Continuity checked</div>
       ) : (
-        <div className={styles.badgeFail}>Continuity below threshold</div>
+        <div className={styles.badgeFail} role="status">Continuity below threshold</div>
       )}
 
       <div className={styles.metrics}>
@@ -94,6 +94,7 @@ export function CandidateCard({
                 />
               </div>
               <span className={styles.metricValue}>{value.toFixed(2)}</span>
+              {!ok && <span className="srOnly">, below {THRESHOLD.toFixed(2)}</span>}
             </div>
           )
         })}

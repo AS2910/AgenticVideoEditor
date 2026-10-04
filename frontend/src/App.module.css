@@ -40,8 +40,8 @@
   flex: none; display: flex; align-items: center; gap: 10px;
   padding: 12px 20px; border-bottom: 1px solid var(--line);
 }
-.panelTitle { font-family: var(--serif); font-size: 17px; font-weight: 600; }
-.brand { font-family: var(--serif); font-size: 18px; font-weight: 600; letter-spacing: -0.01em; }
+.panelTitle { margin: 0; font-family: var(--serif); font-size: 17px; font-weight: 600; }
+.brand { margin: 0; font-family: var(--serif); font-size: 18px; font-weight: 600; letter-spacing: -0.01em; }
 .welcome { font-size: var(--fs-16); line-height: 1.6; color: var(--muted); }
 .thinking { display: flex; flex-direction: column; gap: 10px; padding: 2px 0 0 2px; font-size: 14px; line-height: 1.5; }
 .thought { display: flex; gap: 10px; align-items: flex-start; animation: appear var(--t-open) var(--ease) both; }
@@ -132,5 +132,5 @@
 .whoName { max-width: 140px; overflow: hidden; text-overflow: ellipsis; }
 .signOut { background: none; border: 1px solid var(--line); border-radius: 8px; padding: 0 12px; color: var(--muted); font-size: var(--fs-13); }
 .signOut:hover { color: var(--text); border-color: var(--muted); }
-.blank { min-height: 100dvh; background: var(--bg); }
+.blank { min-height: 100dvh; display: flex; align-items: center; justify-content: center; gap: 12px; background: var(--bg); color: var(--muted); }
 @media (max-width: 960px) { .whoName { display: none; } }

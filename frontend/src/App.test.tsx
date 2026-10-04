@@ -179,7 +179,7 @@ describe('App full journey', () => {
     // Select a word, then prompt
     await user.click(screen.getByText('20%'))
     await user.type(screen.getByRole('textbox', { name: /describe a change/i }), 'change "20% off" to "30% off"')
-    await user.click(screen.getByRole('button', { name: /preview/i }))
+    await user.click(screen.getByRole('button', { name: /send/i }))
 
     await waitFor(() => expect(screen.getByText('30% off')).toBeInTheDocument())
     expect(screen.getByText(/continuity checked/i)).toBeInTheDocument()
@@ -205,7 +205,7 @@ describe('App full journey', () => {
 
     await user.click(screen.getByText('20%'))
     await user.type(screen.getByRole('textbox', { name: /describe a change/i }), 'change "20% off" to "30% off"')
-    await user.click(screen.getByRole('button', { name: /preview/i }))
+    await user.click(screen.getByRole('button', { name: /send/i }))
 
     await waitFor(() =>
       expect(screen.getByText(/matching mouth movement/i)).toBeInTheDocument())
@@ -222,7 +222,7 @@ describe('App full journey', () => {
 
     await user.click(screen.getByText('20%'))
     await user.type(screen.getByRole('textbox', { name: /describe a change/i }), 'change "20% off" to "30% off"')
-    await user.click(screen.getByRole('button', { name: /preview/i }))
+    await user.click(screen.getByRole('button', { name: /send/i }))
 
     await waitFor(() =>
       expect(screen.getByText(/failed after several attempts/i)).toBeInTheDocument())
@@ -248,18 +248,18 @@ describe('App full journey', () => {
 
     await user.click(screen.getByText('20%'))
     await user.type(screen.getByRole('textbox', { name: /describe a change/i }), 'change "20% off" to "30% off"')
-    await user.click(screen.getByRole('button', { name: /preview/i }))
+    await user.click(screen.getByRole('button', { name: /send/i }))
 
     // Nothing is voiced until the question is answered.
     const sheet = await screen.findByRole('dialog')
     expect(sheet).toHaveTextContent("I'll be creating speech in this person's voice")
     expect(f.mock.calls.some(([url]) => String(url).endsWith('/edits/preview'))).toBe(false)
-    await user.click(screen.getByRole('button', { name: 'Not yet' }))
+    await user.click(screen.getByRole('button', { name: /not yet/i }))
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
     expect(f.mock.calls.some(([url]) => String(url).endsWith('/edits/preview'))).toBe(false)
 
     await user.type(screen.getByRole('textbox', { name: /describe a change/i }), 'change "20% off" to "30% off"')
-    await user.click(screen.getByRole('button', { name: /preview/i }))
+    await user.click(screen.getByRole('button', { name: /send/i }))
     await user.click(await screen.findByRole('button', { name: 'Yes, I have it' }))
     await waitFor(() => expect(granted).toHaveLength(1))
     await waitFor(() => expect(f.mock.calls.some(([url]) => String(url).endsWith('/edits/preview'))).toBe(true))
@@ -290,7 +290,7 @@ describe('App full journey', () => {
 
     await user.click(screen.getByText('20%'))
     await user.type(screen.getByRole('textbox', { name: /describe a change/i }), 'change "20% off" to "30% off"')
-    await user.click(screen.getByRole('button', { name: /preview/i }))
+    await user.click(screen.getByRole('button', { name: /send/i }))
 
     await waitFor(() =>
       expect(screen.getByText(/right to edit and clone/i)).toBeInTheDocument())
@@ -324,7 +324,7 @@ describe('App full journey', () => {
 
     await user.click(screen.getByText('20%'))
     await user.type(screen.getByRole('textbox', { name: /describe a change/i }), 'change "20% off" to "30% off"')
-    await user.click(screen.getByRole('button', { name: /preview/i }))
+    await user.click(screen.getByRole('button', { name: /send/i }))
     await waitFor(() => expect(screen.getByText('30% off')).toBeInTheDocument())
 
     await user.click(screen.getByRole('button', { name: /approve/i }))
@@ -344,7 +344,7 @@ describe('App full journey', () => {
 
     await user.click(screen.getByText('Get')) // 0.0–0.4
     await user.type(screen.getByRole('textbox', { name: /describe a change/i }), 'change it')
-    await user.click(screen.getByRole('button', { name: /preview/i }))
+    await user.click(screen.getByRole('button', { name: /send/i }))
 
     // Backend returns 0.4–0.9; the timeline region must follow it.
     await waitFor(() => {
@@ -1277,7 +1277,7 @@ describe('App: shifting original speech (UX-1c)', () => {
     // Where it was, and its own row where it now plays.
     expect(await screen.findByText('Moved away')).toBeInTheDocument()
     expect(screen.getByText(/Moved to 0:01\.00/)).toBeInTheDocument()
-    expect(screen.getByRole('row', { name: 'Moved line at 0:01' })).toHaveTextContent('Get 20% off today only.')
+    expect(screen.getByRole('listitem', { name: 'Moved line at 0:01' })).toHaveTextContent('Get 20% off today only.')
     expect(screen.getByText('Moved')).toBeInTheDocument()
     await user.click(screen.getAllByRole('button', { name: 'Undo' })[0])
     await waitFor(() => expect(f.mock.calls.some(([url]) => String(url).endsWith('/edits/e8/revert'))).toBe(true))

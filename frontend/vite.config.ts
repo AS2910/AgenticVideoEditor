@@ -13,6 +13,17 @@ export default defineConfig({
       },
     },
   },
+  // The same proxy for `vite preview`, so a production build can be checked
+  // against the local backend (headless captures use this: no HMR socket).
+  preview: {
+    proxy: {
+      '/api': {
+        target: 'http://127.0.0.1:8000',
+        changeOrigin: true,
+        rewrite: (p) => p.replace(/^\/api/, ''),
+      },
+    },
+  },
   test: {
     environment: 'jsdom',
     globals: true,

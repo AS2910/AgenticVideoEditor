@@ -31,6 +31,7 @@ export function LoadScreen({ onLoad, onLoadSample, loading, error, children, who
         )}
       </header>
 
+      <main className={styles.main}>
       <div className={styles.hero}>
         <h1 className={styles.title}>Change what's said in a video you've already shot.</h1>
         <p className={styles.tagline}>
@@ -38,7 +39,7 @@ export function LoadScreen({ onLoad, onLoadSample, loading, error, children, who
           voice that fits — checking each one sounds right before anything is final.
         </p>
 
-        <div className={styles.card}>
+        <div className={styles.card} aria-busy={loading || undefined}>
           <input
             ref={inputRef}
             className={styles.fileInput}
@@ -62,11 +63,13 @@ export function LoadScreen({ onLoad, onLoadSample, loading, error, children, who
             </button>
           </div>
           <p className={styles.hint}>Up to 3 minutes, English, one speaker on camera.</p>
-          {error && <div className={styles.error}>{error}</div>}
+          {loading && <p className={styles.hint} role="status">Uploading and transcribing. This takes a little while for a long clip.</p>}
+          {error && <div className={styles.error} role="alert">{error}</div>}
         </div>
       </div>
 
       <div className={styles.recent}>{children}</div>
+      </main>
     </div>
   )
 }
