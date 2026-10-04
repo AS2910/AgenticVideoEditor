@@ -2,7 +2,7 @@ import { Fragment, useEffect, useRef, useState } from 'react'
 import type {
   Candidate, ItemStatus, LineStatus, LongLines, Mix, Question, QuestionOption, Revision, Selection, Speaker, Statement, Voice, Word,
 } from '../types'
-import { diffWords, trackedChanges } from '../transcript/changes'
+import { diffWords, lineAfter, trackedChanges } from '../transcript/changes'
 import { clock } from '../transcript/format'
 import { speakerSlot } from '../transcript/speakers'
 import { verdict } from '../transcript/verdict'
@@ -134,21 +134,38 @@ export function LineDoc({
     return sp?.name ?? (label ? `Speaker ${label}` : null)
   }
 
+  /** The line as it stands now: the kept wording, or the original. */
+  const standing = (s: Statement): string => {
+    const live = revisions.filter((r) => overlaps(r, s))
+    const revision = live.length ? live[live.length - 1] : null
+    return revision && revision.mix !== 'remove' ? lineAfter(s, revision, words) : s.text
+  }
+
+  /** Where to start editing from: the last wording tried on this line (a take
+   *  waiting, a question, an error), else the line as it stands. Never the
+   *  original when you have already moved past it. */
+  const startingPoint = (s: Statement) => {
+    const last = lines[keyOf({ start: s.start, end: s.end })]?.request
+    return last && last.mix === 'replace' ? last : null
+  }
+
   const open = (index: number, mode: 'edit' | 'add', focusDelivery = false) => {
     const s = statements[index]
+    const last = mode === 'edit' ? startingPoint(s) : lines[addKeyOf(s)]?.request ?? null
     setEditing({ index, mode })
-    setDraft(mode === 'edit' ? s.text : '')
+    setDraft(mode === 'edit' ? (last?.text ?? standing(s)) : (last?.text ?? ''))
     setOffers([])
-    setVoiceId(speakers.find((sp) => sp.label === s.speaker)?.voice_id ?? '')
-    setOnLong(longLines)
-    setDelivery(null)
-    setOwnWords(focusDelivery ? '' : null)
-    setMix('over')
+    setVoiceId(last?.voiceId ?? speakers.find((sp) => sp.label === s.speaker)?.voice_id ?? '')
+    setOnLong(last?.onLong ?? longLines)
+    const known = last?.delivery && DELIVERIES.includes(last.delivery) ? last.delivery : null
+    setDelivery(known)
+    setOwnWords(focusDelivery && !last?.delivery ? '' : last?.delivery && !known ? last.delivery : null)
+    setMix(last?.mix === 'concatenate' ? 'concatenate' : 'over')
   }
   const close = () => setEditing(null)
   const hear = (s: Statement) => {
     const text = draft.trim()
-    if (!editing || !text || (editing.mode === 'edit' && text === s.text)) return
+    if (!editing || !text || (editing.mode === 'edit' && text === standing(s))) return
     const key = editing.mode === 'edit' ? keyOf(s) : addKeyOf(s)
     onHear(key, {
       selection: { start: s.start, end: s.end }, text, voiceId: voiceId || null, onLong,
@@ -172,8 +189,9 @@ export function LineDoc({
   const editor = (s: Statement, mode: 'edit' | 'add') => {
     const chars = draft.trim().length
     const cost = usdPerChar ? ` · about ${Math.max(1, Math.round(chars * usdPerChar * 100))}¢` : ''
-    const preview = mode === 'edit' && draft.trim() && draft.trim() !== s.text
-      ? diffWords(s.text, draft.trim()) : null
+    const base = mode === 'edit' ? standing(s) : ''
+    const preview = mode === 'edit' && draft.trim() && draft.trim() !== base
+      ? diffWords(base, draft.trim()) : null
     return (
       <div className={styles.editor} data-testid="editor">
         <textarea
@@ -247,7 +265,7 @@ export function LineDoc({
             type="button"
             className={styles.primary}
             aria-label="Hear it"
-            disabled={disabled || !draft.trim() || (mode === 'edit' && draft.trim() === s.text)}
+            disabled={disabled || !draft.trim() || (mode === 'edit' && draft.trim() === base)}
             onClick={() => hear(s)}
           >
             Hear it
