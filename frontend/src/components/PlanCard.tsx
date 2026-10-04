@@ -15,30 +15,31 @@ interface PlanCardProps {
   projectId: string
   /** A job is voicing the plan: no second run until it is done. */
   busy?: boolean
-  onToggle: (item: PlanItem, enabled: boolean) => void
-  onReword: (item: PlanItem, text: string) => void
-  onInclude: (item: PlanItem, include: boolean) => void
-  onRun: () => void
+  onToggle: (item: PlanItem, enabled: boolean) => void | Promise<unknown>
+  onReword: (item: PlanItem, text: string) => void | Promise<unknown>
+  onInclude: (item: PlanItem, include: boolean) => void | Promise<unknown>
+  onRun: () => void | Promise<unknown>
   /** "Adjust": say what to change in the composer. */
   onAdjust?: () => void
-  onAnswer: (item: PlanItem, option: QuestionOption) => void
-  onRedo: (item: PlanItem) => void
+  onAnswer: (item: PlanItem, option: QuestionOption) => void | Promise<unknown>
+  onRedo: (item: PlanItem) => void | Promise<unknown>
   onApproveAll: () => void
   /** UX-2: how a line is said, and how an added line meets the picture. */
-  onDelivery?: (item: PlanItem, delivery: string | null) => void
-  onMix?: (item: PlanItem, mix: 'over' | 'concatenate') => void
+  onDelivery?: (item: PlanItem, delivery: string | null) => void | Promise<unknown>
+  onMix?: (item: PlanItem, mix: 'over' | 'concatenate') => void | Promise<unknown>
   /** UX-2: stop a running plan after the line it is on. */
-  onStop?: () => void
+  onStop?: () => void | Promise<unknown>
 }
 
 const KIND: Record<string, string> = { replace: 'Replaces the line', concatenate: 'Added after the line, the picture holds', over: 'Added after the line, over the picture', layer: 'Over the original sound' }
 const DELIVERIES = ['warmer', 'more excited', 'calmer', 'slower', 'firmer']
 
 /** The two controls a line has in its editor, for a plan item (UX-2). */
-function ItemControls({ item, onDelivery, onMix }: {
+function ItemControls({ item, onDelivery, onMix, busy }: {
   item: PlanItem
-  onDelivery?: (item: PlanItem, delivery: string | null) => void
-  onMix?: (item: PlanItem, mix: 'over' | 'concatenate') => void
+  onDelivery?: (item: PlanItem, delivery: string | null) => void | Promise<unknown>
+  onMix?: (item: PlanItem, mix: 'over' | 'concatenate') => void | Promise<unknown>
+  busy?: boolean
 }) {
   const at = clock(item.selection.start)
   const delivery = item.delivery ?? null
@@ -46,17 +47,17 @@ function ItemControls({ item, onDelivery, onMix }: {
   const [ownWords, setOwnWords] = useState<string | null>(own ? delivery : null)
   const commitOwn = () => {
     const text = (ownWords ?? '').trim()
-    if (text && text !== delivery && onDelivery) onDelivery(item, text)
+    if (text && text !== delivery && onDelivery) void onDelivery(item, text)
     if (!text) setOwnWords(null)
   }
   return (
-    <div className={styles.controls}>
+    <div className={styles.controls} aria-busy={busy || undefined}>
       {onDelivery && (
         <div className={styles.control} role="group" aria-label={`Delivery at ${at}`}>
           <span className={styles.controlLabel}>Delivery</span>
-          <button type="button" className={delivery === null && ownWords === null ? styles.pillOn : styles.pill} aria-pressed={delivery === null} onClick={() => { setOwnWords(null); if (delivery !== null) onDelivery(item, null) }}>As spoken</button>
+          <button type="button" className={delivery === null && ownWords === null ? styles.pillOn : styles.pill} aria-pressed={delivery === null} disabled={busy} onClick={() => { setOwnWords(null); if (delivery !== null) void onDelivery(item, null) }}>As spoken</button>
           {DELIVERIES.map((d) => (
-            <button key={d} type="button" className={delivery === d ? styles.pillOn : styles.pill} aria-pressed={delivery === d} onClick={() => { setOwnWords(null); onDelivery(item, d) }}>{d}</button>
+            <button key={d} type="button" className={delivery === d ? styles.pillOn : styles.pill} aria-pressed={delivery === d} disabled={busy} onClick={() => { setOwnWords(null); void onDelivery(item, d) }}>{d}</button>
           ))}
           {ownWords === null
             ? <button type="button" className={styles.link} onClick={() => setOwnWords(own ? delivery : '')}>in your words…</button>
@@ -66,8 +67,8 @@ function ItemControls({ item, onDelivery, onMix }: {
       {onMix && item.mix !== 'replace' && (
         <div className={styles.control} role="group" aria-label={`Sound meets picture at ${at}`}>
           <span className={styles.controlLabel}>Sound meets picture</span>
-          <button type="button" className={item.mix === 'over' ? styles.pillOn : styles.pill} aria-pressed={item.mix === 'over'} onClick={() => onMix(item, 'over')}>Over the picture</button>
-          <button type="button" className={item.mix === 'concatenate' ? styles.pillOn : styles.pill} aria-pressed={item.mix === 'concatenate'} onClick={() => onMix(item, 'concatenate')}>Hold the picture</button>
+          <button type="button" className={item.mix === 'over' ? styles.pillOn : styles.pill} aria-pressed={item.mix === 'over'} disabled={busy} onClick={() => void onMix(item, 'over')}>Over the picture</button>
+          <button type="button" className={item.mix === 'concatenate' ? styles.pillOn : styles.pill} aria-pressed={item.mix === 'concatenate'} disabled={busy} onClick={() => void onMix(item, 'concatenate')}>Hold the picture</button>
         </div>
       )}
     </div>
@@ -140,6 +141,12 @@ export function PlanCard({
   onDelivery, onMix, onStop,
 }: PlanCardProps) {
   const [drafts, setDrafts] = useState<Record<string, string>>({})
+  // The item whose change is on its way to the server: its controls wait, and say so.
+  const [pending, setPending] = useState<string | null>(null)
+  const run = async (id: string, fn: () => void | Promise<unknown>) => {
+    setPending(id)
+    try { await fn() } finally { setPending((p) => (p === id ? null : p)) }
+  }
   const planned = plan.items.filter((i) => i.kind === 'planned' && i.status !== 'dismissed')
   const suggestions = plan.items.filter((i) => i.kind === 'suggestion' && i.status === 'suggested')
   const ticked = planned.filter((i) => i.enabled)
@@ -157,7 +164,7 @@ export function PlanCard({
 
   const commit = (item: PlanItem) => {
     const text = (drafts[item.item_id] ?? item.new_text).trim()
-    if (text && text !== item.new_text) onReword(item, text)
+    if (text && text !== item.new_text) void run(item.item_id, () => onReword(item, text))
     setDrafts(({ [item.item_id]: _, ...rest }) => rest)
   }
 
@@ -186,8 +193,8 @@ export function PlanCard({
                 <div className={styles.progressFill} style={{ transform: `scaleX(${ticked.length ? settled.length / ticked.length : 0})` }} />
               </div>
               {running && onStop && (
-                <button className={styles.stop} onClick={onStop} disabled={plan.status === 'stopping'}>
-                  {plan.status === 'stopping' ? 'Stopping…' : 'Stop'}
+                <button className={styles.stop} onClick={() => void run('stop', onStop)} disabled={plan.status === 'stopping' || pending === 'stop'} aria-busy={pending === 'stop' || undefined}>
+                  {plan.status === 'stopping' || pending === 'stop' ? 'Stopping…' : 'Stop'}
                 </button>
               )}
             </>
@@ -203,14 +210,15 @@ export function PlanCard({
           const at = clock(item.selection.start)
           const label = name(item)
           return (
-            <div key={item.item_id} className={styles.item} data-status={item.status}>
+            <div key={item.item_id} className={styles.item} data-status={item.status} aria-busy={pending === item.item_id || undefined}>
               {proposed ? (
                 <label className={styles.tick}>
                   <input
                     type="checkbox"
                     checked={item.enabled}
+                    disabled={pending === item.item_id}
                     aria-label={`Include the change at ${at}`}
-                    onChange={(e) => onToggle(item, e.target.checked)}
+                    onChange={(e) => void run(item.item_id, () => onToggle(item, e.target.checked))}
                   />
                 </label>
               ) : (
@@ -234,7 +242,7 @@ export function PlanCard({
                       onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur() }}
                     />
                     {(item.note ?? item.reason) && <div className={styles.why}>{item.note ?? item.reason}</div>}
-                    {(onDelivery || onMix) && <ItemControls item={item} onDelivery={onDelivery} onMix={onMix} />}
+                    {(onDelivery || onMix) && <ItemControls item={item} onDelivery={(i, d) => run(i.item_id, () => onDelivery!(i, d))} onMix={onMix ? (i, m) => run(i.item_id, () => onMix(i, m)) : undefined} busy={pending === item.item_id} />}
                     {(item.status === 'ready' || item.status === 'approved') && item.candidate && (
                       <>
                         <div className={styles.quiet}>Already voiced; it keeps this take unless you change the words, the delivery or how it meets the picture.</div>
@@ -269,7 +277,7 @@ export function PlanCard({
                         <div className={styles.needs} data-testid="needs-you" role="status">
                           <div className={styles.recommends}><Orb size={14} /><span>Voltage recommends</span></div>
                           {item.question.options.map((o, k) => k === 0 ? (
-                            <button key={k} className={styles.recommended} onClick={() => onAnswer(item, o)} disabled={busy}>
+                            <button key={k} className={styles.recommended} onClick={() => void run(item.item_id, () => onAnswer(item, o))} disabled={busy || pending === item.item_id} aria-busy={pending === item.item_id || undefined}>
                               <span className={styles.recommendedLabel}>{o.label}</span>
                               <span className={styles.recommendedWhy}>
                                 {o.text ? 'Keeps the meaning, fits the gap, nothing else changes.' : o.warning ?? 'The simplest change.'}
@@ -278,7 +286,7 @@ export function PlanCard({
                           ) : null)}
                           <div className={styles.options}>
                             {item.question.options.slice(1).map((o, k) => (
-                              <button key={k} className={styles.secondary} onClick={() => onAnswer(item, o)} disabled={busy}>
+                              <button key={k} className={styles.secondary} onClick={() => void run(item.item_id, () => onAnswer(item, o))} disabled={busy || pending === item.item_id}>
                                 {o.label}{o.warning && <span className={styles.warning}> {o.warning}</span>}
                               </button>
                             ))}
@@ -289,7 +297,7 @@ export function PlanCard({
                     {item.status === 'failed' && (
                       <div className={styles.failed} role="alert">
                         <span>{item.error ?? 'This line could not be voiced.'}</span>
-                        <button className={styles.secondary} onClick={() => onRedo(item)} disabled={busy}>Redo</button>
+                        <button className={styles.secondary} onClick={() => void run(item.item_id, () => onRedo(item))} disabled={busy || pending === item.item_id} aria-busy={pending === item.item_id || undefined}>{pending === item.item_id ? 'Redoing…' : 'Redo'}</button>
                       </div>
                     )}
                   </>
@@ -304,8 +312,8 @@ export function PlanCard({
             <span className={styles.estimate}>{estimateText(plan.estimate)}</span>
             <span className={styles.spacer} />
             {onAdjust && <button className={styles.secondary} onClick={onAdjust}>Adjust</button>}
-            <button className={styles.primary} onClick={onRun} disabled={busy || toVoice.length === 0 || plan.status === 'clarifying'}>
-              {voiced.length > 0 && toVoice.length > 0 ? `Voice ${toVoice.length === 1 ? 'the change' : `these ${toVoice.length}`}` : 'Go ahead'}
+            <button className={styles.primary} onClick={() => void run('run', onRun)} disabled={busy || pending === 'run' || toVoice.length === 0 || plan.status === 'clarifying'} aria-busy={pending === 'run' || undefined}>
+              {pending === 'run' ? 'Starting…' : voiced.length > 0 && toVoice.length > 0 ? `Voice ${toVoice.length === 1 ? 'the change' : `these ${toVoice.length}`}` : 'Go ahead'}
             </button>
           </div>
         )}
@@ -323,8 +331,8 @@ export function PlanCard({
               {' '}Change it to “{item.new_text}”?
             </div>
             <div className={styles.options}>
-              <button className={styles.secondary} onClick={() => onInclude(item, true)}>Add to plan</button>
-              <button className={styles.secondary} onClick={() => onInclude(item, false)}>Leave it</button>
+              <button className={styles.secondary} onClick={() => void run(item.item_id, () => onInclude(item, true))} disabled={pending === item.item_id}>Add to plan</button>
+              <button className={styles.secondary} onClick={() => void run(item.item_id, () => onInclude(item, false))} disabled={pending === item.item_id}>Leave it</button>
             </div>
           </div>
         </div>

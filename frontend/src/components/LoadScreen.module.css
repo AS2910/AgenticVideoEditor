@@ -34,3 +34,10 @@
   border-radius: 8px; background: var(--amber-tint); border: 1px solid var(--amber-line);
 }
 .recent { width: min(760px, 100% - 32px); margin: 48px 0; }
+
+/* UX-6: the upload shows a bar and a sentence while it runs. The bar is
+   indeterminate (an upload through fetch reports no progress). */
+.progress { display: flex; align-items: center; gap: 12px; }
+.progressTrack { flex: none; width: 120px; height: 4px; border-radius: 2px; background: var(--line); overflow: hidden; }
+.progressFill { display: block; width: 40%; height: 100%; border-radius: 2px; background: var(--accent); animation: slide 1.2s ease-in-out infinite; }
+@keyframes slide { from { transform: translateX(-100%); } to { transform: translateX(300%); } }

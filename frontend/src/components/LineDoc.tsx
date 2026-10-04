@@ -64,9 +64,9 @@ interface LineDocProps {
   readouts?: FitReadout[]
   onSeek: (statement: Statement) => void
   onHear: (key: LineKey, request: LineRequest) => void
-  onKeep: (key: LineKey, candidate: Candidate) => void
-  onAnother: (key: LineKey) => void
-  onAnswer: (key: LineKey, option: QuestionOption) => void
+  onKeep: (key: LineKey, candidate: Candidate) => void | Promise<unknown>
+  onAnother: (key: LineKey) => void | Promise<unknown>
+  onAnswer: (key: LineKey, option: QuestionOption) => void | Promise<unknown>
   onUndo: (editId: string) => void
   onRemove: (statement: Statement) => void
   /** UX-1c: move this line of the original speech to start at `to`. */
@@ -140,6 +140,12 @@ export function LineDoc({
   // Backspace removes a line only when pressed twice within two seconds; Delete removes at once.
   const armed = useRef<{ index: number; at: number } | null>(null)
   const [armedRow, setArmedRow] = useState<number | null>(null)
+  // The control whose request is on its way: it waits, and says so (UX-6).
+  const [pending, setPending] = useState<string | null>(null)
+  const run = async (id: string, fn: () => void | Promise<unknown>) => {
+    setPending(id)
+    try { await fn() } finally { setPending((p) => (p === id ? null : p)) }
+  }
   // A row being dragged up or down to shift it in time (UX-1c).
   const [drag, setDrag] = useState<{ key: string; label: string; duration: number; at: number; to: number; apply: (to: number) => void } | null>(null)
   const box = useRef<HTMLTextAreaElement>(null)
@@ -441,8 +447,8 @@ export function LineDoc({
         {onMove && placeControl(c.candidate_id, c.plan.selection.start, c.audio.duration, (t) => onMove(key, c, t))}
         {total === 1 && (
           <div className={styles.takeButtons}>
-            <button className={styles.primary} onClick={() => onKeep(key, c)} disabled={disabled}>Keep</button>
-            <button className={styles.secondary} onClick={() => onAnother(key)} disabled={disabled}>Another take</button>
+            <button className={styles.primary} onClick={() => void run(`keep-${c.candidate_id}`, () => onKeep(key, c))} disabled={disabled || pending !== null} aria-busy={pending === `keep-${c.candidate_id}` || undefined}>{pending === `keep-${c.candidate_id}` ? 'Keeping…' : 'Keep'}</button>
+            <button className={styles.secondary} onClick={() => void run(`another-${key}`, () => onAnother(key))} disabled={disabled || pending !== null} aria-busy={pending === `another-${key}` || undefined}>{pending === `another-${key}` ? 'Asking…' : 'Another take'}</button>
           </div>
         )}
       </div>
@@ -471,7 +477,7 @@ export function LineDoc({
           <div>{q.question}</div>
           <div className={styles.options}>
             {q.options.map((o, k) => (
-              <button key={k} className={k === 0 ? styles.primary : styles.secondary} onClick={() => onAnswer(key, o)} disabled={disabled}>
+              <button key={k} className={k === 0 ? styles.primary : styles.secondary} onClick={() => void run(`answer-${key}`, () => onAnswer(key, o))} disabled={disabled || pending !== null} aria-busy={pending === `answer-${key}` || undefined}>
                 {o.label}{o.warning && <span className={styles.warning}> {o.warning}</span>}
               </button>
             ))}
@@ -490,11 +496,11 @@ export function LineDoc({
         {takes.length > 1 && (
           <div className={styles.takeButtons}>
             {takes.map((c, i) => (
-              <button key={c.candidate_id} className={i === takes.length - 1 ? styles.primary : styles.secondary} onClick={() => onKeep(key, c)} disabled={disabled}>
-                Keep take {total - takes.length + i + 1}
+              <button key={c.candidate_id} className={i === takes.length - 1 ? styles.primary : styles.secondary} onClick={() => void run(`keep-${c.candidate_id}`, () => onKeep(key, c))} disabled={disabled || pending !== null} aria-busy={pending === `keep-${c.candidate_id}` || undefined}>
+                {pending === `keep-${c.candidate_id}` ? 'Keeping…' : `Keep take ${total - takes.length + i + 1}`}
               </button>
             ))}
-            <button className={styles.secondary} onClick={() => onAnother(key)} disabled={disabled}>Another take</button>
+            <button className={styles.secondary} onClick={() => void run(`another-${key}`, () => onAnother(key))} disabled={disabled || pending !== null}>{pending === `another-${key}` ? 'Asking…' : 'Another take'}</button>
             <button className={styles.ghost} onClick={() => { onDismiss(key); open(index, 'edit') }}>Neither — change the words</button>
           </div>
         )}
@@ -656,7 +662,7 @@ export function LineDoc({
           <button className={styles.time} onClick={() => onSeek(s)} aria-label={`Go to ${clock(s.start)}`}>{clock(s.start)}</button>
           <span className={styles.who}>{newSpeaker && label && <Avatar name={label} slot={speakerSlot(speakers, s.speaker)} />}</span>
           <div className={styles.body}>
-            {isEditing ? editor(s, 'edit') : (
+            {isEditing ? <div className={styles.reveal}>{editor(s, 'edit')}</div> : (
               <div className={styles.lineWrap}>
                 <button className={styles.line} onClick={() => open(i, 'edit')} title="Change the words" data-testid={shown ? 'revision' : undefined}>
                   {removed ? <del className={styles.del}>{s.text}</del>
@@ -682,7 +688,7 @@ export function LineDoc({
                 {pending && !revision && pending.text && MIX_NOTE[pending.mix ?? 'replace'] && (
                   <div className={styles.meta}>Added · {MIX_NOTE[pending.mix ?? 'replace']}</div>
                 )}
-                {!isEditing && lineBlock(key, s, i)}
+                {!isEditing && <div className={styles.reveal}>{lineBlock(key, s, i)}</div>}
               </div>
             )}
           </div>
@@ -728,7 +734,7 @@ export function LineDoc({
           <div className={styles.row} data-state="adding" role="listitem" aria-label={`New line after ${clock(s.start)}`}>
             <span className={styles.time} />
             <span className={styles.who} />
-            <div className={styles.body}>{editor(s, 'add')}</div>
+            <div className={styles.body}><div className={styles.reveal}>{editor(s, 'add')}</div></div>
           </div>
         )}
         {added && !isAdding && (

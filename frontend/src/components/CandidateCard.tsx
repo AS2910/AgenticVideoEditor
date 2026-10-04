@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import type { Candidate, ContinuityReport } from '../types'
 import { artifactUrl } from '../api'
 import { Avatar } from './Avatar'
@@ -15,9 +16,9 @@ const THRESHOLD = 0.8
 
 interface CandidateCardProps {
   candidate: Candidate
-  onApprove: () => void
+  onApprove: () => void | Promise<unknown>
   /** Approve despite failed continuity — offered only when it failed. */
-  onApproveAnyway?: () => void
+  onApproveAnyway?: () => void | Promise<unknown>
   onTryAgain: () => void
   projectId: string
   /** Which change this is a take of, e.g. "The change at 0:07". */
@@ -33,8 +34,13 @@ export function CandidateCard({
   candidate, onApprove, onApproveAnyway, onTryAgain, projectId, label, speaker, note,
 }: CandidateCardProps) {
   const c = candidate.continuity
+  const [pending, setPending] = useState(false)
+  const run = async (fn: () => void | Promise<unknown>) => {
+    setPending(true)
+    try { await fn() } finally { setPending(false) }
+  }
   return (
-    <div className={styles.card}>
+    <div className={styles.card} aria-busy={pending || undefined}>
       {(label || speaker || note) && (
         <div className={styles.meta}>
           {speaker && <Avatar name={speaker.name} slot={speaker.slot} size={18} />}
@@ -106,22 +112,22 @@ export function CandidateCard({
         </ul>
       )}
 
-      {!c.passed && !onApproveAnyway && (
-        <div className={styles.media}>Below the threshold, so it can't be approved as it is. Try again for another take.</div>
+      {!c.passed && (
+        <div className={styles.media}>
+          {onApproveAnyway
+            ? 'Below the threshold. Approve anyway keeps it for a trial; Try again makes another take.'
+            : "Below the threshold, so it can't be approved as it is. Try again for another take."}
+        </div>
       )}
       <div className={styles.actions}>
         <button className={styles.tryAgain} onClick={onTryAgain}>Try again</button>
         {c.passed || !onApproveAnyway ? (
-          <button className={styles.approve} onClick={onApprove} disabled={!c.passed}>
-            Approve
+          <button className={styles.approve} onClick={() => void run(onApprove)} disabled={!c.passed || pending} aria-busy={pending || undefined}>
+            {pending ? 'Approving…' : 'Approve'}
           </button>
         ) : (
-          <button
-            className={styles.approveAnyway}
-            onClick={onApproveAnyway}
-            title="Approve for a trial even though the continuity check failed"
-          >
-            Approve anyway
+          <button className={styles.approveAnyway} onClick={() => void run(onApproveAnyway)} disabled={pending} aria-busy={pending || undefined}>
+            {pending ? 'Approving…' : 'Approve anyway'}
           </button>
         )}
       </div>
