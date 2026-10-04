@@ -4,6 +4,9 @@ import type {
 } from './types'
 
 const BASE = '/api'
+// Phase 9c: a state-changing request says it came from Voltage; a cross-site
+// form cannot set this header, which is the CSRF check when sign-in is on.
+const FROM_VOLTAGE = { 'X-Requested-With': 'voltage' }
 
 export class ApiError extends Error {
   status: number
@@ -32,7 +35,7 @@ async function failure(res: Response): Promise<never> {
 async function post<T>(path: string, body?: unknown): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...FROM_VOLTAGE },
     body: body === undefined ? undefined : JSON.stringify(body),
   })
   if (!res.ok) return failure(res)
@@ -50,7 +53,7 @@ export async function createProject(file: File, consent: boolean): Promise<Proje
   const body = new FormData()
   body.append('file', file)
   body.append('consent', String(consent))
-  const res = await fetch(`${BASE}/projects`, { method: 'POST', body })
+  const res = await fetch(`${BASE}/projects`, { method: 'POST', headers: FROM_VOLTAGE, body })
   if (!res.ok) return failure(res)
   return (await res.json()) as Project
 }
@@ -77,7 +80,7 @@ export async function updateSpeaker(
 ): Promise<Speaker[]> {
   const res = await fetch(`${BASE}/projects/${id}/speakers/${label}`, {
     method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...FROM_VOLTAGE },
     body: JSON.stringify(change),
   })
   if (!res.ok) return failure(res)
@@ -91,7 +94,7 @@ export const getUsage = (id: string) => get<Usage>(`/projects/${id}/usage`)
 
 /** Deletes the project and all its media — also how consent is withdrawn. */
 export async function deleteProject(id: string): Promise<void> {
-  const res = await fetch(`${BASE}/projects/${id}`, { method: 'DELETE' })
+  const res = await fetch(`${BASE}/projects/${id}`, { method: 'DELETE', headers: FROM_VOLTAGE })
   if (!res.ok) return failure(res)
 }
 
@@ -161,7 +164,7 @@ export async function updateSettings(
 ): Promise<ProjectSettings> {
   const res = await fetch(`${BASE}/projects/${id}/settings`, {
     method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...FROM_VOLTAGE },
     body: JSON.stringify(change),
   })
   if (!res.ok) return failure(res)
@@ -187,7 +190,7 @@ export const rewordLine = (id: string, req: { start: number; end: number; draft?
 async function put<T>(path: string, body: unknown): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
     method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...FROM_VOLTAGE },
     body: JSON.stringify(body),
   })
   if (!res.ok) return failure(res)
@@ -254,3 +257,10 @@ export const grantConsent = (id: string) =>
 
 /** A variant: the same clip as a new project, with the plan as a draft. */
 export const createVariant = (id: string) => post<Project>(`/projects/${id}/variants`)
+
+/** Phase 9c: whether sign-in is on, and who is signed in. */
+export interface Me { mode: 'off' | 'google'; user: { sub: string; email: string | null; name: string | null; picture: string | null } | null }
+export const getMe = () => get<Me>('/auth/me')
+/** Where the browser goes to sign in (a redirect to Google). */
+export const loginUrl = `${BASE}/auth/login`
+export const logout = () => post<{ signed_out: boolean }>('/auth/logout')

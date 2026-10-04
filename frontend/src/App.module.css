@@ -125,3 +125,12 @@
   .main { padding: 16px 16px 24px; overflow: visible; }
   .panel { border-left: none; border-top: 1px solid var(--line); min-height: 60vh; }
 }
+
+/* Phase 9c: who is signed in, in the header; a blank while we ask. */
+.who { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 13px; white-space: nowrap; }
+.face { width: 22px; height: 22px; border-radius: 50%; }
+.whoName { max-width: 140px; overflow: hidden; text-overflow: ellipsis; }
+.signOut { background: none; border: 1px solid var(--line); border-radius: 8px; padding: 4px 9px; color: var(--muted); font-size: 12px; }
+.signOut:hover { color: var(--text); border-color: var(--muted); }
+.blank { min-height: 100vh; background: var(--bg); }
+@media (max-width: 960px) { .whoName { display: none; } }

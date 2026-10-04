@@ -102,6 +102,7 @@ function routeFetch(approveStatus = 200, job: unknown = JOB_DONE) {
     if (url.endsWith('/lines/reword')) {
       return ok({ text: 'Get 30% off today.', selection: { start: 0, end: 2.3 } })
     }
+    if (url.endsWith('/auth/me')) return ok({ mode: 'off', user: null })
     if (url.endsWith('/reading')) return ok(READING)
     if (url.endsWith('/plans')) return ok(PLAN)
     if (/\/plans\/plan1$/.test(url)) return ok(PLAN)
@@ -145,7 +146,7 @@ function routeFetch(approveStatus = 200, job: unknown = JOB_DONE) {
 
 /** load -> the goal stage, where Voltage has read the clip. */
 async function reachGoal(user: ReturnType<typeof userEvent.setup>) {
-  await user.click(screen.getByRole('button', { name: /sample ad/i }))
+  await user.click(await screen.findByRole('button', { name: /sample ad/i }))
   await screen.findByText('What should this video say?')
 }
 
@@ -270,6 +271,7 @@ describe('App full journey', () => {
     } as Response
 
     const f = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.endsWith('/auth/me')) return ok({ mode: 'off', user: null })
       if (url.endsWith('/usage')) return forbidden
       if (url.endsWith('/edits/preview')) return forbidden
       if (url.endsWith('/projects')) return ok(init?.method === 'POST' ? PROJECT : { projects: [] })
@@ -291,10 +293,10 @@ describe('App full journey', () => {
       expect(screen.getByText(/right to edit and clone/i)).toBeInTheDocument())
   })
 
-  it('opens on the load screen; no gate before anything is seen', () => {
+  it('opens on the load screen; no gate before anything is seen', async () => {
     vi.stubGlobal('fetch', routeFetch())
     render(<App />)
-    expect(screen.getByRole('button', { name: /sample ad/i })).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: /sample ad/i })).toBeInTheDocument()
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
   })
 
@@ -1133,7 +1135,7 @@ describe('App panel order', () => {
     }))
     const user = userEvent.setup()
     render(<App />)
-    await user.click(screen.getByRole('button', { name: /sample ad/i }))
+    await user.click(await screen.findByRole('button', { name: /sample ad/i }))
     expect(await screen.findByText(/no speech in this clip/i)).toBeInTheDocument()
     expect(screen.queryByText('What should this video say?')).not.toBeInTheDocument()
   })
@@ -1324,5 +1326,60 @@ describe('App: moving audio on the timeline (UX-1b)', () => {
     await user.type(screen.getByRole('textbox', { name: /words for the new line/i }), 'Welcome.{Enter}')
     await waitFor(() => expect(bodies).toHaveLength(1))
     expect(bodies[0]).toMatchObject({ text: 'Welcome.', mix: 'layer', fit: 'start', start: 1.1 })
+  })
+})
+
+
+describe('App sign-in (Phase 9c)', () => {
+  const ME = { mode: 'google', user: { sub: '42', email: 'ash@example.com', name: 'Ash', picture: null } }
+
+  it('shows the door when sign-in is on and nobody is in', async () => {
+    const base = routeFetch()
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.endsWith('/auth/me')) return ok({ mode: 'google', user: null })
+      return base(url, init)
+    }))
+    render(<App />)
+    const door = await screen.findByRole('link', { name: /sign in with google/i })
+    expect(door).toHaveAttribute('href', '/api/auth/login')
+    expect(screen.queryByRole('button', { name: /sample ad/i })).not.toBeInTheDocument()
+  })
+
+  it('names who is in, sends writes as Voltage, and signs out', async () => {
+    const base = routeFetch()
+    const calls: { url: string; init?: RequestInit }[] = []
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      calls.push({ url, init })
+      if (url.endsWith('/auth/me')) return ok(ME)
+      if (url.endsWith('/auth/logout')) return ok({ signed_out: true })
+      return base(url, init)
+    }))
+    const user = userEvent.setup()
+    render(<App />)
+    expect(await screen.findByTestId('who')).toHaveTextContent('Ash')
+    await user.click(await screen.findByRole('button', { name: /sample ad/i }))
+    await screen.findByText('What should this video say?')
+    const upload = calls.find((c) => c.url.endsWith('/projects') && c.init?.method === 'POST')
+    expect((upload!.init!.headers as Record<string, string>)['X-Requested-With']).toBe('voltage')
+
+    await user.click(screen.getByRole('button', { name: /edit a line yourself/i }))
+    await user.click(await screen.findByRole('button', { name: 'Sign out' }))
+    expect(calls.some((c) => c.url.endsWith('/auth/logout') && c.init?.method === 'POST')).toBe(true)
+    expect(await screen.findByRole('link', { name: /sign in with google/i })).toBeInTheDocument()
+  })
+
+  it('goes back to the door when the session ends', async () => {
+    const base = routeFetch()
+    const gone = { ok: false, status: 401, json: async () => ({ detail: 'Sign in to continue.' }), text: async () => JSON.stringify({ detail: 'Sign in to continue.' }) } as Response
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.endsWith('/auth/me')) return ok(ME)
+      if (url.endsWith('/projects') && init?.method === 'POST') return gone
+      return base(url, init)
+    }))
+    const user = userEvent.setup()
+    render(<App />)
+    await user.click(await screen.findByRole('button', { name: /sample ad/i }))
+    expect(await screen.findByRole('link', { name: /sign in with google/i })).toBeInTheDocument()
+    expect(screen.getByRole('alert')).toHaveTextContent('Your session ended')
   })
 })

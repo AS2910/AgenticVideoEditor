@@ -1,0 +1,21 @@
+.screen {
+  min-height: 100vh; display: flex; flex-direction: column; align-items: center;
+  background: radial-gradient(ellipse 60% 40% at 50% 0%, rgba(233, 168, 96, 0.10) 0%, rgba(233, 168, 96, 0) 70%), var(--bg);
+}
+.header { width: 100%; height: 56px; display: flex; align-items: center; padding: 0 24px; }
+.brand { font-family: var(--serif); font-size: 20px; font-weight: 600; letter-spacing: -0.01em; }
+.hero { width: min(640px, 100% - 32px); margin-top: clamp(32px, 14vh, 140px); display: flex; flex-direction: column; gap: 18px; }
+.title { margin: 0; font-family: var(--serif); font-size: clamp(30px, 4.5vw, 44px); font-weight: 500; letter-spacing: -0.02em; line-height: 1.1; }
+.tagline { margin: 0; color: var(--muted); font-size: 16px; line-height: 1.5; }
+.card {
+  display: flex; flex-direction: column; gap: 12px; padding: 16px;
+  border-radius: 18px; background: var(--surface); border: 1px solid var(--line); box-shadow: var(--shadow);
+}
+.google {
+  align-self: flex-start; display: inline-flex; align-items: center; gap: 10px;
+  padding: 11px 18px; border-radius: 12px; font-weight: 600; text-decoration: none;
+  background: var(--accent); color: var(--accent-ink);
+}
+.google:hover { color: var(--accent-ink); filter: brightness(1.05); }
+.hint { margin: 0; color: var(--muted); font-size: 12.5px; line-height: 1.5; }
+.error { color: var(--amber); font-size: 13px; padding: 8px 10px; border-radius: 8px; background: var(--amber-tint); border: 1px solid var(--amber-line); }

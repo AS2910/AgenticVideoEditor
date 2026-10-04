@@ -161,7 +161,7 @@ Grouped into three milestones. Each milestone is independently useful — you ca
 - [x] **Phase 9 · Durability & hardening** — **done 2026-09-26** (plan: `2026-09-26-phase-9-10-durability-and-editing.md`)
   - **9a** SQLite (`var/ave.db`): projects, candidates, edits and the chat survive restarts; ids never reused; project list, reopen, delete (= consent withdrawal); the server keeps the chat. Every project has an owner, checked on every route (another's project is a 404).
   - **9b** Usage ledger: every paid call recorded with an estimated USD (Whisper minutes, ElevenLabs characters, Claude tokens); the voice budget reads it; `AVE_PROJECT_BUDGET_USD` caps new paid work per project; `GET /projects/{id}/usage`; spend shown in the editor.
-  - **9c** Auth designed, not built: OIDC sign-in (Google first) → session → `current_owner()`; then a login page, CSRF on writes, per-user quotas.
+  - **9c** Sign-in — **done 2026-10-04** (`2026-10-04-phase-9c-sign-in.md`): Google OIDC with PKCE → signed session cookie → `current_owner()`; the door; CSRF header on writes; per-user spend ceiling. Off by default (`AVE_AUTH=off`).
   - **Exit met:** 346 backend + 94 frontend tests. Live: a project and its chat survive a restart; a real clip's spend recorded ($0.0008 Whisper, $0.0067 Claude).
 
 - [x] **Phase 10 · Editing by transcript, voices, timeline** — **done 2026-09-26** (same plan)
@@ -189,6 +189,7 @@ Grouped into three milestones. Each milestone is independently useful — you ca
 - [x] **UX-2 · The panel does one job** — **done 2026-10-04** (`2026-10-04-ux2-the-panel-does-one-job.md`)
 - [x] **UX-3 · Review, ship, return** — **done 2026-10-04** (`2026-10-04-ux3-review-ship-return.md`)
 - [x] **UX-4 · Keyboard and polish** — **done 2026-10-04** (`2026-10-04-ux4-keyboard-and-polish.md`). The UX plan of 2026-10-03 is complete.
+- [x] **Phase 9c · Sign-in** — **done 2026-10-04** (`2026-10-04-phase-9c-sign-in.md`)
   - `app/media/fit.py`: syllable counts and a speaking rate per speaker → a **syllable budget** per line, shown to the planner ("7 syl now, up to 9 fit") and put in the reword prompt; **gap-first fitting** — pauses trimmed or opened before any tempo change, within the old limits.
   - ElevenLabs adapter: **takes by duration** (a first take within `AVE_FIT_TOLERANCE` is kept; else up to `AVE_TAKES_PER_LINE` and the nearest wins), and the model's own `speed` (0.7–1.2) tried once when every take is beyond a tempo change; `last_notes` says what was done.
   - A long line may **borrow up to 150 ms from the pause before it** (`room_before`) when the pause after is not quite enough.

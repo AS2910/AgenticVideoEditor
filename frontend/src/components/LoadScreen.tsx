@@ -9,16 +9,26 @@ interface LoadScreenProps {
   error?: string | null
   /** Past projects, shown under the upload. */
   children?: ReactNode
+  /** Phase 9c: who is signed in, with a way out. */
+  who?: { name: string; picture?: string | null } | null
+  onSignOut?: () => void
 }
 
 /** The start: a video in, and what Voltage will do with it. */
-export function LoadScreen({ onLoad, onLoadSample, loading, error, children }: LoadScreenProps) {
+export function LoadScreen({ onLoad, onLoadSample, loading, error, children, who, onSignOut }: LoadScreenProps) {
   const inputRef = useRef<HTMLInputElement>(null)
 
   return (
     <div className={styles.screen}>
       <header className={styles.header}>
         <span className={styles.brand}>Voltage</span>
+        {who && (
+          <span className={styles.who} data-testid="who">
+            {who.picture ? <img className={styles.face} src={who.picture} alt="" referrerPolicy="no-referrer" /> : null}
+            {who.name}
+            {onSignOut && <button className={styles.signOut} onClick={onSignOut}>Sign out</button>}
+          </span>
+        )}
       </header>
 
       <div className={styles.hero}>

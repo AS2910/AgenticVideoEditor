@@ -6,8 +6,8 @@ from pathlib import Path
 
 import shutil
 
-from fastapi import Depends, FastAPI, HTTPException, File, Form, UploadFile
-from fastapi.responses import FileResponse
+from fastapi import Depends, FastAPI, HTTPException, File, Form, Request, Response, UploadFile
+from fastapi.responses import FileResponse, RedirectResponse
 from pydantic import BaseModel
 
 from typing import Literal
@@ -38,6 +38,7 @@ from app.media.ffmpeg import SpanMismatch
 from app.orchestrator.pipeline import run_edit
 from app.store.db import Database
 from app.usage import Ledger, SpendCeilingReached, WHISPER_USD_PER_MINUTE, claude_usd
+from app import auth
 from app.store.repository import ProjectRecord, ProjectRepository, LOCAL_OWNER
 from app.store.artifacts import ArtifactStore
 from app.render.renderer import render
@@ -72,6 +73,11 @@ interpreter, interpreter_label = select_interpreter(settings)
 planner, planner_label = select_planner(settings)
 jobs = JobStore()
 runner = JobRunner(jobs)
+# Phase 9c: who signs people in. None while AVE_AUTH=off.
+oidc: auth.Provider | None = (
+    auth.GoogleProvider(settings.google_client_id or "", settings.google_client_secret or "")
+    if settings.auth_mode == "google" else None
+)
 
 
 @app.get("/health")
@@ -84,6 +90,7 @@ def health() -> dict:
         "continuity": continuity_label,
         "intent": interpreter_label,
         "planner": planner_label,
+        "auth": settings.auth_mode,
     }
 
 
@@ -204,14 +211,109 @@ CONSENT_REQUIRED = (
 )
 
 
-def current_owner() -> str:
+def current_owner(request: Request) -> str:
     """Who is calling — the auth seam (Phase 9c).
 
-    Everyone is the local owner until sign-in lands; then this returns the
-    verified subject from the session, and every route below is already
-    scoped by it.
+    With AVE_AUTH=off everyone is the local owner. With sign-in on, the
+    session cookie names the owner, every route is scoped by it, and a
+    state-changing request must carry the header a cross-site form cannot.
     """
-    return LOCAL_OWNER
+    if settings.auth_mode == "off":
+        return LOCAL_OWNER
+    who = auth.identity_from(auth.verify(
+        request.cookies.get(auth.SESSION_COOKIE), settings.session_secret or "", max_age=auth.SESSION_SECONDS,
+    ))
+    if who is None:
+        raise HTTPException(status_code=401, detail="Sign in to continue.")
+    if request.method not in ("GET", "HEAD", "OPTIONS") and request.headers.get(auth.CSRF_HEADER) != auth.CSRF_VALUE:
+        raise HTTPException(status_code=403, detail="This request did not come from Voltage.")
+    return who.owner
+
+
+def _ensure_spend(project_id: str) -> None:
+    """The project's ceiling, and with sign-in the person's across projects."""
+    record = repo.get(project_id)
+    ledger.ensure_can_spend(
+        project_id,
+        owner=record.owner if record and settings.auth_mode != "off" else None,
+        owner_ceiling_usd=settings.user_budget_usd if settings.auth_mode != "off" else None,
+    )
+
+
+# ── Phase 9c: sign-in ────────────────────────────────────────────────────────
+
+def _secure() -> bool:
+    return settings.public_url.startswith("https://")
+
+
+def _redirect_uri() -> str:
+    return f"{settings.public_url}/api/auth/callback"
+
+
+def _me(request: Request) -> dict:
+    if settings.auth_mode == "off":
+        return {"mode": "off", "user": None}
+    who = auth.identity_from(auth.verify(
+        request.cookies.get(auth.SESSION_COOKIE), settings.session_secret or "", max_age=auth.SESSION_SECONDS,
+    ))
+    return {
+        "mode": settings.auth_mode,
+        "user": {"sub": who.sub, "email": who.email, "name": who.name, "picture": who.picture} if who else None,
+    }
+
+
+@app.get("/auth/me")
+def auth_me(request: Request) -> dict:
+    """Whether sign-in is on, and who is signed in."""
+    return _me(request)
+
+
+@app.get("/auth/login")
+def auth_login(request: Request) -> Response:
+    """Off to Google. The state and the PKCE verifier ride in a short-lived
+    signed cookie, so the callback can check them."""
+    if oidc is None:
+        raise HTTPException(status_code=404, detail="Sign-in is off.")
+    state = auth._b64(auth.secrets.token_bytes(16))
+    verifier, challenge = auth.pkce_pair()
+    response = RedirectResponse(oidc.authorize_url(_redirect_uri(), state, challenge), status_code=302)
+    response.set_cookie(
+        auth.LOGIN_COOKIE, auth.sign({"state": state, "verifier": verifier}, settings.session_secret or ""),
+        max_age=auth.LOGIN_SECONDS, httponly=True, samesite="lax", secure=_secure(), path="/",
+    )
+    return response
+
+
+@app.get("/auth/callback")
+def auth_callback(request: Request, code: str | None = None, state: str | None = None, error: str | None = None) -> Response:
+    """Back from Google: check the state, exchange the code, set the session."""
+    if oidc is None:
+        raise HTTPException(status_code=404, detail="Sign-in is off.")
+    login = auth.verify(request.cookies.get(auth.LOGIN_COOKIE), settings.session_secret or "", max_age=auth.LOGIN_SECONDS)
+    if error:
+        raise HTTPException(status_code=400, detail=f"Google refused the sign-in ({error}).")
+    if not login or not state or not code or login.get("state") != state:
+        raise HTTPException(status_code=400, detail="That sign-in has expired. Start again.")
+    try:
+        who = oidc.identity(code, _redirect_uri(), login["verifier"])
+    except auth.AuthError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    if not auth.allowed(who, settings.allowed_emails):
+        raise HTTPException(status_code=403, detail="This Voltage is private; that account is not on its list.")
+    response = RedirectResponse(settings.public_url + "/", status_code=302)
+    response.set_cookie(
+        auth.SESSION_COOKIE,
+        auth.sign({"sub": who.sub, "email": who.email, "name": who.name, "picture": who.picture}, settings.session_secret or ""),
+        max_age=auth.SESSION_SECONDS, httponly=True, samesite="lax", secure=_secure(), path="/",
+    )
+    response.delete_cookie(auth.LOGIN_COOKIE, path="/")
+    return response
+
+
+@app.post("/auth/logout")
+def auth_logout(response: Response) -> dict:
+    response.delete_cookie(auth.SESSION_COOKIE, path="/")
+    return {"signed_out": True}
 
 
 def _owned(project_id: str, owner: str) -> ProjectRecord:
@@ -394,6 +496,8 @@ def get_usage(project_id: str, owner: str = Depends(current_owner)) -> dict:
     return {
         "spent_usd": round(ledger.spent_usd(project_id), 4),
         "ceiling_usd": ledger.ceiling_usd,
+        "user_spent_usd": round(ledger.spent_usd_by_owner(owner), 4) if settings.auth_mode != "off" else None,
+        "user_ceiling_usd": settings.user_budget_usd if settings.auth_mode != "off" else None,
         "voice_characters": budget.spent(project_id),
         "voice_characters_ceiling": budget.ceiling,
         "lines": [
@@ -454,7 +558,7 @@ def detect_speakers(project_id: str, owner: str = Depends(current_owner)) -> dic
     record = _owned(project_id, owner)
     if transcriber_label.startswith("openai"):
         try:
-            ledger.ensure_can_spend(project_id)
+            _ensure_spend(project_id)
         except SpendCeilingReached as exc:
             raise HTTPException(status_code=402, detail=str(exc)) from exc
     try:
@@ -485,7 +589,7 @@ def read_project(project_id: str, req: ReadRequest, owner: str = Depends(current
     if not lines:
         raise HTTPException(status_code=422, detail="This video has no speech to read.")
     try:
-        ledger.ensure_can_spend(project_id)
+        _ensure_spend(project_id)
         reading = planner.read(lines, meter=_meter(project_id, "reading"))
     except SpendCeilingReached as exc:
         raise HTTPException(status_code=402, detail=str(exc)) from exc
@@ -621,7 +725,7 @@ def preview_edit(
 
     def work(report) -> dict:
         # No new paid work once the project has reached its spend ceiling.
-        ledger.ensure_can_spend(project_id)
+        _ensure_spend(project_id)
         if req.text is not None:
             intent = Intent(action="speak", new_text=req.text)
         else:
@@ -893,7 +997,7 @@ def reword_line(
             detail="Wording suggestions need Claude. Set ANTHROPIC_API_KEY to turn them on.",
         )
     try:
-        ledger.ensure_can_spend(project_id)
+        _ensure_spend(project_id)
     except SpendCeilingReached as exc:
         raise HTTPException(status_code=402, detail=str(exc)) from exc
     selection = snap_to_word_boundaries(record.transcript, Selection(req.start, req.end))
@@ -1100,7 +1204,7 @@ def _new_plan(project_id: str, record: ProjectRecord, goal: str, mode: str | Non
     if not lines:
         raise HTTPException(status_code=422, detail="This video has no speech to change.")
     try:
-        ledger.ensure_can_spend(project_id)
+        _ensure_spend(project_id)
     except SpendCeilingReached as exc:
         raise HTTPException(status_code=402, detail=str(exc)) from exc
     mode = mode or _settings(project_id)["autonomy"]
@@ -1174,7 +1278,7 @@ def clarify_plan(
     repo.add_message(project_id, "user", answer)
     repo.append_log(project_id, plan_id, f"You said: {answer}")
     try:
-        ledger.ensure_can_spend(project_id)
+        _ensure_spend(project_id)
         proposal = planner.plan(plan.goal, _lines(record), [], meter=_meter(project_id, "planning"),
                                 answer=(plan.question["text"], answer))
     except SpendCeilingReached as exc:
@@ -1281,7 +1385,7 @@ def revise_plan(
     ]
     repo.add_message(project_id, "user", instruction)
     try:
-        ledger.ensure_can_spend(project_id)
+        _ensure_spend(project_id)
         revision = planner.revise(instruction, views, lines, plan.goal, meter=_meter(project_id, "planning"))
     except SpendCeilingReached as exc:
         raise HTTPException(status_code=402, detail=str(exc)) from exc
@@ -1442,7 +1546,7 @@ def _run_plan(project_id: str, record: ProjectRecord, plan_id: str, item_ids: li
 
             step(0.05, "Synthesizing the new line")
             try:
-                ledger.ensure_can_spend(project_id)
+                _ensure_spend(project_id)
                 voice_id = _voice_for(project_id, record, item.selection, getattr(voice, "default_voice", "speaker-1"),
                                       speaker=item.speaker)
                 candidate_id = repo.next_candidate_id(project_id)

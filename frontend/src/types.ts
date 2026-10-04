@@ -170,6 +170,9 @@ export interface Reading { opening: string; roles: RoleGuess[]; at?: string }
 export interface Usage {
   spent_usd: number
   ceiling_usd: number
+  /** With sign-in on: the person's spend across every project, and their cap. */
+  user_spent_usd?: number | null
+  user_ceiling_usd?: number | null
   voice_characters: number
   voice_characters_ceiling: number
   lines: { vendor: string; what: string; unit: string; units: number; usd: number; calls: number }[]
