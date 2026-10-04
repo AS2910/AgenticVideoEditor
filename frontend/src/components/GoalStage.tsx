@@ -184,7 +184,7 @@ export function GoalStage({ project, reading, onPlan, onHandsOn, onName, busy, c
                 className={styles.input}
                 rows={3}
                 aria-label="What the video should say"
-                placeholder={silent ? 'Add an audio introducing the place: "Welcome to Goa"' : "Turn this into our Diwali ad: everything's 30% off, and say the brand name as Bhaji Cam."}
+                placeholder={silent ? 'e.g. Add an audio introducing the place: "Welcome to Goa"' : "e.g. Turn this into our Diwali ad: everything's 30% off, and say the brand name as Bhaji Cam."}
                 value={goal}
                 onChange={(e) => setGoal(e.target.value)}
                 onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submit() } }}
