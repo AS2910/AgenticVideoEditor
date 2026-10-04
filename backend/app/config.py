@@ -39,6 +39,8 @@ DEFAULT_VOICE_BUDGET_CHARS = 2000
 DEFAULT_MAX_REGENERATIONS = 2
 # Per-project ceiling on estimated spend across every paid vendor (Phase 9b).
 DEFAULT_PROJECT_BUDGET_USD = 2.0
+# Per-user ceiling across every project, once there are users (Phase 9c).
+DEFAULT_USER_BUDGET_USD = 10.0
 # Phase 14: when the first take misses its slot, how many takes to voice in
 # all and keep the nearest; and how far off the slot counts as a miss.
 DEFAULT_TAKES_PER_LINE = 3
@@ -70,6 +72,17 @@ class Settings:
     elevenlabs_usd_per_1k: float = DEFAULT_ELEVENLABS_USD_PER_1K
     takes_per_line: int = DEFAULT_TAKES_PER_LINE
     fit_tolerance: float = DEFAULT_FIT_TOLERANCE
+    # Phase 9c: "off" keeps the single local owner; "google" requires sign-in.
+    auth_mode: str = "off"
+    google_client_id: str | None = None
+    google_client_secret: str | None = None
+    session_secret: str | None = None
+    # The origin the browser uses, for the OAuth redirect: https://voltage.example.com
+    public_url: str = "http://localhost:5173"
+    # Who may sign in: emails or @domains, comma-separated. Empty = anyone with a Google account.
+    allowed_emails: tuple[str, ...] = ()
+    # Per-user ceiling on estimated spend across all their projects.
+    user_budget_usd: float = DEFAULT_USER_BUDGET_USD
 
     @property
     def has_anthropic(self) -> bool:
@@ -127,4 +140,22 @@ def load_settings() -> Settings:
         elevenlabs_usd_per_1k=_amount("AVE_ELEVENLABS_USD_PER_1K", DEFAULT_ELEVENLABS_USD_PER_1K),
         takes_per_line=max(1, _whole_number("AVE_TAKES_PER_LINE", DEFAULT_TAKES_PER_LINE)),
         fit_tolerance=_amount("AVE_FIT_TOLERANCE", DEFAULT_FIT_TOLERANCE),
+        auth_mode=_auth_mode(),
+        google_client_id=os.environ.get("GOOGLE_CLIENT_ID") or None,
+        google_client_secret=os.environ.get("GOOGLE_CLIENT_SECRET") or None,
+        session_secret=os.environ.get("AVE_SESSION_SECRET") or None,
+        public_url=(os.environ.get("AVE_PUBLIC_URL") or "http://localhost:5173").rstrip("/"),
+        allowed_emails=tuple(e.strip() for e in os.environ.get("AVE_ALLOWED_EMAILS", "").split(",") if e.strip()),
+        user_budget_usd=_amount("AVE_USER_BUDGET_USD", DEFAULT_USER_BUDGET_USD),
     )
+
+
+def _auth_mode() -> str:
+    mode = (os.environ.get("AVE_AUTH") or "off").strip().lower()
+    if mode not in ("off", "google"):
+        raise ValueError(f"AVE_AUTH must be 'off' or 'google', got {mode!r}")
+    if mode == "google":
+        missing = [k for k in ("GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "AVE_SESSION_SECRET") if not os.environ.get(k)]
+        if missing:
+            raise ValueError(f"AVE_AUTH=google needs {', '.join(missing)}")
+    return mode

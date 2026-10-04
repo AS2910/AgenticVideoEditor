@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { ConsentSheet } from './components/ConsentSheet'
+import { SignIn } from './components/SignIn'
 import { ShipSheet } from './components/ShipSheet'
 import type { Shipped } from './components/ShipSheet'
 import { LoadScreen } from './components/LoadScreen'
@@ -30,8 +31,9 @@ import {
   pollJob, PollCancelled, ApiError, listProjects, getProject, deleteProject, getUsage, listVoices, updateSpeaker, detectSpeakers,
   revertEdit, updateSettings, rewordLine, removeLine, moveCandidate, moveEdit,
   createPlan, getPlan, updateItem, runPlan, answerItem, redoItem, approvePlan, clarifyPlan,
-  readProject, revisePlan, stopPlan, grantConsent, createVariant,
+  readProject, revisePlan, stopPlan, grantConsent, createVariant, getMe, logout,
 } from './api'
+import type { Me } from './api'
 import type {
   Word, Selection, Candidate, Segment, Project, ChatMessage, Question, QuestionOption,
   Fit, Mix, Insert, ProjectSummary, Usage, Statement, Voice, Revision, LongLines,
@@ -58,6 +60,9 @@ const voiceName = (voices: Voice[], id: string) => voices.find((v) => v.voice_id
 
 export default function App() {
   const [stage, setStage] = useState<Stage>('load')
+  // Phase 9c: whether sign-in is on, and who is here. Null until asked.
+  const [me, setMe] = useState<Me | null>(null)
+  const [signedOut, setSignedOut] = useState(false)
   // Consent is asked once per project, the first time a voice is about to be
   // made (UX-3): the sheet, and what to do once it is given.
   const [consentAsk, setConsentAsk] = useState<{ who: string | null; go: () => void } | null>(null)
@@ -147,14 +152,32 @@ export default function App() {
     if (stage === 'load' || stage === 'goal') void refreshProjects()
   }, [stage, refreshProjects])
 
-  // A reload keeps you in the project you had open: its id is the URL hash.
-  // Its consent was recorded when it was uploaded.
+  // Who is here (Phase 9c), then — a reload keeps you in the project you
+  // had open: its id is the URL hash.
   useEffect(() => {
-    const id = window.location.hash.slice(1)
-    if (/^p\d+$/.test(id)) void openProject(id)
+    getMe()
+      .then((m) => {
+        setMe(m)
+        const id = window.location.hash.slice(1)
+        if ((m.mode === 'off' || m.user) && /^p\d+$/.test(id)) void openProject(id)
+      })
+      .catch(() => setMe({ mode: 'off', user: null }))   // an older server: open as before
     // Only on first load.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  // A 401 anywhere means the session ended: back to the door.
+  useEffect(() => {
+    if (me?.mode === 'google' && error === 'Sign in to continue.') setSignedOut(true)
+  }, [error, me])
+
+  const signOut = async () => {
+    try { await logout() } catch { /* the cookie is gone either way */ }
+    clearEditor()
+    window.location.hash = ''
+    setMe((m) => (m ? { ...m, user: null } : m))
+    setStage('load')
+  }
 
   /** Back to a blank editor state, e.g. before opening another project. */
   const clearEditor = () => {
@@ -965,6 +988,12 @@ export default function App() {
     await refreshProjects()
   }
 
+  if (me === null) {
+    return <div className={styles.blank} aria-busy="true" />
+  }
+  if (me.mode === 'google' && (!me.user || signedOut)) {
+    return <SignIn error={signedOut ? 'Your session ended. Sign in again to continue.' : null} />
+  }
   if (stage === 'load' || !project) {
     return (
       <LoadScreen
@@ -972,6 +1001,8 @@ export default function App() {
         onLoadSample={loadSample}
         loading={loading}
         error={error}
+        who={me.user ? { name: me.user.name ?? me.user.email ?? 'You', picture: me.user.picture } : null}
+        onSignOut={me.user ? () => void signOut() : undefined}
       >
         <ProjectList projects={projects} onOpen={(id) => void openProject(id)} onDelete={(id) => void removeProject(id)} />
       </LoadScreen>
@@ -1078,6 +1109,13 @@ export default function App() {
         </span>
         <span className={styles.spacer} />
         <SpendMeter usage={usage} />
+        {me.user && (
+          <span className={styles.who} data-testid="who">
+            {me.user.picture ? <img className={styles.face} src={me.user.picture} alt="" referrerPolicy="no-referrer" /> : null}
+            <span className={styles.whoName}>{me.user.name ?? me.user.email ?? 'You'}</span>
+            <button className={styles.signOut} onClick={() => void signOut()}>Sign out</button>
+          </span>
+        )}
         {reviewable && !review && (
           <button className={styles.reviewButton} onClick={() => setReview(true)}>
             {readyCount > 0 ? `Review ${readyCount} ready ${readyCount === 1 ? 'change' : 'changes'}` : 'Review changes'}

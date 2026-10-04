@@ -36,6 +36,18 @@ class SpendCeilingReached(NonRetryableError):
         )
 
 
+class UserCeilingReached(SpendCeilingReached):
+    """The person has spent their allowance across every project."""
+
+    def __init__(self, spent: float, ceiling: float) -> None:
+        self.spent, self.ceiling = spent, ceiling
+        NonRetryableError.__init__(
+            self,
+            f"You have used your ${ceiling:.2f} spending limit across your projects "
+            f"(about ${spent:.2f} so far).",
+        )
+
+
 @dataclass(frozen=True)
 class UsageLine:
     vendor: str
@@ -94,8 +106,23 @@ class Ledger:
             ).fetchall()
         return [UsageLine(r["vendor"], r["what"], r["unit"], r["units"], r["usd"], r["calls"]) for r in rows]
 
-    def ensure_can_spend(self, project_id: str) -> None:
-        """Refuse new paid work once the project has reached its ceiling."""
+    def spent_usd_by_owner(self, owner: str) -> float:
+        """Everything one person's projects have spent (Phase 9c)."""
+        with self.db.tx() as c:
+            row = c.execute(
+                "SELECT COALESCE(SUM(u.usd), 0) AS usd FROM usage u "
+                "JOIN projects p ON p.id = u.project_id WHERE p.owner = ?", (owner,),
+            ).fetchone()
+        return float(row["usd"])
+
+    def ensure_can_spend(self, project_id: str, owner: str | None = None,
+                         owner_ceiling_usd: float | None = None) -> None:
+        """Refuse new paid work once the project — or, with sign-in, the
+        person — has reached its ceiling."""
         spent = self.spent_usd(project_id)
         if spent >= self.ceiling_usd:
             raise SpendCeilingReached(spent, self.ceiling_usd)
+        if owner is not None and owner_ceiling_usd is not None:
+            mine = self.spent_usd_by_owner(owner)
+            if mine >= owner_ceiling_usd:
+                raise UserCeilingReached(mine, owner_ceiling_usd)

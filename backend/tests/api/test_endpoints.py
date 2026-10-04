@@ -1901,3 +1901,138 @@ def test_a_variant_is_the_same_clip_with_the_plan_as_a_draft(client, project, mo
     # Deleting the variant leaves the original's media alone.
     client.delete("/projects/p2")
     assert client.get("/projects/p1/artifacts/" + project["media"]["sha256"]).status_code == 200
+
+
+# ── Phase 9c: sign-in ────────────────────────────────────────────────────────
+
+class FakeGoogle:
+    """Signs in whoever the test says, after a real-looking redirect."""
+
+    def __init__(self, who):
+        from app.auth import Identity
+        self.who = Identity(*who)
+        self.exchanged = []
+
+    def authorize_url(self, redirect_uri, state, challenge):
+        return f"https://accounts.google.com/o/oauth2/v2/auth?state={state}&redirect_uri={redirect_uri}&code_challenge={challenge}"
+
+    def identity(self, code, redirect_uri, verifier):
+        self.exchanged.append((code, redirect_uri, verifier))
+        return self.who
+
+
+def signed_in(monkeypatch, who=("42", "ash@example.com", "Ash", None), allow=(), public="http://localhost:5173"):
+    """Turn sign-in on with a fake Google, and sign `who` in through the real
+    routes. Returns the fake."""
+    import app.api.main as main
+    from dataclasses import replace
+    monkeypatch.setattr(main, "settings", replace(
+        main.settings, auth_mode="google", session_secret="s3cret", public_url=public, allowed_emails=allow,
+    ))
+    fake = FakeGoogle(who)
+    monkeypatch.setattr(main, "oidc", fake)
+    return fake
+
+
+HEADERS = {"X-Requested-With": "voltage"}
+
+
+def login(client):
+    from urllib.parse import parse_qs, urlparse
+    sent = client.get("/auth/login", follow_redirects=False)
+    assert sent.status_code == 302
+    state = parse_qs(urlparse(sent.headers["location"]).query)["state"][0]
+    return client.get(f"/auth/callback?code=c0de&state={state}", follow_redirects=False)
+
+
+def test_with_sign_in_on_nothing_is_reachable_until_you_sign_in(client, sample_video, monkeypatch):
+    fake = signed_in(monkeypatch)
+    assert client.get("/auth/me").json() == {"mode": "google", "user": None}
+    assert client.get("/projects").status_code == 401
+    assert client.get("/projects").json()["detail"] == "Sign in to continue."
+    assert client.get("/health").status_code == 200          # the health check stays open
+
+    sent = client.get("/auth/login", follow_redirects=False)
+    assert sent.headers["location"].startswith("https://accounts.google.com/")
+    assert "redirect_uri=http://localhost:5173/api/auth/callback" in sent.headers["location"]
+    assert "ave_login" in sent.cookies
+
+    back = login(client)
+    assert back.status_code == 302 and back.headers["location"] == "http://localhost:5173/"
+    assert fake.exchanged[0][0] == "c0de" and fake.exchanged[0][1] == "http://localhost:5173/api/auth/callback"
+    assert client.get("/auth/me").json()["user"] == {"sub": "42", "email": "ash@example.com", "name": "Ash", "picture": None}
+    assert client.get("/projects").json() == {"projects": []}
+
+    # A write needs the header a cross-site form cannot send.
+    resp = upload(client, sample_video)
+    assert resp.status_code == 403 and "did not come from Voltage" in resp.json()["detail"]
+    with open(sample_video, "rb") as handle:
+        resp = client.post("/projects", files={"file": ("ad.mp4", handle, "video/mp4")}, data={"consent": "true"}, headers=HEADERS)
+    assert resp.status_code == 200
+    # ...and it belongs to the person who signed in.
+    assert [p["project_id"] for p in client.get("/projects").json()["projects"]] == ["p1"]
+    assert main_owner_of("p1") == "google:42"
+
+    client.post("/auth/logout", headers=HEADERS)
+    assert client.get("/auth/me").json()["user"] is None
+    assert client.get("/projects").status_code == 401
+
+
+def main_owner_of(project_id):
+    import app.api.main as main
+    return main.repo.get(project_id).owner
+
+
+def test_a_stale_or_mismatched_login_is_refused(client, monkeypatch):
+    signed_in(monkeypatch)
+    assert client.get("/auth/callback?code=c&state=nope", follow_redirects=False).status_code == 400
+    client.get("/auth/login", follow_redirects=False)
+    assert client.get("/auth/callback?code=c&state=wrong", follow_redirects=False).status_code == 400
+    assert client.get("/auth/callback?error=access_denied", follow_redirects=False).status_code == 400
+    assert client.get("/auth/me").json()["user"] is None
+
+
+def test_a_private_voltage_lets_only_listed_accounts_in(client, monkeypatch):
+    signed_in(monkeypatch, who=("7", "stranger@else.com", "S", None), allow=("@example.com", "friend@x.y"))
+    back = login(client)
+    assert back.status_code == 403 and "private" in back.json()["detail"]
+    assert client.get("/auth/me").json()["user"] is None
+    signed_in(monkeypatch, who=("8", "me@example.com", "M", None), allow=("@example.com",))
+    assert login(client).status_code == 302
+    assert client.get("/auth/me").json()["user"]["email"] == "me@example.com"
+
+
+def test_each_person_sees_only_their_own_projects(client, sample_video, monkeypatch):
+    signed_in(monkeypatch, who=("1", "a@x.y", "A", None))
+    login(client)
+    with open(sample_video, "rb") as handle:
+        client.post("/projects", files={"file": ("ad.mp4", handle, "video/mp4")}, data={"consent": "true"}, headers=HEADERS)
+    signed_in(monkeypatch, who=("2", "b@x.y", "B", None))
+    login(client)
+    assert client.get("/projects").json()["projects"] == []
+    assert client.get("/projects/p1").status_code == 404
+    assert client.post("/projects/p1/export", headers=HEADERS).status_code == 404
+
+
+def test_a_person_has_a_ceiling_across_their_projects(client, sample_video, monkeypatch):
+    import app.api.main as main
+    from dataclasses import replace
+    signed_in(monkeypatch)
+    monkeypatch.setattr(main, "settings", replace(main.settings, user_budget_usd=0.05))
+    login(client)
+    with open(sample_video, "rb") as handle:
+        client.post("/projects", files={"file": ("ad.mp4", handle, "video/mp4")}, data={"consent": "true"}, headers=HEADERS)
+    main.ledger.record("p1", "elevenlabs", "speech", 100, "characters", 0.06)
+    usage = client.get("/projects/p1/usage").json()
+    assert usage["user_spent_usd"] == 0.06 and usage["user_ceiling_usd"] == 0.05
+    resp = client.post("/projects/p1/edits/preview", json=PREVIEW, headers=HEADERS)
+    assert resp.status_code == 202
+    job = await_job(client, resp.json()["job_id"])
+    assert job["status"] == "failed" and "across your projects" in job["error"]
+    assert client.post("/projects/p1/plans", json={"goal": GOAL}, headers=HEADERS).status_code == 402
+
+
+def test_with_sign_in_off_everything_is_as_before(client, project):
+    assert client.get("/auth/me").json() == {"mode": "off", "user": None}
+    assert client.get("/auth/login").status_code == 404
+    assert client.get("/projects/p1/usage").json()["user_ceiling_usd"] is None
