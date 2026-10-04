@@ -187,6 +187,14 @@ describe('PlanCard, the panel does one job (UX-2)', () => {
   })
 })
 
+describe('PlanCard, empty (UX-4)', () => {
+  it('says when a goal changes nothing, instead of an empty list', () => {
+    render(<PlanCard plan={plan({ items: [], summary: 'No line mentions the offer.' })} speakers={SPEAKERS} voices={VOICES} projectId="p1" {...handlers()} />)
+    expect(screen.getByTestId('plan-empty')).toHaveTextContent('Nothing to change for that. No line mentions the offer.')
+    expect(screen.getByRole('button', { name: 'Go ahead' })).toBeDisabled()
+  })
+})
+
 describe('estimateText', () => {
   it('reads the estimate in words', () => {
     expect(estimateText({ items: 3, voice_characters: 110, usd: 0.033, seconds: 36 })).toBe('≈ 110 voice characters · about $0.03 · ready in about 36 s')

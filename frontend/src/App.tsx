@@ -206,6 +206,19 @@ export default function App() {
       return { ...all, [key]: { ...prev, ...patch } }
     })
 
+  // "/" puts the cursor in the box, from anywhere that is not already typing (UX-4).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== '/' || e.metaKey || e.ctrlKey || e.altKey) return
+      const t = e.target as HTMLElement | null
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return
+      const box = composerRef.current ?? document.querySelector<HTMLTextAreaElement>('textarea[aria-label="What the video should say"]')
+      if (box) { e.preventDefault(); box.focus() }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
+
   // Voltage's eye moves down the transcript while it reads.
   useEffect(() => {
     if (!planning) return

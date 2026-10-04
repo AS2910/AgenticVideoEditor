@@ -10,7 +10,12 @@
   display: grid; grid-template-columns: 34px 22px minmax(0, 1fr) auto;
   column-gap: 12px; align-items: start; padding: 8px 10px; border-radius: 12px;
 }
+.row { transition: background-color 160ms ease, box-shadow 160ms ease; outline: none; }
 .row[data-state], .row[data-selected="true"] { background: var(--surface); }
+.row:focus-visible { box-shadow: inset 0 0 0 1.5px var(--accent-line); background: var(--surface); }
+.row:focus-visible .actions { opacity: 1; }
+.keys { white-space: nowrap; }
+.keys kbd { display: inline-block; min-width: 18px; padding: 0 5px; margin: 0 1px; border-radius: 5px; font: inherit; font-size: 11.5px; text-align: center; color: var(--text); background: var(--raised); border: 1px solid var(--line); }
 .row[data-selected="true"] { box-shadow: inset 2px 0 0 var(--accent); }
 .row:hover .actions, .row:focus-within .actions { opacity: 1; }
 
@@ -105,3 +110,16 @@
 .warning { color: var(--amber); font-weight: 400; }
 .place { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
 .failed { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 10px; background: var(--amber-tint); border: 1px solid var(--amber-line); font-size: 13px; }
+
+/* UX-4: motion — takes and blocks rise in. */
+.take, .working, .needs, .failed, .editor { animation: rise 180ms ease-out both; }
+@keyframes rise { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: none; } }
+@media (max-width: 960px) {
+  .keys { display: none; }
+  .row { grid-template-columns: 34px 22px minmax(0, 1fr); row-gap: 6px; }
+  .side { grid-column: 3; flex-direction: row; flex-wrap: wrap; align-items: center; justify-content: flex-start; }
+  /* No hover on a phone: tapping the row focuses it, and the actions show. */
+  .actions { display: none; justify-content: flex-start; min-width: 0; flex: 1 1 100%; }
+  .row:hover .actions, .row:focus-within .actions { display: flex; }
+  .side:empty { display: none; }
+}

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { render, screen, within } from '@testing-library/react'
+import { act, render, screen, within, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { LineDoc } from './LineDoc'
 import { keyOf, addKeyOf } from '../transcript/keys'
@@ -268,5 +268,50 @@ describe('LineDoc: a take can go anywhere on the timeline', () => {
     await userEvent.type(screen.getByRole('textbox', { name: 'Starts at' }), '0:03.50')
     await userEvent.type(screen.getByRole('textbox', { name: /words for the new line/i }), 'Welcome to Goa.{Enter}')
     expect(h.onHear).toHaveBeenCalledWith(addKeyOf(STATEMENTS[2]), expect.objectContaining({ text: 'Welcome to Goa.', mix: 'over', at: 3.5 }))
+  })
+})
+
+
+describe('LineDoc: keyboard (UX-4)', () => {
+  it('moves between lines, opens and closes the editor, plays, keeps, undoes and removes from the keys', async () => {
+    const user = userEvent.setup()
+    const h = doc({
+      lines: { [KEY]: { status: 'ready', takes: [take()] } },
+      revisions: [{ edit_id: 'e1', start: 9.38, end: 9.88, text: 'Sure, boss.', mix: 'replace' }],
+    })
+    const row = (i: number) => document.getElementById(`line-${i}`) as HTMLElement
+    act(() => row(0).focus())
+    expect(screen.getByTestId('keys')).toHaveTextContent('move')
+    await user.keyboard('{ArrowDown}')
+    expect(row(1)).toHaveFocus()
+    await user.keyboard(' ')
+    expect(h.onSeek).toHaveBeenCalledWith(STATEMENTS[1])
+    await user.keyboard('k')
+    expect(h.onKeep).toHaveBeenCalledWith(KEY, expect.objectContaining({ candidate_id: 'c1' }))
+    await user.keyboard('{Enter}')
+    expect(screen.getByRole('textbox', { name: 'New wording' })).toHaveFocus()
+    await user.keyboard('{Escape}')
+    expect(screen.queryByTestId('editor')).not.toBeInTheDocument()
+    await waitFor(() => expect(row(1)).toHaveFocus())
+    await user.keyboard('{ArrowDown}')
+    await user.keyboard('u')
+    expect(h.onUndo).toHaveBeenCalledWith('e1')
+    await user.keyboard('{ArrowUp}{ArrowUp}')
+    expect(row(0)).toHaveFocus()
+    await user.keyboard('{Delete}')
+    expect(h.onRemove).toHaveBeenCalledWith(STATEMENTS[0])
+    await user.keyboard('a')
+    expect(screen.getByRole('textbox', { name: 'Words for the new line' })).toBeInTheDocument()
+  })
+
+  it('leaves the keys alone while typing in a line', async () => {
+    const user = userEvent.setup()
+    const h = doc()
+    act(() => (document.getElementById('line-1') as HTMLElement).focus())
+    await user.keyboard('{Enter}')
+    await user.keyboard(' k u')
+    expect(h.onKeep).not.toHaveBeenCalled()
+    expect(h.onUndo).not.toHaveBeenCalled()
+    expect(h.onSeek).not.toHaveBeenCalled()
   })
 })

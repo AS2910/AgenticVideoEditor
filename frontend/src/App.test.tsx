@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import App from './App'
 
@@ -1136,6 +1136,22 @@ describe('App panel order', () => {
     await user.click(screen.getByRole('button', { name: /sample ad/i }))
     expect(await screen.findByText(/no speech in this clip/i)).toBeInTheDocument()
     expect(screen.queryByText('What should this video say?')).not.toBeInTheDocument()
+  })
+})
+
+describe('App keyboard (UX-4)', () => {
+  it('puts the cursor in the box on "/" from the transcript, and leaves a typed "/" alone', async () => {
+    vi.stubGlobal('fetch', routeFetch())
+    const user = userEvent.setup()
+    render(<App />)
+    await reachEditor(user)
+    act(() => (document.getElementById('line-0') as HTMLElement).focus())
+    await user.keyboard('/')
+    const box = screen.getByRole('textbox', { name: /describe a change/i })
+    expect(box).toHaveFocus()
+    expect(box).toHaveValue('')
+    await user.keyboard('a/b')
+    expect(box).toHaveValue('a/b')
   })
 })
 
