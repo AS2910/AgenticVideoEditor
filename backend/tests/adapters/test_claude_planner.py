@@ -118,3 +118,58 @@ def test_each_line_shows_its_syllables_and_its_budget():
     lines = [Line(1, 5.2, 6.9, "Customer", "Hi, I want to buy groceries.", syllables=8, budget=10)]
     text = render_plan_request("goal", lines, [])
     assert "1. [5.2s] Customer: Hi, I want to buy groceries.  (8 syl now, up to 10 fit)" in text
+
+
+# ── UX-2: reading the clip, revising the plan in words ───────────────────────
+
+def test_reading_the_clip_names_each_speakers_role_and_opens_specifically():
+    from app.adapters.claude_planner import _Reading, _Role, render_read_request
+    reading = _Reading(opening=" Two people, three lines. The brand name is said once, at 0:07. ", roles=[
+        _Role(speaker="Customer", role="customer.", why="Asks to buy."),
+        _Role(speaker="Shopkeeper", role="Shopkeeper", why="Answers."),
+        _Role(speaker="Shopkeeper", role="Owner", why="twice: dropped"),
+        _Role(speaker="Nobody", role="Ghost", why="unknown: dropped"),
+    ])
+    reader, messages = planner(SimpleNamespace(stop_reason="end_turn", parsed_output=reading, usage=None))
+    got = reader.read(LINES)
+    assert got.opening == "Two people, three lines. The brand name is said once, at 0:07."
+    assert [(r.speaker, r.role) for r in got.roles] == [("Customer", "Customer"), ("Shopkeeper", "Shopkeeper")]
+    assert messages.calls[0]["output_config"] == {"effort": "low"}
+    assert "2. [0:07] Customer: Start a live Bajicam session." in render_read_request(LINES)
+
+
+def test_a_revision_touches_only_the_items_it_names_and_may_add_a_line():
+    from app.adapters.claude_planner import _ItemChange, _Revision, render_revise_request
+    from app.orchestrator.planner import ItemView
+    items = [
+        ItemView("i1", 2, "Start a live Bajicam session.", "Start a live Bhaji Cam session.", "replace", None, True, "ready", "Customer"),
+        ItemView("i2", 3, "Sure, sir.", "Sure, sir. Thirty off.", "over", "warmer", False, "planned", "Shopkeeper"),
+    ]
+    text = render_revise_request("not the first one, and calmer", items, LINES, "Say Bhaji Cam")
+    assert 'i1. line 2 [0:07] Customer: "Start a live Bajicam session." → "Start a live Bhaji Cam session." (replaces the line; voiced)' in text
+    assert 'i2. line 3 [0:09] Shopkeeper: "Sure, sir." → "Sure, sir. Thirty off." (added after, over the picture; not voiced yet; delivery: warmer; left out)' in text
+    assert text.endswith("The user says: not the first one, and calmer")
+
+    revision = _Revision(summary="Left out the first and calmed the second.", changes=[
+        _ItemChange(item_id="i1", enabled=False),
+        _ItemChange(item_id="i2", delivery="calmer", new_text='"Shopkeeper: Sure. Thirty off."', mix="concatenate"),
+        _ItemChange(item_id="i2", delivery="as spoken"),
+        _ItemChange(item_id="i9", enabled=False),
+    ], additions=[_Edit(line=1, new_text="Welcome in!", mix="over", reason="A greeting", speaker="Shopkeeper")])
+    reader, messages = planner(SimpleNamespace(stop_reason="end_turn", parsed_output=revision, usage=None))
+    got = reader.revise("not the first one, and calmer", items, LINES, "Say Bhaji Cam")
+    assert messages.calls[0]["output_config"] == {"effort": "medium"}
+    assert got.new_goal is False
+    assert [(c.item_id, c.enabled, c.new_text, c.mix, c.delivery, c.clear_delivery) for c in got.changes] == [
+        ("i1", False, None, None, None, False),
+        ("i2", None, "Sure. Thirty off.", "concatenate", "calmer", False),
+        ("i2", None, None, None, None, True),
+    ]
+    assert [(a.line, a.new_text, a.mix, a.speaker) for a in got.additions] == [(1, "Welcome in!", "over", "Shopkeeper")]
+
+
+def test_a_revision_can_say_it_is_really_a_new_goal():
+    from app.adapters.claude_planner import _Revision
+    revision = _Revision(summary="That's a new goal.", new_goal=True, changes=[], additions=[])
+    reader, _ = planner(SimpleNamespace(stop_reason="end_turn", parsed_output=revision, usage=None))
+    assert reader.revise("make it a Diwali ad", [], LINES, "Say Bhaji Cam").new_goal is True

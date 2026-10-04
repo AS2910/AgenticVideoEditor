@@ -208,7 +208,8 @@ def test_an_item_and_the_log_are_updated_in_place():
     repo.update_plan("p1", "plan1", status="done")
     plan = repo.get_plan("p1", "plan1")
     assert plan.status == "done" and plan.log[-1]["text"] == "Voiced the line at 0:00"
-    assert plan.runnable == (plan.item("i1"),)
+    assert plan.runnable == ()      # voiced: Go ahead would not voice it again
+    assert repo.update_item("p1", "plan1", "i1", status="planned").runnable == (plan.item("i1").__class__(**{**plan.item("i1").__dict__, "status": "planned"}),)
 
 
 def test_deleting_a_project_removes_its_plans():

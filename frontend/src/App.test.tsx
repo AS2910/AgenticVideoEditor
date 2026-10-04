@@ -61,12 +61,16 @@ const PLAN = {
   log: [{ at: '2026-10-02T10:00:00Z', text: 'Read your goal and all 1 lines', detail: 'Claude' }],
   items: [PLAN_ITEM],
 }
+const PLAN_REVISED = { ...PLAN, summary: 'Left the change out.', items: [{ ...PLAN_ITEM, enabled: false }],
+  log: [...PLAN.log, { at: '2026-10-04T10:00:00Z', text: 'You said: not that one', detail: '' }] }
 const PLAN_CLARIFYING = { ...PLAN, status: 'clarifying',
   question: { text: 'Who speaks for the brand?', options: ['The Shopkeeper', 'The Customer'], guess: 'The Shopkeeper' } }
 const BRIAN_TAKE = { ...CANDIDATE, plan: { ...CANDIDATE.plan, voice_profile_id: 'nPczCjzI2devNBz1zQrb' } }
 const PLAN_DONE = { ...PLAN, status: 'done', items: [{ ...PLAN_ITEM, status: 'ready', candidate: BRIAN_TAKE }] }
 const PLAN_APPROVED = { ...PLAN, status: 'done', items: [{ ...PLAN_ITEM, status: 'approved', candidate: BRIAN_TAKE, edit_id: 'e1' }],
   log: [...PLAN.log, { at: '2026-10-02T10:01:00Z', text: 'Rendered the edited video', detail: '$0.02 in total' }] }
+
+const READING = { opening: 'One person, one line. The offer is said once, at 0:00.', roles: [] }
 
 const JOB_ACCEPTED = {
   job_id: 'j1', kind: 'preview', project_id: 'p1',
@@ -97,6 +101,7 @@ function routeFetch(approveStatus = 200, job: unknown = JOB_DONE) {
     if (url.endsWith('/lines/reword')) {
       return ok({ text: 'Get 30% off today.', selection: { start: 0, end: 2.3 } })
     }
+    if (url.endsWith('/reading')) return ok(READING)
     if (url.endsWith('/plans')) return ok(PLAN)
     if (/\/plans\/plan1$/.test(url)) return ok(PLAN)
     if (url.includes('/plans/plan1/items/') && _init?.method === 'PUT') return ok(PLAN)
@@ -541,6 +546,36 @@ describe('App editing by transcript and voice (Phase 10)', () => {
   })
 })
 
+describe('App goal stage shows the clip (UX-2)', () => {
+  it('reads the clip once, names the speaker by role, and confirms the guess', async () => {
+    const base = routeFetch()
+    const reads: string[] = []
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.endsWith('/projects') && init?.method === 'POST') {
+        return ok({ ...PROJECT, statements: [{ ...PROJECT.statements[0], speaker: 'A' }],
+          speakers: [{ label: 'A', name: 'Speaker A', voice_id: null }] })
+      }
+      if (url.endsWith('/reading')) { reads.push(url); return ok({ ...READING, roles: [{ label: 'A', role: 'Presenter', why: 'Carries the clip.' }] }) }
+      if (url.includes('/speakers/') && init?.method === 'PUT') {
+        reads.push('PUT ' + JSON.parse(String(init.body)).name)
+        return ok({ speakers: [{ label: 'A', name: 'Presenter', voice_id: null }] })
+      }
+      return base(url, init)
+    }))
+    const user = userEvent.setup()
+    render(<App />)
+    await reachGoal(user)
+    expect(await screen.findByText(/The offer is said once, at 0:00\./)).toBeInTheDocument()
+    expect(screen.getByTestId('cast')).toHaveTextContent('the Presenter · my guess')
+    await user.click(screen.getByRole('button', { name: 'Looks right' }))
+    await waitFor(() => expect(reads).toContain('PUT Presenter'))
+    // Confirmed: no longer a guess, and the line shows the name.
+    await waitFor(() => expect(screen.getByTestId('cast')).not.toHaveTextContent('my guess'))
+    expect(screen.getByTestId('cast')).toHaveTextContent('Presenter')
+    expect(reads.filter((r) => r.endsWith('/reading'))).toHaveLength(1)
+  })
+})
+
 describe('App speakers (Phase 11)', () => {
   it('detects speakers, then names them and gives one a voice', async () => {
     const puts: { url: string; body: unknown }[] = []
@@ -726,6 +761,8 @@ describe('App the agent (Phase 13)', () => {
       if (url.includes('/plans/plan1/items/') && init?.method === 'PUT') { calls.push({ url, body }); return ok(current) }
       if (url.endsWith('/run') || url.endsWith('/answer') || url.endsWith('/redo')) { calls.push({ url, body }); current = result; return ok({ ...JOB_ACCEPTED, kind: 'plan' }) }
       if (url.endsWith('/clarify')) { calls.push({ url, body }); current = PLAN; return ok(PLAN) }
+      if (url.endsWith('/revise')) { calls.push({ url, body }); current = PLAN_REVISED; return ok(PLAN_REVISED) }
+      if (url.endsWith('/stop')) { calls.push({ url, body }); current = { ...PLAN, status: 'stopping' }; return ok(current) }
       if (url.endsWith('/approve')) { calls.push({ url, body }); current = PLAN_APPROVED }
       if (url.endsWith('/settings')) calls.push({ url, body })
       return base(url, init)
@@ -919,6 +956,42 @@ describe('App the agent (Phase 13)', () => {
     expect(asks).toHaveLength(2)
     await user.click(within(offers).getByRole('button', { name: 'Get 30% off, today.' }))
     expect(screen.getByRole('textbox', { name: /new wording/i })).toHaveValue('Get 30% off, today.')
+  })
+
+  it('changes the plan in words, in place, from the box (UX-2)', async () => {
+    const calls = agent()
+    const user = userEvent.setup()
+    render(<App />)
+    await reachGoal(user)
+    await user.type(screen.getByRole('textbox', { name: /what the video should say/i }), 'make it 30% off{Enter}')
+    await screen.findByRole('checkbox', { name: 'Include the change at 0:00' })
+
+    const box = screen.getByRole('textbox', { name: /describe a change/i })
+    expect(box).toHaveAttribute('placeholder', expect.stringContaining('Change the plan in your words'))
+    await user.type(box, 'not that one{Enter}')
+
+    await waitFor(() => expect(calls.some((c) => c.url.endsWith('/plans/plan1/revise'))).toBe(true))
+    expect(calls.find((c) => c.url.endsWith('/revise'))!.body).toEqual({ instruction: 'not that one' })
+    // The same plan, changed: no second plan was made.
+    expect(calls.filter((c) => c.url.endsWith('/plans'))).toHaveLength(1)
+    expect(await screen.findByText('Left the change out.')).toBeInTheDocument()
+    expect(screen.getByRole('checkbox', { name: 'Include the change at 0:00' })).not.toBeChecked()
+  })
+
+  it('sets a delivery on a planned change and can stop a running plan (UX-2)', async () => {
+    const calls = agent(PLAN, { ...PLAN, status: 'running', items: [{ ...PLAN_ITEM, status: 'working' }] })
+    const user = userEvent.setup()
+    render(<App />)
+    await reachGoal(user)
+    await user.type(screen.getByRole('textbox', { name: /what the video should say/i }), 'make it 30% off{Enter}')
+    await screen.findByRole('checkbox', { name: 'Include the change at 0:00' })
+    await user.click(within(screen.getByRole('group', { name: 'Delivery at 0:00' })).getByRole('button', { name: 'calmer' }))
+    await waitFor(() => expect(calls.some((c) => c.url.includes('/items/i1') && (c.body as { delivery?: string }).delivery === 'calmer')).toBe(true))
+
+    await user.click(screen.getByRole('button', { name: 'Go ahead' }))
+    await user.click(await screen.findByRole('button', { name: 'Stop' }))
+    await waitFor(() => expect(calls.some((c) => c.url.endsWith('/plans/plan1/stop'))).toBe(true))
+    expect(await screen.findByText('Stopping after this line…')).toBeInTheDocument()
   })
 
   it('reopens a project with its plan', async () => {

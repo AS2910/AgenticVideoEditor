@@ -1043,6 +1043,16 @@ class Plans:
     def shorten(self, text, share, line, meter=None):
         return self.shorter
 
+    def read(self, lines, meter=None):
+        from app.orchestrator.planner import Reading
+        if meter:
+            meter("claude-opus-5", 300, 40)
+        return Reading(opening=f"One person, {len(lines)} line.")
+
+    def revise(self, instruction, items, lines, goal, meter=None):
+        from app.orchestrator.planner import RulePlanner
+        return RulePlanner().revise(instruction, items, lines, goal)
+
 
 def make_plan(client, goal=GOAL, **body):
     resp = client.post("/projects/p1/plans", json={"goal": goal, **body})
@@ -1652,3 +1662,170 @@ def test_a_kept_line_moves_in_one_step(client, project):
 def test_a_removal_cannot_be_moved(client, project):
     rm = client.post("/projects/p1/lines/remove", json={"start": 0.5, "end": 1.0}).json()
     assert client.post(f"/projects/p1/edits/{rm['edit_id']}/move", json={"start": 1.0}).status_code == 422
+
+
+# ── UX-2: the panel does one job ─────────────────────────────────────────────
+
+def test_reading_the_clip_names_roles_once_and_the_project_carries_it(client, project, monkeypatch):
+    import app.api.main as main
+    from app.orchestrator.planner import Reading, Role
+
+    class Reader(Plans):
+        calls = 0
+
+        def read(self, lines, meter=None):
+            Reader.calls += 1
+            meter("claude-opus-5", 300, 40)
+            return Reading("One person, one line. The offer is said once, at 0:00.",
+                           (Role("Speaker A", "Presenter", "Carries the whole clip."), Role("Nobody", "Ghost")))
+
+    monkeypatch.setattr(main, "planner", Reader([]))
+    client.post("/projects/p1/speakers/detect")
+    assert client.get("/projects/p1").json()["reading"] is None
+
+    reading = client.post("/projects/p1/reading", json={}).json()
+
+    assert reading["opening"] == "One person, one line. The offer is said once, at 0:00."
+    assert reading["roles"] == [{"label": "A", "role": "Presenter", "why": "Carries the whole clip."}]
+    assert client.post("/projects/p1/reading", json={}).json()["opening"] == reading["opening"]
+    assert Reader.calls == 1                                   # saved; read once
+    assert client.get("/projects/p1").json()["reading"]["roles"][0]["role"] == "Presenter"
+    client.post("/projects/p1/reading", json={"again": True})
+    assert Reader.calls == 2
+    usage = client.get("/projects/p1/usage").json()
+    assert any(line["what"] == "reading" and line["calls"] == 2 for line in usage["lines"])
+    # Confirming a role names the speaker through the usual route.
+    named = client.put("/projects/p1/speakers/A", json={"name": "Presenter"}).json()
+    assert named["speakers"][0]["name"] == "Presenter"
+
+
+def test_reading_a_silent_clip_is_refused(client, project, monkeypatch):
+    import app.api.main as main
+    from app.domain.models import Transcript
+    speechless(monkeypatch, main, Transcript(words=()))
+    assert client.post("/projects/p1/reading", json={}).status_code == 422
+
+
+def test_revising_the_plan_in_words_keeps_the_takes_already_voiced(client, project, monkeypatch):
+    import app.api.main as main
+    from app.orchestrator.planner import ItemChange, Revision
+
+    class Revises(Plans):
+        def __init__(self):
+            super().__init__([(1, "Get 30% off today only.", "replace", "Offer"),
+                              (1, "Thirty, friends.", "over", "A tag")])
+            self.seen_revisions = []
+
+        def revise(self, instruction, items, lines, goal, meter=None):
+            self.seen_revisions.append((instruction, items, goal))
+            meter("claude-opus-5", 900, 60)
+            return Revision("Left out the first, reworded the second.", (
+                ItemChange("i1", enabled=False),
+                ItemChange("i2", new_text="Thirty off, friends.", delivery="warmer"),
+            ))
+
+    planner = Revises()
+    monkeypatch.setattr(main, "planner", planner)
+    plan = make_plan(client, goal="30% off")
+    done = run_plan(client, "plan1")
+    assert [i["status"] for i in done["items"]] == ["ready", "ready"] and done["status"] == "done"
+    kept = done["items"][0]["candidate"]["candidate_id"]
+
+    revised = client.post("/projects/p1/plans/plan1/revise", json={"instruction": "not the first one; warmer and say thirty off"}).json()
+
+    instruction, items, goal = planner.seen_revisions[0]
+    assert goal == "30% off" and [(i.item_id, i.line, i.status) for i in items] == [("i1", 1, "ready"), ("i2", 1, "ready")]
+    first, second = revised["items"]
+    # Left out, but its take survives: putting it back costs nothing.
+    assert (first["enabled"], first["status"], first["candidate"]["candidate_id"]) == (False, "ready", kept)
+    # Reworded: back to planned, to be voiced again with the new delivery.
+    assert (second["new_text"], second["delivery"], second["status"], second["candidate"]) == ("Thirty off, friends.", "warmer", "planned", None)
+    assert second["note"] == "Reworded as you asked"
+    assert revised["status"] == "proposed" and revised["estimate"]["items"] == 1
+    assert revised["summary"] == "Left out the first, reworded the second."
+    assert [e["text"] for e in revised["log"]][-2:] == ["You said: not the first one; warmer and say thirty off",
+                                                        "Left out the first, reworded the second."]
+    messages = client.get("/projects/p1").json()["messages"]
+    assert [m["text"] for m in messages[-2:]] == ["not the first one; warmer and say thirty off", "Left out the first, reworded the second."]
+
+    # Go ahead voices only what is planned; the kept take is untouched.
+    again = run_plan(client, "plan1")
+    assert again["items"][0]["candidate"]["candidate_id"] == kept
+    assert again["items"][1]["status"] == "ready" and again["items"][1]["candidate"]["plan"]["delivery"] == "warmer"
+    assert again["status"] == "done"
+
+
+def test_a_revision_can_add_a_line_and_a_new_goal_makes_a_new_plan(client, project, monkeypatch):
+    import app.api.main as main
+    from app.orchestrator.planner import Change, Revision
+
+    class Adds(Plans):
+        def revise(self, instruction, items, lines, goal, meter=None):
+            if instruction.startswith("new:"):
+                return Revision("That's a new goal.", new_goal=True)
+            return Revision("Added a closing line.", additions=(Change(1, "See you soon.", "over", "A close"),))
+
+    monkeypatch.setattr(main, "planner", Adds([(1, "Get 30% off today only.", "replace", "")]))
+    make_plan(client, goal="30% off")
+    revised = client.post("/projects/p1/plans/plan1/revise", json={"instruction": "add a closing line"}).json()
+    assert [(i["item_id"], i["new_text"], i["mix"], i["status"]) for i in revised["items"]] == [
+        ("i1", "Get 30% off today only.", "replace", "planned"), ("i2", "See you soon.", "over", "planned")]
+    assert revised["estimate"]["items"] == 2
+
+    fresh = client.post("/projects/p1/plans/plan1/revise", json={"instruction": "new: make it a Diwali ad"}).json()
+    assert fresh["plan_id"] == "plan2" and fresh["goal"] == "new: make it a Diwali ad"
+    assert client.post("/projects/p1/plans/plan1/revise", json={"instruction": " "}).status_code == 422
+
+
+def test_a_running_plan_can_be_stopped_between_lines(client, project, monkeypatch):
+    import threading
+    import app.api.main as main
+
+    real_voice = main.voice
+
+    class Slow:
+        """The mock voice, but the first line waits until the test lets it go."""
+        identity = real_voice.identity
+        default_voice = getattr(real_voice, "default_voice", "speaker-1")
+        gate = threading.Event()
+        started = threading.Event()
+
+        def cost_of(self, plan):
+            return real_voice.cost_of(plan)
+
+        def synthesize(self, source, plan, transcript=None):
+            Slow.started.set()
+            assert Slow.gate.wait(5)
+            return real_voice.synthesize(source, plan, transcript)
+
+    monkeypatch.setattr(main, "voice", Slow())
+    monkeypatch.setattr(main, "planner", Plans([(1, "Get 30% off today only.", "replace", ""),
+                                                 (1, "Thirty, friends.", "over", ""),
+                                                 (1, "Come back soon.", "over", "")]))
+    make_plan(client, goal="30% off")
+    assert client.post("/projects/p1/plans/plan1/stop").status_code == 409     # not running
+    job = client.post("/projects/p1/plans/plan1/run", json={}).json()
+    assert Slow.started.wait(5)
+
+    stopping = client.post("/projects/p1/plans/plan1/stop").json()
+    assert stopping["status"] == "stopping" and stopping["log"][-1]["text"] == "You stopped the plan"
+    assert client.post("/projects/p1/plans/plan1/run", json={}).status_code == 409
+    assert client.post("/projects/p1/plans/plan1/revise", json={"instruction": "x"}).status_code == 409
+    Slow.gate.set()
+    monkeypatch.setattr(main, "voice", real_voice)
+    finished = await_job(client, job["job_id"])
+
+    plan = finished["result"]
+    assert [i["status"] for i in plan["items"]] == ["ready", "planned", "planned"]   # the line it was on finished
+    assert plan["status"] == "proposed"                                              # waits for Go ahead
+    assert plan["log"][-1]["text"] == "Stopped with 2 lines still planned"
+    # Go ahead later voices only the two that are left.
+    again = run_plan(client, "plan1")
+    assert [i["status"] for i in again["items"]] == ["ready", "ready", "ready"] and again["status"] == "done"
+
+
+def test_rewording_a_voiced_item_puts_a_finished_plan_back_to_proposed(client, project):
+    make_plan(client)
+    run_plan(client, "plan1")
+    plan = client.put("/projects/p1/plans/plan1/items/i1", json={"new_text": "Get a third off today."}).json()
+    assert plan["status"] == "proposed" and plan["items"][0]["status"] == "planned" and plan["estimate"]["items"] == 1

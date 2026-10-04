@@ -185,6 +185,8 @@ Grouped into three milestones. Each milestone is independently useful — you ca
   - **Exit met:** 387 backend + 134 frontend tests; frontend lint and build clean. Live on the 49 s Bhaji Cam clip: "Bajicam" → "Bhaji Cam" came back 1.86 s for a 1.48 s line and **ran 0.38 s into the pause after it with no question** (fit `start`, edit grown to 7.54–9.40); approved, exported, reverted (export back to one original segment, list count 0); Claude reworded "These are regular ones." → "These are the regular ones." Layout checked by headless-Chrome screenshot at 1470 px and 420 px.
 
 - [x] **Phase 14 · Fit by writing and generation** — **done 2026-10-03** (the natural-fit roadmap's first phase; `2026-10-03-natural-fit-roadmap.md`)
+- [x] **UX-1 · The line is the unit** — **done 2026-10-04** (`2026-10-04-ux1-the-line-is-the-unit.md`, with UX-1b the same day)
+- [x] **UX-2 · The panel does one job** — **done 2026-10-04** (`2026-10-04-ux2-the-panel-does-one-job.md`)
   - `app/media/fit.py`: syllable counts and a speaking rate per speaker → a **syllable budget** per line, shown to the planner ("7 syl now, up to 9 fit") and put in the reword prompt; **gap-first fitting** — pauses trimmed or opened before any tempo change, within the old limits.
   - ElevenLabs adapter: **takes by duration** (a first take within `AVE_FIT_TOLERANCE` is kept; else up to `AVE_TAKES_PER_LINE` and the nearest wins), and the model's own `speed` (0.7–1.2) tried once when every take is beyond a tempo change; `last_notes` says what was done.
   - A long line may **borrow up to 150 ms from the pause before it** (`room_before`) when the pause after is not quite enough.

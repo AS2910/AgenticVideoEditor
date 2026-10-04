@@ -28,11 +28,12 @@ import {
   pollJob, PollCancelled, ApiError, listProjects, getProject, deleteProject, getUsage, listVoices, updateSpeaker, detectSpeakers,
   revertEdit, updateSettings, rewordLine, removeLine, moveCandidate, moveEdit,
   createPlan, getPlan, updateItem, runPlan, answerItem, redoItem, approvePlan, clarifyPlan,
+  readProject, revisePlan, stopPlan,
 } from './api'
 import type {
   Word, Selection, Candidate, Segment, Project, ChatMessage, Question, QuestionOption,
   Fit, Mix, Insert, ProjectSummary, Usage, Statement, Voice, Revision, LongLines,
-  Plan, PlanItem, Autonomy,
+  Plan, PlanItem, Autonomy, Reading,
 } from './types'
 import { renderTime, sourceTime } from './timeline/selection'
 import styles from './App.module.css'
@@ -98,6 +99,10 @@ export default function App() {
   const [autonomy, setAutonomy] = useState<Autonomy>('ask')
   const [plan, setPlan] = useState<Plan | null>(null)
   const [planning, setPlanning] = useState(false)
+  // Voltage's first look at the clip (UX-2), for the goal stage.
+  const [reading, setReading] = useState<Reading | null>(null)
+  const [readingBusy, setReadingBusy] = useState(false)
+  const readFor = useRef<string | null>(null)
   const [planBusy, setPlanBusy] = useState(false)
   const [planProgress, setPlanProgress] = useState<{ value: number; step: string } | null>(null)
   const [review, setReview] = useState(false)
@@ -168,6 +173,8 @@ export default function App() {
     planToken.current += 1
     setAutonomy('ask')
     setPlan(null)
+    setReading(null)
+    setReadingBusy(false)
     setPlanning(false)
     setPlanBusy(false)
     setPlanProgress(null)
@@ -221,6 +228,19 @@ export default function App() {
       .catch(() => {}) // without the list, edits use the default voice
   }, [stage, voices.length])
 
+  // On the goal stage, Voltage takes the clip in once: an opening line and a
+  // role for each speaker (UX-2).
+  useEffect(() => {
+    if (stage !== 'goal' || !projectId || reading || readFor.current === projectId) return
+    if ((project?.statements?.length ?? 0) === 0) return
+    readFor.current = projectId
+    setReadingBusy(true)
+    readProject(projectId)
+      .then((r) => setReading(r))
+      .catch(() => {})   // the stage still works with the plain count
+      .finally(() => { setReadingBusy(false); void refreshUsage(projectId) })
+  }, [stage, projectId, reading, project?.statements?.length, refreshUsage])
+
   /** Into the project: fresh ones start by asking what the video should
    *  say; ones with a plan or edits open straight in the editor. */
   const takeIn = (loaded: Project, edited = false) => {
@@ -229,6 +249,7 @@ export default function App() {
     setLongLines(loaded.settings?.long_lines ?? 'pause')
     setAutonomy(loaded.settings?.autonomy ?? 'ask')
     setPlan(loaded.plan ?? null)
+    setReading(loaded.reading ?? null)
     setStage(loaded.plan || edited || (loaded.statements?.length ?? 0) === 0 ? 'editor' : 'goal')
     window.location.hash = loaded.project_id
   }
@@ -564,14 +585,47 @@ export default function App() {
     }
   }
 
-  /** What the composer does depends on where things stand. */
+  /** Change the plan in your words (UX-2): applied in place, so the takes
+   *  already voiced survive. A new goal altogether comes back as a new plan. */
+  const revise = async (instruction: string) => {
+    if (!projectId || !plan) return
+    say({ role: 'user', text: instruction })
+    setError(null)
+    setPlanning(true)
+    setReview(false)
+    try {
+      const revised = await revisePlan(projectId, plan.plan_id, instruction)
+      setPlan(revised)
+      say({ role: 'assistant', text: revised.question ? revised.question.text : revised.summary })
+      if (revised.job_id) void followPlanJob(revised.job_id, revised.plan_id)
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : 'Could not change the plan.')
+    } finally {
+      setPlanning(false)
+      void refreshUsage(projectId)
+    }
+  }
+
+  /** Stop a running plan after the line it is on; the rest waits as planned. */
+  const stop = async () => {
+    if (!projectId || !plan) return
+    try {
+      setPlan(await stopPlan(projectId, plan.plan_id))
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : 'Could not stop the plan.')
+    }
+  }
+
+  /** The box is for the whole video: a goal, or a change to the plan. A
+   *  selection on the Precise timeline still previews through it. */
   const submitComposer = (text: string) => {
     if (plan?.status === 'clarifying') return void clarify(GO.test(text.trim()) ? undefined : text)
     if (selection) return void runPreview(text)
+    if (plan && plan.status !== 'running' && plan.status !== 'stopping') return void revise(text)
     return void makePlan(text)
   }
 
-  const changeItem = async (item: PlanItem, change: { enabled?: boolean; new_text?: string; include?: boolean }) => {
+  const changeItem = async (item: PlanItem, change: { enabled?: boolean; new_text?: string; include?: boolean; delivery?: string; mix?: Mix }) => {
     if (!projectId || !plan) return
     try {
       setPlan(await updateItem(projectId, plan.plan_id, item.item_id, change))
@@ -836,7 +890,14 @@ export default function App() {
   }
   if (stage === 'goal') {
     return (
-      <GoalStage project={project} busy={planning} onPlan={(goal) => void makePlan(goal)} onHandsOn={() => setStage('editor')}>
+      <GoalStage
+        project={project}
+        reading={readingBusy ? null : reading}
+        busy={planning}
+        onPlan={(goal) => void makePlan(goal)}
+        onHandsOn={() => setStage('editor')}
+        onName={(label, name) => void changeSpeaker(label, { name })}
+      >
         {error && <div className={styles.error} role="alert">{error}</div>}
         <ProjectList projects={projects} onOpen={(id) => void openProject(id)} onDelete={(id) => void removeProject(id)} />
       </GoalStage>
@@ -871,8 +932,9 @@ export default function App() {
   const clarifying = plan?.status === 'clarifying'
   const planned = plan?.items.filter((i) => i.kind === 'planned' && i.enabled) ?? []
   const doneCount = planned.filter((i) => ['ready', 'approved', 'needs-you', 'failed'].includes(i.status)).length
-  const stateWord = planning ? 'reading the clip'
+  const stateWord = planning ? (plan ? 'changing the plan' : 'reading the clip')
     : clarifying ? 'has a question'
+    : plan?.status === 'stopping' ? 'stopping after this line'
     : planBusy ? `working · ${doneCount} of ${planned.length} done`
     : editingLine ? 'standing by'
     : plan?.status === 'proposed' ? 'has a plan'
@@ -881,7 +943,8 @@ export default function App() {
   const placeholder = clarifying ? 'Answer, or tell Voltage anything else'
     : review ? "What's off?"
     : selection ? 'Ask for a change, e.g. say "30% off" instead'
-    : plan ? 'Change the plan, or ask for something else'
+    : plan && (plan.status === 'running' || plan.status === 'stopping') ? 'Voicing the plan; Stop it to change it'
+    : plan ? 'Change the plan in your words: "not the second one", "warmer at 0:17"'
     : 'What should this video say?'
   const secondsLeft = plan && planBusy ? Math.max(5, Math.round((plan.estimate.seconds || 12) * (1 - (planned.length ? doneCount / planned.length : 0)))) : 0
 
@@ -1134,6 +1197,9 @@ export default function App() {
               onAnswer={(item, option) => void answerTheItem(item, option)}
               onRedo={(item) => void redoTheItem(item)}
               onApproveAll={() => setReview(true)}
+              onDelivery={(item, delivery) => void changeItem(item, { delivery: delivery ?? '' })}
+              onMix={(item, mix) => void changeItem(item, { mix })}
+              onStop={() => void stop()}
             />
           )}
           {planBusy && (

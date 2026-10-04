@@ -58,7 +58,7 @@ export interface Plan {
   goal: string
   summary: string
   mode: Autonomy
-  status: 'clarifying' | 'proposed' | 'running' | 'done'
+  status: 'clarifying' | 'proposed' | 'running' | 'stopping' | 'done'
   created_at: string
   estimate: { items: number; voice_characters: number; usd: number; seconds: number }
   /** What the planner noticed while reading, in order. */
@@ -156,7 +156,15 @@ export interface Project {
   settings?: ProjectSettings
   /** The latest plan, if the agent has made one (Phase 13). */
   plan?: Plan | null
+  /** Voltage's first look at the clip, once it has had one (UX-2). */
+  reading?: Reading | null
 }
+
+/** One speaker's role in the clip, as Voltage guesses it from what they say. */
+export interface RoleGuess { label: string; role: string; why: string }
+
+/** Voltage's first look at a clip: a specific opening line and a role per speaker. */
+export interface Reading { opening: string; roles: RoleGuess[]; at?: string }
 
 /** What a project has spent. USD is an estimate from list prices. */
 export interface Usage {

@@ -1,6 +1,6 @@
 import type {
   Project, ApprovedResult, ExportManifest, EditRequest, Job, ProjectSummary, ProjectDetail, Usage, Voice, Speaker,
-  ProjectSettings, LongLines, Rewording, Autonomy, Plan, Fit, Mix, Selection, Candidate,
+  ProjectSettings, LongLines, Rewording, Autonomy, Plan, Fit, Mix, Selection, Candidate, Reading,
 } from './types'
 
 const BASE = '/api'
@@ -233,3 +233,16 @@ export interface PlanApproval {
 /** Approves every ready item and renders. */
 export const approvePlan = (id: string, planId: string, req: { items?: string[]; override?: boolean } = {}) =>
   post<PlanApproval>(`/projects/${id}/plans/${planId}/approve`, req)
+
+/** Voltage's first look at the clip (UX-2): an opening line and each speaker's
+ *  role. Saved with the project; read once unless `again`. */
+export const readProject = (id: string, again = false) =>
+  post<Reading>(`/projects/${id}/reading`, again ? { again } : {})
+
+/** Changes the plan in your words, in place: the takes already voiced survive.
+ *  A new goal altogether comes back as a new plan. */
+export const revisePlan = (id: string, planId: string, instruction: string) =>
+  post<Plan>(`/projects/${id}/plans/${planId}/revise`, { instruction })
+
+/** Stops a running plan after the line it is on. */
+export const stopPlan = (id: string, planId: string) => post<Plan>(`/projects/${id}/plans/${planId}/stop`)
