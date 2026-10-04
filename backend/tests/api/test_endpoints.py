@@ -1829,3 +1829,75 @@ def test_rewording_a_voiced_item_puts_a_finished_plan_back_to_proposed(client, p
     run_plan(client, "plan1")
     plan = client.put("/projects/p1/plans/plan1/items/i1", json={"new_text": "Get a third off today."}).json()
     assert plan["status"] == "proposed" and plan["items"][0]["status"] == "planned" and plan["estimate"]["items"] == 1
+
+
+# ── UX-3: review, ship, return ───────────────────────────────────────────────
+
+def test_the_project_list_shows_each_projects_frame_state_and_last_change(client, project):
+    listed = client.get("/projects").json()["projects"][0]
+    assert listed["state"] == "new" and listed["last_change"] == "Nothing changed yet"
+    assert listed["media"]["sha256"] == project["media"]["sha256"] and listed["variant_of"] is None
+
+    make_plan(client)
+    listed = client.get("/projects").json()["projects"][0]
+    assert listed["state"] == "draft" and listed["last_change"] == "Planned 1 change"
+
+    run_plan(client, "plan1")
+    client.post("/projects/p1/plans/plan1/approve", json={})
+    listed = client.get("/projects").json()["projects"][0]
+    assert listed["state"] == "shipped" and listed["edits"] == 1 and listed["last_change"] == "Rendered the edited video"
+
+
+def test_shipping_some_lines_holds_the_rest_and_undo_returns_a_line_to_a_draft(client, project, monkeypatch):
+    import app.api.main as main
+    monkeypatch.setattr(main, "planner", Plans([(1, "Get 30% off today only.", "replace", ""),
+                                                 (1, "Thirty, friends.", "over", "")]))
+    make_plan(client, goal="30% off")
+    run_plan(client, "plan1")
+
+    shipped = client.post("/projects/p1/plans/plan1/approve", json={"items": ["i1"]}).json()
+
+    assert [a["item_id"] for a in shipped["approved"]] == ["i1"]
+    assert [i["status"] for i in shipped["plan"]["items"]] == ["approved", "ready"]   # the second is held
+    assert shipped["export"] is not None
+
+    client.post("/projects/p1/edits/e1/revert")
+
+    plan = client.get("/projects/p1/plans/plan1").json()
+    assert [(i["status"], i["edit_id"]) for i in plan["items"]] == [("ready", None), ("ready", None)]
+    assert plan["items"][0]["candidate"]["candidate_id"] is not None       # the take is kept, as a draft
+    assert plan["log"][-1]["text"] == "You undid the line at 0:00"
+    assert client.get("/projects").json()["projects"][0]["state"] == "draft"
+
+
+def test_a_variant_is_the_same_clip_with_the_plan_as_a_draft(client, project, monkeypatch):
+    import app.api.main as main
+    monkeypatch.setattr(main, "planner", Plans([(1, "Get 30% off today only.", "replace", "Offer")]))
+    client.post("/projects/p1/speakers/detect")
+    client.put("/projects/p1/speakers/A", json={"name": "Presenter", "voice_id": "nPczCjzI2devNBz1zQrb"})
+    client.put("/projects/p1/settings", json={"long_lines": "shorten"})
+    make_plan(client, goal="30% off")
+    done = run_plan(client, "plan1")
+    client.post("/projects/p1/plans/plan1/approve", json={})
+
+    variant = client.post("/projects/p1/variants").json()
+
+    assert variant["project_id"] == "p2" and variant["filename"] == "ad.mp4"
+    assert variant["media"]["sha256"] == project["media"]["sha256"]
+    assert variant["consent"] is not None and variant["settings"]["long_lines"] == "shorten"
+    assert variant["speakers"] == [{"label": "A", "name": "Presenter", "voice_id": "nPczCjzI2devNBz1zQrb"}]
+    plan = variant["plan"]
+    assert plan["plan_id"] == "plan1" and plan["goal"] == "30% off" and plan["status"] == "proposed"
+    assert [(i["new_text"], i["status"], i["candidate"], i["edit_id"]) for i in plan["items"]] == [
+        ("Get 30% off today only.", "planned", None, None)]
+    assert plan["estimate"]["items"] == 1
+    assert plan["log"][-1]["text"] == "Made as a variant of ad.mp4, with its plan as a draft"
+    assert client.get("/projects/p2/artifacts/" + variant["media"]["sha256"]).status_code == 200
+    listed = client.get("/projects").json()["projects"]
+    assert [(p["project_id"], p["state"], p["variant_of"]) for p in listed] == [("p2", "draft", "p1"), ("p1", "shipped", None)]
+    # The original is untouched.
+    assert done["items"][0]["candidate"] is not None
+    assert client.get("/projects/p1/plans/plan1").json()["items"][0]["status"] == "approved"
+    # Deleting the variant leaves the original's media alone.
+    client.delete("/projects/p2")
+    assert client.get("/projects/p1/artifacts/" + project["media"]["sha256"]).status_code == 200

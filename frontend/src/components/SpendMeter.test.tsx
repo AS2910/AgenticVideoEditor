@@ -11,8 +11,8 @@ describe('SpendMeter', () => {
   it('shows spend and voice characters against their limits', () => {
     render(<SpendMeter usage={USAGE} />)
     expect(screen.getByTestId('spend')).toHaveTextContent(
-      '$0.04 of $2.00 spent, 120 of 2,000 voice characters')
-    expect(screen.getByTestId('spend')).toHaveAttribute('title', 'Reading requests: $0.010 (1×)')
+      '$0.04 of $2.00 120 of 2,000 voice characters')
+    expect(screen.getByTestId('spend')).toHaveAttribute('title', 'Reading requests: $0.010 (1×) · 120 of 2,000 voice characters')
   })
 
   it('shows nothing before usage has loaded', () => {

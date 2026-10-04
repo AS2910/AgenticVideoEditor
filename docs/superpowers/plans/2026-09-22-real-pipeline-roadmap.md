@@ -187,6 +187,7 @@ Grouped into three milestones. Each milestone is independently useful — you ca
 - [x] **Phase 14 · Fit by writing and generation** — **done 2026-10-03** (the natural-fit roadmap's first phase; `2026-10-03-natural-fit-roadmap.md`)
 - [x] **UX-1 · The line is the unit** — **done 2026-10-04** (`2026-10-04-ux1-the-line-is-the-unit.md`, with UX-1b the same day)
 - [x] **UX-2 · The panel does one job** — **done 2026-10-04** (`2026-10-04-ux2-the-panel-does-one-job.md`)
+- [x] **UX-3 · Review, ship, return** — **done 2026-10-04** (`2026-10-04-ux3-review-ship-return.md`)
   - `app/media/fit.py`: syllable counts and a speaking rate per speaker → a **syllable budget** per line, shown to the planner ("7 syl now, up to 9 fit") and put in the reword prompt; **gap-first fitting** — pauses trimmed or opened before any tempo change, within the old limits.
   - ElevenLabs adapter: **takes by duration** (a first take within `AVE_FIT_TOLERANCE` is kept; else up to `AVE_TAKES_PER_LINE` and the nearest wins), and the model's own `speed` (0.7–1.2) tried once when every take is beyond a tempo change; `last_notes` says what was done.
   - A long line may **borrow up to 150 ms from the pause before it** (`room_before`) when the pause after is not quite enough.

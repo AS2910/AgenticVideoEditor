@@ -9,6 +9,7 @@ const SOURCE_MEDIA = {
 
 const PROJECT = {
   statements: [{ text: 'Get 20% off today only.', start: 0.0, end: 2.3 }],
+  consent: { granted_at: '2026-09-26T08:00:00Z' },
   project_id: 'p1',
   filename: 'sample-ad.mp4',
   duration: 2.3,
@@ -142,15 +143,13 @@ function routeFetch(approveStatus = 200, job: unknown = JOB_DONE) {
   })
 }
 
-/** consent -> load -> the goal stage, where Voltage has read the clip. */
+/** load -> the goal stage, where Voltage has read the clip. */
 async function reachGoal(user: ReturnType<typeof userEvent.setup>) {
-  await user.click(screen.getByRole('checkbox'))
-  await user.click(screen.getByRole('button', { name: /continue/i }))
   await user.click(screen.getByRole('button', { name: /sample ad/i }))
   await screen.findByText('What should this video say?')
 }
 
-/** consent -> load -> goal -> editor, hands-on, leaving the app on the editor screen. */
+/** load -> goal -> editor, hands-on, leaving the app on the editor screen. */
 async function reachEditor(user: ReturnType<typeof userEvent.setup>) {
   await reachGoal(user)
   await user.click(screen.getByRole('button', { name: /edit a line yourself/i }))
@@ -166,7 +165,7 @@ beforeEach(() => {
 })
 
 describe('App full journey', () => {
-  it('runs consent → load → select → preview → approve → export', async () => {
+  it('runs load → select → preview → approve → export', async () => {
     vi.stubGlobal('fetch', routeFetch())
     const user = userEvent.setup()
     render(<App />)
@@ -227,18 +226,40 @@ describe('App full journey', () => {
     expect(screen.queryByTestId('generating')).not.toBeInTheDocument()
   })
 
-  it('sends the confirmed consent along with the upload', async () => {
-    const f = routeFetch()
+  it('uploads without consent, and asks for it in a sentence the first time a voice is made (UX-3)', async () => {
+    const base = routeFetch()
+    const granted: string[] = []
+    const f = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.endsWith('/projects') && init?.method === 'POST') return ok({ ...PROJECT, consent: null })
+      if (url.endsWith('/consent')) { granted.push(url); return ok({ project_id: 'p1', consent: { granted_at: '2026-10-04T10:00:00Z' } }) }
+      return base(url, init)
+    })
     vi.stubGlobal('fetch', f)
     const user = userEvent.setup()
     render(<App />)
     await reachEditor(user)
 
-    const upload = f.mock.calls.find(
-      ([url, init]) => String(url).endsWith('/projects') && init?.method === 'POST')
-    expect(upload).toBeDefined()
-    const body = upload?.[1]?.body as FormData
-    expect(body.get('consent')).toBe('true')
+    const upload = f.mock.calls.find(([url, init]) => String(url).endsWith('/projects') && init?.method === 'POST')
+    expect((upload![1]!.body as FormData).get('consent')).toBe('false')
+
+    await user.click(screen.getByText('20%'))
+    await user.type(screen.getByRole('textbox', { name: /describe a change/i }), 'change "20% off" to "30% off"')
+    await user.click(screen.getByRole('button', { name: /preview/i }))
+
+    // Nothing is voiced until the question is answered.
+    const sheet = await screen.findByRole('dialog')
+    expect(sheet).toHaveTextContent("I'll be creating speech in this person's voice")
+    expect(f.mock.calls.some(([url]) => String(url).endsWith('/edits/preview'))).toBe(false)
+    await user.click(screen.getByRole('button', { name: 'Not yet' }))
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(f.mock.calls.some(([url]) => String(url).endsWith('/edits/preview'))).toBe(false)
+
+    await user.type(screen.getByRole('textbox', { name: /describe a change/i }), 'change "20% off" to "30% off"')
+    await user.click(screen.getByRole('button', { name: /preview/i }))
+    await user.click(await screen.findByRole('button', { name: 'Yes, I have it' }))
+    await waitFor(() => expect(granted).toHaveLength(1))
+    await waitFor(() => expect(f.mock.calls.some(([url]) => String(url).endsWith('/edits/preview'))).toBe(true))
+    await waitFor(() => expect(screen.getByText('30% off')).toBeInTheDocument())
   })
 
   it('surfaces the backend refusal if generation is attempted without consent', async () => {
@@ -270,11 +291,11 @@ describe('App full journey', () => {
       expect(screen.getByText(/right to edit and clone/i)).toBeInTheDocument())
   })
 
-  it('gates the editor behind consent', () => {
+  it('opens on the load screen; no gate before anything is seen', () => {
     vi.stubGlobal('fetch', routeFetch())
     render(<App />)
-    expect(screen.getByText(/right to edit and clone the speaker/i)).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: /load sample ad/i })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /sample ad/i })).toBeInTheDocument()
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
   })
 
   it('plans a goal typed with nothing selected, instead of previewing', async () => {
@@ -449,9 +470,9 @@ describe('App projects (Phase 9a)', () => {
     return f
   }
 
-  async function toLoadScreen(user: ReturnType<typeof userEvent.setup>) {
-    await user.click(screen.getByRole('checkbox'))
-    await user.click(screen.getByRole('button', { name: /continue/i }))
+  async function toLoadScreen(_user: ReturnType<typeof userEvent.setup>) {
+    // The app opens on the load screen; nothing gates it (UX-3).
+    await screen.findByRole('button', { name: /sample ad/i })
   }
 
   it('reopens a project with its chat, and plays its approved edits', async () => {
@@ -807,8 +828,63 @@ describe('App the agent (Phase 13)', () => {
     await waitFor(() => expect((container.querySelector('video') as HTMLVideoElement).getAttribute('src'))
       .toBe(`/api/projects/p1/artifacts/${'r'.repeat(64)}`))
     expect(calls.some((c) => c.url.endsWith('/plans/plan1/approve'))).toBe(true)
-    expect(screen.getByText('Shipped')).toBeInTheDocument()
+    // UX-3: the sheet says what is in the file.
+    const sheet = await screen.findByTestId('ship-sheet')
+    expect(sheet).toHaveTextContent('1 line changed. 0:02.3 → 0:02.3, the same length. $0.01 for this plan.')
+    expect(sheet).toHaveTextContent('Said “Get 30% off today only.”')
+    expect(within(sheet).getByRole('link', { name: 'Download MP4' })).toHaveAttribute('download', 'sample-ad-edited.mp4')
+    await user.click(within(sheet).getByRole('button', { name: 'Back to the transcript' }))
+    expect(screen.queryByTestId('ship-sheet')).not.toBeInTheDocument()
     expect(screen.getByTestId('activity')).toHaveTextContent('Rendered the edited video')
+  })
+
+  it('ships the lines kept and holds the rest; a shipped line can be undone; a variant starts from the plan (UX-3)', async () => {
+    const two = { ...PLAN_ITEM, item_id: 'i2', selection: { start: 1.5, end: 2.0 }, new_text: 'Thirty off.', mix: 'over' }
+    const done = { ...PLAN, status: 'done', items: [{ ...PLAN_ITEM, status: 'ready', candidate: BRIAN_TAKE }, { ...two, status: 'ready', candidate: BRIAN_TAKE }] }
+    const partly = { ...done, items: [{ ...done.items[0], status: 'approved', edit_id: 'e1' }, done.items[1]] }
+    const calls = agent(PLAN, done)
+    const base = fetch as unknown as (url: string, init?: RequestInit) => Promise<Response>
+    const f = vi.fn(async (url: string, init?: RequestInit) => {
+      const body = typeof init?.body === 'string' ? JSON.parse(init.body) : undefined
+      if (url.endsWith('/approve')) {
+        calls.push({ url, body })
+        return ok({ approved: [{ item_id: 'i1', edit_id: 'e1', overridden: false }], skipped: [], export: { segments: SEGMENTS, render: RENDER }, plan: partly })
+      }
+      if (url.endsWith('/revert')) { calls.push({ url, body }); return ok({ edit_id: 'e1', reverted: true }) }
+      if (url.endsWith('/variants')) { calls.push({ url, body }); return ok({ ...PROJECT, project_id: 'p2', plan: PLAN }) }
+      if (url.endsWith('/projects/p2')) return ok({ ...PROJECT, project_id: 'p2', plan: PLAN, created_at: '2026-10-04T10:00:00Z', edits: [], messages: [] })
+      return base(url, init)
+    })
+    vi.stubGlobal('fetch', f)
+    const user = userEvent.setup()
+    render(<App />)
+    await reachGoal(user)
+    await user.type(screen.getByRole('textbox', { name: /what the video should say/i }), 'make it 30% off{Enter}')
+    await user.click(await screen.findByRole('button', { name: 'Go ahead' }))
+    await user.click(await screen.findByRole('button', { name: 'Review 2 ready changes' }))
+
+    // Hold the second; ship the first.
+    expect(screen.getByText('Two changes, ready to ship')).toBeInTheDocument()
+    await user.click(within(screen.getByRole('group', { name: 'Keep or hold the change at 0:00' })).getByRole('button', { name: 'Hold' }))
+    expect(screen.getByText('1 kept, 1 held as a draft.')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Ship 1 of 2' }))
+    await waitFor(() => expect(calls.find((c) => c.url.endsWith('/approve'))?.body).toEqual({ items: ['i2'] }))
+
+    const sheet = await screen.findByTestId('ship-sheet')
+    expect(sheet).toHaveTextContent('held as a draft')
+    await user.click(within(sheet).getByRole('button', { name: 'Back to the transcript' }))
+
+    // Review again: one shipped with Undo, one still a draft.
+    await user.click(screen.getByRole('button', { name: 'Review 1 ready change' }))
+    await user.click(screen.getByRole('button', { name: 'Undo' }))
+    await waitFor(() => expect(calls.some((c) => c.url.endsWith('/edits/e1/revert'))).toBe(true))
+
+    // A variant: the same clip, the plan as a draft, opened as its own project.
+    await user.click(screen.getByRole('button', { name: 'Ship it' }))
+    await user.click(within(await screen.findByTestId('ship-sheet')).getByRole('button', { name: 'Make a variant' }))
+    await waitFor(() => expect(calls.some((c) => c.url.endsWith('/projects/p1/variants'))).toBe(true))
+    await waitFor(() => expect(window.location.hash).toBe('#p2'))
+    expect(await screen.findByRole('checkbox', { name: 'Include the change at 0:00' })).toBeInTheDocument()
   })
 
   it('unticks and rewords a planned change before running', async () => {
@@ -1057,8 +1133,6 @@ describe('App panel order', () => {
     }))
     const user = userEvent.setup()
     render(<App />)
-    await user.click(screen.getByRole('checkbox'))
-    await user.click(screen.getByRole('button', { name: /continue/i }))
     await user.click(screen.getByRole('button', { name: /sample ad/i }))
     expect(await screen.findByText(/no speech in this clip/i)).toBeInTheDocument()
     expect(screen.queryByText('What should this video say?')).not.toBeInTheDocument()

@@ -182,6 +182,11 @@ export interface ProjectSummary {
   duration: number
   created_at: string
   edits: number
+  /** UX-3: the source media (for a frame), where the project stands, its last change. */
+  media?: MediaArtifact
+  state?: 'new' | 'draft' | 'shipped'
+  last_change?: string
+  variant_of?: string | null
 }
 
 export interface ApprovedEditSummary {
