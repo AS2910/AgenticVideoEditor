@@ -146,6 +146,21 @@ export function LineDoc({
     setPending(id)
     try { await fn() } finally { setPending((p) => (p === id ? null : p)) }
   }
+  // Roving focus (UX-6): Tab moves row to row; only the row that holds focus
+  // exposes its own controls to Tab, so forty lines are forty stops, not 350.
+  const list = useRef<HTMLDivElement>(null)
+  const [focusTick, setFocusTick] = useState(0)
+  useEffect(() => {
+    const root = list.current
+    if (!root) return
+    const active = document.activeElement?.closest('[role="listitem"]') ?? null
+    for (const row of Array.from(root.querySelectorAll<HTMLElement>('[role="listitem"]'))) {
+      const own = row === active
+      for (const el of Array.from(row.querySelectorAll<HTMLElement>('button, input, select, textarea, a[href]'))) {
+        if (el.tabIndex !== (own ? 0 : -1)) el.tabIndex = own ? 0 : -1
+      }
+    }
+  })
   // A row being dragged up or down to shift it in time (UX-1c).
   const [drag, setDrag] = useState<{ key: string; label: string; duration: number; at: number; to: number; apply: (to: number) => void } | null>(null)
   const box = useRef<HTMLTextAreaElement>(null)
@@ -770,7 +785,7 @@ export function LineDoc({
         </span>
       </div>
 
-      <div role="list" className={styles.doc}>
+      <div role="list" className={styles.doc} ref={list} onFocusCapture={() => setFocusTick((t) => t + 1)} onBlurCapture={() => setFocusTick((t) => t + 1)} data-focus-tick={focusTick}>
         {rows.map((entry, order) => (entry.kind === 'moved' ? movedRow(entry, order) : lineRow(entry.s, entry.i, order)))}
         {drag && dropIndexFor(drag.to) === rows.length && dropMarker()}
       </div>

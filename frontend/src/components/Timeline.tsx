@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useRef, useState } from 'react'
 import type { MouseEvent, PointerEvent } from 'react'
 import type { Word, Selection } from '../types'
 import { snapToWords, timeFromX } from '../timeline/selection'
@@ -13,6 +13,34 @@ interface TimelineProps {
 }
 
 const pct = (t: number, duration: number) => `${(t / duration) * 100}%`
+
+/** The words on the track. Memoised: the playhead moves many times a second
+ *  and must not re-render every word with it (UX-6). */
+const Words = memo(function Words({ words, duration, selection, onClickWord }: {
+  words: Word[]
+  duration: number
+  selection: Selection | null
+  onClickWord: (e: MouseEvent, w: Word) => void
+}) {
+  return (
+    <>
+      {words.map((w, i) => (
+        <button
+          key={`${w.text}-${w.start}`}
+          className={styles.word}
+          // Alternate words sit on two rows, so a label can run past its
+          // word's own (often very short) span without covering the next.
+          data-lane={i % 2}
+          aria-pressed={selection ? w.start < selection.end && selection.start < w.end : undefined}
+          style={{ left: pct(w.start, duration), width: pct(w.end - w.start, duration) }}
+          onClick={(e) => onClickWord(e, w)}
+        >
+          {w.text}
+        </button>
+      ))}
+    </>
+  )
+})
 
 // A press that moves less than this is a click, not a drag.
 const DRAG_THRESHOLD_PX = 4
@@ -78,7 +106,7 @@ export function Timeline({ words, duration, selection, currentTime, onSelect }: 
     window.addEventListener('pointerup', end)
   }
 
-  const clickWord = (e: MouseEvent, w: Word) => {
+  const clickWord = useCallback((e: MouseEvent, w: Word) => {
     if (suppressClick.current) {
       suppressClick.current = false
       return
@@ -88,7 +116,7 @@ export function Timeline({ words, duration, selection, currentTime, onSelect }: 
     } else {
       onSelect({ start: w.start, end: w.end })
     }
-  }
+  }, [selection, onSelect])
 
   return (
     <div className={styles.timeline}>
@@ -108,20 +136,7 @@ export function Timeline({ words, duration, selection, currentTime, onSelect }: 
             <div className={styles.empty}>No speech found in this video — there are no words to edit.</div>
           )}
 
-          {words.map((w, i) => (
-            <button
-              key={`${w.text}-${w.start}`}
-              className={styles.word}
-              // Alternate words sit on two rows, so a label can run past its
-              // word's own (often very short) span without covering the next.
-              data-lane={i % 2}
-              aria-pressed={selection ? w.start < selection.end && selection.start < w.end : undefined}
-              style={{ left: pct(w.start, duration), width: pct(w.end - w.start, duration) }}
-              onClick={(e) => clickWord(e, w)}
-            >
-              {w.text}
-            </button>
-          ))}
+          <Words words={words} duration={duration} selection={selection} onClickWord={clickWord} />
 
           {selection && (
             <div
