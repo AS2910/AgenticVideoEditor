@@ -15,9 +15,21 @@
 .state[data-state="shipped"] { color: var(--ok); border-color: var(--ok); }
 .state[data-state="draft"] { color: var(--accent); border-color: var(--accent-line); }
 .meta { color: var(--muted); font-size: var(--fs-14); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.delete, .cancel, .confirm {
-  padding: 0 12px; border-radius: 6px; font-size: var(--fs-13);
-  background: transparent; color: var(--muted); border: 1px solid transparent;
+.delete, .cancel, .confirm, .undo {
+  padding: 0 14px; border-radius: 8px; font-size: var(--fs-14);
+  background: transparent; color: var(--muted); border: 1px solid transparent; white-space: nowrap;
 }
 .delete:hover, .cancel:hover { border-color: var(--line); color: var(--text); }
-.confirm { color: var(--amber); border-color: var(--amber-line); }
+.cancel { color: var(--text); border-color: var(--line); background: var(--raised); }
+/* The confirm sits in a strip across the row, never where Delete was tapped. */
+.confirm { color: var(--amber); border-color: var(--amber-line); margin-left: auto; }
+.confirm:hover { border-color: var(--amber); }
+.undo { color: var(--accent); margin-left: auto; }
+.undo:hover { text-decoration: underline; }
+.strip {
+  flex: 1; display: flex; flex-wrap: wrap; align-items: center; gap: var(--target-gap) 12px;
+  padding: 8px 0 8px 12px; min-height: 52px; color: var(--muted); font-size: var(--fs-14);
+  border-left: 2px solid var(--amber-line);
+}
+.strip strong { color: var(--text); font-weight: 500; }
+.empty { margin: 0; color: var(--muted); font-size: var(--fs-14); }

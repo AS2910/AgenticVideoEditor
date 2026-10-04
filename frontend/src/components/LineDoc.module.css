@@ -7,17 +7,16 @@
 .hint { color: var(--muted); font-size: var(--fs-14); }
 
 .row {
+  position: relative;
   display: grid; grid-template-columns: 34px 22px minmax(0, 1fr) auto;
   column-gap: 12px; align-items: start; padding: 8px 10px; border-radius: 12px;
 }
 .row { min-height: var(--target); transition: background-color var(--t) var(--ease), box-shadow var(--t) var(--ease); }
 .row[data-state], .row[data-selected="true"] { background: var(--surface); }
 .row:focus-visible { outline: none; box-shadow: inset 0 0 0 2px var(--accent); background: var(--surface); }
-.row:focus-visible .actions { opacity: 1; }
 .keys { white-space: nowrap; }
 .keys kbd { display: inline-block; min-width: 18px; padding: 0 5px; margin: 0 1px; border-radius: 5px; font: inherit; font-size: var(--fs-12); text-align: center; color: var(--text); background: var(--raised); border: 1px solid var(--line); }
 .row[data-selected="true"] { box-shadow: inset 2px 0 0 var(--accent); }
-.row:hover .actions, .row:focus-within .actions { opacity: 1; }
 
 .time { display: flex; align-items: center; min-height: var(--target); padding: 0; margin: -10px 0; background: none; border: none; text-align: left; color: var(--muted); font-size: var(--fs-13); }
 .time:hover, .row[data-current="true"] .time { color: var(--accent); }
@@ -37,6 +36,7 @@
 .undo:hover { text-decoration: underline; }
 
 .side { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; min-height: 22px; }
+.sideRow { display: flex; align-items: center; gap: var(--target-gap); }
 .chip { padding: 3px 9px; border-radius: 999px; font-size: 12px; white-space: nowrap; }
 .chip[data-tone="muted"] { color: var(--muted); background: var(--raised); }
 .chip[data-tone="amber"] { color: var(--accent); background: var(--accent-tint); }
@@ -44,8 +44,21 @@
 .chip[data-tone="ok"] { color: var(--ok); background: var(--ok-tint); }
 .row[data-state="reading"] { background: var(--accent-tint); }
 
-/* Actions: in the DOM always, visible on hover or focus. */
-.actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: var(--target-gap); opacity: 0; transition: opacity var(--t) var(--ease); }
+/* Actions: in the DOM always, laid over the row's right edge so the line keeps
+   its full measure; visible on hover or focus. On a touch screen the "…"
+   button opens them under the line instead (UX-6). */
+.actions {
+  position: absolute; right: 10px; top: 6px; z-index: 1;
+  display: flex; flex-wrap: wrap; justify-content: flex-end; gap: var(--target-gap);
+  padding: 4px; border-radius: 12px; background: var(--surface); box-shadow: var(--shadow);
+  opacity: 0; clip-path: inset(0 0 0 100%); transition: opacity var(--t) var(--ease), clip-path var(--t) var(--ease);
+}
+.row:hover .actions, .row:focus-within .actions, .row[data-actions-open] .actions { opacity: 1; clip-path: inset(0); }
+.more {
+  display: none; width: var(--target); height: var(--target); min-height: var(--target); padding: 0; border-radius: 10px;
+  background: transparent; color: var(--muted); border: 1px solid var(--line); font-size: 18px; letter-spacing: 1px;
+}
+.more[aria-expanded="true"] { color: var(--text); border-color: var(--muted); }
 .action { min-height: var(--chip); padding: 0 10px; border-radius: 8px; font-size: var(--fs-13); background: var(--raised); color: var(--text); border: 1px solid var(--line); white-space: nowrap; }
 .action:hover { border-color: var(--muted); }
 
@@ -121,15 +134,13 @@
   .keys { display: none; }
   .row { grid-template-columns: 34px 22px minmax(0, 1fr); row-gap: 6px; }
   .side { grid-column: 3; flex-direction: row; flex-wrap: wrap; align-items: center; justify-content: flex-start; }
-  /* No hover on a phone: tapping the row focuses it, and the actions show. */
-  .actions { display: none; justify-content: flex-start; min-width: 0; flex: 1 1 100%; }
-  .row:hover .actions, .row:focus-within .actions { display: flex; }
   .side:empty { display: none; }
 }
 
 /* UX-1c: drag a row up or down to shift it; the moved line's own row. */
 .grip {
-  padding: 2px 6px; border-radius: 6px; font-size: 12px; letter-spacing: -2px; line-height: 1;
+  display: inline-flex; align-items: center; justify-content: center; width: var(--target); height: var(--target); min-height: var(--target);
+  padding: 0; border-radius: 10px; font-size: 14px; letter-spacing: -2px; line-height: 1;
   background: transparent; color: var(--faint); border: 1px solid transparent; cursor: grab; touch-action: none; user-select: none;
   opacity: 0; transition: opacity var(--t) var(--ease), color var(--t) var(--ease), border-color var(--t) var(--ease);
 }
@@ -144,3 +155,10 @@
   background: var(--accent); color: var(--accent-ink);
 }
 @media (max-width: 960px) { .grip { opacity: 1; } }
+
+/* No hover: the actions live under the line, opened by the "…" button. */
+@media (hover: none) {
+  .actions { display: none; position: static; grid-column: 3; justify-content: flex-start; padding: 0; background: none; box-shadow: none; opacity: 1; clip-path: none; }
+  .row[data-actions-open] .actions { display: flex; }
+  .more { display: inline-flex; align-items: center; justify-content: center; }
+}

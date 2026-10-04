@@ -506,9 +506,10 @@ describe('App projects (Phase 9a)', () => {
     await user.click(await screen.findByRole('button', { name: 'Delete sample-ad.mp4' }))
     await user.click(screen.getByRole('button', { name: /delete for good/i }))
 
+    // The delete waits five seconds behind "Deleted · Undo" before it goes through (UX-6).
     await waitFor(() => expect(f.mock.calls.some(
-      ([url, init]) => String(url).endsWith('/projects/p1') && init?.method === 'DELETE')).toBe(true))
-  })
+      ([url, init]) => String(url).endsWith('/projects/p1') && init?.method === 'DELETE')).toBe(true), { timeout: 7000 })
+  }, 12000)
 
   it('goes back to the project list from the editor', async () => {
     withProjects()

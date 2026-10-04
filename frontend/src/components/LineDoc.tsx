@@ -135,6 +135,11 @@ export function LineDoc({
   const [offers, setOffers] = useState<string[]>([])
   // A row has keyboard focus: the heading shows the keys.
   const [focusedRow, setFocusedRow] = useState<number | null>(null)
+  // On a touch screen the row's actions open from a "…" button (UX-6).
+  const [actionsOpen, setActionsOpen] = useState<number | null>(null)
+  // Backspace removes a line only when pressed twice within two seconds; Delete removes at once.
+  const armed = useRef<{ index: number; at: number } | null>(null)
+  const [armedRow, setArmedRow] = useState<number | null>(null)
   // A row being dragged up or down to shift it in time (UX-1c).
   const [drag, setDrag] = useState<{ key: string; label: string; duration: number; at: number; to: number; apply: (to: number) => void } | null>(null)
   const box = useRef<HTMLTextAreaElement>(null)
@@ -235,7 +240,18 @@ export function LineDoc({
       }
       case 'Delete': case 'Backspace': {
         const live = revisions.filter((r) => overlaps(r, s))
-        if (!live.some((r) => r.mix === 'remove') && !disabled) { e.preventDefault(); onRemove(s) }
+        if (live.some((r) => r.mix === 'remove') || disabled) break
+        e.preventDefault()
+        const now = Date.now()
+        if (e.key === 'Backspace' && !(armed.current && armed.current.index === index && now - armed.current.at < 2000)) {
+          armed.current = { index, at: now }
+          setArmedRow(index)
+          window.setTimeout(() => { if (armed.current && armed.current.at === now) { armed.current = null; setArmedRow(null) } }, 2000)
+          break
+        }
+        armed.current = null
+        setArmedRow(null)
+        onRemove(s)
         break
       }
       default: break
@@ -629,6 +645,7 @@ export function LineDoc({
           data-row-key={key}
           data-row-end={s.end}
           data-dragging={drag?.key === key || undefined}
+          data-actions-open={actionsOpen === i || undefined}
           tabIndex={0}
           role="listitem"
           aria-label={`Line at ${clock(s.start)}${label ? `, ${label}` : ''}`}
@@ -674,18 +691,15 @@ export function LineDoc({
             {status === 'kept' && <span className={styles.chip} data-tone="ok">Kept</span>}
             {status === 'removed' && <span className={styles.chip} data-tone="muted">{movedTo ? 'Moved away' : 'Removed'}</span>}
             {!isEditing && !isAdding && (
-              <span className={styles.actions} role="group" aria-label={`Actions for ${clock(s.start)}`}>
-                <button className={styles.action} onClick={() => open(i, 'edit')}>Change the words</button>
-                <button className={styles.action} onClick={() => open(i, 'edit', true)}>Change the delivery</button>
-                <button className={styles.action} onClick={() => open(i, 'add')}>Add a line after</button>
-                {!removed && <button className={styles.action} onClick={() => onRemove(s)}>Remove</button>}
+              <span className={styles.sideRow}>
+                <button
+                  type="button"
+                  className={styles.more}
+                  aria-label={`Actions for ${clock(s.start)}`}
+                  aria-expanded={actionsOpen === i}
+                  onClick={() => setActionsOpen((o) => (o === i ? null : i))}
+                >…</button>
                 {!revision && onShift && onPlacing && (
-                  <button className={styles.action} onClick={() => { onPlacing({ id: `shift-${key}`, start: s.start, duration: Math.max(0.05, s.end - s.start) }); setPlaceText(timecode(s.start)) }}>Shift</button>
-                )}
-                <button className={styles.action} onClick={() => onSeek(s)}>Play original</button>
-                </span>
-                )}
-                {!revision && !isEditing && !isAdding && onShift && onPlacing && (
                 <button
                 type="button"
                 className={styles.grip}
@@ -693,6 +707,20 @@ export function LineDoc({
                 onPointerDown={(e) => startDrag(e, key, s.text, s.start, Math.max(0.05, s.end - s.start), (t) => onShift(s, t))}
                 onClick={() => { if (dragged.current) { dragged.current = false; return } onPlacing({ id: `shift-${key}`, start: s.start, duration: Math.max(0.05, s.end - s.start) }); setPlaceText(timecode(s.start)) }}
                 >⋮⋮</button>
+                )}
+              </span>
+            )}
+            {!isEditing && !isAdding && (
+              <span className={styles.actions} role="group" aria-label={`Actions for ${clock(s.start)}`}>
+                <button className={styles.action} onClick={() => { setActionsOpen(null); open(i, 'edit') }}>Change the words</button>
+                <button className={styles.action} onClick={() => { setActionsOpen(null); open(i, 'edit', true) }}>Change the delivery</button>
+                <button className={styles.action} onClick={() => { setActionsOpen(null); open(i, 'add') }}>Add a line after</button>
+                {!removed && <button className={styles.action} onClick={() => { setActionsOpen(null); onRemove(s) }}>Remove</button>}
+                {!revision && onShift && onPlacing && (
+                  <button className={styles.action} onClick={() => { onPlacing({ id: `shift-${key}`, start: s.start, duration: Math.max(0.05, s.end - s.start) }); setPlaceText(timecode(s.start)) }}>Shift</button>
+                )}
+                <button className={styles.action} onClick={() => onSeek(s)}>Play original</button>
+                </span>
                 )}
                 </span>
         </div>
@@ -731,7 +759,8 @@ export function LineDoc({
           {editing ? (editing.mode === 'edit' ? `Editing ${clock(statements[editing.index].start)}. Enter to hear it, Esc to cancel.` : `Adding a line after ${clock(statements[editing.index].start)}. Esc to cancel.`)
             : pendingLines.some((p) => p.status === 'reading') ? "Voltage is reading. The line it's on is lit."
             : focusedRow !== null ? <span className={styles.keys} data-testid="keys"><kbd>↑</kbd><kbd>↓</kbd> move · <kbd>Enter</kbd> change the words · <kbd>Space</kbd> play · <kbd>A</kbd> add after · <kbd>S</kbd> shift (or drag ⋮⋮) · <kbd>K</kbd> keep · <kbd>U</kbd> undo · <kbd>/</kbd> ask Voltage</span>
-            : 'Each line carries its own state. Hover a line, or press ↑ ↓ to move between them.'}
+            : armedRow !== null ? <span role="status">Press Backspace again to remove the line at {clock(statements[armedRow].start)}.</span>
+            : 'Each line carries its own state. Tap or hover a line, or press ↑ ↓ to move between them.'}
         </span>
       </div>
 
