@@ -2,20 +2,20 @@
 /* The monitor: neutral black surround so picture reads true. */
 .stage {
   aspect-ratio: 16 / 9; max-height: 46vh; position: relative; overflow: hidden;
-  background: #000; border-radius: var(--radius-lg);
+  background: var(--monitor); border-radius: var(--radius-lg);
 }
 /* Pinned to the stage rather than sized by percentage: `height: 100%` does not
    resolve against an aspect-ratio box, which let a portrait video grow to its
    natural height and be clipped to its middle. */
-.video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; background: #000; }
+.video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; background: var(--monitor); }
 
 .controls { display: flex; align-items: center; gap: 12px; }
 .play {
-  width: 34px; height: 34px; flex: none; border-radius: 50%; border: none;
+  width: 44px; height: 44px; flex: none; border-radius: 50%; border: none;
   background: var(--text); color: var(--bg); display: flex; align-items: center; justify-content: center;
 }
-.play:hover { background: #fff; }
-.timecode { font-size: 13px; white-space: nowrap; }
+.play:hover { background: var(--text-bright); }
+.timecode { font-size: var(--fs-14); white-space: nowrap; }
 .of { color: var(--muted); }
 
 /* The progress bar: a thin track, the played part, markers where the changes
@@ -29,16 +29,17 @@
 .stage { box-shadow: var(--shadow); }
 .stageCompact {
   height: 220px; position: relative; overflow: hidden;
-  background: #000; border-radius: var(--radius-lg); box-shadow: var(--shadow);
+  background: var(--monitor); border-radius: var(--radius-lg); box-shadow: var(--shadow);
 }
 .placing {
   position: absolute; top: -6px; height: 16px; border-radius: 6px; cursor: grab; z-index: 2;
-  background: var(--accent-tint); border: 1px solid var(--accent); box-shadow: 0 0 0 3px rgba(233, 168, 96, 0.12);
+  background: var(--accent-tint); border: 1px solid var(--accent); box-shadow: 0 0 0 3px var(--accent-tint);
   touch-action: none;
 }
+.placing::before { content: ''; position: absolute; left: 0; right: 0; top: -14px; bottom: -14px; }
 .placing:active { cursor: grabbing; }
 .scrubber {
-  position: absolute; left: 0; top: -8px; width: 100%; height: 20px; margin: 0;
+  position: absolute; left: 0; top: -20px; width: 100%; height: 44px; margin: 0;
   opacity: 0; cursor: pointer;
 }
 .scrubber:focus-visible { opacity: 1; }

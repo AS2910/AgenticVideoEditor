@@ -209,7 +209,7 @@ describe('App full journey', () => {
 
     await waitFor(() =>
       expect(screen.getByText(/matching mouth movement/i)).toBeInTheDocument())
-    expect(screen.getByTestId('progress-bar')).toHaveStyle({ width: '55%' })
+    expect(screen.getByTestId('progress-bar')).toHaveStyle({ transform: 'scaleX(0.55)' })
     // No candidate yet — the scorecard must not appear early.
     expect(screen.queryByText(/continuity checked/i)).not.toBeInTheDocument()
   })

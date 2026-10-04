@@ -1356,7 +1356,7 @@ export default function App() {
             <div className={styles.generating} data-testid="plan-progress">
               <div className={styles.progressRow}>
                 <div className={styles.progressTrack}>
-                  <div className={styles.progressFill} style={{ width: `${Math.round((planProgress?.value ?? 0) * 100)}%` }} />
+                  <div className={styles.progressFill} style={{ transform: `scaleX(${Math.min(1, Math.max(0, planProgress?.value ?? 0))})` }} />
                 </div>
                 <span className={styles.progressNote}>about {secondsLeft} s left</span>
               </div>
@@ -1373,7 +1373,7 @@ export default function App() {
                 <div
                   data-testid="progress-bar"
                   className={styles.progressFill}
-                  style={{ width: `${Math.round((progress?.value ?? 0) * 100)}%` }}
+                  style={{ transform: `scaleX(${Math.min(1, Math.max(0, progress?.value ?? 0))})` }}
                 />
               </div>
             </div>

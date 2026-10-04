@@ -183,7 +183,7 @@ export function PlanCard({
             <>
               <span className={styles.spacer} />
               <div className={styles.progress}>
-                <div className={styles.progressFill} style={{ width: `${ticked.length ? (settled.length / ticked.length) * 100 : 0}%` }} />
+                <div className={styles.progressFill} style={{ transform: `scaleX(${ticked.length ? settled.length / ticked.length : 0})` }} />
               </div>
               {running && onStop && (
                 <button className={styles.stop} onClick={onStop} disabled={plan.status === 'stopping'}>

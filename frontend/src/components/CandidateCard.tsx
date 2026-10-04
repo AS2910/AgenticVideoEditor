@@ -90,7 +90,7 @@ export function CandidateCard({
                   data-testid="metric-bar"
                   data-ok={ok}
                   className={ok ? styles.barFillOk : styles.barFillWarn}
-                  style={{ width: `${value * 100}%` }}
+                  style={{ transform: `scaleX(${Math.min(1, Math.max(0, value))})` }}
                 />
               </div>
               <span className={styles.metricValue}>{value.toFixed(2)}</span>

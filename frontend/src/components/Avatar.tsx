@@ -11,7 +11,7 @@ export function Avatar({ name, slot, size = 22 }: { name: string; slot: string; 
       role="img"
       aria-label={name}
       title={name}
-      style={{ width: size, height: size, fontSize: Math.round(size * 0.5) }}
+      style={{ width: size, height: size, fontSize: Math.max(12, Math.round(size * 0.5)) }}
     >
       {initial(name)}
     </span>
