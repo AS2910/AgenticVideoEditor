@@ -29,6 +29,7 @@ export interface PlanItem {
   new_text: string
   speaker: string | null
   mix: Mix
+  delivery?: string | null
   reason: string
   /** A suggestion is a change the goal implied but did not name; it joins
    *  the plan only when added. */
@@ -103,7 +104,10 @@ export interface ContinuityReport {
 }
 
 export type Fit = 'start' | 'stretch'
-export type Mix = 'replace' | 'layer' | 'concatenate'
+export type Mix = 'replace' | 'layer' | 'concatenate' | 'over' | 'remove'
+
+/** How a line is said (UX-1). */
+export type Delivery = 'warmer' | 'more excited' | 'calmer' | 'slower' | 'firmer' | string
 
 export interface EditPlan {
   selection: Selection
@@ -111,6 +115,7 @@ export interface EditPlan {
   voice_profile_id: string
   fit?: Fit | null
   mix?: Mix
+  delivery?: string | null
 }
 
 /** A real media file held by the backend, addressed by the hash of its bytes. */
@@ -223,6 +228,8 @@ export interface EditRequest {
   text?: string
   fit?: Fit
   mix?: Mix
+  /** How it is said (UX-1). */
+  delivery?: string
   /** What the chat shows for this turn when it isn't the prompt — the label
    *  of an option picked in answer to a question. */
   display?: string

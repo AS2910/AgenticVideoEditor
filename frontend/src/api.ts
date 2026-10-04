@@ -1,6 +1,6 @@
 import type {
   Project, ApprovedResult, ExportManifest, EditRequest, Job, ProjectSummary, ProjectDetail, Usage, Voice, Speaker,
-  ProjectSettings, LongLines, Rewording, Autonomy, Plan, Fit, Mix,
+  ProjectSettings, LongLines, Rewording, Autonomy, Plan, Fit, Mix, Selection,
 } from './types'
 
 const BASE = '/api'
@@ -168,6 +168,10 @@ export async function updateSettings(
   return ((await res.json()) as { settings: ProjectSettings }).settings
 }
 
+/** Takes a line out: its words go, the room's own sound stays. Approved at once. */
+export const removeLine = (id: string, span: { start: number; end: number }) =>
+  post<{ edit_id: string; candidate_id: string; selection: Selection; mix: Mix }>(`/projects/${id}/lines/remove`, span)
+
 /** Asks Claude for a new wording of the line in a span, given the draft so far. */
 export const rewordLine = (id: string, req: { start: number; end: number; draft?: string; instruction?: string }) =>
   post<Rewording>(`/projects/${id}/lines/reword`, req)
@@ -196,7 +200,7 @@ export const clarifyPlan = (id: string, planId: string, answer?: string) =>
 /** Untick, reword, or add / leave a suggestion. */
 export const updateItem = (
   id: string, planId: string, itemId: string,
-  change: { enabled?: boolean; new_text?: string; include?: boolean },
+  change: { enabled?: boolean; new_text?: string; include?: boolean; delivery?: string; mix?: Mix },
 ) => put<Plan>(`/projects/${id}/plans/${planId}/items/${itemId}`, change)
 
 /** Voices the ticked items; returns the job to poll. */

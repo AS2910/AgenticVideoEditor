@@ -100,7 +100,9 @@ class EditRequest(BaseModel):
     # so it is not read again (and cannot come back different).
     text: str | None = None
     fit: Literal["start", "stretch"] | None = None
-    mix: Literal["replace", "layer", "concatenate"] | None = None
+    mix: Literal["replace", "layer", "concatenate", "over"] | None = None
+    # How it is said (UX-1): one of DELIVERIES, or the user's own words.
+    delivery: str | None = None
     # What the chat shows for this turn when it isn't the prompt itself — the
     # label of an option picked in answer to a question.
     display: str | None = None
@@ -173,6 +175,7 @@ def _candidate_dict(candidate: EditCandidate) -> dict:
             "voice_profile_id": candidate.plan.voice_profile_id,
             "fit": candidate.plan.fit,
             "mix": candidate.plan.mix,
+            "delivery": candidate.plan.delivery,
         },
         "audio": _artifact_dict(candidate.audio),
         "frames": _artifact_dict(candidate.frames),
@@ -349,6 +352,7 @@ def get_project(project_id: str, owner: str = Depends(current_owner)) -> dict:
                 "new_text": e.plan.new_text,
                 "selection": {"start": e.plan.selection.start, "end": e.plan.selection.end},
                 "mix": e.plan.mix,
+                "delivery": e.plan.delivery,
                 "overridden": e.overridden,
                 "reverted": e.reverted,
             }
@@ -537,7 +541,7 @@ def preview_edit(
         try:
             candidate = _generate(
                 project_id, record, candidate_id, selection, intent.new_text, voice_id,
-                req.fit, mix, req.on_long, report,
+                req.fit, mix, req.on_long, report, delivery=req.delivery,
             )
         except SpanMismatch as exc:
             if req.fit is not None:
@@ -574,14 +578,39 @@ def _voice_for(project_id: str, record: ProjectRecord, selection: Selection, req
     return voices.get(speaker) or requested
 
 
+# An added line can play over the picture only if the pause after its line
+# can hold speech at all.
+MIN_OVER_ROOM = 0.3
+
+
 def _generate(
     project_id: str, record: ProjectRecord, candidate_id: str, selection: Selection,
     text: str, voice_id: str, fit: str | None, mix: str, on_long: str | None, report,
+    delivery: str | None = None,
 ) -> EditCandidate:
     """One line through generation and continuity, placed by the project's
     long-line policy, saved as a candidate. Raises SpanMismatch when the line
-    does not fit and the policy says to ask."""
-    plan = EditPlan(selection, text, voice_id, fit=fit, mix=mix)
+    does not fit and the policy says to ask.
+
+    "over" (UX-1): an added line plays *after* the selection, over the picture
+    that follows — layered on the pause there, fitted to it. When the pause is
+    too short to speak over, or the take cannot be fitted to it, the picture
+    is held instead (concatenate), and the candidate says so."""
+    if mix == "over":
+        room = room_after(record.transcript, selection, record.source.duration)
+        if room >= MIN_OVER_ROOM:
+            window = Selection(selection.end, min(record.source.duration, selection.end + room))
+            try:
+                candidate = _generate(project_id, record, candidate_id, window, text, voice_id,
+                                      None, "layer", "ask", report, delivery)
+            except SpanMismatch:
+                candidate = None
+            if candidate is not None:
+                return candidate
+            report(0.1, "No room to play over the picture; holding it instead")
+        return _generate(project_id, record, candidate_id, selection, text, voice_id,
+                         fit, "concatenate", on_long, report, delivery)
+    plan = EditPlan(selection, text, voice_id, fit=fit, mix=mix, delivery=delivery)
     cost = voice.cost_of(plan)
     if not budget.can_afford(project_id, cost):
         raise BudgetExceeded(cost, budget.remaining(project_id))
@@ -833,6 +862,8 @@ class PlanRequest(BaseModel):
 class ItemUpdate(BaseModel):
     enabled: bool | None = None
     new_text: str | None = None
+    delivery: str | None = None
+    mix: Literal["replace", "over", "concatenate"] | None = None
     # For a suggestion: True adds it to the plan, False leaves it.
     include: bool | None = None
 
@@ -862,6 +893,7 @@ def _item_dict(project_id: str, item: PlanItem) -> dict:
         "new_text": item.new_text,
         "speaker": item.speaker,
         "mix": item.mix,
+        "delivery": item.delivery,
         "reason": item.reason,
         "kind": item.kind,
         "enabled": item.enabled,
@@ -1078,6 +1110,14 @@ def update_item(
         changes.update(kind="suggestion", enabled=False, status="dismissed")
     if req.enabled is not None:
         changes["enabled"] = req.enabled
+    if req.delivery is not None:
+        changes["delivery"] = req.delivery.strip() or None
+        if item.status in ("ready", "needs-you", "failed"):
+            changes.update(status="planned", candidate_id=None, question=None, error=None)
+    if req.mix is not None and item.mix != "replace":
+        changes["mix"] = req.mix
+        if item.status in ("ready", "needs-you", "failed"):
+            changes.update(status="planned", candidate_id=None, question=None, error=None)
     if req.new_text is not None:
         text = req.new_text.strip()
         if not text:
@@ -1155,7 +1195,7 @@ def _run_plan(project_id: str, record: ProjectRecord, plan_id: str, item_ids: li
                 candidate_id = repo.next_candidate_id(project_id)
                 candidate = with_retries(lambda: _generate(
                     project_id, record, candidate_id, item.selection, item.new_text, voice_id,
-                    item.fit, item.mix, None, step,
+                    item.fit, item.mix, None, step, delivery=item.delivery,
                 ))
             except SpanMismatch as exc:
                 question = _agent_fix(project_id, record, item, exc, step)
@@ -1179,10 +1219,13 @@ def _run_plan(project_id: str, record: ProjectRecord, plan_id: str, item_ids: li
             takes = 1 + (int(retried.split()[1].rstrip("×")) if retried else 0)
             cost = voice.cost_of(candidate.plan)
             shortened = candidate.plan.new_text != item.new_text
+            held = item.mix == "over" and candidate.plan.mix == "concatenate"
             repo.update_item(project_id, plan_id, item.item_id, status="ready", candidate_id=candidate_id,
                              question=None, error=None, progress=None,
                              new_text=candidate.plan.new_text,
                              note=("Shortened to fit" if shortened else None)
+                             or ("Held the picture: no room to play over it" if held else None)
+                             or ("Plays over the picture" if item.mix == "over" else None)
                              or _placement_note(candidate, item.selection) or item.note)
             repo.append_log(project_id, plan_id,
                             f"Voiced the line at {_clock(item.selection.start)}"
@@ -1293,4 +1336,67 @@ def approve_plan(
     return {
         "approved": approved, "skipped": skipped, "export": export,
         "plan": _plan_dict(repo.get_plan(project_id, plan_id)),
+    }
+
+
+# ── UX-1: remove a line ──────────────────────────────────────────────────────
+
+class RemoveRequest(BaseModel):
+    start: float
+    end: float
+
+
+def _room_tone(record: ProjectRecord, seconds: float) -> "np.ndarray":
+    """The recording's own quiet, enough to fill `seconds`: the gaps between
+    words, only their genuinely quiet frames, tiled. Silence when the
+    recording has no quiet to offer."""
+    import numpy as np
+    from app.continuity import signals
+    from app.continuity.measured import ROOM_BELOW_SPEECH_DB, _concat, gap_spans, quiet_part
+    rate = signals.RATE
+    want = max(1, int(seconds * rate))
+    try:
+        room = _concat(record.source.media.path, gap_spans(record.transcript, record.source.duration), rate=rate)
+        if room is not None:
+            audio = signals.load(record.source.media.path, rate=rate)
+            level = signals.speech_level_db(audio)
+            if level is not None:
+                room = quiet_part(room, rate, level - ROOM_BELOW_SPEECH_DB)
+    except Exception:  # noqa: BLE001 - room tone is a nicety; silence is the fallback
+        room = None
+    if room is None or room.size < rate // 10:
+        return np.zeros(want, dtype=np.float32)
+    reps = want // room.size + 1
+    return np.tile(room, reps)[:want].astype(np.float32)
+
+
+@app.post("/projects/{project_id}/lines/remove")
+def remove_line(project_id: str, req: RemoveRequest, owner: str = Depends(current_owner)) -> dict:
+    """Take a line out (UX-1): its words go, the room's own sound stays in
+    their place, the picture is untouched. Approved at once — nothing is
+    voiced — and undone like any edit, with Revert."""
+    record = _owned(project_id, owner)
+    if not any(w.end > req.start and w.start < req.end for w in record.transcript.words):
+        raise HTTPException(status_code=422, detail="Nothing is said there to remove.")
+    selection = snap_to_word_boundaries(record.transcript, Selection(req.start, req.end))
+    length = selection.end - selection.start
+    from app.continuity import signals
+    from app.continuity.measured import _write_wav
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "room.wav"
+        _write_wav(path, _room_tone(record, length), signals.RATE)
+        audio = artifacts.put_file(project_id, path, kind="audio", container="wav", duration=length)
+    candidate_id = repo.next_candidate_id(project_id)
+    candidate = EditCandidate(
+        candidate_id=candidate_id,
+        plan=EditPlan(selection, "", "none", mix="remove"),
+        audio=audio, frames=record.source.media,
+        continuity=ContinuityReport(None, None, None, None, True, (), ()),
+    )
+    repo.save_candidate(project_id, candidate)
+    edit_id = _approve_candidate(project_id, candidate, overridden=False)
+    repo.add_message(project_id, "user", f"Removed the line at {_clock(selection.start)}")
+    return {
+        "edit_id": edit_id, "candidate_id": candidate_id,
+        "selection": {"start": selection.start, "end": selection.end}, "mix": "remove",
     }

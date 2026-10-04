@@ -9,8 +9,10 @@ import { QuestionCard } from './components/QuestionCard'
 import { ExportBar } from './components/ExportBar'
 import { ProjectList } from './components/ProjectList'
 import { SpendMeter } from './components/SpendMeter'
-import { TranscriptDoc } from './components/TranscriptDoc'
-import type { LineChange, PendingLine, FitReadout } from './components/TranscriptDoc'
+import { LineDoc } from './components/LineDoc'
+import type { LineRequest, LineState, PendingLine, FitReadout } from './components/LineDoc'
+import { keyOf } from './transcript/keys'
+import type { LineKey } from './transcript/keys'
 import { PlanCard } from './components/PlanCard'
 import { ReviewPanel } from './components/ReviewPanel'
 import { ActivityLog } from './components/ActivityLog'
@@ -24,7 +26,7 @@ import { speakerSlot } from './transcript/speakers'
 import {
   createProject, previewEdit, approveEdit, exportProject, artifactUrl,
   pollJob, PollCancelled, ApiError, listProjects, getProject, deleteProject, getUsage, listVoices, updateSpeaker, detectSpeakers,
-  revertEdit, updateSettings, rewordLine,
+  revertEdit, updateSettings, rewordLine, removeLine,
   createPlan, getPlan, updateItem, runPlan, answerItem, redoItem, approvePlan, clarifyPlan,
 } from './api'
 import type {
@@ -41,7 +43,7 @@ const SAMPLE_URL = '/sample-ad.mp4'
 const DEFAULT_VOICE = 'speaker-1'
 
 /** An answer to a question: the line already read, and the choices so far. */
-interface Answer { text: string; fit?: Fit; mix?: Mix; on_long?: LongLines }
+interface Answer { text: string; fit?: Fit; mix?: Mix; on_long?: LongLines; delivery?: string }
 
 type Stage = 'consent' | 'load' | 'goal' | 'editor'
 
@@ -106,6 +108,13 @@ export default function App() {
   const [showPlanWhileEditing, setShowPlanWhileEditing] = useState(false)
   // How the last take on each line was made to fit, for the editor's readout.
   const [readouts, setReadouts] = useState<FitReadout[]>([])
+  // Hands-on work, line by line: takes to choose from, questions, errors.
+  const [lines, setLines] = useState<Record<LineKey, LineState>>({})
+  // The take playing in place of the line, with its own audio under the video.
+  const [playingTake, setPlayingTake] = useState<string | null>(null)
+  const takeAudio = useRef<HTMLAudioElement | null>(null)
+  // The word timeline is for exact spans; hidden until asked for.
+  const [precise, setPrecise] = useState(false)
   const composerRef = useRef<HTMLInputElement>(null)
   const previewToken = useRef(0)
   const planToken = useRef(0)
@@ -163,7 +172,17 @@ export default function App() {
     setReview(false)
     setEditingLine(null)
     setReadouts([])
+    setLines({})
+    setPlayingTake(null)
+    takeAudio.current?.pause()
   }
+
+  const setLine = (key: LineKey, patch: Partial<LineState> | null) =>
+    setLines((all) => {
+      if (patch === null) { const { [key]: _, ...rest } = all; return rest }
+      const prev: LineState = all[key] ?? { status: 'working', takes: [] }
+      return { ...all, [key]: { ...prev, ...patch } }
+    })
 
   // Voltage's eye moves down the transcript while it reads.
   useEffect(() => {
@@ -245,14 +264,19 @@ export default function App() {
     at: Selection | null = selection,
     shown: string = prompt,
     voice: string = voiceId,
+    line?: { key: LineKey; request: LineRequest },
   ) => {
     if (!projectId || !at) return
     say({ role: 'user', text: shown })
-    setCandidate(null)
-    setQuestion(null)
     setError(null)
-    setGenerating(true)
-    setWorking(at)
+    if (line) {
+      setLine(line.key, { status: 'working', question: null, error: null, progress: 'Voicing the line…', request: line.request })
+    } else {
+      setCandidate(null)
+      setQuestion(null)
+      setGenerating(true)
+      setWorking(at)
+    }
     setAsked(at)
     setProgress({ value: 0, step: 'Queued' })
 
@@ -272,28 +296,38 @@ export default function App() {
       })
       const finished = await pollJob(job.job_id, {
         shouldStop: superseded,
-        onUpdate: (j) => setProgress({ value: j.progress, step: j.step }),
+        onUpdate: (j) => {
+          setProgress({ value: j.progress, step: j.step })
+          if (line) setLine(line.key, { progress: j.step })
+        },
       })
       if (superseded()) return
 
       const result = finished.result
       if (finished.status === 'failed' || !result) {
-        setError(finished.error ?? 'Preview failed. Try again.')
+        if (line) setLine(line.key, { status: 'failed', error: finished.error ?? "Couldn't voice it. Try again.", progress: null })
+        else setError(finished.error ?? 'Preview failed. Try again.')
         return
       }
       if (result.type === 'reply') {
         say({ role: 'assistant', text: result.text })
+        if (line) setLine(line.key, null)
         return
       }
       if (result.type === 'question') {
         say({ role: 'assistant', text: result.question })
-        setQuestion({ question: result, prompt, selection: at })
+        if (line) setLine(line.key, { status: 'needs-you', question: result, progress: null })
+        else setQuestion({ question: result, prompt, selection: at })
         return
       }
       if (!('candidate_id' in result)) return   // a plan's job, not a preview's
-      setSelection(result.plan.selection) // the backend's snapped range
-      setCandidate(result)
-      const over = result.plan.selection.end - at.end
+      if (line) {
+        setLines((all) => ({ ...all, [line.key]: { ...all[line.key], status: 'ready', takes: [...(all[line.key]?.takes ?? []), result], progress: null, question: null } }))
+      } else {
+        setSelection(result.plan.selection) // the backend's snapped range
+        setCandidate(result)
+      }
+      const over = result.plan.mix === 'layer' ? 0 : result.plan.selection.end - at.end
       const notes = result.fit_notes ?? []
       const tags = [
         ...(result.plan.new_text !== (answer?.text ?? result.plan.new_text) ? ['shortened to fit'] : []),
@@ -305,9 +339,11 @@ export default function App() {
       setReadouts((rs) => [...rs.filter((r) => r.selection.start !== at.start || r.selection.end !== at.end), { selection: at, tags }])
     } catch (e) {
       if (e instanceof PollCancelled) return
-      setError(e instanceof ApiError ? e.message : 'Preview failed. Try again.')
+      const message = e instanceof ApiError ? e.message : 'Preview failed. Try again.'
+      if (line) setLine(line.key, { status: 'failed', error: message, progress: null })
+      else setError(message)
     } finally {
-      if (!superseded()) {
+      if (!superseded() && !line) {
         setGenerating(false)
         setWorking(null)
         setProgress(null)
@@ -316,18 +352,81 @@ export default function App() {
     }
   }
 
-  /** A line rewritten in the transcript: an edit of its span with the new
-   *  wording given directly — there is nothing for Claude to interpret. */
-  const editStatement = (s: Statement, change: LineChange) => {
-    const span = { start: s.start, end: s.end }
-    setSelection(span)
+  /** A line edited at the line (UX-1): hear it, keep it, another take, undo. */
+  const hearLine = (key: LineKey, request: LineRequest) => {
+    const s = statementsNow().find((st) => st.start === request.selection.start && st.end === request.selection.end)
+    const display = request.mix === 'replace'
+      ? `“${s?.text ?? ''}” → “${request.text}”`
+      : `Add after ${clock(request.selection.start)}: “${request.text}”`
     void runPreview(
-      `Replace this line with "${change.text}"`,
-      { text: change.text, mix: 'replace', on_long: change.onLong },
-      span,
-      `“${s.text}” → “${change.text}”`,
-      change.voiceId ?? voiceId,
+      request.mix === 'replace' ? `Replace this line with "${request.text}"` : `Add the line "${request.text}"`,
+      { text: request.text, mix: request.mix, on_long: request.onLong, ...(request.delivery ? { delivery: request.delivery } : {}) },
+      request.selection, display, request.voiceId ?? voiceId, { key, request },
     )
+  }
+  const statementsNow = () => project?.statements ?? []
+
+  const keepTake = async (key: LineKey, c: Candidate) => {
+    if (!projectId) return
+    setError(null)
+    try {
+      const result = await approveEdit(projectId, c.candidate_id, !c.continuity.passed)
+      const { selection: at, new_text: text, mix = 'replace' } = c.plan
+      setApproved((a) => [...a, { edit_id: result.edit_id, start: at.start, end: at.end, text, mix }])
+      setLine(key, null)
+      setDownload(null)
+      if (await runExport()) setView('edited')
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : 'Keep failed.')
+    }
+  }
+  const anotherTake = (key: LineKey) => {
+    const request = lines[key]?.request
+    if (request) hearLine(key, request)
+  }
+  const answerLine = (key: LineKey, option: QuestionOption) => {
+    const state = lines[key]
+    if (!state?.question || !state.request) return
+    const q = state.question
+    const request = { ...state.request, text: option.text ?? q.text }
+    say({ role: 'user', text: option.label })
+    void runPreview(
+      `Replace this line with "${request.text}"`,
+      { text: request.text, mix: option.mix ?? q.mix ?? request.mix, fit: option.fit ?? undefined, ...(request.delivery ? { delivery: request.delivery } : {}) },
+      request.selection, option.label, request.voiceId ?? voiceId, { key, request },
+    )
+  }
+  const removeStatement = async (s: Statement) => {
+    if (!projectId) return
+    setError(null)
+    try {
+      const r = await removeLine(projectId, { start: s.start, end: s.end })
+      setApproved((a) => [...a, { edit_id: r.edit_id, start: r.selection.start, end: r.selection.end, text: '', mix: 'remove' }])
+      setDownload(null)
+      if (await runExport()) setView('edited')
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : 'Could not remove that line.')
+    }
+  }
+  /** Play a take in place: the video runs from the line while the take's
+   *  audio plays over it (the original muted for a replacement). */
+  const playTake = (c: Candidate) => {
+    if (!project) return
+    const audio = takeAudio.current ?? (takeAudio.current = new Audio())
+    if (playingTake === c.candidate_id) {
+      audio.pause()
+      setPlayingTake(null)
+      return
+    }
+    audio.src = artifactUrl(project.project_id, c.audio.sha256)
+    audio.onended = () => setPlayingTake(null)
+    const span = c.plan.selection
+    setView('original')
+    setSeekRequest((r) => ({ time: span.start, id: (r?.id ?? 0) + 1, play: true, until: span.start + c.audio.duration + 0.3 }))
+    setCurrentTime(span.start)
+    setPlayingTake(c.candidate_id)
+    const started = audio.play() as Promise<void> | undefined
+    if (started && typeof started.catch === 'function') started.catch(() => {})
   }
 
   /** Remember, for this project, what to do when a line runs long. */
@@ -763,6 +862,24 @@ export default function App() {
   const ranOn = candidate?.plan.mix !== 'concatenate' && overrun > 0.01
 
   const sourceClock = showEdited ? sourceTime(currentTime, inserts) : currentTime
+  const voiceLine = usage?.lines.find((l) => l.vendor === 'elevenlabs' && l.units > 0)
+  const usdPerChar = voiceLine ? voiceLine.usd / voiceLine.units : null
+  const playingMix = playingTake
+    ? Object.values(lines).flatMap((l) => l.takes).find((c) => c.candidate_id === playingTake)?.plan.mix ?? 'replace'
+    : null
+  // What is waiting on you, line by line, for the panel's last word.
+  const lineEntries = Object.entries(lines)
+  const needsYou = lineEntries.filter(([, l]) => l.status === 'needs-you')
+  const readyLines = lineEntries.filter(([, l]) => l.status === 'ready')
+  const atLine = (key: LineKey) => {
+    const i = statements.findIndex((s) => keyOf({ start: s.start, end: s.end }) === key || `add-${s.end.toFixed(3)}` === key)
+    document.getElementById(`line-${i}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    return i >= 0 ? clock(statements[i].start) : ''
+  }
+  const timeOf = (key: LineKey) => {
+    const i = statements.findIndex((s) => keyOf({ start: s.start, end: s.end }) === key || `add-${s.end.toFixed(3)}` === key)
+    return i >= 0 ? clock(statements[i].start) : key
+  }
   const marks = approved.map((r) => (showEdited ? renderTime(r.start, inserts) : r.start))
 
   return (
@@ -794,7 +911,10 @@ export default function App() {
           onTimeUpdate={setCurrentTime}
           seekRequest={seekRequest}
           marks={marks}
+          compact={!review}
+          muted={playingTake !== null && playingMix === 'replace'}
         >
+          <button className={precise ? styles.preciseOn : styles.precise} aria-pressed={precise} onClick={() => setPrecise((p) => !p)}>Precise</button>
           {rendered && (
             <div className={styles.versions} role="group" aria-label="Version">
               {(['edited', 'original'] as const).map((v) => (
@@ -824,14 +944,16 @@ export default function App() {
           />
         ) : (
           <>
-        <Timeline
-          key={project.project_id}
-          words={transcript}
-          duration={project.duration}
-          selection={selection}
-          currentTime={sourceClock}
-          onSelect={setSelection}
-        />
+        {precise && (
+          <Timeline
+            key={project.project_id}
+            words={transcript}
+            duration={project.duration}
+            selection={selection}
+            currentTime={sourceClock}
+            onSelect={setSelection}
+          />
+        )}
         <SpeakersBar
           speakers={speakers}
           voices={voices}
@@ -841,7 +963,7 @@ export default function App() {
           onRename={(label, name) => void changeSpeaker(label, { name })}
           onVoice={(label, id) => void changeSpeaker(label, id ? { voice_id: id } : { clear_voice: true })}
         />
-        <TranscriptDoc
+        <LineDoc
           statements={statements}
           words={transcript}
           speakers={speakers}
@@ -850,15 +972,24 @@ export default function App() {
           selection={selection}
           currentTime={sourceClock}
           pendingLines={pendingLines}
+          lines={lines}
           longLines={longLines}
-          disabled={busy}
+          disabled={planBusy || planning}
+          usdPerChar={usdPerChar}
+          playing={playingTake}
+          readouts={readouts}
           onSeek={seekToStatement}
-          onEdit={editStatement}
-          onRevert={(id) => void revert(id)}
+          onHear={hearLine}
+          onKeep={(key, c) => void keepTake(key, c)}
+          onAnother={anotherTake}
+          onAnswer={answerLine}
+          onUndo={(id) => void revert(id)}
+          onRemove={(s) => void removeStatement(s)}
+          onPlayTake={playTake}
+          onDismiss={(key) => setLine(key, null)}
           onReword={reword}
           onLongLinesChange={(v) => void rememberLongLines(v)}
           onEditingChange={setEditingLine}
-          readouts={readouts}
         />
           </>
         )}
@@ -872,8 +1003,8 @@ export default function App() {
           inputRef={composerRef}
           placeholder={placeholder}
           hint={clarifying ? 'Pick an answer above, or just say "go" and Voltage will use its guess.'
-            : selection ? `Talking about the line at ${clock(selection.start)}.`
-            : 'A goal for the whole video is planned across every line it touches.'}
+            : selection && precise ? `Talking about the words at ${clock(selection.start)}.`
+            : 'For the whole video: a goal, or a change to the plan. To change one line, click it.'}
           toolbar={<VoicePicker voices={voices} value={voiceId} onChange={setVoiceId} />}
           header={
             <div className={styles.panelHead}>
@@ -936,6 +1067,18 @@ export default function App() {
           )}
           {plan && (review || plan.status === 'done') && !(editingLine && plan.status === 'done' && !showPlanWhileEditing) && (
             <ActivityLog plan={plan} />
+          )}
+          {(needsYou.length > 0 || readyLines.length > 0) && !generating && (
+            <div className={styles.nextAction} data-testid="line-action">
+              <span className={styles.nextText}>
+                {needsYou.length > 0
+                  ? `${needsYou.length === 1 ? 'One line needs' : `${needsYou.length} lines need`} you, at ${timeOf(needsYou[0][0])}.`
+                  : `${readyLines.length === 1 ? 'One line is' : `${readyLines.length} lines are`} ready to hear.`}
+              </span>
+              <button className={styles.nextButton} onClick={() => atLine((needsYou[0] ?? readyLines[0])[0])}>
+                {needsYou.length > 0 ? 'Go to it' : readyLines.length === 1 ? 'Go to it' : 'Go to the first'}
+              </button>
+            </div>
           )}
           {plan && !clarifying && !(editingLine && plan.status === 'done' && !showPlanWhileEditing) && (
             <PlanCard

@@ -89,6 +89,12 @@ def _majority(words: list) -> str | None:
     return max(set(labels), key=labels.count) if labels else None
 
 
+# A boundary this close to the selection counts as on it: timings travel as
+# JSON and come back a few millionths off, and a word must not be pulled in
+# over that.
+SNAP_TOLERANCE = 0.02
+
+
 def snap_to_word_boundaries(transcript: Transcript, selection: Selection) -> Selection:
     """Widen a selection outward to the nearest enclosing word boundaries.
 
@@ -98,10 +104,10 @@ def snap_to_word_boundaries(transcript: Transcript, selection: Selection) -> Sel
     if not words:
         return selection
 
-    starts_at_or_before = [w.start for w in words if w.start <= selection.start]
+    starts_at_or_before = [w.start for w in words if w.start <= selection.start + SNAP_TOLERANCE]
     new_start = max(starts_at_or_before) if starts_at_or_before else words[0].start
 
-    ends_at_or_after = [w.end for w in words if w.end >= selection.end]
+    ends_at_or_after = [w.end for w in words if w.end >= selection.end - SNAP_TOLERANCE]
     new_end = min(ends_at_or_after) if ends_at_or_after else words[-1].end
 
     # A selection that falls entirely outside the words can produce start > end;

@@ -24,7 +24,8 @@ class PlanItem:
     old_text: str             # the line as spoken
     new_text: str             # the words to say instead
     speaker: str | None = None
-    mix: str = "replace"      # "replace" | "concatenate" (added after the line)
+    mix: str = "replace"      # "replace" | "over" (added, over the picture) | "concatenate" (added, picture held)
+    delivery: str | None = None   # how it is said: warmer, calmer, …
     reason: str = ""          # why, in a few words
     kind: str = "planned"     # "planned" | "suggestion"
     enabled: bool = True      # ticked: part of the run
@@ -72,6 +73,7 @@ def item_from_dict(d: dict) -> PlanItem:
     return PlanItem(
         item_id=d["item_id"], selection=Selection(**d["selection"]), old_text=d["old_text"],
         new_text=d["new_text"], speaker=d.get("speaker"), mix=d.get("mix", "replace"),
+        delivery=d.get("delivery"),
         reason=d.get("reason", ""), kind=d.get("kind", "planned"), enabled=d.get("enabled", True),
         status=d.get("status", "planned"), fit=d.get("fit"), candidate_id=d.get("candidate_id"),
         edit_id=d.get("edit_id"), question=d.get("question"), error=d.get("error"), note=d.get("note"),

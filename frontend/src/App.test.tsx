@@ -90,6 +90,7 @@ function routeFetch(approveStatus = 200, job: unknown = JOB_DONE) {
     if (url.includes('/jobs/')) return ok(job)
     if (url.endsWith('/edits/preview')) return ok(JOB_ACCEPTED)
     if (url.endsWith('/revert')) return ok({ edit_id: 'e1', reverted: true })
+    if (url.endsWith('/lines/remove')) return ok({ edit_id: 'e7', candidate_id: 'c7', selection: { start: 0, end: 2.3 }, mix: 'remove' })
     if (url.endsWith('/settings')) {
       return ok({ settings: { long_lines: JSON.parse(String(_init?.body)).long_lines } })
     }
@@ -148,6 +149,9 @@ async function reachGoal(user: ReturnType<typeof userEvent.setup>) {
 async function reachEditor(user: ReturnType<typeof userEvent.setup>) {
   await reachGoal(user)
   await user.click(screen.getByRole('button', { name: /edit a line yourself/i }))
+  await screen.findByText('Get 20% off today only.')
+  // The word timeline sits behind Precise; most of these tests select a word on it.
+  await user.click(screen.getByRole('button', { name: 'Precise' }))
   await waitFor(() => expect(screen.getByText('20%')).toBeInTheDocument())
 }
 
@@ -512,9 +516,9 @@ describe('App editing by transcript and voice (Phase 10)', () => {
     const box = screen.getByRole('textbox', { name: /new wording/i })
     await user.clear(box)
     await user.type(box, 'Get 30% off today only.')
-    await user.click(screen.getByRole('button', { name: /preview change/i }))
+    await user.click(screen.getByRole('button', { name: 'Hear it' }))
 
-    await waitFor(() => expect(screen.getByText(/continuity checked/i)).toBeInTheDocument())
+    await screen.findByTestId('take')   // under the line, not in the panel
     expect(bodies[0]).toMatchObject({
       text: 'Get 30% off today only.', mix: 'replace', start: 0, end: 2.3,
       voice_profile_id: 'nPczCjzI2devNBz1zQrb',
@@ -624,7 +628,7 @@ describe('App agentic editor (Phase 12)', () => {
     const video = () => container.querySelector('video') as HTMLVideoElement
     await waitFor(() => expect(video().getAttribute('src')).toBe(`/api/projects/p1/artifacts/${'r'.repeat(64)}`))
 
-    await userEvent.setup().click(screen.getByRole('button', { name: 'Revert' }))
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Undo' }))
 
     await waitFor(() => expect(f.mock.calls.some(
       ([url, init]) => String(url).endsWith('/edits/e1/revert') && init?.method === 'POST')).toBe(true))
@@ -672,7 +676,7 @@ describe('App agentic editor (Phase 12)', () => {
     await user.type(screen.getByRole('textbox', { name: /describe a change/i }), 'say 30% off{Enter}')
 
     await waitFor(() => expect(screen.getByTestId('placement')).toHaveTextContent('Ran 0.4 s into the pause after it'))
-    expect(screen.getByText('Ready')).toBeInTheDocument()   // the line's status
+    expect(screen.getByText('Ready to hear')).toBeInTheDocument()   // the line's status
     await user.click(screen.getByRole('button', { name: /ask me each time/i }))
     await waitFor(() => expect(puts).toEqual([{ long_lines: 'ask' }]))
   })
@@ -705,7 +709,7 @@ describe('App agentic editor (Phase 12)', () => {
     await user.click(screen.getByText('20%'))
     await user.type(screen.getByRole('textbox', { name: /describe a change/i }), 'say 30% off{Enter}')
 
-    await waitFor(() => expect(screen.getByText('Working')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText('Voicing…')).toBeInTheDocument())
   })
 })
 
@@ -753,7 +757,7 @@ describe('App the agent (Phase 13)', () => {
     await user.click(screen.getByRole('button', { name: 'Go ahead' }))
     await waitFor(() => expect(screen.getByText("Take · Brian's voice")).toBeInTheDocument())
     expect(calls.some((c) => c.url.endsWith('/plans/plan1/run'))).toBe(true)
-    expect(screen.getByText('Ready')).toBeInTheDocument()
+    expect(screen.getByText('Ready to hear')).toBeInTheDocument()
     expect(screen.getByTestId('activity')).toHaveTextContent('Read your goal and all 1 lines')
     expect(screen.getByTestId('activity')).toHaveTextContent('$0.01 for this plan')
 
@@ -807,7 +811,7 @@ describe('App the agent (Phase 13)', () => {
 
     await waitFor(() => expect(calls.some((c) => c.url.endsWith('/items/i1/answer'))).toBe(true))
     expect(calls.find((c) => c.url.endsWith('/answer'))?.body).toEqual({ text: '30% off today.' })
-    await waitFor(() => expect(screen.getByText('Ready')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText('Ready to hear')).toBeInTheDocument())
   })
 
   it('adds a suggestion to the plan', async () => {
@@ -945,9 +949,10 @@ describe('App fit notes (Phase 14)', () => {
     const box = screen.getByRole('textbox', { name: /new wording/i })
     await user.clear(box)
     await user.type(box, 'Get 30% off today only.{Enter}')
-    await waitFor(() => expect(screen.getByText(/continuity checked/i)).toBeInTheDocument())
+    const take = await screen.findByTestId('take')
+    expect(take).toHaveTextContent('Trimmed 120 ms of pauses')
 
-    await user.click(screen.getByText('Get 20% off today only.'))
+    await user.click(within(screen.getByRole('group', { name: 'Actions for 0:00' })).getByRole('button', { name: 'Change the words' }))
     expect(screen.getByTestId('readout')).toHaveTextContent(/nearest of 3 takes.*trimmed 120 ms of pauses.*voice at natural speed/)
   })
 })
@@ -984,5 +989,103 @@ describe('App panel order', () => {
     await user.click(screen.getByRole('button', { name: /sample ad/i }))
     expect(await screen.findByText(/no speech in this clip/i)).toBeInTheDocument()
     expect(screen.queryByText('What should this video say?')).not.toBeInTheDocument()
+  })
+})
+
+describe('App: the line is the unit (UX-1)', () => {
+  it('keeps a take from the row, and the line shows it with Undo', async () => {
+    const f = routeFetch()
+    vi.stubGlobal('fetch', f)
+    const user = userEvent.setup()
+    render(<App />)
+    await reachEditor(user)
+
+    await user.click(screen.getByText('Get 20% off today only.'))
+    const box = screen.getByRole('textbox', { name: /new wording/i })
+    await user.clear(box)
+    await user.type(box, 'Get 30% off today only.{Enter}')
+    const take = await screen.findByTestId('take')
+    expect(screen.getByTestId('line-action')).toHaveTextContent('One line is ready to hear.')
+
+    await user.click(within(take).getByRole('button', { name: 'Keep' }))
+
+    await waitFor(() => expect(screen.getByText('Kept')).toBeInTheDocument())
+    expect(screen.getByRole('button', { name: 'Undo' })).toBeInTheDocument()
+    expect(f.mock.calls.some(([url]) => String(url).endsWith('/edits'))).toBe(true)
+    expect(f.mock.calls.some(([url]) => String(url).endsWith('/export'))).toBe(true)
+    expect(screen.queryByTestId('take')).not.toBeInTheDocument()
+  })
+
+  it('asks for another take and shows both as a choice', async () => {
+    let n = 0
+    const base = routeFetch()
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.includes('/jobs/')) { n += 1; return ok({ ...JOB_DONE, result: { ...CANDIDATE, candidate_id: `c${n}` } }) }
+      return base(url, init)
+    }))
+    const user = userEvent.setup()
+    render(<App />)
+    await reachEditor(user)
+    await user.click(screen.getByText('Get 20% off today only.'))
+    const box = screen.getByRole('textbox', { name: /new wording/i })
+    await user.clear(box)
+    await user.type(box, 'Get 30% off today only.{Enter}')
+    await user.click(await screen.findByRole('button', { name: 'Another take' }))
+
+    await waitFor(() => expect(screen.getAllByTestId('take')).toHaveLength(2))
+    expect(screen.getByRole('button', { name: 'Keep take 2' })).toBeInTheDocument()
+  })
+
+  it('removes a line: struck through, room tone in its place, undo at hand', async () => {
+    const f = routeFetch()
+    vi.stubGlobal('fetch', f)
+    const user = userEvent.setup()
+    render(<App />)
+    await reachEditor(user)
+
+    await user.click(within(screen.getByRole('group', { name: 'Actions for 0:00' })).getByRole('button', { name: 'Remove' }))
+
+    await waitFor(() => expect(screen.getByText('Removed')).toBeInTheDocument())
+    expect(screen.getByText('Get 20% off today only.').tagName).toBe('DEL')
+    expect(f.mock.calls.some(([url, init]) => String(url).endsWith('/lines/remove') && init?.method === 'POST')).toBe(true)
+    expect(screen.getByRole('button', { name: 'Undo' })).toBeInTheDocument()
+  })
+
+  it('adds a line after a line, over the picture by default', async () => {
+    const bodies: Record<string, unknown>[] = []
+    const base = routeFetch()
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.endsWith('/edits/preview')) bodies.push(JSON.parse(String(init?.body)))
+      return base(url, init)
+    }))
+    const user = userEvent.setup()
+    render(<App />)
+    await reachEditor(user)
+
+    await user.click(within(screen.getByRole('group', { name: 'Actions for 0:00' })).getByRole('button', { name: 'Add a line after' }))
+    await user.type(screen.getByRole('textbox', { name: /words for the new line/i }), 'Hurry, it ends Sunday.{Enter}')
+
+    await waitFor(() => expect(bodies).toHaveLength(1))
+    expect(bodies[0]).toMatchObject({ text: 'Hurry, it ends Sunday.', mix: 'over', start: 0, end: 2.3 })
+    await screen.findByTestId('take')
+  })
+
+  it('plays a take in place: the video runs from the line with the take over it', async () => {
+    vi.stubGlobal('fetch', routeFetch())
+    const user = userEvent.setup()
+    const { container } = render(<App />)
+    await reachEditor(user)
+    await user.click(screen.getByText('Get 20% off today only.'))
+    const box = screen.getByRole('textbox', { name: /new wording/i })
+    await user.clear(box)
+    await user.type(box, 'Get 30% off today only.{Enter}')
+    const take = await screen.findByTestId('take')
+
+    await user.click(within(take).getByRole('button', { name: /play take 1 in the video/i }))
+
+    const video = container.querySelector('video') as HTMLVideoElement
+    expect(video.currentTime).toBe(0.4)
+    expect(video.muted).toBe(true)   // a replacement: the original's words are off
+    expect(within(take).getByRole('button', { name: /play take 1 in the video/i })).toHaveAttribute('aria-pressed', 'true')
   })
 })

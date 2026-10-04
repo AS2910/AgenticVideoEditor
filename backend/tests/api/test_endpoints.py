@@ -1513,3 +1513,93 @@ def test_fit_notes_reach_the_candidate_and_survive_reopening(client, project, mo
     candidate = preview(client)
     assert candidate["fit_notes"] == ["trimmed 90 ms of pauses"]
     assert main.repo.get_candidate("p1", candidate["candidate_id"]).fit_notes == ("trimmed 90 ms of pauses",)
+
+
+# ── UX-1: over the picture, remove a line, delivery ──────────────────────────
+
+def test_an_added_line_plays_over_the_picture_when_there_is_room(client, project, monkeypatch):
+    import app.api.main as main
+    from app.domain.models import Transcript, Word
+    # a 1.0 s pause after "off" before "today"
+    speechless(monkeypatch, main, Transcript(words=(
+        Word("Get", 0.0, 0.4), Word("20%", 0.4, 0.9), Word("off", 0.9, 1.3), Word("today", 2.3, 2.3),
+    )))
+    result = preview(client, text="Hurry!", mix="over", start=0.4, end=1.3)
+    assert result["type"] == "candidate"
+    assert result["plan"]["mix"] == "layer"
+    assert result["plan"]["selection"] == {"start": 1.3, "end": pytest.approx(2.3, abs=0.02)}
+
+
+def test_an_added_line_holds_the_picture_when_there_is_no_room(client, project):
+    # the canned transcript has no pauses: "today" follows "off" at once
+    result = preview(client, text="Hurry!", mix="over", start=0.4, end=1.3)
+    assert result["type"] == "candidate"
+    assert result["plan"]["mix"] == "concatenate"
+
+
+def test_a_plan_item_over_the_picture_says_what_happened(client, project, monkeypatch):
+    import app.api.main as main
+    monkeypatch.setattr(main, "planner", Plans([(1, "Hurry!", "over", "Urgency")]))
+    make_plan(client, goal="urgent")
+    done = run_plan(client, "plan1")
+    item = done["items"][0]
+    assert item["mix"] == "over" and item["status"] == "ready"
+    assert item["note"] == "Held the picture: no room to play over it"   # the canned clip ends at 2.3
+
+
+def test_removing_a_line_leaves_room_tone_and_can_be_undone(client, project):
+    resp = client.post("/projects/p1/lines/remove", json={"start": 0.5, "end": 1.0})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["mix"] == "remove" and body["edit_id"] == "e1"
+    assert body["selection"] == {"start": 0.4, "end": 1.3}
+    edits = client.get("/projects/p1").json()["edits"]
+    assert edits[0]["mix"] == "remove" and edits[0]["new_text"] == ""
+    export = client.post("/projects/p1/export").json()
+    edited = [s for s in export["segments"] if s["kind"] == "edited"]
+    assert len(edited) == 1 and edited[0]["start"] == pytest.approx(0.4) and edited[0]["end"] == pytest.approx(1.3)
+    assert client.post("/projects/p1/edits/e1/revert").status_code == 200
+    assert [s["kind"] for s in client.post("/projects/p1/export").json()["segments"]] == ["original"]
+
+
+def test_removing_nothing_is_refused(client, project):
+    assert client.post("/projects/p1/lines/remove", json={"start": 5.0, "end": 5.0}).status_code == 422
+
+
+def test_a_delivery_reaches_the_voice_and_the_candidate(client, project, monkeypatch):
+    import app.api.main as main
+    seen = []
+
+    class Hears:
+        identity = "mock"
+        default_voice = "mock"
+
+        def cost_of(self, plan):
+            return 0
+
+        def voices(self):
+            return []
+
+        def synthesize(self, source, plan, transcript=None):
+            seen.append(plan.delivery)
+            return main.voice.synthesize(source, plan, transcript)
+
+    real = main.voice
+    Hears.real = real
+
+    def forward(self, source, plan, transcript=None):
+        seen.append(plan.delivery)
+        return Hears.real.synthesize(source, plan, transcript)
+
+    Hears.synthesize = forward
+    monkeypatch.setattr(main, "voice", Hears())
+    result = preview(client, text="Get 30% off.", mix="replace", delivery="warmer")
+    assert seen == ["warmer"] and result["plan"]["delivery"] == "warmer"
+
+
+def test_a_plan_item_can_be_given_a_delivery_and_a_placement(client, project, monkeypatch):
+    import app.api.main as main
+    monkeypatch.setattr(main, "planner", Plans([(1, "Hurry!", "over", "")]))
+    make_plan(client, goal="urgent")
+    plan = client.put("/projects/p1/plans/plan1/items/i1", json={"delivery": "warmer", "mix": "concatenate"}).json()
+    assert (plan["items"][0]["delivery"], plan["items"][0]["mix"]) == ("warmer", "concatenate")
