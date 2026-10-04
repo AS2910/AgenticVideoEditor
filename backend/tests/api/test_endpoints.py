@@ -2036,3 +2036,47 @@ def test_with_sign_in_off_everything_is_as_before(client, project):
     assert client.get("/auth/me").json() == {"mode": "off", "user": None}
     assert client.get("/auth/login").status_code == 404
     assert client.get("/projects/p1/usage").json()["user_ceiling_usd"] is None
+
+
+# ── UX-1c: shift a line of the original speech ───────────────────────────────
+
+def test_a_line_can_be_shifted_to_another_time_without_voicing_it(client, project):
+    moved = client.post("/projects/p1/lines/shift", json={"start": 0.5, "end": 1.0, "to": 1.5}).json()
+
+    assert moved["mix"] == "layer" and moved["from"] == {"start": 0.4, "end": 1.3}      # snapped to the words "20% off"
+    assert moved["selection"]["start"] == 1.5 and moved["selection"]["end"] == pytest.approx(2.3, abs=0.01)   # clamped to the clip
+    assert moved["candidate"]["plan"]["new_text"] == "20% off" and moved["candidate"]["fit_notes"] == ["moved from 0:00"]
+    assert moved["candidate"]["audio"]["duration"] == pytest.approx(0.9, abs=0.02)      # the original words, cut out
+    edits = client.get("/projects/p1").json()["edits"]
+    assert [(e["edit_id"], e["mix"], e["partner"], e["reverted"]) for e in edits] == [
+        ("e1", "remove", "e2", False), ("e2", "layer", "e1", False)]
+    # Rendered: room tone where the words were, the words over the picture at 1.5.
+    manifest = client.post("/projects/p1/export").json()
+    kinds = [(s["kind"], s["start"]) for s in manifest["segments"]]
+    assert ("edited", 0.4) in kinds and ("edited", 1.5) in kinds
+    assert client.get("/projects/p1").json()["messages"][-1]["text"] == "Moved the line at 0:00 to 0:01"
+
+
+def test_undoing_a_shifted_line_undoes_both_halves(client, project):
+    moved = client.post("/projects/p1/lines/shift", json={"start": 0.5, "end": 1.0, "to": 1.5}).json()
+    client.post(f"/projects/p1/edits/{moved['removed_edit_id']}/revert")
+    edits = client.get("/projects/p1").json()["edits"]
+    assert [e["reverted"] for e in edits] == [True, True]
+    assert [s["kind"] for s in client.post("/projects/p1/export").json()["segments"]] == ["original"]
+
+
+def test_a_shifted_line_can_be_moved_again_and_stays_paired(client, project):
+    moved = client.post("/projects/p1/lines/shift", json={"start": 0.5, "end": 1.0, "to": 1.5}).json()
+    again = client.post(f"/projects/p1/edits/{moved['edit_id']}/move", json={"start": 1.2}).json()
+    edits = {e["edit_id"]: e for e in client.get("/projects/p1").json()["edits"]}
+    assert edits["e2"]["reverted"] is True
+    assert edits["e3"]["partner"] == "e1" and edits["e1"]["partner"] == "e3" and edits["e3"]["selection"]["start"] == 1.2
+    client.post("/projects/p1/edits/e1/revert")
+    assert all(e["reverted"] for e in client.get("/projects/p1").json()["edits"].__iter__())
+
+
+def test_shifting_silence_is_refused(client, project, monkeypatch):
+    import app.api.main as main
+    from app.domain.models import Transcript, Word
+    speechless(monkeypatch, main, Transcript(words=(Word("Get", 0.0, 0.4),)))
+    assert client.post("/projects/p1/lines/shift", json={"start": 1.5, "end": 2.0, "to": 0.1}).status_code == 422

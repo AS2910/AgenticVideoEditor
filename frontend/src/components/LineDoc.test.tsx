@@ -315,3 +315,43 @@ describe('LineDoc: keyboard (UX-4)', () => {
     expect(h.onSeek).not.toHaveBeenCalled()
   })
 })
+
+
+describe('LineDoc: shifting a line of the original speech (UX-1c)', () => {
+  it('offers Shift on an untouched line and places it from the control', async () => {
+    const user = userEvent.setup()
+    const onShift = vi.fn()
+    const onPlacing = vi.fn()
+    const h = doc({ onShift, onPlacing })
+    void h
+    const actions = screen.getByRole('group', { name: 'Actions for 0:07' })
+    await user.click(within(actions).getByRole('button', { name: 'Shift' }))
+    expect(onPlacing).toHaveBeenCalledWith({ id: `shift-${KEY}`, start: 7.54, duration: expect.closeTo(1.48, 2) })
+  })
+
+  it('shows the control while placing, and "Put it here" shifts the line', async () => {
+    const user = userEvent.setup()
+    const onShift = vi.fn()
+    doc({ onShift, onPlacing: vi.fn(), placing: { id: `shift-${KEY}`, start: 12.3, duration: 1.48 } })
+    await user.click(screen.getByRole('button', { name: 'Put it here' }))
+    expect(onShift).toHaveBeenCalledWith(STATEMENTS[1], 12.3)
+  })
+
+  it('shows a moved line as moved, with where it went, Undo and Move', () => {
+    doc({
+      onMoveKept: vi.fn(),
+      revisions: [
+        { edit_id: 'e1', start: 7.54, end: 9.02, text: '', mix: 'remove', partner: 'e2' },
+        { edit_id: 'e2', start: 12.3, end: 13.78, text: 'Start a live Bajicam session.', mix: 'layer', partner: 'e1' },
+      ],
+    })
+    expect(screen.getByText('Moved')).toBeInTheDocument()
+    expect(screen.getByText(/Moved to 0:12\.30, as spoken/)).toBeInTheDocument()
+    expect(screen.getByText('Start a live Bajicam session.').tagName).toBe('DEL')
+    expect(screen.getByRole('button', { name: 'Undo' })).toBeInTheDocument()
+    expect(screen.getByText('Starts at 0:12.30')).toBeInTheDocument()
+    // The line it landed on is left alone.
+    expect(screen.queryByText('Kept')).not.toBeInTheDocument()
+    expect(screen.queryByText(/Removed\./)).not.toBeInTheDocument()
+  })
+})

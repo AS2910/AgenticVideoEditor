@@ -12,6 +12,8 @@
 
 **Audio goes where you put it (UX-1b, same day).** The user asked to "pick an audio and move it anywhere in the timeline (edited or otherwise)". Every take and every kept line shows "Starts at 0:04.96 · Move": Move puts a draggable block of the take's length on the monitor's bar (arrow keys nudge it, Shift for a second), with a typed time and ◀ ▶ nudges beside the line; *Put it here* re-places the same audio without voicing it again (`POST /candidates/{id}/move`, or `POST /edits/{id}/move` for a kept line, which reverts and re-keeps in one step). The add editor has *Starts at*: empty follows the line; a time puts the new line there, over the sound at its natural length (or with the picture held there).
 
+**The original speech moves too (UX-1c, same day).** The user opened a line and asked how to shift its timing; Move only lived on takes and kept lines. Every untouched line now has **Shift** (and the S key): the same place control appears — drag the block on the bar, type a time, nudge — and *Put it here* calls `POST /lines/shift {start, end, to}`: the line's own audio is cut out of the source (`extract_segment`), the room's sound takes its place, and the words play over the picture from the new time, as spoken, nothing voiced. It is two paired edits (`ApprovedEdit.partner`): undoing either undoes both; moving the placed half again keeps the pair linked. The row reads "Moved to 0:12.30, as spoken, over the sound there" with Undo and Move; the line it lands on is left alone.
+
 **Play in place.** A take plays over the video from its line, with the original's words muted for a replacement and left alone under an added line, and stops at the end of the take.
 
 ## Where

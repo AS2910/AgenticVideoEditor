@@ -29,7 +29,7 @@ import { speakerSlot } from './transcript/speakers'
 import {
   createProject, previewEdit, approveEdit, exportProject, artifactUrl,
   pollJob, PollCancelled, ApiError, listProjects, getProject, deleteProject, getUsage, listVoices, updateSpeaker, detectSpeakers,
-  revertEdit, updateSettings, rewordLine, removeLine, moveCandidate, moveEdit,
+  revertEdit, updateSettings, rewordLine, removeLine, moveCandidate, moveEdit, shiftLine,
   createPlan, getPlan, updateItem, runPlan, answerItem, redoItem, approvePlan, clarifyPlan,
   readProject, revisePlan, stopPlan, grantConsent, createVariant, getMe, logout,
 } from './api'
@@ -495,7 +495,10 @@ export default function App() {
     try {
       const r = await moveEdit(projectId, editId, { start })
       const { selection: at, new_text: text, mix = 'replace' } = r.candidate.plan
-      setApproved((a) => a.map((rev) => (rev.edit_id === editId ? { edit_id: r.edit_id, start: at.start, end: at.end, text, mix } : rev)))
+      setApproved((a) => a.map((rev) => (
+        rev.edit_id === editId ? { edit_id: r.edit_id, start: at.start, end: at.end, text, mix, partner: rev.partner ?? null }
+        : rev.partner === editId ? { ...rev, partner: r.edit_id } : rev
+      )))
       setDownload(null)
       if (await runExport()) setView('edited')
     } catch (e) {
@@ -544,6 +547,24 @@ export default function App() {
       if (await runExport()) setView('edited')
     } catch (e) {
       setError(e instanceof ApiError ? e.message : 'Could not remove that line.')
+    }
+  }
+  /** Move a line of the original speech to another time (UX-1c): two paired
+   *  edits — room tone where it was, the words over the picture from `to`. */
+  const shiftStatement = async (s: Statement, to: number) => {
+    if (!projectId) return
+    setError(null)
+    setPlacing(null)
+    try {
+      const r = await shiftLine(projectId, { start: s.start, end: s.end, to })
+      setApproved((a) => [...a,
+        { edit_id: r.removed_edit_id, start: r.from.start, end: r.from.end, text: '', mix: 'remove', partner: r.edit_id },
+        { edit_id: r.edit_id, start: r.selection.start, end: r.selection.end, text: s.text, mix: 'layer', partner: r.removed_edit_id },
+      ])
+      setDownload(null)
+      if (await runExport()) setView('edited')
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : 'Could not move that line.')
     }
   }
   /** Play a take in place: the video runs from the line while the take's
@@ -920,7 +941,8 @@ export default function App() {
       setError(e instanceof ApiError ? e.message : 'Could not revert that edit.')
       return
     }
-    const remaining = approved.filter((r) => r.edit_id !== editId)
+    const gone = approved.find((r) => r.edit_id === editId)
+    const remaining = approved.filter((r) => r.edit_id !== editId && r.edit_id !== gone?.partner)
     setApproved(remaining)
     setDownload(null)
     if (plan?.items.some((i) => i.edit_id === editId)) {
@@ -966,7 +988,7 @@ export default function App() {
       takeIn(opened, live.length > 0 || opened.messages.length > 0)
       setMessages(opened.messages)
       setApproved(live.map((e) => ({
-        edit_id: e.edit_id, start: e.selection.start, end: e.selection.end, text: e.new_text, mix: e.mix,
+        edit_id: e.edit_id, start: e.selection.start, end: e.selection.end, text: e.new_text, mix: e.mix, partner: e.partner ?? null,
       })))
       // Approved edits are rendered again, so Play hears them straight away.
       if (live.length > 0 && await runExport(opened.project_id, opened.filename)) {
@@ -1210,6 +1232,7 @@ export default function App() {
           onAnswer={answerLine}
           onUndo={(id) => void revert(id)}
           onRemove={(s) => void removeStatement(s)}
+          onShift={(s, to) => void shiftStatement(s, to)}
           onPlayTake={playTake}
           onDismiss={(key) => setLine(key, null)}
           onMove={(key, c, start) => void moveTake(key, c, start)}

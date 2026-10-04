@@ -219,6 +219,21 @@ class ProjectRepository:
             ).fetchall()
         return [codec.edit(json.loads(r["body"])) for r in rows]
 
+    def relink_edit(self, project_id: str, edit_id: str, partner: str | None) -> bool:
+        """Point an edit at its new other half (a shifted line moved again)."""
+        with self.db.tx() as c:
+            rows = c.execute(
+                "SELECT seq, body FROM edits WHERE project_id = ? ORDER BY seq", (project_id,),
+            ).fetchall()
+            for row in rows:
+                body = json.loads(row["body"])
+                if body["edit_id"] == edit_id:
+                    body["partner"] = partner
+                    c.execute("UPDATE edits SET body = ? WHERE project_id = ? AND seq = ?",
+                              (json.dumps(body), project_id, row["seq"]))
+                    return True
+        return False
+
     def revert_edit(self, project_id: str, edit_id: str) -> bool:
         """Mark an approved edit undone (Phase 12). The record stays — edits
         only ever append — but the render skips it. False if there is no such

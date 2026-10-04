@@ -481,6 +481,7 @@ def get_project(project_id: str, owner: str = Depends(current_owner)) -> dict:
                 "delivery": e.plan.delivery,
                 "overridden": e.overridden,
                 "reverted": e.reverted,
+                "partner": e.partner,
             }
             for e in repo.list_edits(project_id)
         ],
@@ -931,7 +932,7 @@ def approve_edit(
     }
 
 
-def _approve_candidate(project_id: str, candidate: EditCandidate, overridden: bool) -> str:
+def _approve_candidate(project_id: str, candidate: EditCandidate, overridden: bool, partner: str | None = None) -> str:
     """Commit a previewed candidate as an approved edit; a plan item that
     produced it is marked approved too."""
     edit_id = f"e{len(repo.list_edits(project_id)) + 1}"
@@ -942,6 +943,7 @@ def _approve_candidate(project_id: str, candidate: EditCandidate, overridden: bo
         audio=candidate.audio,
         frames=candidate.frames,
         overridden=overridden,
+        partner=partner,
     ))
     plan = repo.latest_plan(project_id)
     if plan is not None:
@@ -957,8 +959,12 @@ def revert_edit(project_id: str, edit_id: str, owner: str = Depends(current_owne
     nothing is lost; the render skips it and the transcript shows the line as
     shot. Reverting again is harmless."""
     _owned(project_id, owner)
-    if not repo.revert_edit(project_id, edit_id):
+    edit = next((e for e in repo.list_edits(project_id) if e.edit_id == edit_id), None)
+    if edit is None or not repo.revert_edit(project_id, edit_id):
         raise HTTPException(status_code=404, detail="edit not found")
+    # A shifted line is two edits; undoing one undoes the other.
+    if edit.partner:
+        repo.revert_edit(project_id, edit.partner)
     # A shipped plan line goes back to a draft (ready, with its take), so the
     # review shows it held rather than shipped (UX-3).
     plan = repo.latest_plan(project_id)
@@ -1764,6 +1770,71 @@ def remove_line(project_id: str, req: RemoveRequest, owner: str = Depends(curren
     }
 
 
+# ── UX-1c: shift a line of the original speech ──────────────────────────────
+
+class ShiftRequest(BaseModel):
+    start: float
+    end: float
+    # Where the words should start instead, in seconds of the source.
+    to: float
+
+
+def _room_tone_candidate(project_id: str, record: ProjectRecord, selection: Selection) -> EditCandidate:
+    """The room's own sound in place of the words at `selection`."""
+    length = selection.end - selection.start
+    from app.continuity import signals
+    from app.continuity.measured import _write_wav
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "room.wav"
+        _write_wav(path, _room_tone(record, length), signals.RATE)
+        audio = artifacts.put_file(project_id, path, kind="audio", container="wav", duration=length)
+    candidate = EditCandidate(
+        candidate_id=repo.next_candidate_id(project_id),
+        plan=EditPlan(selection, "", "none", mix="remove"),
+        audio=audio, frames=record.source.media,
+        continuity=ContinuityReport(None, None, None, None, True, (), ()),
+    )
+    repo.save_candidate(project_id, candidate)
+    return candidate
+
+
+@app.post("/projects/{project_id}/lines/shift")
+def shift_line(project_id: str, req: ShiftRequest, owner: str = Depends(current_owner)) -> dict:
+    """Move a line of the original speech to another time, as it was
+    spoken: its words leave their place (the room's sound stays there) and
+    play over the picture from `to`. Nothing is voiced. Two edits, undone
+    together; the placed half can be moved again like any kept line."""
+    record = _owned(project_id, owner)
+    if not any(w.end > req.start and w.start < req.end for w in record.transcript.words):
+        raise HTTPException(status_code=422, detail="Nothing is said there to move.")
+    source = snap_to_word_boundaries(record.transcript, Selection(req.start, req.end))
+    duration = record.source.duration
+    to = round(min(max(0.0, req.to), duration), 3)
+    length = source.end - source.start
+    words = " ".join(w.text for w in record.transcript.words if w.end > source.start and w.start < source.end)
+    with tempfile.TemporaryDirectory() as tmp:
+        path, got = ffmpeg.extract_segment(record.source.media.path, Path(tmp) / "line.wav", source.start, source.end)
+        audio = artifacts.put_file(project_id, path, kind="audio", container="wav", duration=got)
+    placed = EditCandidate(
+        candidate_id=repo.next_candidate_id(project_id),
+        plan=EditPlan(Selection(to, round(min(duration, to + length), 3)), words, "original", fit="start", mix="layer"),
+        audio=audio, frames=record.source.media,
+        continuity=ContinuityReport(None, None, None, None, True, (), ()),
+        fit_notes=(f"moved from {_clock(source.start)}",),
+    )
+    repo.save_candidate(project_id, placed)
+    removed = _room_tone_candidate(project_id, record, source)
+    removed_id = _approve_candidate(project_id, removed, overridden=False)
+    placed_id = _approve_candidate(project_id, placed, overridden=False, partner=removed_id)
+    repo.relink_edit(project_id, removed_id, placed_id)
+    repo.add_message(project_id, "user", f"Moved the line at {_clock(source.start)} to {_clock(to)}")
+    return {
+        "edit_id": placed_id, "removed_edit_id": removed_id, "candidate": _candidate_dict(placed),
+        "from": {"start": source.start, "end": source.end},
+        "selection": {"start": placed.plan.selection.start, "end": placed.plan.selection.end}, "mix": "layer",
+    }
+
+
 # ── UX-1b: move a take or a kept line anywhere on the timeline ────────────────
 
 class MoveRequest(BaseModel):
@@ -1827,5 +1898,7 @@ def move_edit(
     )
     moved = _moved(project_id, record, source, req.start, req.mix)
     repo.revert_edit(project_id, edit_id)
-    new_id = _approve_candidate(project_id, moved, overridden=edit.overridden)
+    new_id = _approve_candidate(project_id, moved, overridden=edit.overridden, partner=edit.partner)
+    if edit.partner:
+        repo.relink_edit(project_id, edit.partner, new_id)
     return {"edit_id": new_id, "reverted": edit_id, "candidate": _candidate_dict(moved)}

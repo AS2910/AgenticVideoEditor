@@ -96,6 +96,9 @@ function routeFetch(approveStatus = 200, job: unknown = JOB_DONE) {
     if (url.endsWith('/edits/preview')) return ok(JOB_ACCEPTED)
     if (url.endsWith('/revert')) return ok({ edit_id: 'e1', reverted: true })
     if (url.endsWith('/lines/remove')) return ok({ edit_id: 'e7', candidate_id: 'c7', selection: { start: 0, end: 2.3 }, mix: 'remove' })
+    if (url.endsWith('/lines/shift')) {
+      return ok({ edit_id: 'e9', removed_edit_id: 'e8', candidate: CANDIDATE, from: { start: 0, end: 2.3 }, selection: { start: 1.0, end: 2.3 }, mix: 'layer' })
+    }
     if (url.endsWith('/settings')) {
       return ok({ settings: { long_lines: JSON.parse(String(_init?.body)).long_lines } })
     }
@@ -1252,6 +1255,30 @@ describe('App: the line is the unit (UX-1)', () => {
     expect(video.currentTime).toBe(0.4)
     expect(video.muted).toBe(true)   // a replacement: the original's words are off
     expect(within(take).getByRole('button', { name: /play take 1 in the video/i })).toHaveAttribute('aria-pressed', 'true')
+  })
+})
+
+describe('App: shifting original speech (UX-1c)', () => {
+  it('shifts a line to a typed time: room tone where it was, the words over the picture there, undo for both', async () => {
+    const f = routeFetch()
+    vi.stubGlobal('fetch', f)
+    const user = userEvent.setup()
+    render(<App />)
+    await reachEditor(user)
+
+    await user.click(within(screen.getByRole('group', { name: 'Actions for 0:00' })).getByRole('button', { name: 'Shift' }))
+    const box = screen.getByRole('textbox', { name: 'Starts at' })
+    await user.clear(box)
+    await user.type(box, '0:01.00')
+    await user.click(screen.getByRole('button', { name: 'Put it here' }))
+
+    await waitFor(() => expect(f.mock.calls.some(([url, init]) => String(url).endsWith('/lines/shift')
+      && JSON.parse(String(init?.body)).to === 1)).toBe(true))
+    expect(await screen.findByText('Moved')).toBeInTheDocument()
+    expect(screen.getByText(/Moved to 0:01\.00/)).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Undo' }))
+    await waitFor(() => expect(f.mock.calls.some(([url]) => String(url).endsWith('/edits/e8/revert'))).toBe(true))
+    await waitFor(() => expect(screen.queryByText('Moved')).not.toBeInTheDocument())
   })
 })
 

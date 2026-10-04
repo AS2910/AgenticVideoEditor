@@ -4,7 +4,7 @@ export interface Statement { text: string; start: number; end: number; speaker?:
 
 /** An approved edit as the transcript shows it: the new words over a span,
  *  as inline tracked changes. `edit_id` is what Revert names. */
-export interface Revision { edit_id?: string; start: number; end: number; text: string; mix: Mix }
+export interface Revision { edit_id?: string; start: number; end: number; text: string; mix: Mix; /** The other half of a shifted line. */ partner?: string | null }
 
 /** What happens when a new line runs longer than the words it replaces:
  *  run into the pause after them (when there is room), speed it up, or ask. */
@@ -201,6 +201,8 @@ export interface ApprovedEditSummary {
   overridden: boolean
   /** Undone after approval; the render skips it. */
   reverted?: boolean
+  /** The other half of a shifted line (UX-1c). */
+  partner?: string | null
 }
 
 /** A reopened project: the upload plus what has been done to it. */
