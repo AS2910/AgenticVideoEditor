@@ -167,7 +167,7 @@ Five commits, each merged to main with build, lint, typecheck and tests clean: R
 
 **Left for later.**
 
-- Real upload progress: an upload through `fetch` reports none; moving to XHR changes the test harness's fetch mocks. The bar is indeterminate for now.
-- The silent clip's empty transcript still reads as a sentence; the place editor is UX-5's.
+- ~~Real upload progress~~ — done the same evening with UX-5: the upload goes through `XMLHttpRequest` and reports its share ("Uploading, 40%", a valued progressbar), then "Transcribing…" indeterminate; `vitest.setup.ts` gives the tests an XMLHttpRequest that routes through their fetch mock.
+- ~~The silent clip's empty transcript~~ — the place editor landed with UX-5 the same evening.
 - The spend meter's breakdown as a visible popover rather than `aria-valuetext`.
 - The editor was captured at 1440 after R-5 (Chrome's new headless mode reaches a project only under `--virtual-time-budget`, minutes per capture): the transcript's lines now run the full column — "Hi, I want to buy groceries." on one line where it wrapped after four words before — the header shows one export state (*Download MP4* · *Export again*) with the inserts sentence beside it, the chips and the composer are at size, and the voice's description reads under the picker. Phone-width captures of the editor did not complete headlessly; the start screen did (500px, no horizontal scroll). A VoiceOver pass is the user's.
