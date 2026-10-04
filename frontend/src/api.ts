@@ -246,3 +246,11 @@ export const revisePlan = (id: string, planId: string, instruction: string) =>
 
 /** Stops a running plan after the line it is on. */
 export const stopPlan = (id: string, planId: string) => post<Plan>(`/projects/${id}/plans/${planId}/stop`)
+
+/** Confirms the rights for a project uploaded without them — asked once, the
+ *  first time a voice is about to be made (UX-3). */
+export const grantConsent = (id: string) =>
+  post<{ project_id: string; consent: { granted_at: string } }>(`/projects/${id}/consent`)
+
+/** A variant: the same clip as a new project, with the plan as a draft. */
+export const createVariant = (id: string) => post<Project>(`/projects/${id}/variants`)

@@ -35,6 +35,19 @@ describe('ProjectList', () => {
     expect(onDelete).not.toHaveBeenCalled()
   })
 
+  it('shows a frame, where each stands and its last change (UX-3)', () => {
+    const rich = [
+      { ...PROJECTS[0], media: { kind: 'video' as const, sha256: 's'.repeat(64), duration: 48.9, container: 'mp4' }, state: 'shipped' as const, last_change: 'Rendered the edited video' },
+      { ...PROJECTS[1], project_id: 'p3', state: 'draft' as const, last_change: 'Planned 2 changes', variant_of: 'p2' },
+    ]
+    const { container } = render(<ProjectList projects={rich} onOpen={() => {}} onDelete={() => {}} />)
+    expect(container.querySelector('video')).toHaveAttribute('src', `/api/projects/p2/artifacts/${'s'.repeat(64)}#t=0.5`)
+    expect(screen.getByText('Shipped')).toBeInTheDocument()
+    expect(screen.getByText(/Rendered the edited video/)).toBeInTheDocument()
+    expect(screen.getByText('Draft')).toBeInTheDocument()
+    expect(screen.getByText('variant of bhaji.mp4')).toBeInTheDocument()
+  })
+
   it('shows nothing when there are no projects', () => {
     const { container } = render(<ProjectList projects={[]} onOpen={() => {}} onDelete={() => {}} />)
     expect(container).toBeEmptyDOMElement()

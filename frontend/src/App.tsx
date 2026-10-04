@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { ConsentGate } from './components/ConsentGate'
+import { ConsentSheet } from './components/ConsentSheet'
+import { ShipSheet } from './components/ShipSheet'
+import type { Shipped } from './components/ShipSheet'
 import { LoadScreen } from './components/LoadScreen'
 import { Player } from './components/Player'
 import { Timeline } from './components/Timeline'
@@ -28,7 +30,7 @@ import {
   pollJob, PollCancelled, ApiError, listProjects, getProject, deleteProject, getUsage, listVoices, updateSpeaker, detectSpeakers,
   revertEdit, updateSettings, rewordLine, removeLine, moveCandidate, moveEdit,
   createPlan, getPlan, updateItem, runPlan, answerItem, redoItem, approvePlan, clarifyPlan,
-  readProject, revisePlan, stopPlan,
+  readProject, revisePlan, stopPlan, grantConsent, createVariant,
 } from './api'
 import type {
   Word, Selection, Candidate, Segment, Project, ChatMessage, Question, QuestionOption,
@@ -46,7 +48,7 @@ const DEFAULT_VOICE = 'speaker-1'
 /** An answer to a question: the line already read, and the choices so far. */
 interface Answer { text: string; fit?: Fit; mix?: Mix; on_long?: LongLines; delivery?: string }
 
-type Stage = 'consent' | 'load' | 'goal' | 'editor'
+type Stage = 'load' | 'goal' | 'editor'
 
 /** Words that mean "take your guess" when Voltage has asked something. */
 const GO = /^(go|ok|okay|yes|sure|go ahead|fine|yep|do it)[.!]?$/i
@@ -55,10 +57,17 @@ const GO = /^(go|ok|okay|yes|sure|go ahead|fine|yep|do it)[.!]?$/i
 const voiceName = (voices: Voice[], id: string) => voices.find((v) => v.voice_id === id)?.name
 
 export default function App() {
-  const [stage, setStage] = useState<Stage>('consent')
-  // Tracked explicitly rather than inferred from the stage, so what we send is
-  // what the user actually confirmed.
-  const [consented, setConsented] = useState(false)
+  const [stage, setStage] = useState<Stage>('load')
+  // Consent is asked once per project, the first time a voice is about to be
+  // made (UX-3): the sheet, and what to do once it is given.
+  const [consentAsk, setConsentAsk] = useState<{ who: string | null; go: () => void } | null>(null)
+  const [consenting, setConsenting] = useState(false)
+  // Read by closures made before consent was given, so the action they
+  // resume does not ask a second time.
+  const consentGiven = useRef(false)
+  // What just shipped, for the sheet that says what is in the file.
+  const [shipped, setShipped] = useState<Shipped | null>(null)
+  const [varianting, setVarianting] = useState(false)
   const [loading, setLoading] = useState(false)
   const [project, setProject] = useState<Project | null>(null)
   const [transcript, setTranscript] = useState<Word[]>([])
@@ -179,6 +188,9 @@ export default function App() {
     setPlanBusy(false)
     setPlanProgress(null)
     setReview(false)
+    setShipped(null)
+    setConsentAsk(null)
+    consentGiven.current = false
     setEditingLine(null)
     setReadouts([])
     setLines({})
@@ -245,6 +257,7 @@ export default function App() {
    *  say; ones with a plan or edits open straight in the editor. */
   const takeIn = (loaded: Project, edited = false) => {
     setProject(loaded)
+    consentGiven.current = loaded.consent !== null && loaded.consent !== undefined
     setTranscript(loaded.transcript)
     setLongLines(loaded.settings?.long_lines ?? 'pause')
     setAutonomy(loaded.settings?.autonomy ?? 'ask')
@@ -258,7 +271,7 @@ export default function App() {
     setLoading(true)
     setError(null)
     try {
-      takeIn(await createProject(file, consented))
+      takeIn(await createProject(file, false))
     } catch (e) {
       // The backend's rejection reason is the useful part — show it verbatim.
       setError(e instanceof ApiError ? e.message : 'Could not upload that video.')
@@ -282,6 +295,38 @@ export default function App() {
 
   const say = (message: ChatMessage) => setMessages((m) => [...m, message])
 
+  /** Whose voice a span belongs to, for the consent sentence: "the Shopkeeper". */
+  const whoAt = (at: Selection | null | undefined) => {
+    if (!at) return null
+    const st = (project?.statements ?? []).find((x) => x.start < at.end && at.start < x.end)
+    const name = project?.speakers?.find((sp) => sp.label === st?.speaker)?.name
+    return name ? (/^Speaker /.test(name) ? name : `the ${name}`) : null
+  }
+
+  /** Run `go` once the project's consent is recorded — asking for it first,
+   *  in a sentence, the first time a voice is about to be made (UX-3). */
+  const withConsent = (who: string | null, go: () => void) => {
+    if (consentGiven.current) go()
+    else setConsentAsk({ who, go })
+  }
+
+  const confirmConsent = async () => {
+    if (!projectId || !consentAsk) return
+    setConsenting(true)
+    try {
+      const r = await grantConsent(projectId)
+      consentGiven.current = true
+      setProject((p) => (p ? { ...p, consent: r.consent } : p))
+      const { go } = consentAsk
+      setConsentAsk(null)
+      go()
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : 'Could not record that.')
+    } finally {
+      setConsenting(false)
+    }
+  }
+
   const runPreview = async (
     prompt: string,
     answer?: Answer,
@@ -291,6 +336,9 @@ export default function App() {
     line?: { key: LineKey; request: LineRequest },
   ) => {
     if (!projectId || !at) return
+    if (!consentGiven.current) {
+      return withConsent(whoAt(at), () => void runPreview(prompt, answer, at, shown, voice, line))
+    }
     say({ role: 'user', text: shown })
     setError(null)
     if (line) {
@@ -547,6 +595,9 @@ export default function App() {
   /** A goal for the whole video: Voltage plans the edits. */
   const makePlan = async (goal: string) => {
     if (!projectId) return
+    if (autonomy === 'draft' && !consentGiven.current) {
+      return withConsent(null, () => void makePlan(goal))
+    }
     say({ role: 'user', text: goal })
     setError(null)
     setPlanning(true)
@@ -636,6 +687,10 @@ export default function App() {
 
   const startJob = async (start: () => Promise<{ job_id: string }>) => {
     if (!projectId || !plan) return
+    if (!consentGiven.current) {
+      const first = plan.items.find((i) => i.kind === 'planned' && i.enabled)
+      return withConsent(whoAt(first?.selection), () => void startJob(start))
+    }
     setError(null)
     try {
       const job = await start()
@@ -654,12 +709,13 @@ export default function App() {
     }))
   }
 
-  /** Approve every ready change and render. */
-  const approveAll = async () => {
+  /** Ship the ready changes — all of them, or the ones kept — and render;
+   *  the rest stay as drafts. Then the sheet says what is in the file. */
+  const approveAll = async (items?: string[]) => {
     if (!projectId || !plan) return
     setError(null)
     try {
-      const result = await approvePlan(projectId, plan.plan_id)
+      const result = await approvePlan(projectId, plan.plan_id, items ? { items } : {})
       setPlan(result.plan)
       const fresh = result.plan.items.filter((i) => i.status === 'approved' && i.edit_id
         && !approved.some((r) => r.edit_id === i.edit_id))
@@ -672,9 +728,20 @@ export default function App() {
         setInserts(result.export.inserts ?? [])
         const stem = (project?.filename ?? 'video').replace(/\.[^.]+$/, '')
         const url = artifactUrl(projectId, result.export.render.sha256)
-        setDownload({ url, filename: `${stem}-edited.mp4` })
+        const download = { url, filename: `${stem}-edited.mp4` }
+        setDownload(download)
         setRendered({ url, duration: result.export.render.duration })
         setView('edited')
+        const went = new Set(result.approved.map((a) => a.item_id))
+        setShipped({
+          items: result.plan.items.filter((i) => went.has(i.item_id)),
+          held: result.plan.items.filter((i) => i.status === 'ready').length,
+          removed: approved.filter((r) => r.mix === 'remove').length,
+          before: project?.duration ?? 0,
+          after: result.export.render.duration,
+          download,
+          spendUsd: result.plan.spend_usd,
+        })
       }
       if (result.skipped.length > 0) {
         setError(`${result.skipped.length} ${result.skipped.length === 1 ? 'change' : 'changes'} skipped: the sound check failed. Listen to them, then Redo or approve them one by one.`)
@@ -683,6 +750,22 @@ export default function App() {
       setError(e instanceof ApiError ? e.message : 'Approve failed.')
     } finally {
       void refreshUsage(projectId)
+    }
+  }
+
+  /** A variant: this clip again, as a new project, with the plan as a draft. */
+  const makeVariant = async () => {
+    if (!projectId) return
+    setVarianting(true)
+    setError(null)
+    try {
+      const made = await createVariant(projectId)
+      window.location.hash = made.project_id
+      await openProject(made.project_id)
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : 'Could not make a variant.')
+    } finally {
+      setVarianting(false)
     }
   }
 
@@ -804,6 +887,9 @@ export default function App() {
     const remaining = approved.filter((r) => r.edit_id !== editId)
     setApproved(remaining)
     setDownload(null)
+    if (plan?.items.some((i) => i.edit_id === editId)) {
+      getPlan(projectId, plan.plan_id).then(setPlan).catch(() => {})
+    }
     if (remaining.length > 0) {
       if (await runExport()) setView('edited')
     } else {
@@ -866,16 +952,6 @@ export default function App() {
     await refreshProjects()
   }
 
-  if (stage === 'consent') {
-    return (
-      <ConsentGate
-        onConfirm={() => {
-          setConsented(true)
-          setStage('load')
-        }}
-      />
-    )
-  }
   if (stage === 'load' || !project) {
     return (
       <LoadScreen
@@ -910,8 +986,7 @@ export default function App() {
   const leave = () => {
     clearEditor()
     window.location.hash = ''
-    // Uploading again needs the rights confirmed in this session.
-    setStage(consented ? 'load' : 'consent')
+    setStage('load')
   }
 
   // Where things stand line by line: the plan's items, and the one edit the
@@ -1037,7 +1112,8 @@ export default function App() {
             busy={busy}
             onCompare={compareItem}
             onRedo={(item) => void redoTheItem(item)}
-            onApproveAll={() => void approveAll()}
+            onShip={(ids) => void approveAll(ids)}
+            onUndo={(item) => { if (item.edit_id) void revert(item.edit_id) }}
             onBack={() => setReview(false)}
           />
         ) : (
@@ -1251,6 +1327,12 @@ export default function App() {
           )}
         </ChatPanel>
       </aside>
+      {consentAsk && (
+        <ConsentSheet who={consentAsk.who} busy={consenting} onConfirm={() => void confirmConsent()} onCancel={() => setConsentAsk(null)} />
+      )}
+      {shipped && (
+        <ShipSheet shipped={shipped} busy={varianting} onVariant={() => void makeVariant()} onClose={() => { setShipped(null); setReview(false) }} />
+      )}
     </div>
   )
 }

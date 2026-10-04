@@ -327,17 +327,39 @@ def list_voices() -> dict:
 
 @app.get("/projects")
 def list_projects(owner: str = Depends(current_owner)) -> dict:
-    """The caller's projects, newest first — enough to show and reopen them."""
-    return {"projects": [
-        {
-            "project_id": r.source.project_id,
-            "filename": r.source.filename,
-            "duration": r.source.duration,
-            "created_at": r.created_at,
-            "edits": sum(1 for e in repo.list_edits(r.source.project_id) if not e.reverted),
-        }
-        for r in repo.list(owner)
-    ]}
+    """The caller's projects, newest first — enough to show and reopen them:
+    a frame (the source media), where each stands, and its last change (UX-3)."""
+    return {"projects": [_summary(r) for r in repo.list(owner)]}
+
+
+def _summary(r: ProjectRecord) -> dict:
+    pid = r.source.project_id
+    live = [e for e in repo.list_edits(pid) if not e.reverted]
+    plan = repo.latest_plan(pid)
+    settings_ = repo.settings(pid)
+    if live:
+        state = "shipped"
+    elif plan is not None:
+        state = "draft"
+    else:
+        state = "new"
+    if plan is not None and plan.log:
+        last = plan.log[-1]["text"]
+    elif live:
+        last = f"{len(live)} {'line' if len(live) == 1 else 'lines'} changed"
+    else:
+        last = "Nothing changed yet"
+    return {
+        "project_id": pid,
+        "filename": r.source.filename,
+        "duration": r.source.duration,
+        "created_at": r.created_at,
+        "edits": len(live),
+        "media": _artifact_dict(r.source.media),
+        "state": state,
+        "last_change": last,
+        "variant_of": settings_.get("variant_of"),
+    }
 
 
 @app.get("/projects/{project_id}")
@@ -491,6 +513,43 @@ def delete_project(project_id: str, owner: str = Depends(current_owner)) -> None
     _owned(project_id, owner)
     repo.delete(project_id)
     shutil.rmtree(artifacts.root / project_id, ignore_errors=True)
+
+
+@app.post("/projects/{project_id}/variants")
+def create_variant(project_id: str, owner: str = Depends(current_owner)) -> dict:
+    """A variant (UX-3): the same clip as a new project, with the latest
+    plan copied as a draft — every line planned again, nothing voiced — so
+    another offer or another wording starts from the plan, not an upload."""
+    record = _owned(project_id, owner)
+    new_id = repo.next_id()
+    path = artifacts.find(project_id, record.source.media.sha256)
+    if path is None:
+        raise HTTPException(status_code=409, detail="The original video is missing.")
+    media = artifacts.put_file(new_id, path, kind="video", container=record.source.media.container,
+                               duration=record.source.media.duration)
+    source = replace(record.source, project_id=new_id, media=media)
+    repo.create(source, record.transcript, record.consent, owner=owner)
+    for s in repo.speakers(project_id):
+        repo.set_speaker(new_id, s.label, name=s.name, voice_id=s.voice_id)
+    saved = {k: v for k, v in repo.settings(project_id).items() if k != "reading"} | {"variant_of": project_id}
+    if "reading" in repo.settings(project_id):
+        saved["reading"] = repo.settings(project_id)["reading"]
+    repo.set_settings(new_id, **saved)
+    plan = repo.latest_plan(project_id)
+    if plan is not None:
+        items = tuple(
+            replace(i, status="planned" if i.kind == "planned" else "suggested", candidate_id=None, edit_id=None,
+                    question=None, error=None, progress=None, fit=None, note=None)
+            for i in plan.items if i.status != "dismissed"
+        )
+        draft = Plan(
+            plan_id=repo.next_plan_id(new_id), project_id=new_id, goal=plan.goal, summary=plan.summary,
+            items=items, mode=plan.mode, status="proposed", created_at=_now(), findings=plan.findings,
+            estimate=_estimate(new_id, items),
+        )
+        repo.save_plan(draft)
+        repo.append_log(new_id, draft.plan_id, f"Made as a variant of {record.source.filename}, with its plan as a draft")
+    return _project_dict(repo.get(new_id))
 
 
 @app.post("/projects/{project_id}/consent")
@@ -796,6 +855,14 @@ def revert_edit(project_id: str, edit_id: str, owner: str = Depends(current_owne
     _owned(project_id, owner)
     if not repo.revert_edit(project_id, edit_id):
         raise HTTPException(status_code=404, detail="edit not found")
+    # A shipped plan line goes back to a draft (ready, with its take), so the
+    # review shows it held rather than shipped (UX-3).
+    plan = repo.latest_plan(project_id)
+    if plan is not None:
+        for item in plan.items:
+            if item.edit_id == edit_id and item.status == "approved":
+                repo.update_item(project_id, plan.plan_id, item.item_id, status="ready", edit_id=None)
+                repo.append_log(project_id, plan.plan_id, f"You undid the line at {_clock(item.selection.start)}")
     return {"edit_id": edit_id, "reverted": True}
 
 
