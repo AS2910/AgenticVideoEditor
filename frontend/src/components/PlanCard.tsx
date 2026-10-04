@@ -194,6 +194,11 @@ export function PlanCard({
           )}
         </div>
 
+        {proposed && planned.length === 0 && (
+          <div className={styles.empty} data-testid="plan-empty">
+            Nothing to change for that. {plan.summary} Try saying what should be different, or click a line to change it yourself.
+          </div>
+        )}
         {planned.map((item) => {
           const at = clock(item.selection.start)
           const label = name(item)

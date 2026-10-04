@@ -6,3 +6,4 @@
 .near .fill { background: var(--amber); }
 .detail { color: var(--faint); }
 @media (max-width: 1200px) { .detail { display: none; } }
+@media (max-width: 960px) { .track { display: none; } }

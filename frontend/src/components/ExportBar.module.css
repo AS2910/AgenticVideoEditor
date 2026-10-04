@@ -15,3 +15,6 @@
 .download:hover { color: var(--accent-ink); }
 .inserts { color: var(--muted); font-size: 12px; }
 @media (max-width: 1600px) { .inserts { display: none; } }
+
+/* UX-4: on a phone the export controls take their own line in the header. */
+@media (max-width: 960px) { .bar { flex: 1 1 100%; } }

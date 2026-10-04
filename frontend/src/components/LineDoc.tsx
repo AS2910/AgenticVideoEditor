@@ -1,4 +1,5 @@
 import { Fragment, useEffect, useRef, useState } from 'react'
+import type React from 'react'
 import type {
   Candidate, ItemStatus, LineStatus, LongLines, Mix, Question, QuestionOption, Revision, Selection, Speaker, Statement, Voice, Word,
 } from '../types'
@@ -130,9 +131,18 @@ export function LineDoc({
   const [mix, setMix] = useState<'over' | 'concatenate'>('over')
   const [asking, setAsking] = useState(false)
   const [offers, setOffers] = useState<string[]>([])
+  // A row has keyboard focus: the heading shows the keys.
+  const [focusedRow, setFocusedRow] = useState<number | null>(null)
   const box = useRef<HTMLTextAreaElement>(null)
 
   useEffect(() => { box.current?.focus() }, [editing])
+  // The row to put focus back on when its editor closes, so the keys keep working.
+  const returnTo = useRef<number | null>(null)
+  useEffect(() => {
+    if (editing || returnTo.current === null) return
+    document.getElementById(`line-${returnTo.current}`)?.focus()
+    returnTo.current = null
+  }, [editing])
   useEffect(() => {
     onEditingChange?.(editing && editing.mode === 'edit' ? statements[editing.index] : null)
   }, [editing, statements, onEditingChange])
@@ -175,7 +185,48 @@ export function LineDoc({
     setMix(last?.mix === 'concatenate' ? 'concatenate' : 'over')
     setAt(last?.at != null ? timecode(last.at) : '')
   }
-  const close = () => setEditing(null)
+  const close = () => {
+    if (editing) returnTo.current = editing.index
+    setEditing(null)
+  }
+
+  /** Keys on a focused row (UX-4): ↑↓ move, Enter opens, Space plays, K
+   *  keeps the latest take, U undoes, Delete removes. Only when the row
+   *  itself has focus — never while typing in it. */
+  const onRowKey = (e: React.KeyboardEvent<HTMLDivElement>, index: number) => {
+    if (e.target !== e.currentTarget) return
+    const s = statements[index]
+    const move = (to: number) => {
+      const row = document.getElementById(`line-${Math.max(0, Math.min(statements.length - 1, to))}`)
+      row?.focus()
+      row?.scrollIntoView?.({ block: 'nearest' })
+    }
+    switch (e.key) {
+      case 'ArrowDown': case 'j': e.preventDefault(); move(index + 1); break
+      case 'ArrowUp': e.preventDefault(); move(index - 1); break
+      case 'Enter': e.preventDefault(); open(index, 'edit'); break
+      case ' ': e.preventDefault(); onSeek(s); break
+      case 'a': case 'A': e.preventDefault(); open(index, 'add'); break
+      case 'k': case 'K': {
+        const state = lines[keyOf(s)]
+        const latest = state?.takes[state.takes.length - 1]
+        if (latest && state?.status === 'ready' && !disabled) { e.preventDefault(); onKeep(keyOf(s), latest) }
+        break
+      }
+      case 'u': case 'U': {
+        const live = revisions.filter((r) => overlaps(r, s))
+        const revision = live.length ? live[live.length - 1] : null
+        if (revision?.edit_id) { e.preventDefault(); onUndo(revision.edit_id) }
+        break
+      }
+      case 'Delete': case 'Backspace': {
+        const live = revisions.filter((r) => overlaps(r, s))
+        if (!live.some((r) => r.mix === 'remove') && !disabled) { e.preventDefault(); onRemove(s) }
+        break
+      }
+      default: break
+    }
+  }
   const hear = (s: Statement) => {
     const text = draft.trim()
     if (!editing || !text || (editing.mode === 'edit' && text === standing(s))) return
@@ -424,9 +475,10 @@ export function LineDoc({
       <div className={styles.heading}>
         <span className={styles.title}>Transcript</span>
         <span className={styles.hint}>
-          {editing ? (editing.mode === 'edit' ? `Editing ${clock(statements[editing.index].start)}. Enter to hear it, Esc to cancel.` : `Adding a line after ${clock(statements[editing.index].start)}.`)
+          {editing ? (editing.mode === 'edit' ? `Editing ${clock(statements[editing.index].start)}. Enter to hear it, Esc to cancel.` : `Adding a line after ${clock(statements[editing.index].start)}. Esc to cancel.`)
             : pendingLines.some((p) => p.status === 'reading') ? "Voltage is reading. The line it's on is lit."
-            : 'Each line carries its own state. Hover a line for what you can do to it.'}
+            : focusedRow !== null ? <span className={styles.keys} data-testid="keys"><kbd>↑</kbd><kbd>↓</kbd> move · <kbd>Enter</kbd> change the words · <kbd>Space</kbd> play · <kbd>A</kbd> add after · <kbd>K</kbd> keep · <kbd>U</kbd> undo · <kbd>/</kbd> ask Voltage</span>
+            : 'Each line carries its own state. Hover a line, or press ↑ ↓ to move between them.'}
         </span>
       </div>
 
@@ -451,7 +503,19 @@ export function LineDoc({
         const added = lines[addKey]
         return (
           <Fragment key={`${s.start}-${i}`}>
-            <div id={`line-${i}`} className={styles.row} data-current={current} data-selected={selected} data-state={status ?? undefined}>
+            <div
+              id={`line-${i}`}
+              className={styles.row}
+              data-current={current}
+              data-selected={selected}
+              data-state={status ?? undefined}
+              tabIndex={0}
+              role="row"
+              aria-label={`Line at ${clock(s.start)}${label ? `, ${label}` : ''}`}
+              onKeyDown={(e) => onRowKey(e, i)}
+              onFocus={(e) => { if (e.target === e.currentTarget) setFocusedRow(i) }}
+              onBlur={(e) => { if (e.target === e.currentTarget) setFocusedRow((f) => (f === i ? null : f)) }}
+            >
               <button className={styles.time} onClick={() => onSeek(s)} aria-label={`Go to ${clock(s.start)}`}>{clock(s.start)}</button>
               <span className={styles.who}>{newSpeaker && label && <Avatar name={label} slot={speakerSlot(speakers, s.speaker)} />}</span>
               <div className={styles.body}>
