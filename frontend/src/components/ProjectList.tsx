@@ -3,6 +3,24 @@ import type { ProjectSummary } from '../types'
 import { artifactUrl } from '../api'
 import styles from './ProjectList.module.css'
 
+/** A project's first frame, fetched only once the row is near the viewport
+ *  (UX-6). Where IntersectionObserver is missing (jsdom), it mounts at once. */
+function LazyFrame({ src }: { src: string }) {
+  const slot = useRef<HTMLSpanElement>(null)
+  const [near, setNear] = useState(typeof IntersectionObserver === 'undefined')
+  useEffect(() => {
+    if (near || !slot.current) return
+    const io = new IntersectionObserver((entries) => {
+      if (entries.some((e) => e.isIntersecting)) { setNear(true); io.disconnect() }
+    }, { rootMargin: '200px' })
+    io.observe(slot.current)
+    return () => io.disconnect()
+  }, [near])
+  return near
+    ? <video className={styles.frame} muted playsInline preload="metadata" tabIndex={-1} aria-hidden="true" src={src} />
+    : <span ref={slot} className={styles.frame} aria-hidden="true" />
+}
+
 interface ProjectListProps {
   projects: ProjectSummary[]
   onOpen: (id: string) => void
@@ -63,8 +81,7 @@ export function ProjectList({ projects, onOpen, onDelete, undoMs = 5000 }: Proje
             <>
               <button className={styles.open} onClick={() => onOpen(p.project_id)}>
                 {p.media ? (
-                  <video className={styles.frame} muted playsInline preload="metadata" tabIndex={-1} aria-hidden="true"
-                    src={`${artifactUrl(p.project_id, p.media.sha256)}#t=0.5`} />
+                  <LazyFrame src={`${artifactUrl(p.project_id, p.media.sha256)}#t=0.5`} />
                 ) : <span className={styles.frame} />}
                 <span className={styles.text}>
                   <span className={styles.line}>
