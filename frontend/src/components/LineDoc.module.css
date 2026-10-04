@@ -123,3 +123,21 @@
   .row:hover .actions, .row:focus-within .actions { display: flex; }
   .side:empty { display: none; }
 }
+
+/* UX-1c: drag a row up or down to shift it; the moved line's own row. */
+.grip {
+  padding: 2px 6px; border-radius: 6px; font-size: 12px; letter-spacing: -2px; line-height: 1;
+  background: transparent; color: var(--faint); border: 1px solid transparent; cursor: grab; touch-action: none; user-select: none;
+  opacity: 0; transition: opacity 120ms ease;
+}
+.row:hover .grip, .row:focus-within .grip { opacity: 1; }
+.grip:hover { color: var(--text); border-color: var(--line); }
+.grip:active { cursor: grabbing; }
+.row[data-dragging] { opacity: 0.45; }
+.row[data-state="moved"] { background: var(--surface); box-shadow: inset 2px 0 0 var(--ok); }
+.dropLine { position: relative; height: 0; margin: 0 10px; border-top: 2px solid var(--accent); }
+.dropLine span {
+  position: absolute; right: 0; top: -11px; padding: 2px 8px; border-radius: 999px; font-size: 11.5px;
+  background: var(--accent); color: var(--accent-ink);
+}
+@media (max-width: 960px) { .grip { opacity: 1; } }
