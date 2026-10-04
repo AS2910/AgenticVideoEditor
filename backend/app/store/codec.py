@@ -39,6 +39,7 @@ def plan(d: dict) -> EditPlan:
     return EditPlan(
         selection=Selection(**d["selection"]), new_text=d["new_text"],
         voice_profile_id=d["voice_profile_id"], fit=d.get("fit"), mix=d.get("mix", "replace"),
+        delivery=d.get("delivery"),
     )
 
 

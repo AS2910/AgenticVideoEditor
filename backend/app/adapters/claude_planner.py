@@ -27,8 +27,11 @@ every line of the transcript and decide which lines to change and what each \
 should say instead.
 
 The editor can only re-voice dialogue: say new words in a line's place \
-("replace") or add a new line right after one ("concatenate", the picture \
-holds while it plays). It cannot change visuals, music, or pacing.
+("replace"), or add a new line right after one. An added line normally plays \
+over the picture that follows ("over": the video keeps moving); only when the \
+goal asks for the picture to wait, or nothing could play over it, use \
+"concatenate" (the picture holds while it plays). It cannot change visuals, \
+music, or pacing.
 
 Rules:
 - `edits` are the changes the goal asks for. Keep each as close to the original \
@@ -73,7 +76,7 @@ line only.\
 class _Edit(BaseModel):
     line: int = Field(description="The transcript line number this change is for.")
     new_text: str = Field(description="The words to speak, and nothing else — never a speaker's name or label in front.")
-    mix: Literal["replace", "concatenate"]
+    mix: Literal["replace", "over", "concatenate"]
     reason: str
     speaker: str | None = Field(default=None, description="Who says it, by their name as the transcript shows it. Needed for an added line spoken by someone other than the line it follows; null otherwise.")
 

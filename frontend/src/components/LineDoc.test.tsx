@@ -1,0 +1,195 @@
+import { describe, it, expect, vi } from 'vitest'
+import { render, screen, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
+import { LineDoc } from './LineDoc'
+import { keyOf, addKeyOf } from '../transcript/keys'
+import type { Candidate } from '../types'
+
+const STATEMENTS = [
+  { text: 'Hi, I want to buy groceries.', start: 5.2, end: 6.94, speaker: 'A' },
+  { text: 'Start a live Bajicam session.', start: 7.54, end: 9.02, speaker: 'A' },
+  { text: 'Sure, sir.', start: 9.38, end: 9.88, speaker: 'B' },
+]
+const SPEAKERS = [
+  { label: 'A', name: 'the Customer', voice_id: 'nPczCjzI2devNBz1zQrb' },
+  { label: 'B', name: 'the Shopkeeper', voice_id: null },
+]
+const VOICES = [
+  { voice_id: 'EXAVITQu4vr4xnSDxMaL', name: 'Sarah', description: '', gender: 'female', accent: null, age: null },
+  { voice_id: 'nPczCjzI2devNBz1zQrb', name: 'Brian', description: '', gender: 'male', accent: null, age: null },
+]
+const take = (over: Partial<Candidate> = {}): Candidate => ({
+  candidate_id: 'c1',
+  plan: { selection: { start: 7.54, end: 9.02 }, new_text: 'Start a live Bhaji Cam session.', voice_profile_id: 'nPczCjzI2devNBz1zQrb', mix: 'replace' },
+  audio: { kind: 'audio', sha256: 'a'.repeat(64), duration: 1.5, container: 'wav' },
+  frames: { kind: 'video', sha256: 'f'.repeat(64), duration: 1.5, container: 'mp4' },
+  continuity: { voice_match: null, prosody: 0.96, audio_integration: 0.99, lip_sync: null, passed: true, warnings: [], measured: ['prosody', 'audio_integration'] },
+  fit_notes: ['trimmed 120 ms of pauses'],
+  ...over,
+})
+const handlers = () => ({
+  onSeek: vi.fn(), onHear: vi.fn(), onKeep: vi.fn(), onAnother: vi.fn(), onAnswer: vi.fn(), onUndo: vi.fn(),
+  onRemove: vi.fn(), onPlayTake: vi.fn(), onDismiss: vi.fn(),
+})
+const doc = (props: Partial<Parameters<typeof LineDoc>[0]> = {}) => {
+  const h = handlers()
+  render(<LineDoc statements={STATEMENTS} currentTime={0} speakers={SPEAKERS} voices={VOICES} {...h} {...props} />)
+  return h
+}
+const KEY = keyOf({ start: 7.54, end: 9.02 })
+
+describe('LineDoc: the line is the unit', () => {
+  it('lists lines with their times and shows the speaker once per change', () => {
+    doc({ currentTime: 8 })
+    expect(screen.getByText('0:07')).toBeInTheDocument()
+    expect(screen.getByText('Start a live Bajicam session.').closest('[data-current]')).toHaveAttribute('data-current', 'true')
+    expect(screen.getAllByRole('img', { name: 'the Customer' })).toHaveLength(1)
+  })
+
+  it('offers every action on the line itself', async () => {
+    const h = doc()
+    const actions = screen.getByRole('group', { name: 'Actions for 0:07' })
+    expect(within(actions).getAllByRole('button').map((b) => b.textContent)).toEqual(
+      ['Change the words', 'Change the delivery', 'Add a line after', 'Remove', 'Play original'])
+    await userEvent.click(within(actions).getByRole('button', { name: 'Remove' }))
+    expect(h.onRemove).toHaveBeenCalledWith(STATEMENTS[1])
+    await userEvent.click(within(actions).getByRole('button', { name: 'Play original' }))
+    expect(h.onSeek).toHaveBeenCalledWith(STATEMENTS[1])
+  })
+
+  it('edits a line in place: wording shown as a change, delivery, voice, cost, Hear it', async () => {
+    const h = doc({ usdPerChar: 0.0003 })
+    await userEvent.click(screen.getByText('Start a live Bajicam session.'))
+    expect(screen.getByText(/editing 0:07/i)).toBeInTheDocument()
+    expect(screen.getByRole('combobox', { name: 'Voice' })).toHaveValue('nPczCjzI2devNBz1zQrb')
+    const box = screen.getByRole('textbox', { name: /new wording/i })
+    await userEvent.clear(box)
+    await userEvent.type(box, 'Start a live Bhaji Cam session.')
+    expect(screen.getByText(/you'd be changing/i)).toHaveTextContent('Bajicam')
+    expect(screen.getByText(/31 characters · about 1¢/)).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: 'Warmer' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Hear it' }))
+    expect(h.onHear).toHaveBeenCalledWith(KEY, {
+      selection: { start: 7.54, end: 9.02 }, text: 'Start a live Bhaji Cam session.', voiceId: 'nPczCjzI2devNBz1zQrb',
+      onLong: 'pause', delivery: 'warmer', mix: 'replace',
+    })
+    expect(screen.queryByTestId('editor')).not.toBeInTheDocument()
+  })
+
+  it('does not hear an unchanged line, and cancels with Escape', async () => {
+    const h = doc()
+    await userEvent.click(screen.getByText('Sure, sir.'))
+    expect(screen.getByRole('button', { name: 'Hear it' })).toBeDisabled()
+    await userEvent.keyboard('{Escape}')
+    expect(screen.queryByTestId('editor')).not.toBeInTheDocument()
+    expect(h.onHear).not.toHaveBeenCalled()
+  })
+
+  it('adds a line after a line, over the picture by default', async () => {
+    const h = doc()
+    await userEvent.click(within(screen.getByRole('group', { name: 'Actions for 0:09' })).getByRole('button', { name: 'Add a line after' }))
+    expect(screen.getByText(/adding a line after 0:09/i)).toBeInTheDocument()
+    const group = screen.getByRole('group', { name: 'Sound meets picture' })
+    expect(within(group).getByRole('button', { name: 'Over the picture' })).toHaveAttribute('aria-pressed', 'true')
+    await userEvent.type(screen.getByRole('textbox', { name: /words for the new line/i }), 'Everything is 30% off today.{Enter}')
+    expect(h.onHear).toHaveBeenCalledWith(addKeyOf(STATEMENTS[2]), expect.objectContaining({
+      selection: { start: 9.38, end: 9.88 }, text: 'Everything is 30% off today.', mix: 'over',
+    }))
+  })
+
+  it('can hold the picture instead', async () => {
+    const h = doc()
+    await userEvent.click(screen.getByRole('button', { name: /add a line here/i }))
+    await userEvent.click(screen.getByRole('button', { name: 'Hold the picture' }))
+    await userEvent.type(screen.getByRole('textbox', { name: /words for the new line/i }), 'Bye!{Enter}')
+    expect(h.onHear).toHaveBeenCalledWith(addKeyOf(STATEMENTS[2]), expect.objectContaining({ mix: 'concatenate' }))
+  })
+
+  it('shows the take under its line, with a verdict in words, Keep and Another take', async () => {
+    const h = doc({ lines: { [KEY]: { status: 'ready', takes: [take()] } } })
+    const card = screen.getByTestId('take')
+    expect(card).toHaveTextContent("Take 1 · Brian's voice")
+    expect(card).toHaveTextContent('Sounds like the Customer, and sits in the room. Trimmed 120 ms of pauses.')
+    expect(card).toHaveTextContent('0.96')
+    await userEvent.click(within(card).getByRole('button', { name: 'Play take 1 in the video' }))
+    expect(h.onPlayTake).toHaveBeenCalled()
+    await userEvent.click(within(card).getByRole('button', { name: 'Keep' }))
+    expect(h.onKeep).toHaveBeenCalledWith(KEY, expect.objectContaining({ candidate_id: 'c1' }))
+    await userEvent.click(within(card).getByRole('button', { name: 'Another take' }))
+    expect(h.onAnother).toHaveBeenCalledWith(KEY)
+  })
+
+  it('puts two takes side by side as a choice', async () => {
+    const second = take({ candidate_id: 'c2', continuity: { voice_match: null, prosody: 0.7, audio_integration: 0.9, lip_sync: null, passed: false, warnings: ['Pitch is -6.3 semitones off the surrounding speech.'], measured: ['prosody'] }, fit_notes: [] })
+    const h = doc({ lines: { [KEY]: { status: 'ready', takes: [take(), second] } } })
+    const cards = screen.getAllByTestId('take')
+    expect(cards).toHaveLength(2)
+    expect(cards[1]).toHaveTextContent('Sounds 6 semitones low for the Customer.')
+    await userEvent.click(screen.getByRole('button', { name: 'Keep take 1' }))
+    expect(h.onKeep).toHaveBeenCalledWith(KEY, expect.objectContaining({ candidate_id: 'c1' }))
+    expect(screen.getByRole('button', { name: /neither/i })).toBeInTheDocument()
+  })
+
+  it('shows what is happening, a question with the recommended answer first, and an error with Try again', async () => {
+    const request = { selection: { start: 7.54, end: 9.02 }, text: 'x', voiceId: null, onLong: 'pause' as const, delivery: null, mix: 'replace' as const }
+    const h = doc({ lines: {
+      [keyOf({ start: 5.2, end: 6.94 })]: { status: 'working', takes: [], progress: 'Take 1: pitch is 6 semitones off. Trying again (take 2 of 3)' },
+      [KEY]: { status: 'needs-you', takes: [], request, question: { type: 'question', question: 'The new line runs 1.1 s long.', text: 'x', mix: 'replace',
+        options: [{ label: 'Use a shorter line: “Two kinds.”', fit: null, mix: null, warning: null, text: 'Two kinds.' }, { label: 'Speed it up', fit: 'stretch', mix: null, warning: null }] } },
+      [keyOf({ start: 9.38, end: 9.88 })]: { status: 'failed', takes: [], request, error: 'The voice service was busy. Nothing was charged.' },
+    } })
+    expect(screen.getByTestId('line-working')).toHaveTextContent('Trying again')
+    expect(screen.getByText('Voicing…')).toBeInTheDocument()
+    const q = screen.getByTestId('line-needs-you')
+    expect(within(q).getAllByRole('button')[0]).toHaveTextContent('Use a shorter line')
+    await userEvent.click(within(q).getAllByRole('button')[0])
+    expect(h.onAnswer).toHaveBeenCalledWith(KEY, expect.objectContaining({ text: 'Two kinds.' }))
+    const err = screen.getByTestId('line-error')
+    expect(err).toHaveTextContent('busy')
+    await userEvent.click(within(err).getByRole('button', { name: 'Try again' }))
+    expect(h.onHear).toHaveBeenCalledWith(keyOf({ start: 9.38, end: 9.88 }), request)
+  })
+
+  it('shows a kept change inline with Undo, and a removed line struck through', async () => {
+    const h = doc({ revisions: [
+      { edit_id: 'e1', start: 7.54, end: 9.02, text: 'Start a live Bhaji Cam session.', mix: 'replace' },
+      { edit_id: 'e2', start: 9.38, end: 9.88, text: '', mix: 'remove' },
+    ] })
+    const kept = screen.getByTestId('revision')
+    expect(within(kept).getByText('Bhaji Cam').tagName).toBe('INS')
+    expect(screen.getByText('Kept')).toBeInTheDocument()
+    expect(screen.getByText('Removed')).toBeInTheDocument()
+    expect(screen.getByText('Sure, sir.').tagName).toBe('DEL')
+    const undos = screen.getAllByRole('button', { name: 'Undo' })
+    await userEvent.click(undos[0])
+    expect(h.onUndo).toHaveBeenCalledWith('e1')
+    await userEvent.click(undos[1])
+    expect(h.onUndo).toHaveBeenCalledWith('e2')
+  })
+
+  it('shows a planned change and lights the line Voltage is reading', () => {
+    doc({ pendingLines: [
+      { selection: { start: 7.54, end: 9.02 }, status: 'planned', text: 'Start a live Bhaji Cam session.' },
+      { selection: { start: 9.38, end: 9.88 }, status: 'reading' },
+    ] })
+    expect(within(screen.getByTestId('revision')).getByText('Bhaji Cam').tagName).toBe('INS')
+    expect(screen.getByText('Planned')).toBeInTheDocument()
+    expect(screen.getByText('Reading')).toBeInTheDocument()
+  })
+
+  it('offers tighter wordings, remembers "if it runs long", and tells the panel what is open', async () => {
+    const onReword = vi.fn(async () => ['Sure, right away.', 'Of course, sir.'])
+    const onLongLinesChange = vi.fn()
+    const onEditingChange = vi.fn()
+    doc({ onReword, onLongLinesChange, onEditingChange, readouts: [{ selection: { start: 9.38, end: 9.88 }, tags: ['voice at natural speed'] }] })
+    await userEvent.click(screen.getByText('Sure, sir.'))
+    expect(onEditingChange).toHaveBeenLastCalledWith(STATEMENTS[2])
+    expect(screen.getByTestId('readout')).toHaveTextContent('voice at natural speed')
+    await userEvent.selectOptions(screen.getByRole('combobox', { name: /runs long/i }), 'shorten')
+    expect(onLongLinesChange).toHaveBeenCalledWith('shorten')
+    await userEvent.click(screen.getByRole('button', { name: /ask voltage for wording/i }))
+    const offers = await screen.findByTestId('offers')
+    await userEvent.click(within(offers).getByRole('button', { name: 'Of course, sir.' }))
+    expect(screen.getByRole('textbox', { name: /new wording/i })).toHaveValue('Of course, sir.')
+  })
+})

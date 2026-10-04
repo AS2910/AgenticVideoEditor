@@ -51,7 +51,16 @@ FITS = ("start", "stretch")
 #   "layer"       — the line plays over the selection's audio
 #   "concatenate" — the selection plays as it was, then the video holds its
 #                   last frame while the line plays; the video gets longer
-MIXES = ("replace", "layer", "concatenate")
+#   "over"        — asked for by the UI for an added line: play it after the
+#                   selection, over the picture that follows (the API turns it
+#                   into "layer" over the pause there, or "concatenate" when
+#                   there is no room); never stored on a plan
+#   "remove"      — the selection's dialogue is taken out and the room's own
+#                   sound left in its place
+MIXES = ("replace", "layer", "concatenate", "over", "remove")
+
+# How a line is said (UX-1): a short instruction the voice understands.
+DELIVERIES = ("warmer", "more excited", "calmer", "slower", "firmer")
 
 
 @dataclass(frozen=True)
@@ -61,6 +70,7 @@ class EditPlan:
     voice_profile_id: str
     fit: str | None = None
     mix: str = "replace"
+    delivery: str | None = None
 
 
 @dataclass(frozen=True)

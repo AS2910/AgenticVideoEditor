@@ -107,10 +107,24 @@ def _context(words: list[str], from_end: bool) -> str:
     return " ".join(reversed(picked) if from_end else picked)
 
 
+# How a delivery is asked of the model (UX-1). Stability low = more varied,
+# expressive; style high = more exaggerated. Measured by ear on multilingual_v2.
+DELIVERY_SETTINGS: dict[str, dict] = {
+    "warmer": {"stability": 0.45, "style": 0.35},
+    "more excited": {"stability": 0.3, "style": 0.65},
+    "calmer": {"stability": 0.8, "style": 0.1},
+    "slower": {"speed": 0.9},
+    "firmer": {"stability": 0.6, "style": 0.3},
+}
+
+
 def to_request(plan: EditPlan, transcript: Transcript | None, model: str, speed: float = 1.0) -> dict:
     body: dict = {"text": plan.new_text, "model_id": model}
+    settings: dict = dict(DELIVERY_SETTINGS.get((plan.delivery or "").lower(), {}))
     if abs(speed - 1.0) > 1e-3:
-        body["voice_settings"] = {"speed": round(min(SPEED_MAX, max(SPEED_MIN, speed)), 2)}
+        settings["speed"] = round(min(SPEED_MAX, max(SPEED_MIN, speed * settings.get("speed", 1.0))), 2)
+    if settings:
+        body["voice_settings"] = settings
     if transcript is None:
         return body
     start, end = plan.selection.start, plan.selection.end

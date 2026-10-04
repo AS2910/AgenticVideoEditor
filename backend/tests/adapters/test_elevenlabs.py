@@ -346,3 +346,14 @@ def test_speed_goes_in_the_request_within_the_apis_limits():
     assert to_request(PLAN, None, "m", speed=1.1)["voice_settings"] == {"speed": 1.1}
     assert to_request(PLAN, None, "m", speed=1.9)["voice_settings"] == {"speed": 1.2}
     assert "voice_settings" not in to_request(PLAN, None, "m")
+
+
+# --- UX-1: delivery ---------------------------------------------------------------
+
+def test_a_delivery_becomes_voice_settings():
+    from dataclasses import replace
+    assert to_request(replace(PLAN, delivery="more excited"), None, "m")["voice_settings"] == {"stability": 0.3, "style": 0.65}
+    assert to_request(replace(PLAN, delivery="slower"), None, "m")["voice_settings"] == {"speed": 0.9}
+    # a speed asked for by the fitter combines with a slow delivery, inside the limits
+    assert to_request(replace(PLAN, delivery="slower"), None, "m", speed=1.2)["voice_settings"]["speed"] == pytest.approx(1.08)
+    assert "voice_settings" not in to_request(replace(PLAN, delivery="in my own words"), None, "m")

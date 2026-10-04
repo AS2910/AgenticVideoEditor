@@ -109,3 +109,12 @@ def test_room_before_is_the_gap_since_the_last_word():
     t = Transcript(words=(Word("a", 0.0, 0.4), Word("b", 0.9, 1.3)))
     assert room_before(t, Selection(0.9, 1.3)) == pytest.approx(0.5)
     assert room_before(t, Selection(0.0, 0.4)) == 0.0
+
+
+def test_a_boundary_a_few_millionths_off_still_snaps_to_its_own_word():
+    import pytest
+    from app.domain.models import Selection, Transcript, Word
+    t = Transcript(words=(Word("peppers", 13.18, 13.46), Word("Done", 14.520000457, 14.520000457),
+                          Word("sir", 14.82, 14.82000045), Word("What", 14.92, 15.24)))
+    snapped = snap_to_word_boundaries(t, Selection(14.52, 14.82))
+    assert snapped.start == pytest.approx(14.52, abs=1e-6) and snapped.end == pytest.approx(14.82, abs=1e-6)

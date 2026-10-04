@@ -17,6 +17,10 @@ interface PlayerProps {
   marks?: number[]
   /** Shown at the end of the transport row (e.g. the Edited / Original switch). */
   children?: ReactNode
+  /** A small monitor, for working on lines; large for review. */
+  compact?: boolean
+  /** The original's sound off while a replacement take plays over it. */
+  muted?: boolean
 }
 
 /** play() returns a promise in browsers and nothing in jsdom; neither may throw. */
@@ -34,7 +38,7 @@ const timecode = (t: number) => {
 }
 
 export function Player({
-  src, duration, currentTime, onSeek, onTimeUpdate, seekRequest, marks = [], children,
+  src, duration, currentTime, onSeek, onTimeUpdate, seekRequest, marks = [], children, compact, muted,
 }: PlayerProps) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const [playing, setPlaying] = useState(false)
@@ -77,11 +81,12 @@ export function Player({
   const played = length > 0 ? Math.min(100, (currentTime / length) * 100) : 0
   return (
     <div className={styles.player}>
-      <div className={styles.stage}>
+      <div className={compact ? styles.stageCompact : styles.stage}>
         <video
           ref={videoRef}
           className={styles.video}
           src={src}
+          muted={muted}
           playsInline
           onLoadedMetadata={(e) => {
             const d = e.currentTarget.duration
