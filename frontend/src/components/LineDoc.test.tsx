@@ -193,3 +193,35 @@ describe('LineDoc: the line is the unit', () => {
     expect(screen.getByRole('textbox', { name: /new wording/i })).toHaveValue('Of course, sir.')
   })
 })
+
+describe('LineDoc: editing starts from where the line stands', () => {
+  const request = { selection: { start: 7.54, end: 9.02 }, text: 'Start a Bhaji Cam session now.', voiceId: 'EXAVITQu4vr4xnSDxMaL', onLong: 'shorten' as const, delivery: 'warmer', mix: 'replace' as const }
+
+  it('reopens with the last wording you tried, and the choices you made', async () => {
+    doc({ lines: { [KEY]: { status: 'ready', takes: [take()], request } } })
+    await userEvent.click(within(screen.getByRole('group', { name: 'Actions for 0:07' })).getByRole('button', { name: 'Change the words' }))
+    expect(screen.getByRole('textbox', { name: /new wording/i })).toHaveValue('Start a Bhaji Cam session now.')
+    expect(screen.getByRole('combobox', { name: 'Voice' })).toHaveValue('EXAVITQu4vr4xnSDxMaL')
+    expect(screen.getByRole('combobox', { name: /runs long/i })).toHaveValue('shorten')
+    expect(screen.getByRole('button', { name: 'Warmer' })).toHaveClass(/pillOn/)
+    expect(screen.getByRole('button', { name: 'Hear it' })).toBeEnabled()   // it differs from the line as it stands
+  })
+
+  it('reopens a kept line with its kept wording, and measures the change from there', async () => {
+    doc({ revisions: [{ edit_id: 'e1', start: 7.54, end: 9.02, text: 'Start a live Bhaji Cam session.', mix: 'replace' }] })
+    await userEvent.click(within(screen.getByRole('group', { name: 'Actions for 0:07' })).getByRole('button', { name: 'Change the words' }))
+    const box = screen.getByRole('textbox', { name: /new wording/i })
+    expect(box).toHaveValue('Start a live Bhaji Cam session.')
+    expect(screen.getByRole('button', { name: 'Hear it' })).toBeDisabled()
+    await userEvent.type(box, ' Now.')
+    expect(screen.getByText(/you'd be changing/i)).not.toHaveTextContent('Bajicam')
+    expect(within(screen.getByText(/you'd be changing/i)).getByText('Now.').tagName).toBe('INS')
+  })
+
+  it('reopens an added line with what you wrote for it', async () => {
+    const added = { ...request, mix: 'over' as const, text: 'Everything is 30% off.', delivery: null }
+    doc({ lines: { [addKeyOf(STATEMENTS[2])]: { status: 'failed', takes: [], request: added, error: 'busy' } } })
+    await userEvent.click(within(screen.getByRole('group', { name: 'Actions for 0:09' })).getByRole('button', { name: 'Add a line after' }))
+    expect(screen.getByRole('textbox', { name: /words for the new line/i })).toHaveValue('Everything is 30% off.')
+  })
+})

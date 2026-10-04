@@ -100,7 +100,7 @@ Both suites are offline and deterministic. No running server required.
 
 ```sh
 cd backend && .venv/bin/python -m pytest      # 464 tests
-cd frontend && npm test                        # 162 tests, 19 files
+cd frontend && npm test                        # 165 tests, 19 files
 ```
 
 Backend tests write their media to a temp dir, never to `backend/var/`. Tests that
