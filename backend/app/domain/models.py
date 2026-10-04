@@ -153,3 +153,6 @@ class ApprovedEdit:
     # Undone after approval (Phase 12 Revert). Kept, not deleted — edits only
     # ever append — but the render skips it and the transcript shows it undone.
     reverted: bool = False
+    # The other half of a shifted line (UX-1c): the removal and the placing
+    # elsewhere are two edits that are undone together.
+    partner: str | None = None

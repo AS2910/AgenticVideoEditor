@@ -69,6 +69,8 @@ interface LineDocProps {
   onAnswer: (key: LineKey, option: QuestionOption) => void
   onUndo: (editId: string) => void
   onRemove: (statement: Statement) => void
+  /** UX-1c: move this line of the original speech to start at `to`. */
+  onShift?: (s: Statement, to: number) => void
   onPlayTake: (candidate: Candidate) => void
   onDismiss: (key: LineKey) => void
   /** A take dragged to a new start; the moved take replaces it under the line. */
@@ -118,7 +120,7 @@ export function LineDoc({
   statements, words = [], speakers = [], voices = [], revisions = [], selection, currentTime,
   pendingLines = [], lines = {}, longLines = 'pause', disabled, usdPerChar, playing, readouts = [],
   onSeek, onHear, onKeep, onAnother, onAnswer, onUndo, onRemove, onPlayTake, onDismiss, onReword,
-  onLongLinesChange, onEditingChange, onMove, onMoveKept, placing, onPlacing,
+  onLongLinesChange, onEditingChange, onMove, onMoveKept, placing, onPlacing, onShift,
 }: LineDocProps) {
   const [at, setAt] = useState<string>('')          // the add editor's "starts at", as typed
   const [placeText, setPlaceText] = useState('')     // the placing control's time, as typed
@@ -207,6 +209,14 @@ export function LineDoc({
       case 'Enter': e.preventDefault(); open(index, 'edit'); break
       case ' ': e.preventDefault(); onSeek(s); break
       case 'a': case 'A': e.preventDefault(); open(index, 'add'); break
+      case 's': case 'S': {
+        if (onShift && onPlacing && !revisions.some((r) => overlaps(r, s) && !(r.mix === 'layer' && r.partner))) {
+          e.preventDefault()
+          onPlacing({ id: `shift-${keyOf(s)}`, start: s.start, duration: Math.max(0.05, s.end - s.start) })
+          setPlaceText(timecode(s.start))
+        }
+        break
+      }
       case 'k': case 'K': {
         const state = lines[keyOf(s)]
         const latest = state?.takes[state.takes.length - 1]
@@ -477,7 +487,7 @@ export function LineDoc({
         <span className={styles.hint}>
           {editing ? (editing.mode === 'edit' ? `Editing ${clock(statements[editing.index].start)}. Enter to hear it, Esc to cancel.` : `Adding a line after ${clock(statements[editing.index].start)}. Esc to cancel.`)
             : pendingLines.some((p) => p.status === 'reading') ? "Voltage is reading. The line it's on is lit."
-            : focusedRow !== null ? <span className={styles.keys} data-testid="keys"><kbd>↑</kbd><kbd>↓</kbd> move · <kbd>Enter</kbd> change the words · <kbd>Space</kbd> play · <kbd>A</kbd> add after · <kbd>K</kbd> keep · <kbd>U</kbd> undo · <kbd>/</kbd> ask Voltage</span>
+            : focusedRow !== null ? <span className={styles.keys} data-testid="keys"><kbd>↑</kbd><kbd>↓</kbd> move · <kbd>Enter</kbd> change the words · <kbd>Space</kbd> play · <kbd>A</kbd> add after · <kbd>S</kbd> shift · <kbd>K</kbd> keep · <kbd>U</kbd> undo · <kbd>/</kbd> ask Voltage</span>
             : 'Each line carries its own state. Hover a line, or press ↑ ↓ to move between them.'}
         </span>
       </div>
@@ -488,9 +498,11 @@ export function LineDoc({
         const current = currentTime >= s.start && currentTime < s.end
         const selected = !!selection && overlaps(selection, s)
         const pending = pendingLines.find((p) => overlaps(p.selection, s) && STATUS[p.status])
-        const live = revisions.filter((r) => overlaps(r, s))
+        // The placed half of a shifted line belongs to the line it came from, not the one it lands on.
+        const live = revisions.filter((r) => overlaps(r, s) && !(r.mix === 'layer' && r.partner))
         const revision = live.length ? live[live.length - 1] : null
         const removed = revision?.mix === 'remove'
+        const movedTo = removed && revision?.partner ? revisions.find((r) => r.edit_id === revision.partner) ?? null : null
         const shown: Revision | null = pending?.text
           ? { start: pending.selection.start, end: pending.selection.end, text: pending.text, mix: pending.mix ?? 'replace' }
           : revision && !removed ? revision : null
@@ -531,12 +543,19 @@ export function LineDoc({
                     </button>
                     {(revision || removed) && (
                       <div className={styles.meta}>
-                        {removed ? "Removed. The gap is closed with the room's own sound; the picture is untouched." : `Kept${shown && MIX_NOTE[shown.mix] ? ` · ${MIX_NOTE[shown.mix]}` : ''}.`}
+                        {movedTo ? `Moved to ${timecode(movedTo.start)}, as spoken, over the sound there; the room's own sound stays here.`
+                          : removed ? "Removed. The gap is closed with the room's own sound; the picture is untouched." : `Kept${shown && MIX_NOTE[shown.mix] ? ` · ${MIX_NOTE[shown.mix]}` : ''}.`}
                         {revision?.edit_id && <> <button className={styles.undo} onClick={() => onUndo(revision.edit_id!)}>Undo</button></>}
                       </div>
                     )}
                     {revision && !removed && revision.edit_id && onMoveKept && (
                       placeControl(`edit-${revision.edit_id}`, revision.start, Math.max(0.05, revision.end - revision.start), (t) => onMoveKept(revision.edit_id!, t))
+                    )}
+                    {movedTo?.edit_id && onMoveKept && (
+                      placeControl(`edit-${movedTo.edit_id}`, movedTo.start, Math.max(0.05, movedTo.end - movedTo.start), (t) => onMoveKept(movedTo.edit_id!, t))
+                    )}
+                    {!revision && onShift && placing?.id === `shift-${key}` && (
+                      placeControl(`shift-${key}`, s.start, Math.max(0.05, s.end - s.start), (t) => onShift(s, t))
                     )}
                     {pending && !revision && pending.text && MIX_NOTE[pending.mix ?? 'replace'] && (
                       <div className={styles.meta}>Added · {MIX_NOTE[pending.mix ?? 'replace']}</div>
@@ -548,13 +567,16 @@ export function LineDoc({
               <span className={styles.side}>
                 {status && STATUS[status] && <span className={styles.chip} data-tone={TONE[status]}>{STATUS[status]}</span>}
                 {status === 'kept' && <span className={styles.chip} data-tone="ok">Kept</span>}
-                {status === 'removed' && <span className={styles.chip} data-tone="muted">Removed</span>}
+                {status === 'removed' && <span className={styles.chip} data-tone="muted">{movedTo ? 'Moved' : 'Removed'}</span>}
                 {!isEditing && !isAdding && (
                   <span className={styles.actions} role="group" aria-label={`Actions for ${clock(s.start)}`}>
                     <button className={styles.action} onClick={() => open(i, 'edit')}>Change the words</button>
                     <button className={styles.action} onClick={() => open(i, 'edit', true)}>Change the delivery</button>
                     <button className={styles.action} onClick={() => open(i, 'add')}>Add a line after</button>
                     {!removed && <button className={styles.action} onClick={() => onRemove(s)}>Remove</button>}
+                    {!revision && onShift && onPlacing && (
+                      <button className={styles.action} onClick={() => { onPlacing({ id: `shift-${key}`, start: s.start, duration: Math.max(0.05, s.end - s.start) }); setPlaceText(timecode(s.start)) }}>Shift</button>
+                    )}
                     <button className={styles.action} onClick={() => onSeek(s)}>Play original</button>
                   </span>
                 )}

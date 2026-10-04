@@ -264,3 +264,8 @@ export const getMe = () => get<Me>('/auth/me')
 /** Where the browser goes to sign in (a redirect to Google). */
 export const loginUrl = `${BASE}/auth/login`
 export const logout = () => post<{ signed_out: boolean }>('/auth/logout')
+
+/** Moves a line of the original speech to another time, as spoken: room tone
+ *  where it was, the words over the picture from `to`. Two edits, paired. */
+export const shiftLine = (id: string, req: { start: number; end: number; to: number }) =>
+  post<{ edit_id: string; removed_edit_id: string; candidate: Candidate; from: Selection; selection: Selection; mix: Mix }>(`/projects/${id}/lines/shift`, req)
