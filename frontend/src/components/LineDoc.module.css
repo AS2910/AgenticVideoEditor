@@ -170,3 +170,7 @@
 @keyframes unfold { from { grid-template-rows: 0fr; opacity: 0; } to { grid-template-rows: 1fr; opacity: 1; } }
 /* A warning on the amber option reads in ink, never in rose on amber. */
 .primary .warning { color: var(--accent-ink); opacity: 0.8; }
+
+/* UX-5: a voice-over placed by time, on a clip with no speech. */
+.placedLabel { color: var(--muted); font-style: italic; }
+.placeTitle { margin: 0; font-family: var(--serif); font-size: var(--fs-20); font-weight: 500; }

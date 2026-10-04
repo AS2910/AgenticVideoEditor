@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import type { Project, Reading } from '../types'
+import { frameUrl } from '../api'
 import { clock } from '../transcript/format'
 import { speakerSlot } from '../transcript/speakers'
 import { Avatar } from './Avatar'
@@ -12,6 +13,13 @@ const EXAMPLES = [
   'Fix how the brand name is said',
   'Make the shopkeeper warmer',
   'Add a closing line',
+]
+// UX-5: a clip with no speech gets a voice-over instead.
+const SILENT_EXAMPLES = [
+  'Introduce the place',
+  'Write a line for this',
+  'Look at it and help me decide',
+  'Say "Welcome to Goa" at the start',
 ]
 
 interface GoalStageProps {
@@ -40,6 +48,8 @@ export function GoalStage({ project, reading, onPlan, onHandsOn, onName, busy, c
   const cancelled = useRef(false)
   const statements = project.statements ?? []
   const lines = statements.length
+  const silent = lines === 0
+  const frames = project.frames ?? []
   const speakers = project.speakers ?? []
   const guess = (label: string) => reading?.roles.find((r) => r.label === label)
   const shown = (label: string) => {
@@ -49,7 +59,8 @@ export function GoalStage({ project, reading, onPlan, onHandsOn, onName, busy, c
   }
   const unconfirmed = speakers.filter((s) => unnamed(s.name, s.label) && guess(s.label))
   const opening = reading?.opening
-    ?? (speakers.length === 2 ? `Two people speak, ${lines} ${lines === 1 ? 'line' : 'lines'}.`
+    ?? (silent ? 'No one speaks.'
+      : speakers.length === 2 ? `Two people speak, ${lines} ${lines === 1 ? 'line' : 'lines'}.`
       : speakers.length > 2 ? `${speakers.length} people speak, ${lines} lines.`
       : `${lines} ${lines === 1 ? 'line' : 'lines'}.`)
   const submit = () => {
@@ -69,15 +80,37 @@ export function GoalStage({ project, reading, onPlan, onHandsOn, onName, busy, c
       </header>
       <main className={styles.main}>
       <div className={styles.hero}>
-        <div className={styles.read} role="status">
-          <Orb size={32} working={busy || (reading === null && lines > 0)} />
+        <div className={styles.read} role="status" aria-busy={reading === null || undefined}>
+          <Orb size={32} working={busy || reading === null} />
           <span>
-            I've read all {lines} {lines === 1 ? 'line' : 'lines'} of <strong>{project.filename}</strong>.{' '}
-            {reading === null && lines > 0 ? <span className={styles.dim}>Taking it in…</span> : opening}
+            {silent ? <>I've looked at <strong>{project.filename}</strong>.</> : <>I've read all {lines} {lines === 1 ? 'line' : 'lines'} of <strong>{project.filename}</strong>.</>}{' '}
+            {reading === null ? <span className={styles.dim}>Taking it in…</span> : opening}
           </span>
         </div>
         <h1 className={styles.title}>What should this video say?</h1>
         <div className={styles.columns}>
+          {silent ? (
+          <section className={styles.script} aria-label="What the picture shows" tabIndex={0} aria-busy={reading === null || undefined}>
+            <ul className={styles.strip} data-testid="frames">
+              {(frames.length ? frames : [0, 1, 2].map((i) => ({ index: i, at: NaN }))).map((f) => (
+                <li key={f.index} className={styles.frameSlot}>
+                  {Number.isNaN(f.at) ? <span className={styles.frameEmpty} aria-hidden="true" /> : (
+                    <button
+                      type="button"
+                      className={styles.frameButton}
+                      aria-label={`Frame at ${clock(f.at)}: say it from here`}
+                      onClick={() => setGoal((g) => (g.trim() ? `${g.trim()} — from ${clock(f.at)}` : `Say it from ${clock(f.at)}: `))}
+                    >
+                      <img className={styles.frameImg} src={frameUrl(project.project_id, f.index)} alt="" width={160} height={90} loading="lazy" />
+                      <span className={styles.frameTime}>{clock(f.at)}</span>
+                    </button>
+                  )}
+                </li>
+              ))}
+            </ul>
+            {reading?.sight?.setting && <p className={styles.sightLine}>{reading.sight.setting}{reading.sight.place_guess ? ` · ${reading.sight.place_guess}` : ''}</p>}
+          </section>
+          ) : (
           <section className={styles.script} aria-label="What is said" tabIndex={0}>
             {speakers.length > 0 && (
               <div className={styles.cast} data-testid="cast">
@@ -137,20 +170,21 @@ export function GoalStage({ project, reading, onPlan, onHandsOn, onName, busy, c
                   <span className={styles.words}>{st.text}</span>
                 </li>
               ))}
-              {lines === 0 && <li className={styles.dim}>No speech in this clip.</li>}
             </ol>
           </section>
+          )}
           <div className={styles.ask}>
             <p className={styles.lead}>
-              Tell me in your own words. I'll find every line it touches, write the change, voice it in the
-              right person's voice, and show you each one before anything is final.
+              {silent
+                ? "No one speaks, so tell me what it should say: words in quotes to use them as they are, a brief for me to write it, or ask me to look at it and help."
+                : "Tell me in your own words. I'll find every line it touches, write the change, voice it in the right person's voice, and show you each one before anything is final."}
             </p>
             <div className={styles.card}>
               <textarea
                 className={styles.input}
                 rows={3}
                 aria-label="What the video should say"
-                placeholder="Turn this into our Diwali ad: everything's 30% off, and say the brand name as Bhaji Cam."
+                placeholder={silent ? 'Add an audio introducing the place: "Welcome to Goa"' : "Turn this into our Diwali ad: everything's 30% off, and say the brand name as Bhaji Cam."}
                 value={goal}
                 onChange={(e) => setGoal(e.target.value)}
                 onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submit() } }}
@@ -166,11 +200,11 @@ export function GoalStage({ project, reading, onPlan, onHandsOn, onName, busy, c
             </div>
             <div className={styles.examples}>
               <span className={styles.or}>Or try</span>
-              {EXAMPLES.map((e) => (
+              {(silent ? SILENT_EXAMPLES : EXAMPLES).map((e) => (
                 <button key={e} className={styles.example} onClick={() => setGoal(e)}>{e}</button>
               ))}
               <span className={styles.spacer} />
-              <button className={styles.link} onClick={onHandsOn}>Edit a line yourself instead</button>
+              <button className={styles.link} onClick={onHandsOn}>{silent ? 'Place a voice-over yourself instead' : 'Edit a line yourself instead'}</button>
             </div>
           </div>
         </div>

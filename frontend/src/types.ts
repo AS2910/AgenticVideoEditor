@@ -1,6 +1,6 @@
 export interface Word { text: string; start: number; end: number }
 /** A sentence as spoken, with punctuation — edited from the transcript panel. */
-export interface Statement { text: string; start: number; end: number; speaker?: string | null }
+export interface Statement { text: string; start: number; end: number; speaker?: string | null; /** UX-5: a voice-over placed by time on a clip with no speech. */ placed?: boolean }
 
 /** An approved edit as the transcript shows it: the new words over a span,
  *  as inline tracked changes. `edit_id` is what Revert names. */
@@ -64,6 +64,10 @@ export interface Plan {
   /** What the planner noticed while reading, in order. */
   findings: string[]
   question: PlanQuestion | null
+  /** UX-5: the brief so far, and how many questions may still come. */
+  answers?: [string, string][]
+  questions_left?: number
+  voice?: string | null
   /** What this plan has cost so far, estimated. */
   spend_usd: number
   log: PlanLogEntry[]
@@ -158,13 +162,30 @@ export interface Project {
   plan?: Plan | null
   /** Voltage's first look at the clip, once it has had one (UX-2). */
   reading?: Reading | null
+  /** UX-5: a clip with no speech shows its frames where the transcript would be. */
+  frames?: FrameRef[]
 }
 
 /** One speaker's role in the clip, as Voltage guesses it from what they say. */
 export interface RoleGuess { label: string; role: string; why: string }
 
 /** Voltage's first look at a clip: a specific opening line and a role per speaker. */
-export interface Reading { opening: string; roles: RoleGuess[]; at?: string }
+export interface Reading { opening: string; roles: RoleGuess[]; at?: string; /** UX-5: what Voltage saw, on a clip with no speech. */ sight?: Sight | null }
+
+/** What Voltage saw in a clip with no speech (UX-5). */
+export interface Sight {
+  opening: string
+  setting: string
+  mood: string
+  people: string
+  text_on_screen: string
+  place_guess: string
+  confidence: string
+  beats: { at: number; note: string }[]
+}
+
+/** A still of the picture, served at /projects/{id}/frames/{index} (UX-5). */
+export interface FrameRef { index: number; at: number }
 
 /** What a project has spent. USD is an estimate from list prices. */
 export interface Usage {

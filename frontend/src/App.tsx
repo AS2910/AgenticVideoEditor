@@ -99,6 +99,8 @@ export default function App() {
   const [inserts, setInserts] = useState<Insert[]>([])
   const [download, setDownload] = useState<{ url: string; filename: string } | null>(null)
   const [exporting, setExporting] = useState(false)
+  // UX-6: how much of the upload has gone, 0..1; null when not uploading.
+  const [uploadShare, setUploadShare] = useState<number | null>(null)
   // The latest render of the approved edits, and which version the player shows.
   const [rendered, setRendered] = useState<{ url: string; duration: number } | null>(null)
   const [view, setView] = useState<'original' | 'edited'>('original')
@@ -285,7 +287,6 @@ export default function App() {
   // role for each speaker (UX-2).
   useEffect(() => {
     if (stage !== 'goal' || !projectId || reading || readFor.current === projectId) return
-    if ((project?.statements?.length ?? 0) === 0) return
     readFor.current = projectId
     setReadingBusy(true)
     readProject(projectId)
@@ -304,20 +305,23 @@ export default function App() {
     setAutonomy(loaded.settings?.autonomy ?? 'ask')
     setPlan(loaded.plan ?? null)
     setReading(loaded.reading ?? null)
-    setStage(loaded.plan || edited || (loaded.statements?.length ?? 0) === 0 ? 'editor' : 'goal')
+    // UX-5: a clip with no speech starts on the goal stage too — Voltage looks at it.
+    setStage(loaded.plan || edited ? 'editor' : 'goal')
     window.location.hash = loaded.project_id
   }
 
   const load = async (file: File) => {
     setLoading(true)
+    setUploadShare(0)
     setError(null)
     try {
-      takeIn(await createProject(file, false))
+      takeIn(await createProject(file, false, setUploadShare))
     } catch (e) {
       // The backend's rejection reason is the useful part — show it verbatim.
       setError(e instanceof ApiError ? e.message : 'Could not upload that video.')
     } finally {
       setLoading(false)
+      setUploadShare(null)
     }
   }
 
@@ -470,6 +474,17 @@ export default function App() {
 
   /** A line edited at the line (UX-1): hear it, keep it, another take, undo. */
   const hearLine = (key: LineKey, request: LineRequest) => {
+    // UX-5: a voice-over placed by time on a clip with no speech — the chosen
+    // span is the selection, the line plays over the sound there.
+    if (request.mix === 'layer') {
+      setPlaced((p) => (p.some((x) => x.start === request.selection.start && x.end === request.selection.end) ? p : [...p, request.selection]))
+      void runPreview(
+        `Add the line "${request.text}"`,
+        { text: request.text, mix: 'layer', on_long: request.onLong, ...(request.delivery ? { delivery: request.delivery } : {}) },
+        request.selection, `Voice-over at ${clock(request.selection.start)}: “${request.text}”`, request.voiceId ?? voiceId, { key, request },
+      )
+      return
+    }
     const s = statementsNow().find((st) => st.start === request.selection.start && st.end === request.selection.end)
     const display = request.mix === 'replace'
       ? `“${s?.text ?? ''}” → “${request.text}”`
@@ -513,7 +528,18 @@ export default function App() {
       setError(e instanceof ApiError ? e.message : 'Could not move the line.')
     }
   }
-  const statementsNow = () => project?.statements ?? []
+  // UX-5: on a clip with no speech, the voice-overs placed by hand or by the
+  // plan stand where the lines would be, so every row's machinery applies.
+  const [placed, setPlaced] = useState<Selection[]>([])
+  const placedStatements = (): Statement[] => {
+    if (project?.statements?.length) return []
+    const spans = [...placed, ...(plan?.items ?? []).filter((i) => i.kind === 'planned' && i.old_text === '').map((i) => i.selection)]
+    const seen = new Set<string>()
+    return spans.filter((s) => { const k = keyOf(s); if (seen.has(k)) return false; seen.add(k); return true })
+      .sort((a, b) => a.start - b.start)
+      .map((s) => ({ text: '', start: s.start, end: s.end, speaker: null, placed: true }))
+  }
+  const statementsNow = (): Statement[] => (project?.statements?.length ? project.statements : placedStatements())
 
   const keepTake = async (key: LineKey, c: Candidate) => {
     if (!projectId) return
@@ -669,7 +695,7 @@ export default function App() {
     setReview(false)
     try {
       setStage('editor')
-      const made = await createPlan(projectId, { goal })
+      const made = await createPlan(projectId, { goal, voice_profile_id: voiceId })
       setPlan(made)
       say({ role: 'assistant', text: made.question ? made.question.text : made.summary })
       if (made.job_id) void followPlanJob(made.job_id, made.plan_id)
@@ -682,14 +708,14 @@ export default function App() {
   }
 
   /** Answer Voltage's question (or take its guess); it plans again. */
-  const clarify = async (answer?: string) => {
+  const clarify = async (answer?: string, allGuesses = false) => {
     if (!projectId || !plan?.question) return
-    const said_ = answer ?? plan.question.guess ?? plan.question.options[0]
+    const said_ = answer ?? (allGuesses ? 'Go with your guesses' : plan.question.guess ?? plan.question.options[0])
     say({ role: 'user', text: said_ })
     setError(null)
     setPlanning(true)
     try {
-      const made = await clarifyPlan(projectId, plan.plan_id, answer)
+      const made = await clarifyPlan(projectId, plan.plan_id, answer, allGuesses)
       setPlan(made)
       say({ role: 'assistant', text: made.summary })
       if (made.job_id) void followPlanJob(made.job_id, made.plan_id)
@@ -1038,6 +1064,7 @@ export default function App() {
         onLoad={load}
         onLoadSample={loadSample}
         loading={loading}
+        progress={uploadShare}
         error={error}
         who={me.user ? { name: me.user.name ?? me.user.email ?? 'You', picture: me.user.picture } : null}
         onSignOut={me.user ? () => void signOut() : undefined}
@@ -1064,7 +1091,7 @@ export default function App() {
 
   const showEdited = view === 'edited' && rendered !== null
   const speakers = project.speakers ?? []
-  const statements = project.statements ?? []
+  const statements = statementsNow()
   const leave = () => {
     clearEditor()
     window.location.hash = ''
@@ -1263,6 +1290,7 @@ export default function App() {
           onReword={reword}
           onLongLinesChange={(v) => void rememberLongLines(v)}
           onEditingChange={setEditingLine}
+          duration={project.duration}
         />
           </>
         )}
@@ -1278,6 +1306,7 @@ export default function App() {
           sendLabel={sendLabel}
           hint={clarifying ? 'Pick an answer above, or just say "go" and Voltage will use its guess.'
             : selection && precise ? `Talking about the words at ${clock(selection.start)}.`
+            : (project.statements?.length ?? 0) === 0 ? 'For the whole video: what it should say, a brief, or ask me to look at it and help.'
             : 'For the whole video: a goal, or a change to the plan. To change one line, click it.'}
           toolbar={<VoicePicker voices={voices} value={voiceId} onChange={setVoiceId} />}
           header={
@@ -1292,8 +1321,8 @@ export default function App() {
         >
           {!plan && messages.length === 0 && !generating && !planning && (
             <div className={styles.welcome}>
-              {statements.length === 0
-                ? "There's no speech in this clip, so there's nothing for me to change. If you want a voice-over, drag across the timeline where it should go and tell me what to say."
+              {(project.statements?.length ?? 0) === 0
+                ? 'No one speaks in this clip. Tell me what it should say, or ask me to look at it and help; or place a voice-over yourself on the left.'
                 : "Tell me what this video should say and I'll plan it across every line it touches. Or click any line to change it yourself; I'll stay out of the way."}
             </div>
           )}
@@ -1329,9 +1358,15 @@ export default function App() {
                   <button key={o} className={o === plan.question?.guess ? styles.optionOn : styles.option} onClick={() => void clarify(o)}>{o}</button>
                 ))}
               </div>
-              <div className={styles.questionNote}>
+              <div className={styles.questionNote} role="status">
+                {(plan.questions_left ?? 0) > 0 && (project.statements?.length ?? 0) === 0 ? `Question ${(plan.answers?.length ?? 0) + 1} of up to 3. ` : ''}
                 {plan.question.guess ? `My guess is ${plan.question.guess}. ` : ''}Pick one, or just say "go" and I'll use that.
               </div>
+              {(project.statements?.length ?? 0) === 0 && (plan.questions_left ?? 0) > 1 && (
+                <div className={styles.questionOptions}>
+                  <button className={styles.option} onClick={() => void clarify(undefined, true)}>Go with your guesses</button>
+                </div>
+              )}
             </div>
           )}
           {editingLine && !planBusy && (

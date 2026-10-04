@@ -65,3 +65,27 @@ describe('GoalStage (UX-2)', () => {
     expect(onPlan).toHaveBeenCalledWith('make it 30% off')
   })
 })
+
+describe('GoalStage on a clip with no speech (UX-5)', () => {
+  it('shows the frames where the lines would be, a voice-over brief, and its own examples', () => {
+    const silent: Project = { ...PROJECT, statements: [], speakers: [], frames: [{ index: 0, at: 0.3 }, { index: 1, at: 3.9 }, { index: 2, at: 7.2 }] }
+    const reading = { opening: 'No one speaks. A beach at dusk.', roles: [], sight: { opening: 'No one speaks. A beach at dusk.', setting: 'A wide beach at dusk', mood: 'calm', people: 'two', text_on_screen: '', place_guess: 'Goa', confidence: 'medium', beats: [] } }
+    render(<GoalStage project={silent} reading={reading} onPlan={noop} onHandsOn={noop} onName={noop} />)
+    expect(screen.getByText(/I've looked at/)).toBeInTheDocument()
+    expect(screen.getByText(/No one speaks\. A beach at dusk\./)).toBeInTheDocument()
+    const frames = within(screen.getByTestId('frames')).getAllByRole('button')
+    expect(frames).toHaveLength(3)
+    expect(frames[1]).toHaveAttribute('aria-label', 'Frame at 0:03: say it from here')
+    expect(within(frames[1]).getByRole('presentation', { hidden: true })).toHaveAttribute('src', '/api/projects/p3/frames/1')
+    expect(screen.getByText('A wide beach at dusk · Goa')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Introduce the place' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Place a voice-over yourself instead' })).toBeInTheDocument()
+  })
+
+  it('clicking a frame starts the goal from that moment', async () => {
+    const silent: Project = { ...PROJECT, statements: [], speakers: [], frames: [{ index: 0, at: 0.3 }] }
+    render(<GoalStage project={silent} reading={null} onPlan={noop} onHandsOn={noop} />)
+    await userEvent.click(screen.getByRole('button', { name: 'Frame at 0:00: say it from here' }))
+    expect(screen.getByRole('textbox', { name: 'What the video should say' })).toHaveValue('Say it from 0:00: ')
+  })
+})

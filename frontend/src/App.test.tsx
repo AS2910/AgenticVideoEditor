@@ -1131,17 +1131,22 @@ describe('App panel order', () => {
     expect(ids[ids.length - 1]).toBe('next-action')
   })
 
-  it('tells you when a clip has no speech, instead of inviting a goal', async () => {
+  it('takes a clip with no speech to the goal stage, with its frames, and plans a voice-over (UX-5)', async () => {
     const base = routeFetch()
     vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
-      if (url.endsWith('/projects') && init?.method === 'POST') return ok({ ...PROJECT, transcript: [], statements: [] })
+      if (url.endsWith('/projects') && init?.method === 'POST') return ok({ ...PROJECT, transcript: [], statements: [], frames: [{ index: 0, at: 0.3 }, { index: 1, at: 1.2 }, { index: 2, at: 2.0 }] })
+      if (url.endsWith('/reading')) return ok({ opening: 'No one speaks. A beach at dusk.', roles: [], sight: { opening: 'No one speaks. A beach at dusk.', setting: 'A wide beach at dusk', mood: 'calm', people: 'two, far off', text_on_screen: '', place_guess: 'Goa', confidence: 'medium', beats: [] } })
       return base(url, init)
     }))
     const user = userEvent.setup()
     render(<App />)
     await user.click(await screen.findByRole('button', { name: /sample ad/i }))
-    expect(await screen.findByText(/no speech in this clip/i)).toBeInTheDocument()
-    expect(screen.queryByText('What should this video say?')).not.toBeInTheDocument()
+    expect(await screen.findByText('What should this video say?')).toBeInTheDocument()
+    expect(await screen.findByText(/No one speaks\. A beach at dusk\./)).toBeInTheDocument()
+    const frames = within(screen.getByTestId('frames')).getAllByRole('button')
+    expect(frames.map((b) => b.getAttribute('aria-label'))).toEqual(['Frame at 0:00: say it from here', 'Frame at 0:01: say it from here', 'Frame at 0:02: say it from here'])
+    expect(screen.getByRole('button', { name: 'Place a voice-over yourself instead' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Introduce the place' })).toBeInTheDocument()
   })
 })
 
