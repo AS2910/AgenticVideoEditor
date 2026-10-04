@@ -1,5 +1,5 @@
-.switch { display: flex; padding: 2px; border-radius: 8px; background: var(--surface); border: 1px solid var(--line); }
-.on, .off { padding: 4px 10px; border-radius: 6px; font-size: 12px; border: none; white-space: nowrap; }
+.switch { display: flex; gap: 2px; padding: 2px; border-radius: 8px; background: var(--surface); border: 1px solid var(--line); }
+.on, .off { min-height: var(--chip); padding: 0 12px; border-radius: 6px; font-size: var(--fs-13); border: none; white-space: nowrap; }
 .on { background: var(--raised); color: var(--text); }
 .off { background: transparent; color: var(--muted); }
 .off:hover { color: var(--text); }

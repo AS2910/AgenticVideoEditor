@@ -15,7 +15,7 @@ export function ActivityLog({ plan }: { plan: Plan }) {
     <div className={styles.log} data-testid="activity">
       <div className={styles.head}>
         <Orb size={20} idle />
-        <span className={styles.title}>What I did</span>
+        <h2 className={styles.title}>What I did</h2>
         <span className={styles.spacer} />
         {plan.spend_usd > 0 && <span className={styles.cost}>${plan.spend_usd.toFixed(2)} for this plan</span>}
       </div>

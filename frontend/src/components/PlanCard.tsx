@@ -172,7 +172,7 @@ export function PlanCard({
       )}
       <div className={styles.card} data-testid="plan">
         <div className={styles.head}>
-          <span className={styles.title}>The plan</span>
+          <h2 className={styles.title}>The plan</h2>
           <span className={styles.count}>
             {proposed
               ? `${planned.length} ${planned.length === 1 ? 'change' : 'changes'}${cast > 1 ? ` · ${cast} speakers` : ''}${voiced.length > 0 && toVoice.length > 0 ? ` · ${voiced.length} voiced` : ''}`
@@ -182,8 +182,8 @@ export function PlanCard({
           {!proposed && (
             <>
               <span className={styles.spacer} />
-              <div className={styles.progress}>
-                <div className={styles.progressFill} style={{ width: `${ticked.length ? (settled.length / ticked.length) * 100 : 0}%` }} />
+              <div className={styles.progress} role="progressbar" aria-label="Voicing the plan" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(ticked.length ? (settled.length / ticked.length) * 100 : 0)}>
+                <div className={styles.progressFill} style={{ transform: `scaleX(${ticked.length ? settled.length / ticked.length : 0})` }} />
               </div>
               {running && onStop && (
                 <button className={styles.stop} onClick={onStop} disabled={plan.status === 'stopping'}>
@@ -205,13 +205,14 @@ export function PlanCard({
           return (
             <div key={item.item_id} className={styles.item} data-status={item.status}>
               {proposed ? (
-                <input
-                  type="checkbox"
-                  className={styles.tick}
-                  checked={item.enabled}
-                  aria-label={`Include the change at ${at}`}
-                  onChange={(e) => onToggle(item, e.target.checked)}
-                />
+                <label className={styles.tick}>
+                  <input
+                    type="checkbox"
+                    checked={item.enabled}
+                    aria-label={`Include the change at ${at}`}
+                    onChange={(e) => onToggle(item, e.target.checked)}
+                  />
+                </label>
               ) : (
                 <span className={styles.icon}><Icon status={item.status} /></span>
               )}
@@ -259,13 +260,13 @@ export function PlanCard({
                     {item.status === 'working' && (
                       <>
                         <div className={styles.line}>{item.mix === 'concatenate' ? `Adding “${item.new_text}” after ${at}.` : `Voicing “${item.new_text}” at ${at}.`}</div>
-                        <div className={styles.quiet} data-testid="narration">{item.progress ?? 'Starting…'}</div>
+                        <div className={styles.quiet} data-testid="narration" role="status">{item.progress ?? 'Starting…'}</div>
                       </>
                     )}
                     {item.status === 'needs-you' && item.question && (
                       <>
                         <div className={styles.line}>{item.question.question}</div>
-                        <div className={styles.needs} data-testid="needs-you">
+                        <div className={styles.needs} data-testid="needs-you" role="status">
                           <div className={styles.recommends}><Orb size={14} /><span>Voltage recommends</span></div>
                           {item.question.options.map((o, k) => k === 0 ? (
                             <button key={k} className={styles.recommended} onClick={() => onAnswer(item, o)} disabled={busy}>
@@ -286,7 +287,7 @@ export function PlanCard({
                       </>
                     )}
                     {item.status === 'failed' && (
-                      <div className={styles.failed}>
+                      <div className={styles.failed} role="alert">
                         <span>{item.error ?? 'This line could not be voiced.'}</span>
                         <button className={styles.secondary} onClick={() => onRedo(item)} disabled={busy}>Redo</button>
                       </div>

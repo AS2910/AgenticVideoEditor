@@ -1,9 +1,9 @@
 .log { display: flex; flex-direction: column; gap: 8px; padding: 14px; border-radius: var(--radius-lg); background: var(--surface); border: 1px solid var(--line); box-shadow: var(--shadow); }
 .head { display: flex; align-items: center; gap: 10px; }
-.title { font-family: var(--serif); font-size: 16px; font-weight: 600; }
+.title { margin: 0; font-family: var(--serif); font-size: 16px; font-weight: 600; }
 .spacer { flex: 1; }
-.cost { color: var(--muted); font-size: 12px; }
-.entry { display: flex; gap: 10px; font-size: 12px; color: var(--muted); }
-.at { width: 36px; flex: none; }
+.cost { color: var(--muted); font-size: var(--fs-13); white-space: nowrap; }
+.entry { display: flex; gap: 10px; font-size: var(--fs-14); color: var(--muted); }
+.at { width: 44px; flex: none; font-variant-numeric: tabular-nums; }
 .text { flex: 1; color: var(--text); }
-.detail { white-space: nowrap; }
+.detail { white-space: nowrap; min-width: 0; max-width: 40%; overflow: hidden; text-overflow: ellipsis; }

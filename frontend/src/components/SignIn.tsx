@@ -8,6 +8,7 @@ export function SignIn({ error }: { error?: string | null }) {
       <header className={styles.header}>
         <span className={styles.brand}>Voltage</span>
       </header>
+      <main className={styles.main}>
       <div className={styles.hero}>
         <h1 className={styles.title}>Change what's said in a video you've already shot.</h1>
         <p className={styles.tagline}>
@@ -27,6 +28,7 @@ export function SignIn({ error }: { error?: string | null }) {
           {error && <div className={styles.error} role="alert">{error}</div>}
         </div>
       </div>
+      </main>
     </div>
   )
 }

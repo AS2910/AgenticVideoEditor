@@ -6,12 +6,12 @@ import { ChatPanel } from './ChatPanel'
 describe('ChatPanel', () => {
   it('disables Preview when canSubmit is false', () => {
     render(<ChatPanel messages={[]} canSubmit={false} onSubmit={() => {}} />)
-    expect(screen.getByRole('button', { name: /preview/i })).toBeDisabled()
+    expect(screen.getByRole('button', { name: /send/i })).toBeDisabled()
   })
 
   it('disables Preview when the prompt is empty even if canSubmit', () => {
     render(<ChatPanel messages={[]} canSubmit={true} onSubmit={() => {}} />)
-    expect(screen.getByRole('button', { name: /preview/i })).toBeDisabled()
+    expect(screen.getByRole('button', { name: /send/i })).toBeDisabled()
   })
 
   it('submits the typed prompt and clears the input', async () => {
@@ -19,7 +19,7 @@ describe('ChatPanel', () => {
     render(<ChatPanel messages={[]} canSubmit={true} onSubmit={onSubmit} />)
     const input = screen.getByRole('textbox')
     await userEvent.type(input, 'change "20% off" to "30% off"')
-    await userEvent.click(screen.getByRole('button', { name: /preview/i }))
+    await userEvent.click(screen.getByRole('button', { name: /send/i }))
     expect(onSubmit).toHaveBeenCalledWith('change "20% off" to "30% off"')
     expect(input).toHaveValue('')
   })

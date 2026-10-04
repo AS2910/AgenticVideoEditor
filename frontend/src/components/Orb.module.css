@@ -1,11 +1,14 @@
+/* Voltage's presence. The glow is a pseudo-element whose opacity breathes,
+   so the animation never repaints a box-shadow. */
 .orb {
-  display: inline-block; flex: none; border-radius: 50%;
-  background: radial-gradient(circle at 35% 30%, #F6D3A4 0%, var(--accent) 45%, var(--accent-fill) 100%);
-  box-shadow: 0 0 0 3px var(--accent-tint), 0 0 18px rgba(233, 168, 96, 0.35);
+  position: relative; display: inline-block; flex: none; border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, var(--orb-highlight) 0%, var(--accent) 45%, var(--accent-fill) 100%);
+  box-shadow: var(--glow-soft);
+}
+.orb::after {
+  content: ''; position: absolute; inset: 0; border-radius: 50%;
+  box-shadow: var(--glow-strong); opacity: 0;
 }
 .orb[data-idle] { box-shadow: none; opacity: 0.8; }
-.orb[data-working] { animation: breathe 1.6s ease-in-out infinite; }
-@keyframes breathe {
-  0%, 100% { box-shadow: 0 0 0 3px var(--accent-tint), 0 0 18px rgba(233, 168, 96, 0.35); }
-  50% { box-shadow: 0 0 0 6px var(--accent-tint), 0 0 28px rgba(233, 168, 96, 0.55); }
-}
+.orb[data-working]::after { animation: breathe 1.6s ease-in-out infinite; }
+@keyframes breathe { 0%, 100% { opacity: 0; } 50% { opacity: 1; } }

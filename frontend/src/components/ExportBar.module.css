@@ -4,16 +4,16 @@
 .original { background: var(--raised); }
 .edited { background: var(--ok); }
 .export {
-  padding: 7px 12px; border-radius: 8px; font-size: 13px; font-weight: 500; white-space: nowrap;
+  padding: 0 14px; border-radius: 8px; font-size: var(--fs-14); font-weight: 500; white-space: nowrap;
   background: var(--raised); color: var(--text); border: 1px solid var(--line);
 }
 .export:hover { border-color: var(--muted); }
 .download {
-  padding: 7px 12px; border-radius: 8px; font-size: 13px; font-weight: 500;
+  display: inline-flex; align-items: center; min-height: var(--target); padding: 0 14px; border-radius: 8px; font-size: var(--fs-14); font-weight: 500;
   background: var(--accent); color: var(--accent-ink); text-decoration: none; white-space: nowrap;
 }
 .download:hover { color: var(--accent-ink); }
-.inserts { color: var(--muted); font-size: 12px; }
+.inserts { color: var(--muted); font-size: var(--fs-13); }
 @media (max-width: 1600px) { .inserts { display: none; } }
 
 /* UX-4: on a phone the export controls take their own line in the header. */

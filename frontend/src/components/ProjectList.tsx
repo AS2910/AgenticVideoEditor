@@ -21,10 +21,11 @@ export function ProjectList({ projects, onOpen, onDelete }: ProjectListProps) {
   if (projects.length === 0) return null
   const nameOf = (id: string) => projects.find((p) => p.project_id === id)?.filename
   return (
-    <div className={styles.list}>
-      <div className={styles.heading}>Recent</div>
+    <section className={styles.list} aria-labelledby="recent-title">
+      <h2 id="recent-title" className={styles.heading}>Recent</h2>
+      <ul className={styles.rows}>
       {projects.map((p) => (
-        <div key={p.project_id} className={styles.row}>
+        <li key={p.project_id} className={styles.row}>
           <button className={styles.open} onClick={() => onOpen(p.project_id)}>
             {p.media ? (
               <video className={styles.frame} muted playsInline preload="metadata" tabIndex={-1} aria-hidden="true"
@@ -57,8 +58,9 @@ export function ProjectList({ projects, onOpen, onDelete }: ProjectListProps) {
               Delete
             </button>
           )}
-        </div>
+        </li>
       ))}
-    </div>
+      </ul>
+    </section>
   )
 }

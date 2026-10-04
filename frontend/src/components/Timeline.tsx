@@ -115,6 +115,7 @@ export function Timeline({ words, duration, selection, currentTime, onSelect }: 
               // Alternate words sit on two rows, so a label can run past its
               // word's own (often very short) span without covering the next.
               data-lane={i % 2}
+              aria-pressed={selection ? w.start < selection.end && selection.start < w.end : undefined}
               style={{ left: pct(w.start, duration), width: pct(w.end - w.start, duration) }}
               onClick={(e) => clickWord(e, w)}
             >
@@ -141,8 +142,9 @@ export function Timeline({ words, duration, selection, currentTime, onSelect }: 
         </div>
       </div>
       {words.length > 0 && (
-        <div className={styles.hint}>Click a word, shift-click to extend, or drag across words.</div>
+        <div className={styles.hint}>Tap or click a word, shift-click to extend, or drag across words.</div>
       )}
+      <span className="srOnly" role="status">{selection ? `Selected ${selection.start.toFixed(2)} to ${selection.end.toFixed(2)} seconds` : ''}</span>
     </div>
   )
 }

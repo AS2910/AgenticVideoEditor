@@ -1,6 +1,6 @@
-.picker { display: flex; align-items: center; gap: 6px; font-size: 12px; }
+.picker { display: flex; align-items: center; gap: var(--target-gap); font-size: var(--fs-13); }
 .caption { color: var(--muted); }
 .select {
-  max-width: 200px; padding: 3px 6px; font-size: 12px;
+  max-width: 200px; min-height: var(--chip); padding: 0 8px; font-size: var(--fs-13);
   background: var(--raised); color: var(--text); border: 1px solid var(--line); border-radius: 6px;
 }

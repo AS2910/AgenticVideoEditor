@@ -50,14 +50,17 @@ export function ChatPanel({
   return (
     <div className={styles.panel}>
       {header}
-      <div ref={list} className={styles.messages}>
+      <div ref={list} className={styles.messages} role="log" aria-live="polite" aria-relevant="additions" aria-label="The conversation">
         {hidden > 0 && (
           <button className={styles.earlier} onClick={() => setShowAll(true)}>
             Show {hidden} earlier {hidden === 1 ? 'message' : 'messages'}
           </button>
         )}
         {messages.slice(hidden).map((m, i) => (
-          <div key={hidden + i} className={m.role === 'user' ? styles.message : styles.reply}>{m.text}</div>
+          <div key={hidden + i} className={m.role === 'user' ? styles.message : styles.reply}>
+            <span className="srOnly">{m.role === 'user' ? 'You: ' : 'Voltage: '}</span>
+            <span>{m.text}</span>
+          </div>
         ))}
         {children}
       </div>
@@ -73,7 +76,7 @@ export function ChatPanel({
             onChange={(e) => setPrompt(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Enter') submit() }}
           />
-          <button className={styles.send} onClick={submit} disabled={disabled} aria-label="Preview" title="Preview">
+          <button className={styles.send} onClick={submit} disabled={disabled} aria-label="Send">
             <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
               <path d="M8 13V3M3.5 7.5L8 3l4.5 4.5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
             </svg>

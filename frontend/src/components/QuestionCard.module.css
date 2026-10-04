@@ -4,13 +4,13 @@
   border-radius: 10px; background: var(--amber-tint); border: 1px solid var(--amber-line);
 }
 .line { font-size: 15px; color: var(--text); }
-.options { display: flex; flex-wrap: wrap; gap: 6px; }
+.options { display: flex; flex-wrap: wrap; gap: var(--target-gap); }
 .option {
   display: flex; flex-direction: column; gap: 2px; text-align: left;
-  padding: 7px 12px; border-radius: 8px; font-size: 13px; font-weight: 500;
+  padding: 10px 14px; border-radius: 8px; font-size: var(--fs-14); font-weight: 500;
   background: var(--raised); color: var(--text); border: 1px solid var(--line);
 }
 .option:first-child { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
 .option:hover { border-color: var(--accent); }
-.warning { color: var(--amber); font-size: 12px; font-weight: 400; }
-.option:first-child .warning { color: #6B3B2E; }
+.warning { color: var(--amber); font-size: var(--fs-13); font-weight: 400; }
+.option:first-child .warning { color: var(--accent-ink); opacity: 0.8; }

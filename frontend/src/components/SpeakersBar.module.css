@@ -1,22 +1,22 @@
 /* The cast: who speaks, and in which voice. */
-.bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; padding: 0 10px; font-size: 13px; }
+.bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; padding: 0 10px; font-size: var(--fs-14); }
 .heading { font-weight: 600; }
 .caption { color: var(--muted); }
 .detect {
-  padding: 4px 10px; border-radius: 8px; font-size: 12px; font-weight: 500;
+  min-height: var(--chip); padding: 0 12px; border-radius: 8px; font-size: var(--fs-13); font-weight: 500;
   background: var(--raised); color: var(--accent); border: 1px solid var(--line);
 }
 .detect:hover { border-color: var(--accent); }
 .detect:disabled { color: var(--muted); border-color: var(--line); }
-.speaker { display: flex; align-items: center; gap: 6px; padding: 3px 6px 3px 4px; border-radius: 999px; background: var(--surface); border: 1px solid var(--line); }
+.speaker { display: flex; align-items: center; gap: var(--target-gap); padding: 3px 6px 3px 4px; border-radius: 999px; background: var(--surface); border: 1px solid var(--line); }
 .name {
-  width: 11ch; padding: 1px 4px;
+  min-width: 11ch; width: auto; field-sizing: content; min-height: var(--chip); padding: 0 6px;
   background: transparent; color: var(--text); font-weight: 500;
   border: 1px solid transparent; border-radius: 6px;
 }
 .name:hover { border-color: var(--line); }
-.name:focus { outline: none; border-color: var(--accent); background: var(--raised); }
+.name:focus-visible { border-color: var(--accent); background: var(--raised); }
 .voice {
-  max-width: 150px; padding: 2px 4px; font-size: 12px;
+  max-width: 150px; min-height: var(--chip); padding: 0 6px; font-size: var(--fs-13);
   background: var(--raised); color: var(--text); border: 1px solid var(--line); border-radius: 6px;
 }

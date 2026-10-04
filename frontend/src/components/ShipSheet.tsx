@@ -1,5 +1,6 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import type { PlanItem } from '../types'
+import { useModal } from './useModal'
 import styles from './ShipSheet.module.css'
 
 export interface Shipped {
@@ -27,7 +28,9 @@ const secs = (t: number) => `${Math.floor(t / 60)}:${(t % 60).toFixed(1).padStar
 /** What is in the file, once it is shipped (UX-3): the changes, the length,
  *  a download, a link, and a way to start the next version from this one. */
 export function ShipSheet({ shipped, onVariant, onClose, busy }: ShipSheetProps) {
-  const [copied, setCopied] = useState(false)
+  const [copied, setCopied] = useState<boolean | 'failed'>(false)
+  const sheet = useRef<HTMLDivElement>(null)
+  useModal(sheet, onClose)
   const changed = shipped.items.filter((i) => i.mix === 'replace').length
   const added = shipped.items.length - changed
   const parts = [
@@ -42,12 +45,12 @@ export function ShipSheet({ shipped, onVariant, onClose, busy }: ShipSheetProps)
       await navigator.clipboard.writeText(link)
       setCopied(true)
     } catch {
-      setCopied(false)
+      setCopied('failed')
     }
   }
   return (
     <div className={styles.overlay} role="dialog" aria-modal="true" aria-labelledby="ship-title">
-      <div className={styles.sheet} data-testid="ship-sheet">
+      <div ref={sheet} className={styles.sheet} data-testid="ship-sheet">
         <h2 id="ship-title" className={styles.title}>Shipped</h2>
         <p className={styles.lead}>
           {parts.length > 0 ? parts.join(', ') : 'Nothing changed'}
@@ -55,7 +58,7 @@ export function ShipSheet({ shipped, onVariant, onClose, busy }: ShipSheetProps)
           {' '}{secs(shipped.before)} → {secs(shipped.after)}{Math.abs(longer) >= 0.05 ? ` (${longer > 0 ? '+' : '−'}${Math.abs(longer).toFixed(1)} s)` : ', the same length'}.
           {shipped.spendUsd > 0 && ` $${shipped.spendUsd.toFixed(2)} for this plan.`}
         </p>
-        <ul className={styles.lines}>
+        <ul className={styles.lines} tabIndex={shipped.items.length > 4 ? 0 : undefined} aria-label="What was said">
           {shipped.items.map((i) => (
             <li key={i.item_id}>
               <span className={styles.quiet}>{i.mix === 'replace' ? 'Said' : 'Added'}</span> “{i.new_text}”
@@ -64,7 +67,8 @@ export function ShipSheet({ shipped, onVariant, onClose, busy }: ShipSheetProps)
         </ul>
         <div className={styles.actions}>
           <a className={styles.primary} href={shipped.download.url} download={shipped.download.filename}>Download MP4</a>
-          <button className={styles.secondary} onClick={() => void copy()}>{copied ? 'Link copied' : 'Copy link'}</button>
+          <button className={styles.secondary} onClick={() => void copy()}>{copied === true ? 'Link copied' : 'Copy link'}</button>
+          <span className="srOnly" role="status">{copied === true ? 'Link copied' : copied === 'failed' ? 'Could not copy the link; use Download instead.' : ''}</span>
           <button className={styles.secondary} onClick={onVariant} disabled={busy}>{busy ? 'Making a variant…' : 'Make a variant'}</button>
           <span className={styles.spacer} />
           <button className={styles.link} onClick={onClose}>Back to the transcript</button>

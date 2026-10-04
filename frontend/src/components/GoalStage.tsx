@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import type { Project, Reading } from '../types'
 import { clock } from '../transcript/format'
@@ -36,6 +36,8 @@ export function GoalStage({ project, reading, onPlan, onHandsOn, onName, busy, c
   const [goal, setGoal] = useState('')
   const [renaming, setRenaming] = useState<string | null>(null)
   const [draft, setDraft] = useState('')
+  // Escape cancels a rename; the blur that follows must not commit the draft.
+  const cancelled = useRef(false)
   const statements = project.statements ?? []
   const lines = statements.length
   const speakers = project.speakers ?? []
@@ -55,6 +57,7 @@ export function GoalStage({ project, reading, onPlan, onHandsOn, onName, busy, c
     if (text && !busy) onPlan(text)
   }
   const commitName = (label: string) => {
+    if (cancelled.current) { cancelled.current = false; setRenaming(null); return }
     const name = draft.trim()
     if (name && onName) onName(label, name)
     setRenaming(null)
@@ -64,8 +67,9 @@ export function GoalStage({ project, reading, onPlan, onHandsOn, onName, busy, c
       <header className={styles.header}>
         <span className={styles.brand}>Voltage</span>
       </header>
+      <main className={styles.main}>
       <div className={styles.hero}>
-        <div className={styles.read}>
+        <div className={styles.read} role="status">
           <Orb size={32} working={busy || (reading === null && lines > 0)} />
           <span>
             I've read all {lines} {lines === 1 ? 'line' : 'lines'} of <strong>{project.filename}</strong>.{' '}
@@ -74,7 +78,7 @@ export function GoalStage({ project, reading, onPlan, onHandsOn, onName, busy, c
         </div>
         <h1 className={styles.title}>What should this video say?</h1>
         <div className={styles.columns}>
-          <section className={styles.script} aria-label="What is said">
+          <section className={styles.script} aria-label="What is said" tabIndex={0}>
             {speakers.length > 0 && (
               <div className={styles.cast} data-testid="cast">
                 {speakers.map((s) => {
@@ -93,14 +97,14 @@ export function GoalStage({ project, reading, onPlan, onHandsOn, onName, busy, c
                           onBlur={() => commitName(s.label)}
                           onKeyDown={(e) => {
                             if (e.key === 'Enter') commitName(s.label)
-                            if (e.key === 'Escape') setRenaming(null)
+                            if (e.key === 'Escape') { cancelled.current = true; setRenaming(null) }
                           }}
                         />
                       ) : (
                         <>
                           <span className={styles.memberName}>
                             {guessed ? 'the ' : ''}{shown(s.label)}
-                            {guessed && <span className={styles.guess} title={g.why}> · my guess</span>}
+                            {guessed && <span className={styles.guess}> · my guess{g.why ? `: ${g.why}` : ''}</span>}
                           </span>
                           {onName && (
                             <button
@@ -172,6 +176,7 @@ export function GoalStage({ project, reading, onPlan, onHandsOn, onName, busy, c
         </div>
       </div>
       <div className={styles.recent}>{children}</div>
+      </main>
     </div>
   )
 }

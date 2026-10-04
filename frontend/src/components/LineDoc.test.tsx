@@ -352,12 +352,12 @@ describe('LineDoc: shifting a line of the original speech (UX-1c)', () => {
     const texts = screen.getAllByText('Start a live Bajicam session.')
     expect(texts.map((t) => t.tagName)).toEqual(['DEL', 'SPAN'])
     // Where it plays now: its own row, last in time order, with Move and a grip.
-    const rows = screen.getAllByRole('row').map((r) => r.getAttribute('aria-label'))
+    const rows = screen.getAllByRole('listitem', { name: /line at/i }).map((r) => r.getAttribute('aria-label'))
     expect(rows).toEqual(['Line at 0:05, the Customer', 'Line at 0:07, the Customer', 'Line at 0:09, the Shopkeeper', 'Moved line at 0:12, the Customer'])
     expect(screen.getByText(/Moved from 0:07, as spoken/)).toBeInTheDocument()
     expect(screen.getByText('Starts at 0:12.30')).toBeInTheDocument()
     expect(screen.getAllByRole('button', { name: 'Undo' })).toHaveLength(2)
-    expect(screen.getByRole('button', { name: 'Drag to move the line at 0:12' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /move the line at 0:12/i })).toBeInTheDocument()
     // The line it landed on is left alone.
     expect(screen.queryByText('Kept')).not.toBeInTheDocument()
   })
@@ -367,11 +367,11 @@ describe('LineDoc: shifting a line of the original speech (UX-1c)', () => {
     const onPlacing = vi.fn()
     doc({ onShift, onPlacing })
     // jsdom has no layout: give each row a box, top to bottom.
-    const rowsEls = screen.getAllByRole('row')
+    const rowsEls = screen.getAllByRole('listitem', { name: /line at/i })
     rowsEls.forEach((el, k) => {
       el.getBoundingClientRect = () => ({ top: k * 100, height: 100, bottom: k * 100 + 100, left: 0, right: 500, width: 500, x: 0, y: k * 100, toJSON: () => ({}) })
     })
-    const grip = screen.getByRole('button', { name: 'Drag to move the line at 0:05' })
+    const grip = screen.getByRole('button', { name: /move the line at 0:05/i })
     fireEvent.pointerDown(grip, { clientY: 50, pointerId: 1 })
     expect(onPlacing).toHaveBeenCalledWith({ id: KEY0, start: 5.2, duration: expect.closeTo(1.74, 2) })
     // Below the third row's midpoint: it would start where that row ends.

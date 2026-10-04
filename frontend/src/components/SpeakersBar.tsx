@@ -37,7 +37,7 @@ export function SpeakersBar({
   }
 
   return (
-    <div className={styles.bar} aria-label="Speakers">
+    <div className={styles.bar} role="group" aria-label="Speakers">
       <span className={styles.heading}>Cast</span>
       {speakers.map((s) => {
         const draft = drafts[s.label] ?? s.name

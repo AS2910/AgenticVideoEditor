@@ -42,6 +42,10 @@ import type {
 import { renderTime, sourceTime } from './timeline/selection'
 import styles from './App.module.css'
 
+/** Smooth scrolling and motion are the user's call (UX-6). */
+const prefersReducedMotion = () =>
+  typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches
+
 /** Bundled demo clip, uploaded through the same path as any other file. */
 const SAMPLE_URL = '/sample-ad.mp4'
 // Until the voice list loads: the server's configured default voice.
@@ -1011,7 +1015,12 @@ export default function App() {
   }
 
   if (me === null) {
-    return <div className={styles.blank} aria-busy="true" />
+    return (
+      <div className={styles.blank} role="status" aria-busy="true">
+        <Orb size={26} working />
+        <span>Opening…</span>
+      </div>
+    )
   }
   if (me.mode === 'google' && (!me.user || signedOut)) {
     return <SignIn error={signedOut ? 'Your session ended. Sign in again to continue.' : null} />
@@ -1110,7 +1119,7 @@ export default function App() {
   const readyLines = lineEntries.filter(([, l]) => l.status === 'ready')
   const atLine = (key: LineKey) => {
     const i = statements.findIndex((s) => keyOf({ start: s.start, end: s.end }) === key || `add-${s.end.toFixed(3)}` === key)
-    document.getElementById(`line-${i}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    document.getElementById(`line-${i}`)?.scrollIntoView({ behavior: prefersReducedMotion() ? 'auto' : 'smooth', block: 'center' })
     return i >= 0 ? clock(statements[i].start) : ''
   }
   const timeOf = (key: LineKey) => {
@@ -1121,10 +1130,11 @@ export default function App() {
 
   return (
     <div className={styles.app}>
+      <a className="skip" href="#main">Skip to the transcript</a>
       <header className={styles.header}>
         <button className={styles.back} onClick={leave}>← Projects</button>
-        <span className={styles.brand}>Voltage</span>
-        <span className={styles.slash}>/</span>
+        <h1 className={styles.brand}>Voltage</h1>
+        <span className={styles.slash} aria-hidden="true">/</span>
         <span className={styles.filename} title={project.filename}>{project.filename}</span>
         <span className={styles.meta}>
           {project.duration.toFixed(1)} s{speakers.length > 0 && `, ${speakers.length} ${speakers.length === 1 ? 'speaker' : 'speakers'}`}
@@ -1146,7 +1156,7 @@ export default function App() {
         <ExportBar segments={segments} inserts={inserts} onExport={() => void runExport()} download={download} />
       </header>
 
-      <main className={styles.main}>
+      <main id="main" className={styles.main} aria-busy={planBusy || undefined}>
         <Player
           src={showEdited ? rendered.url : artifactUrl(project.project_id, project.media.sha256)}
           duration={showEdited ? rendered.duration : project.duration}
@@ -1247,7 +1257,7 @@ export default function App() {
         )}
       </main>
 
-      <aside className={styles.panel}>
+      <aside className={styles.panel} aria-label="Voltage" aria-busy={busy || undefined}>
         <ChatPanel
           messages={messages}
           canSubmit
@@ -1261,8 +1271,8 @@ export default function App() {
           header={
             <div className={styles.panelHead}>
               <Orb size={26} working={busy} idle={!busy && !plan} />
-              <span className={styles.panelTitle}>Voltage</span>
-              <span className={styles.panelNote}>{stateWord}</span>
+              <h2 className={styles.panelTitle}>Voltage</h2>
+              <span className={styles.panelNote} role="status">{stateWord}</span>
               <span className={styles.spacer} />
               <AutonomySwitch value={autonomy} onChange={(v) => void rememberAutonomy(v)} />
             </div>
@@ -1287,7 +1297,7 @@ export default function App() {
                 </div>
               ))}
               {planning && (
-                <div className={`${styles.thought} ${styles.thoughtLive}`} data-testid="planning">
+                <div className={`${styles.thought} ${styles.thoughtLive}`} data-testid="planning" role="status">
                   <span className={styles.spinner} aria-hidden="true" />
                   <span>{plan?.question ? 'Planning with your answer…' : 'Reading every line, and who says it…'}<span className={styles.caret} aria-hidden="true" /></span>
                 </div>
@@ -1353,10 +1363,10 @@ export default function App() {
             />
           )}
           {planBusy && (
-            <div className={styles.generating} data-testid="plan-progress">
+            <div className={styles.generating} data-testid="plan-progress" role="status">
               <div className={styles.progressRow}>
-                <div className={styles.progressTrack}>
-                  <div className={styles.progressFill} style={{ width: `${Math.round((planProgress?.value ?? 0) * 100)}%` }} />
+                <div className={styles.progressTrack} role="progressbar" aria-label="Voicing the plan" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round((planProgress?.value ?? 0) * 100)}>
+                  <div className={styles.progressFill} style={{ transform: `scaleX(${Math.min(1, Math.max(0, planProgress?.value ?? 0))})` }} />
                 </div>
                 <span className={styles.progressNote}>about {secondsLeft} s left</span>
               </div>
@@ -1365,15 +1375,15 @@ export default function App() {
 
           {generating && (
             <div className={styles.generating} data-testid="generating">
-              <div className={styles.generatingStep}>
+              <div className={styles.generatingStep} role="status">
                 <span className={styles.spinner} aria-hidden="true" />
                 {progress?.step ?? 'Queued'}
               </div>
-              <div className={styles.progressTrack}>
+              <div className={styles.progressTrack} role="progressbar" aria-label="Making the take" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round((progress?.value ?? 0) * 100)}>
                 <div
                   data-testid="progress-bar"
                   className={styles.progressFill}
-                  style={{ width: `${Math.round((progress?.value ?? 0) * 100)}%` }}
+                  style={{ transform: `scaleX(${Math.min(1, Math.max(0, progress?.value ?? 0))})` }}
                 />
               </div>
             </div>
