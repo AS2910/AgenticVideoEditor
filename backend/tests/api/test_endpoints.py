@@ -1085,12 +1085,105 @@ def test_a_goal_becomes_a_plan_that_waits_for_run(client, project):
     assert client.get("/projects/p1/plans/plan1").json()["goal"] == GOAL
 
 
-def test_an_empty_goal_or_a_silent_video_is_refused(client, project, monkeypatch):
+def test_an_empty_goal_is_refused(client, project):
     assert client.post("/projects/p1/plans", json={"goal": "  "}).status_code == 422
+
+
+# ── UX-5: a clip with no speech ──────────────────────────────────────────────
+
+def test_a_silent_clip_is_planned_from_the_picture_as_a_line_placed_by_time(client, project, monkeypatch):
+    """Offline, words in quotes are placed over the picture from half a second
+    in: an item with nothing to replace, on its own span, spoken in the chat's
+    voice (UX-5, SV-2)."""
     import app.api.main as main
     from app.domain.models import Transcript
     speechless(monkeypatch, main, Transcript(words=()))
-    assert client.post("/projects/p1/plans", json={"goal": GOAL}).status_code == 422
+    resp = client.post("/projects/p1/plans", json={"goal": 'Introduce the place: "Welcome to Goa"', "voice_profile_id": "speaker-2"})
+    assert resp.status_code == 200, resp.text
+    plan = resp.json()
+    [item] = plan["items"]
+    assert item["old_text"] == "" and item["new_text"] == "Welcome to Goa"
+    assert item["mix"] == "layer"
+    assert item["selection"]["start"] == pytest.approx(0.5)
+    assert 0.5 < item["selection"]["end"] <= 2.3
+    assert plan["voice"] == "speaker-2"
+    assert plan["answers"] == [] and plan["questions_left"] == 0
+    log = [e["text"] for e in plan["log"]]
+    assert "Looked at the picture and read your goal" in log
+    # The project now shows its frames where the transcript would be.
+    frames = client.get("/projects/p1/frames").json()
+    assert [f["index"] for f in frames] == [0, 1, 2]
+    assert frames[0]["at"] == pytest.approx(0.3)
+    frame = client.get("/projects/p1/frames/0")
+    assert frame.status_code == 200 and frame.headers["content-type"] == "image/jpeg"
+    assert client.get("/projects/p1/frames/9").status_code == 404
+    assert client.get("/projects/p1").json()["frames"] == frames
+
+
+class Briefs:
+    """A planner that keeps asking until it has `rounds` answers (UX-5, SV-3)."""
+
+    identity = "claude"
+
+    def __init__(self, rounds):
+        self.rounds = rounds
+        self.seen = []
+
+    def look(self, frames, duration, meter=None):
+        from app.orchestrator.planner import Sight
+        return Sight(opening="No one speaks. A beach at dusk.", setting="beach", mood="calm", place_guess="Goa", confidence="medium")
+
+    def plan(self, goal, lines, history=(), meter=None, answer=None, sight=None, duration=None, answers=()):
+        from app.orchestrator.planner import Change, Proposal, Question
+        self.seen.append(tuple(answers))
+        n = len(answers)
+        edits = (Change(0, f"Line after {n} answers", "layer", "why", start=0.5, end=2.0),)
+        question = Question(f"Question {n + 1}?", ("yes", "no"), guess="yes") if n < self.rounds else None
+        return Proposal(summary=f"Planned with {n} answers.", edits=edits, question=question)
+
+    def shorten(self, text, share, line, meter=None):
+        return None
+
+    def read(self, lines, meter=None):
+        raise AssertionError("a silent clip is looked at, not read")
+
+    def revise(self, instruction, items, lines, goal, meter=None):
+        raise AssertionError("not revised here")
+
+
+def test_the_brief_asks_up_to_three_questions_one_at_a_time(client, project, monkeypatch):
+    import app.api.main as main
+    from app.domain.models import Transcript
+    speechless(monkeypatch, main, Transcript(words=()))
+    planner = Briefs(rounds=5)
+    monkeypatch.setattr(main, "planner", planner)
+    plan = client.post("/projects/p1/plans", json={"goal": "Look at this and help me"}).json()
+    assert plan["status"] == "clarifying" and plan["question"]["text"] == "Question 1?"
+    assert plan["questions_left"] == 3
+    plan = client.post("/projects/p1/plans/plan1/clarify", json={"answer": "A warm welcome"}).json()
+    assert plan["status"] == "clarifying" and plan["question"]["text"] == "Question 2?"
+    assert plan["answers"] == [["Question 1?", "A warm welcome"]] and plan["questions_left"] == 2
+    plan = client.post("/projects/p1/plans/plan1/clarify", json={}).json()   # the guess
+    assert plan["question"]["text"] == "Question 3?" and plan["questions_left"] == 1
+    plan = client.post("/projects/p1/plans/plan1/clarify", json={"answer": "Goa, yes"}).json()
+    # Three answers: the planner still wanted to ask, but the brief is over and the plan stands.
+    assert plan["status"] == "proposed" and plan["question"] is None
+    assert [a for _, a in plan["answers"]] == ["A warm welcome", "yes", "Goa, yes"]
+    assert plan["items"][0]["new_text"] == "Line after 3 answers"
+
+
+def test_go_with_your_guesses_answers_the_rest_of_the_brief(client, project, monkeypatch):
+    import app.api.main as main
+    from app.domain.models import Transcript
+    speechless(monkeypatch, main, Transcript(words=()))
+    planner = Briefs(rounds=2)
+    monkeypatch.setattr(main, "planner", planner)
+    client.post("/projects/p1/plans", json={"goal": "Look at this and help me"})
+    plan = client.post("/projects/p1/plans/plan1/clarify", json={"answer": "An intro", "all_guesses": True}).json()
+    assert plan["status"] == "proposed" and plan["question"] is None
+    assert plan["answers"] == [["Question 1?", "An intro"], ["Question 2?", "yes"]]
+    assert plan["items"][0]["new_text"] == "Line after 2 answers"
+    assert any("went with its guess: yes" in e["text"] for e in plan["log"])
 
 
 def test_planning_is_metered_and_uses_the_speakers_names(client, project, monkeypatch):
@@ -1699,11 +1792,19 @@ def test_reading_the_clip_names_roles_once_and_the_project_carries_it(client, pr
     assert named["speakers"][0]["name"] == "Presenter"
 
 
-def test_reading_a_silent_clip_is_refused(client, project, monkeypatch):
+def test_reading_a_silent_clip_looks_at_the_picture_instead(client, project, monkeypatch):
+    """UX-5, SV-1: nothing to read, so the reading is what the picture shows,
+    kept with the project like any reading."""
     import app.api.main as main
     from app.domain.models import Transcript
     speechless(monkeypatch, main, Transcript(words=()))
-    assert client.post("/projects/p1/reading", json={}).status_code == 422
+    resp = client.post("/projects/p1/reading", json={})
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["opening"] == "No one speaks. 2.3 s of picture, 3 frames."
+    assert body["roles"] == []
+    assert body["sight"]["opening"] == body["opening"]
+    assert client.get("/projects/p1").json()["reading"] == body
 
 
 def test_revising_the_plan_in_words_keeps_the_takes_already_voiced(client, project, monkeypatch):

@@ -173,3 +173,51 @@ def test_a_revision_can_say_it_is_really_a_new_goal():
     revision = _Revision(summary="That's a new goal.", new_goal=True, changes=[], additions=[])
     reader, _ = planner(SimpleNamespace(stop_reason="end_turn", parsed_output=revision, usage=None))
     assert reader.revise("make it a Diwali ad", [], LINES, "Say Bhaji Cam").new_goal is True
+
+
+# ── UX-5: a clip with no speech ──────────────────────────────────────────────
+
+def test_the_request_for_a_silent_clip_describes_the_picture_and_the_brief():
+    from app.orchestrator.planner import Sight
+    sight = Sight(opening="No one speaks. A beach at dusk.", setting="A wide beach at dusk", mood="calm",
+                  people="two, far off", text_on_screen="", place_guess="Goa, India", confidence="medium",
+                  beats=({"at": 0.3, "note": "wide shot of the beach"}, {"at": 7.2, "note": "the light fading"}))
+    text = render_plan_request("Introduce the place", [], [], sight=sight, duration=7.5,
+                               answers=(("What is the audio for?", "A warm welcome"),))
+    assert "The clip has no speech. It is 7.5 s long." in text
+    assert "- Setting: A wide beach at dusk" in text
+    assert "- Place: Goa, India (medium confidence)" in text
+    assert "- 0.3s: wide shot of the beach" in text
+    assert "syllables fit in the whole clip" in text
+    assert "You asked: What is the audio for?\nThe user answered: A warm welcome" in text
+    assert "You may ask 2 more questions" in text
+    assert text.endswith("Goal: Introduce the place")
+
+
+def test_a_placed_edit_keeps_its_span_and_plays_over_the_sound():
+    reading = _PlanReading(
+        summary="One line.", findings=[], question=None,
+        edits=[_Edit(line=0, start=0.5, end=2.4, new_text=' "Welcome to Goa." ', mix="layer", reason="The opening shot")],
+        suggestions=[_Edit(line=0, start=0.5, end=2.4, new_text="This is Goa.", mix="layer", reason="Shorter")],
+    )
+    proposal = to_proposal(reading, [])
+    [edit] = proposal.edits
+    assert edit.placed and (edit.start, edit.end) == (0.5, 2.4)
+    assert edit.new_text == "Welcome to Goa." and edit.mix == "layer"
+    assert [s.new_text for s in proposal.suggestions] == ["This is Goa."]
+
+
+def test_looking_sends_the_frames_as_images_and_reads_back_a_sight(tmp_path):
+    from app.adapters.claude_planner import _Beat, _Sight
+    from app.orchestrator.planner import Frame
+    jpg = tmp_path / "f.jpg"
+    jpg.write_bytes(b"\xff\xd8\xff\xe0 not really a jpeg")
+    seen = _Sight(opening="No one speaks. A beach.", setting="beach", mood="calm", people="no one",
+                  text_on_screen="", place_guess="", confidence="low", beats=[_Beat(at=0.3, note="sand")])
+    reader, messages = planner(SimpleNamespace(stop_reason="end_turn", parsed_output=seen, usage=None))
+    sight = reader.look([Frame(0.3, str(jpg))], 7.5)
+    content = messages.calls[0]["messages"][0]["content"]
+    assert content[0] == {"type": "text", "text": "Frame at 0.3 s:"}
+    assert content[1]["type"] == "image" and content[1]["source"]["media_type"] == "image/jpeg"
+    assert messages.calls[0]["output_config"] == {"effort": "low"}
+    assert sight.opening == "No one speaks. A beach." and sight.beats == ({"at": 0.3, "note": "sand"},)
