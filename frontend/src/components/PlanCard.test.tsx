@@ -144,6 +144,49 @@ describe('PlanCard, running', () => {
   })
 })
 
+describe('PlanCard, the panel does one job (UX-2)', () => {
+  it('gives each planned item the delivery and sound-meets-picture controls', async () => {
+    const h = { ...handlers(), onDelivery: vi.fn(), onMix: vi.fn() }
+    const added = item({ item_id: 'i2', mix: 'over', selection: { start: 9.38, end: 9.88 }, speaker: 'B', new_text: 'Thirty off.' })
+    render(<PlanCard plan={plan({ items: [item(), added] })} speakers={SPEAKERS} voices={VOICES} projectId="p1" {...h} />)
+    expect(screen.getByText('Added after the line, over the picture')).toBeInTheDocument()
+    await userEvent.click(within(screen.getByRole('group', { name: 'Delivery at 0:07' })).getByRole('button', { name: 'warmer' }))
+    expect(h.onDelivery).toHaveBeenCalledWith(expect.objectContaining({ item_id: 'i1' }), 'warmer')
+    // A replaced line has no picture control; an added one does.
+    expect(screen.queryByRole('group', { name: 'Sound meets picture at 0:07' })).not.toBeInTheDocument()
+    await userEvent.click(within(screen.getByRole('group', { name: 'Sound meets picture at 0:09' })).getByRole('button', { name: 'Hold the picture' }))
+    expect(h.onMix).toHaveBeenCalledWith(expect.objectContaining({ item_id: 'i2' }), 'concatenate')
+    // In your words.
+    await userEvent.click(within(screen.getByRole('group', { name: 'Delivery at 0:09' })).getByRole('button', { name: 'in your words…' }))
+    await userEvent.type(screen.getByRole('textbox', { name: 'Delivery at 0:09, in your words' }), 'like a secret{Enter}')
+    expect(h.onDelivery).toHaveBeenLastCalledWith(expect.objectContaining({ item_id: 'i2' }), 'like a secret')
+  })
+
+  it('shows a voiced item with its take when the plan is proposed again, and voices only the rest', async () => {
+    const h = handlers()
+    const voiced = item({ status: 'ready', candidate: CANDIDATE })
+    const reworded = item({ item_id: 'i2', selection: { start: 9.38, end: 9.88 }, speaker: 'B', new_text: 'Thirty off.', note: 'Reworded as you asked' })
+    render(<PlanCard plan={plan({ items: [voiced, reworded] })} speakers={SPEAKERS} voices={VOICES} projectId="p1" {...h} />)
+    expect(screen.getByText('2 changes · 2 speakers · 1 voiced')).toBeInTheDocument()
+    expect(screen.getByText(/Already voiced; it keeps this take/)).toBeInTheDocument()
+    expect(screen.getByLabelText('Play take')).toBeInTheDocument()
+    expect(screen.getByText('Reworded as you asked')).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: 'Voice the change' }))
+    expect(h.onRun).toHaveBeenCalled()
+  })
+
+  it('offers Stop while the plan runs, and says it is stopping', async () => {
+    const h = { ...handlers(), onStop: vi.fn() }
+    const items = [item({ status: 'ready', candidate: CANDIDATE }), item({ item_id: 'i2', status: 'working', selection: { start: 9.38, end: 9.88 } })]
+    const { rerender } = render(<PlanCard plan={plan({ status: 'running', items })} speakers={SPEAKERS} voices={VOICES} projectId="p1" busy {...h} />)
+    await userEvent.click(screen.getByRole('button', { name: 'Stop' }))
+    expect(h.onStop).toHaveBeenCalled()
+    rerender(<PlanCard plan={plan({ status: 'stopping', items })} speakers={SPEAKERS} voices={VOICES} projectId="p1" busy {...h} />)
+    expect(screen.getByText('Stopping after this line…')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Stopping…' })).toBeDisabled()
+  })
+})
+
 describe('estimateText', () => {
   it('reads the estimate in words', () => {
     expect(estimateText({ items: 3, voice_characters: 110, usd: 0.033, seconds: 36 })).toBe('≈ 110 voice characters · about $0.03 · ready in about 36 s')

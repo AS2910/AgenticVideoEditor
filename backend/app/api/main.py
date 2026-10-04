@@ -32,7 +32,7 @@ from app.adapters.selection import (
 from app.errors import NonRetryableError
 from app.budget import VoiceBudget, BudgetExceeded
 from app.orchestrator.intent import Turn, edit_context
-from app.orchestrator.planner import Line, Proposal, Question
+from app.orchestrator.planner import ItemView, Line, Proposal, Question, Revision
 from app.orchestrator.questions import fit_question, mix_question
 from app.media.ffmpeg import SpanMismatch
 from app.orchestrator.pipeline import run_edit
@@ -242,6 +242,8 @@ def _project_dict(record: ProjectRecord) -> dict:
         "speakers": _speakers(source.project_id),
         "settings": _settings(source.project_id),
         "plan": _plan_dict(repo.latest_plan(source.project_id)),
+        # UX-2: Voltage's first look at the clip, once it has had one.
+        "reading": repo.settings(source.project_id).get("reading"),
     }
 
 
@@ -441,6 +443,45 @@ def detect_speakers(project_id: str, owner: str = Depends(current_owner)) -> dic
     _record_diarization(project_id, record.source.duration)
     repo.update_transcript(project_id, assign_speakers(record.transcript, turns))
     return _project_dict(repo.get(project_id))
+
+
+class ReadRequest(BaseModel):
+    # Read the clip again even though a reading is saved.
+    again: bool = False
+
+
+@app.post("/projects/{project_id}/reading")
+def read_project(project_id: str, req: ReadRequest, owner: str = Depends(current_owner)) -> dict:
+    """Voltage's first look at the clip (UX-2): one specific opening line for
+    the goal stage, and a role for each speaker ("the Customer") to confirm
+    or rename. Saved with the project; read once unless asked again."""
+    record = _owned(project_id, owner)
+    saved = repo.settings(project_id).get("reading")
+    if saved and not req.again:
+        return saved
+    lines = _lines(record)
+    if not lines:
+        raise HTTPException(status_code=422, detail="This video has no speech to read.")
+    try:
+        ledger.ensure_can_spend(project_id)
+        reading = planner.read(lines, meter=_meter(project_id, "reading"))
+    except SpendCeilingReached as exc:
+        raise HTTPException(status_code=402, detail=str(exc)) from exc
+    except NonRetryableError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    except VendorError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    by_name = {s.name: s.label for s in repo.speakers(project_id)}
+    out = {
+        "opening": reading.opening,
+        "roles": [
+            {"label": by_name[r.speaker], "role": r.role, "why": r.why}
+            for r in reading.roles if r.speaker in by_name
+        ],
+        "at": _now(),
+    }
+    repo.set_settings(project_id, reading=out)
+    return out
 
 
 @app.delete("/projects/{project_id}", status_code=204)
@@ -947,7 +988,7 @@ def _lines(record: ProjectRecord) -> list[Line]:
 def _estimate(project_id: str, items: tuple[PlanItem, ...]) -> dict:
     """What running the ticked items should cost: voice characters at the
     ledger's rate, and a rough time."""
-    runnable = [i for i in items if i.kind == "planned" and i.enabled]
+    runnable = [i for i in items if i.kind == "planned" and i.enabled and i.status == "planned"]
     chars = sum(voice.cost_of(EditPlan(i.selection, i.new_text, getattr(voice, "default_voice", "speaker-1"))) for i in runnable)
     return {
         "items": len(runnable),
@@ -984,6 +1025,10 @@ def create_plan(project_id: str, req: PlanRequest, owner: str = Depends(current_
     goal = req.goal.strip()
     if not goal:
         raise HTTPException(status_code=422, detail="Say what the video should say.")
+    return _new_plan(project_id, record, goal, req.mode)
+
+
+def _new_plan(project_id: str, record: ProjectRecord, goal: str, mode: str | None) -> dict:
     lines = _lines(record)
     if not lines:
         raise HTTPException(status_code=422, detail="This video has no speech to change.")
@@ -991,7 +1036,7 @@ def create_plan(project_id: str, req: PlanRequest, owner: str = Depends(current_
         ledger.ensure_can_spend(project_id)
     except SpendCeilingReached as exc:
         raise HTTPException(status_code=402, detail=str(exc)) from exc
-    mode = req.mode or _settings(project_id)["autonomy"]
+    mode = mode or _settings(project_id)["autonomy"]
     if mode == "draft" and record.consent is None:
         raise HTTPException(status_code=403, detail=CONSENT_REQUIRED)
     earlier = repo.latest_plan(project_id)
@@ -1127,8 +1172,143 @@ def update_item(
             if item.status in ("ready", "needs-you", "failed"):
                 changes.update(status="planned", candidate_id=None, question=None, error=None)
     updated = repo.update_item(project_id, plan_id, item_id, **changes)
-    updated = repo.update_plan(project_id, plan_id, estimate=_estimate(project_id, updated.items))
+    updated = repo.update_plan(project_id, plan_id, estimate=_estimate(project_id, updated.items),
+                               status=_status_after_edit(updated))
     return _plan_dict(updated)
+
+
+def _status_after_edit(plan: Plan) -> str:
+    """A finished plan with something planned again waits for Go ahead."""
+    if plan.status == "done" and plan.runnable:
+        return "proposed"
+    return plan.status
+
+
+# ── UX-2: revise the plan in words, and stop it ──────────────────────────────
+
+class ReviseRequest(BaseModel):
+    instruction: str
+
+
+@app.post("/projects/{project_id}/plans/{plan_id}/revise")
+def revise_plan(
+    project_id: str, plan_id: str, req: ReviseRequest, owner: str = Depends(current_owner),
+) -> dict:
+    """Change the plan in your own words — "not the second one", "warmer at
+    0:17", "shorter" — applied to the plan in place, so the takes already
+    voiced survive. A new goal altogether makes a new plan instead."""
+    record = _owned(project_id, owner)
+    plan = _plan_or_404(project_id, plan_id)
+    instruction = req.instruction.strip()
+    if not instruction:
+        raise HTTPException(status_code=422, detail="Say what to change about the plan.")
+    if plan.status in ("running", "stopping"):
+        raise HTTPException(status_code=409, detail="Stop the plan first, or wait for it to finish.")
+    lines = _lines(record)
+    statements = statements_of(record.transcript)
+    names = {s.label: s.name for s in repo.speakers(project_id)}
+    views = [
+        ItemView(i.item_id, _line_index(statements, i.selection), i.old_text, i.new_text, i.mix, i.delivery,
+                 i.enabled, i.status, names.get(i.speaker or ""))
+        for i in plan.items if i.kind == "planned" or i.status == "suggested"
+    ]
+    repo.add_message(project_id, "user", instruction)
+    try:
+        ledger.ensure_can_spend(project_id)
+        revision = planner.revise(instruction, views, lines, plan.goal, meter=_meter(project_id, "planning"))
+    except SpendCeilingReached as exc:
+        raise HTTPException(status_code=402, detail=str(exc)) from exc
+    except NonRetryableError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    except VendorError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    if revision.new_goal:
+        return _new_plan(project_id, record, instruction, plan.mode)
+    repo.append_log(project_id, plan_id, f"You said: {instruction}")
+    touched = _apply_revision(project_id, record, plan, revision)
+    repo.add_message(project_id, "assistant", revision.summary)
+    repo.append_log(project_id, plan_id, revision.summary if touched else "Nothing in the plan changed")
+    updated = repo.get_plan(project_id, plan_id)
+    updated = repo.update_plan(project_id, plan_id, summary=revision.summary,
+                               estimate=_estimate(project_id, updated.items),
+                               status=_status_after_edit(updated))
+    return _plan_dict(updated)
+
+
+def _line_index(statements, selection: Selection) -> int:
+    for n, st in enumerate(statements):
+        if abs(st.start - selection.start) < 0.05:
+            return n + 1
+    return 0
+
+
+def _apply_revision(project_id: str, record: ProjectRecord, plan: Plan, revision: Revision) -> int:
+    """Apply a revision to the plan's items in place. Returns how many items
+    changed. An item whose words, placement or delivery change goes back to
+    planned (its take no longer says what it should); one merely left out or
+    put back keeps its take."""
+    touched = 0
+    for change in revision.changes:
+        item = plan.item(change.item_id)
+        if item is None:
+            continue
+        changes: dict = {}
+        revoice = False
+        if change.enabled is not None and change.enabled != item.enabled:
+            changes["enabled"] = change.enabled
+            if item.kind == "suggestion" and change.enabled:
+                changes.update(kind="planned", status="planned")
+        if change.new_text and change.new_text != item.new_text:
+            changes.update(new_text=change.new_text, fit=None, note="Reworded as you asked")
+            revoice = True
+        if change.mix and item.mix != "replace" and change.mix != item.mix:
+            changes["mix"] = change.mix
+            revoice = True
+        if change.clear_delivery and item.delivery:
+            changes["delivery"] = None
+            revoice = True
+        elif change.delivery and change.delivery != item.delivery:
+            changes["delivery"] = change.delivery
+            revoice = True
+        if revoice and item.status in ("ready", "needs-you", "failed"):
+            changes.update(status="planned", candidate_id=None, question=None, error=None)
+        if changes:
+            repo.update_item(project_id, plan.plan_id, item.item_id, **changes)
+            touched += 1
+    if revision.additions:
+        statements = statements_of(record.transcript)
+        by_name = {s.name.lower(): s.label for s in repo.speakers(project_id)}
+        current = repo.get_plan(project_id, plan.plan_id)
+        new_items = list(current.items)
+        for change in revision.additions:
+            if not 1 <= change.line <= len(statements):
+                continue
+            st = statements[change.line - 1]
+            new_items.append(PlanItem(
+                item_id=f"i{len(new_items) + 1}", selection=Selection(st.start, st.end), old_text=st.text,
+                new_text=change.new_text, speaker=by_name.get((change.speaker or "").lower(), st.speaker),
+                mix=change.mix, reason=change.reason, kind="planned", enabled=True, status="planned",
+            ))
+            touched += 1
+        repo.update_plan(project_id, plan.plan_id, items=tuple(new_items))
+    return touched
+
+
+# Plans asked to stop: checked by the running job between lines.
+_stops: set[str] = set()
+
+
+@app.post("/projects/{project_id}/plans/{plan_id}/stop")
+def stop_plan(project_id: str, plan_id: str, owner: str = Depends(current_owner)) -> dict:
+    """Stop a running plan after the line it is on. What is done stays done;
+    the rest waits as planned, for Go ahead later."""
+    _owned(project_id, owner)
+    plan = _plan_or_404(project_id, plan_id)
+    if plan.status != "running":
+        raise HTTPException(status_code=409, detail="The plan is not running.")
+    _stops.add(plan_id)
+    repo.append_log(project_id, plan_id, "You stopped the plan")
+    return _plan_dict(repo.update_plan(project_id, plan_id, status="stopping"))
 
 
 def _clock(t: float) -> str:
@@ -1180,6 +1360,12 @@ def _run_plan(project_id: str, record: ProjectRecord, plan_id: str, item_ids: li
         targets = [i for i in plan.items if i.item_id in item_ids and i.kind == "planned" and i.enabled]
         total = max(1, len(targets))
         for n, item in enumerate(targets):
+            if plan_id in _stops:
+                _stops.discard(plan_id)
+                left = len(targets) - n
+                repo.append_log(project_id, plan_id,
+                                f"Stopped with {left} {'line' if left == 1 else 'lines'} still planned")
+                break
             repo.update_item(project_id, plan_id, item.item_id, status="working", error=None)
             base = n / total
 
@@ -1231,9 +1417,12 @@ def _run_plan(project_id: str, record: ProjectRecord, plan_id: str, item_ids: li
                             f"Voiced the line at {_clock(item.selection.start)}"
                             + (f" ({retried.rstrip('.').lower()})" if retried else ""),
                             f"{cost * takes} characters" if cost else "")
+        _stops.discard(plan_id)
         plan = repo.get_plan(project_id, plan_id)
         still = any(i.status == "working" for i in plan.items)
-        repo.update_plan(project_id, plan_id, status="running" if still else "done")
+        # Stopped, or a line left planned: the plan waits for Go ahead again.
+        status = "running" if still else "proposed" if plan.runnable else "done"
+        repo.update_plan(project_id, plan_id, status=status)
         return _plan_dict(repo.get_plan(project_id, plan_id))
 
     runner.submit(job, work)
@@ -1252,6 +1441,8 @@ def run_plan(
     plan = _plan_or_404(project_id, plan_id)
     if plan.status == "clarifying":
         raise HTTPException(status_code=409, detail="Answer Voltage's question first (or take its guess).")
+    if plan.status in ("running", "stopping"):
+        raise HTTPException(status_code=409, detail="The plan is already running.")
     ids = req.items or [i.item_id for i in plan.runnable]
     if not ids:
         raise HTTPException(status_code=422, detail="Nothing is ticked to run.")

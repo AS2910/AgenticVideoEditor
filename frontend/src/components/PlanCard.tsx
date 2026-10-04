@@ -24,9 +24,55 @@ interface PlanCardProps {
   onAnswer: (item: PlanItem, option: QuestionOption) => void
   onRedo: (item: PlanItem) => void
   onApproveAll: () => void
+  /** UX-2: how a line is said, and how an added line meets the picture. */
+  onDelivery?: (item: PlanItem, delivery: string | null) => void
+  onMix?: (item: PlanItem, mix: 'over' | 'concatenate') => void
+  /** UX-2: stop a running plan after the line it is on. */
+  onStop?: () => void
 }
 
-const KIND: Record<string, string> = { replace: 'Replaces the line', concatenate: 'Added after the line', layer: 'Over the original sound' }
+const KIND: Record<string, string> = { replace: 'Replaces the line', concatenate: 'Added after the line, the picture holds', over: 'Added after the line, over the picture', layer: 'Over the original sound' }
+const DELIVERIES = ['warmer', 'more excited', 'calmer', 'slower', 'firmer']
+
+/** The two controls a line has in its editor, for a plan item (UX-2). */
+function ItemControls({ item, onDelivery, onMix }: {
+  item: PlanItem
+  onDelivery?: (item: PlanItem, delivery: string | null) => void
+  onMix?: (item: PlanItem, mix: 'over' | 'concatenate') => void
+}) {
+  const at = clock(item.selection.start)
+  const delivery = item.delivery ?? null
+  const own = delivery !== null && !DELIVERIES.includes(delivery)
+  const [ownWords, setOwnWords] = useState<string | null>(own ? delivery : null)
+  const commitOwn = () => {
+    const text = (ownWords ?? '').trim()
+    if (text && text !== delivery && onDelivery) onDelivery(item, text)
+    if (!text) setOwnWords(null)
+  }
+  return (
+    <div className={styles.controls}>
+      {onDelivery && (
+        <div className={styles.control} role="group" aria-label={`Delivery at ${at}`}>
+          <span className={styles.controlLabel}>Delivery</span>
+          <button type="button" className={delivery === null && ownWords === null ? styles.pillOn : styles.pill} aria-pressed={delivery === null} onClick={() => { setOwnWords(null); if (delivery !== null) onDelivery(item, null) }}>As spoken</button>
+          {DELIVERIES.map((d) => (
+            <button key={d} type="button" className={delivery === d ? styles.pillOn : styles.pill} aria-pressed={delivery === d} onClick={() => { setOwnWords(null); onDelivery(item, d) }}>{d}</button>
+          ))}
+          {ownWords === null
+            ? <button type="button" className={styles.link} onClick={() => setOwnWords(own ? delivery : '')}>in your words…</button>
+            : <input className={styles.ownWords} aria-label={`Delivery at ${at}, in your words`} placeholder="e.g. like a secret" value={ownWords} onChange={(e) => setOwnWords(e.target.value)} onBlur={commitOwn} onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur() }} />}
+        </div>
+      )}
+      {onMix && item.mix !== 'replace' && (
+        <div className={styles.control} role="group" aria-label={`Sound meets picture at ${at}`}>
+          <span className={styles.controlLabel}>Sound meets picture</span>
+          <button type="button" className={item.mix === 'over' ? styles.pillOn : styles.pill} aria-pressed={item.mix === 'over'} onClick={() => onMix(item, 'over')}>Over the picture</button>
+          <button type="button" className={item.mix === 'concatenate' ? styles.pillOn : styles.pill} aria-pressed={item.mix === 'concatenate'} onClick={() => onMix(item, 'concatenate')}>Hold the picture</button>
+        </div>
+      )}
+    </div>
+  )
+}
 
 const Icon = ({ status }: { status: PlanItem['status'] }) => {
   if (status === 'ready' || status === 'approved') {
@@ -91,6 +137,7 @@ const said = (item: PlanItem, who: string | null, voice?: string) => {
 /** The agent's plan: what it will change, or is changing, line by line. */
 export function PlanCard({
   plan, speakers, voices, projectId, busy, onToggle, onReword, onInclude, onRun, onAdjust, onAnswer, onRedo, onApproveAll,
+  onDelivery, onMix, onStop,
 }: PlanCardProps) {
   const [drafts, setDrafts] = useState<Record<string, string>>({})
   const planned = plan.items.filter((i) => i.kind === 'planned' && i.status !== 'dismissed')
@@ -99,6 +146,10 @@ export function PlanCard({
   const ready = planned.filter((i) => i.status === 'ready')
   const settled = planned.filter((i) => ['ready', 'approved', 'needs-you', 'failed'].includes(i.status))
   const proposed = plan.status === 'proposed' || plan.status === 'clarifying'
+  const running = plan.status === 'running' || plan.status === 'stopping'
+  // Ticked lines not yet voiced: what Go ahead will voice this time.
+  const toVoice = ticked.filter((i) => i.status === 'planned')
+  const voiced = planned.filter((i) => i.status === 'ready' || i.status === 'approved')
   const who = (item: PlanItem) => speakers.find((s) => s.label === item.speaker)
   const name = (item: PlanItem) => who(item)?.name ?? (item.speaker ? `Speaker ${item.speaker}` : null)
   const voiceOf = (item: PlanItem) => voices.find((v) => v.voice_id === item.candidate?.plan.voice_profile_id)?.name
@@ -124,7 +175,8 @@ export function PlanCard({
           <span className={styles.title}>The plan</span>
           <span className={styles.count}>
             {proposed
-              ? `${planned.length} ${planned.length === 1 ? 'change' : 'changes'}${cast > 1 ? ` · ${cast} speakers` : ''}`
+              ? `${planned.length} ${planned.length === 1 ? 'change' : 'changes'}${cast > 1 ? ` · ${cast} speakers` : ''}${voiced.length > 0 && toVoice.length > 0 ? ` · ${voiced.length} voiced` : ''}`
+              : plan.status === 'stopping' ? 'Stopping after this line…'
               : `${settled.length} of ${ticked.length} done`}
           </span>
           {!proposed && (
@@ -133,6 +185,11 @@ export function PlanCard({
               <div className={styles.progress}>
                 <div className={styles.progressFill} style={{ width: `${ticked.length ? (settled.length / ticked.length) * 100 : 0}%` }} />
               </div>
+              {running && onStop && (
+                <button className={styles.stop} onClick={onStop} disabled={plan.status === 'stopping'}>
+                  {plan.status === 'stopping' ? 'Stopping…' : 'Stop'}
+                </button>
+              )}
             </>
           )}
         </div>
@@ -171,6 +228,13 @@ export function PlanCard({
                       onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur() }}
                     />
                     {(item.note ?? item.reason) && <div className={styles.why}>{item.note ?? item.reason}</div>}
+                    {(onDelivery || onMix) && <ItemControls item={item} onDelivery={onDelivery} onMix={onMix} />}
+                    {(item.status === 'ready' || item.status === 'approved') && item.candidate && (
+                      <>
+                        <div className={styles.quiet}>Already voiced; it keeps this take unless you change the words, the delivery or how it meets the picture.</div>
+                        <Take item={item} projectId={projectId} voices={voices} />
+                      </>
+                    )}
                   </>
                 ) : (
                   <>
@@ -234,8 +298,8 @@ export function PlanCard({
             <span className={styles.estimate}>{estimateText(plan.estimate)}</span>
             <span className={styles.spacer} />
             {onAdjust && <button className={styles.secondary} onClick={onAdjust}>Adjust</button>}
-            <button className={styles.primary} onClick={onRun} disabled={busy || ticked.length === 0 || plan.status === 'clarifying'}>
-              Go ahead
+            <button className={styles.primary} onClick={onRun} disabled={busy || toVoice.length === 0 || plan.status === 'clarifying'}>
+              {voiced.length > 0 && toVoice.length > 0 ? `Voice ${toVoice.length === 1 ? 'the change' : `these ${toVoice.length}`}` : 'Go ahead'}
             </button>
           </div>
         )}

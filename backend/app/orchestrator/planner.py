@@ -59,6 +59,59 @@ class Proposal:
     question: Question | None = None
 
 
+@dataclass(frozen=True)
+class Role:
+    """Who a speaker is in the clip, as the planner guesses from what they say."""
+    speaker: str        # the display name the transcript used ("Speaker A")
+    role: str           # "Customer", "Shopkeeper", "Presenter", …
+    why: str = ""
+
+
+@dataclass(frozen=True)
+class Reading:
+    """The planner's first look at a clip (UX-2): one specific opening line
+    for the goal stage, and a role for each speaker."""
+    opening: str
+    roles: tuple[Role, ...] = ()
+
+
+@dataclass(frozen=True)
+class ItemView:
+    """One item of an existing plan, as the planner sees it when revising."""
+    item_id: str
+    line: int                # Line.index of the line it is on
+    old_text: str
+    new_text: str
+    mix: str
+    delivery: str | None
+    enabled: bool
+    status: str              # "planned" | "ready" | …
+    speaker: str | None = None
+
+
+@dataclass(frozen=True)
+class ItemChange:
+    """What to change about one item; None leaves that field alone."""
+    item_id: str
+    enabled: bool | None = None
+    new_text: str | None = None
+    mix: str | None = None
+    delivery: str | None = None
+    # Delivery is tri-state: `clear_delivery` sets it back to "as spoken".
+    clear_delivery: bool = False
+
+
+@dataclass(frozen=True)
+class Revision:
+    """A change to a plan in the user's words (UX-2): edits to its items and
+    new items, applied in place so the takes already voiced survive. When the
+    instruction is a new goal altogether, `new_goal` is set and nothing else."""
+    summary: str
+    changes: tuple[ItemChange, ...] = ()
+    additions: tuple[Change, ...] = ()
+    new_goal: bool = False
+
+
 class Planner(Protocol):
     identity: str
 
@@ -71,6 +124,15 @@ class Planner(Protocol):
         """A shorter wording that keeps the meaning, spoken in about `share` of
         the time — the agent's own fix for a line that runs long. None when
         it cannot offer one."""
+        ...
+
+    def read(self, lines: Sequence[Line], meter: Meter | None = None) -> Reading:
+        """A first look at the clip: an opening line and each speaker's role."""
+        ...
+
+    def revise(self, instruction: str, items: Sequence[ItemView], lines: Sequence[Line],
+               goal: str, meter: Meter | None = None) -> Revision:
+        """Change an existing plan as the instruction says."""
         ...
 
 
@@ -112,3 +174,61 @@ class RulePlanner:
 
     def shorten(self, text: str, share: float, line: Line, meter: Meter | None = None) -> str | None:
         return None
+
+    def read(self, lines: Sequence[Line], meter: Meter | None = None) -> Reading:
+        speakers = {line.speaker for line in lines if line.speaker}
+        n = len(lines)
+        who = (f"{len(speakers)} people speak" if len(speakers) > 1 else "one person speaks") if speakers else ""
+        opening = f"{n} {'line' if n == 1 else 'lines'}" + (f", {who}." if who else ".")
+        return Reading(opening=opening)
+
+    def revise(self, instruction: str, items: Sequence[ItemView], lines: Sequence[Line],
+               goal: str, meter: Meter | None = None) -> Revision:
+        """Offline: "not the second one" / "skip the one at 0:17" leaves an item
+        out; "put the first one back" puts it back; `change "X" to "Y"` rewords
+        the items that say X. Anything else needs Claude."""
+        changes: list[ItemChange] = []
+        text = instruction.strip()
+        back = re.search(r"\b(back|again|include)\b", text, re.IGNORECASE) is not None
+        for item in _named_items(text, items, lines):
+            changes.append(ItemChange(item.item_id, enabled=back))
+        pairs = _CHANGE.findall(text)
+        for item in items:
+            new = item.new_text
+            for old, repl in pairs:
+                new = re.sub(re.escape(old), repl, new, flags=re.IGNORECASE)
+            if new != item.new_text:
+                changes.append(ItemChange(item.item_id, new_text=new))
+        if not changes:
+            return Revision(summary=("I couldn't follow that offline. Say which one: \"not the second one\", "
+                                     "\"skip the one at 0:17\", or change \"X\" to \"Y\"."))
+        n = len(changes)
+        return Revision(summary=f"Changed {n} {'item' if n == 1 else 'items'} in the plan.", changes=tuple(changes))
+
+
+_ORDINALS = {"first": 1, "second": 2, "third": 3, "fourth": 4, "fifth": 5, "last": -1}
+_AT = re.compile(r"\bat\s+(\d+):(\d{2})\b")
+_NTH = re.compile(r"\b(first|second|third|fourth|fifth|last|\d+)(?:st|nd|rd|th)?\b", re.IGNORECASE)
+
+
+def _named_items(text: str, items: Sequence[ItemView], lines: Sequence[Line]) -> list[ItemView]:
+    """The items an instruction points at: by ordinal ("the second one") or by
+    the time of their line ("at 0:17")."""
+    out: list[ItemView] = []
+    if not re.search(r"\b(not|skip|drop|leave|without|remove|back|again|include|only)\b", text, re.IGNORECASE):
+        return out
+    for m in _AT.finditer(text):
+        t = int(m.group(1)) * 60 + int(m.group(2))
+        for item in items:
+            line = next((ln for ln in lines if ln.index == item.line), None)
+            if line is not None and int(line.start) == t and item not in out:
+                out.append(item)
+    for m in _NTH.finditer(_AT.sub("", text)):
+        word = m.group(1).lower()
+        n = _ORDINALS.get(word) or (int(word) if word.isdigit() else None)
+        if n is None:
+            continue
+        idx = len(items) - 1 if n == -1 else n - 1
+        if 0 <= idx < len(items) and items[idx] not in out:
+            out.append(items[idx])
+    return out

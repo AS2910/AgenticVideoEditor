@@ -69,3 +69,18 @@
 }
 .suggestion svg { flex: none; margin-top: 2px; }
 .noticed { font-size: 13px; line-height: 1.5; }
+
+/* UX-2: the line editor's controls, on a plan item; Stop. */
+.controls { display: flex; flex-direction: column; gap: 6px; }
+.control { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
+.controlLabel { width: 120px; flex: none; }
+.pill, .pillOn { padding: 4px 10px; border-radius: 999px; font-size: 12px; }
+.pill { background: var(--surface); color: var(--text); border: 1px solid var(--line); }
+.pill:hover { border-color: var(--muted); }
+.pillOn { background: var(--accent-tint); color: var(--accent); border: 1px solid var(--accent-line); }
+.link { background: none; border: none; padding: 0; color: var(--accent); font-size: 12px; }
+.link:hover { text-decoration: underline; }
+.ownWords { width: 160px; padding: 4px 8px; font-size: 12px; background: var(--raised); color: var(--text); border: 1px solid var(--line); border-radius: 8px; }
+.stop { padding: 5px 11px; border-radius: 8px; font-size: 12px; font-weight: 500; background: var(--raised); color: var(--text); border: 1px solid var(--line); }
+.stop:hover { border-color: var(--amber); color: var(--amber); }
+.stop:disabled { color: var(--muted); border-color: var(--line); }

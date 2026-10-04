@@ -47,7 +47,7 @@ class Plan:
     summary: str
     items: tuple[PlanItem, ...]
     mode: str = "ask"              # "ask" (waits for Run) | "draft" (runs at once)
-    status: str = "proposed"       # "proposed" | "running" | "done"
+    status: str = "proposed"       # "clarifying" | "proposed" | "running" | "stopping" | "done"
     created_at: str = ""
     log: tuple[dict, ...] = ()     # what Voltage did: {at, text, detail}
     estimate: dict = field(default_factory=dict)   # voice_characters, usd, seconds
@@ -65,8 +65,9 @@ class Plan:
 
     @property
     def runnable(self) -> tuple[PlanItem, ...]:
-        """The ticked, planned items — what Run voices."""
-        return tuple(i for i in self.items if i.kind == "planned" and i.enabled)
+        """The ticked items not yet voiced — what Go ahead voices. A line
+        already ready keeps its take."""
+        return tuple(i for i in self.items if i.kind == "planned" and i.enabled and i.status == "planned")
 
 
 def item_from_dict(d: dict) -> PlanItem:
