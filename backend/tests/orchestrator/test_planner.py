@@ -1,3 +1,5 @@
+import pytest
+
 from app.orchestrator.planner import ItemView, Line, RulePlanner
 
 LINES = [
@@ -65,3 +67,28 @@ def test_offline_a_quoted_change_rewords_the_items_that_say_it():
 def test_offline_prose_cannot_revise_the_plan():
     revision = RulePlanner().revise("make it warmer", ITEMS, LINES, "30% off")
     assert revision.changes == () and revision.new_goal is False and "offline" in revision.summary
+
+
+# ── UX-5: a clip with no speech ──────────────────────────────────────────────
+
+def test_offline_a_quoted_line_is_placed_over_the_picture_from_the_start():
+    proposal = RulePlanner().plan('Add an audio introducing the place: "Welcome to Goa"', [], duration=7.5)
+    [change] = proposal.edits
+    assert change.placed and change.line == 0
+    assert change.new_text == "Welcome to Goa"
+    assert change.mix == "layer"
+    assert change.start == pytest.approx(0.5)
+    assert 0.5 < change.end <= 7.5
+    assert "placed over the picture" in proposal.summary
+
+
+def test_offline_a_brief_without_words_asks_for_them():
+    proposal = RulePlanner().plan("Add an audio introducing the place", [], duration=7.5)
+    assert proposal.edits == ()
+    assert "in quotes" in proposal.summary
+
+
+def test_the_rule_planner_looks_without_seeing():
+    from app.orchestrator.planner import Frame
+    sight = RulePlanner().look([Frame(0.3, "a.jpg"), Frame(3.9, "b.jpg")], 7.5)
+    assert sight.opening == "No one speaks. 7.5 s of picture, 2 frames."

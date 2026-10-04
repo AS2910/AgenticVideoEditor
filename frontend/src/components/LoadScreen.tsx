@@ -6,6 +6,8 @@ interface LoadScreenProps {
   onLoad: (file: File) => void
   onLoadSample: () => void
   loading: boolean
+  /** UX-6: how much of the upload has gone, 0..1; null while transcribing or unknown. */
+  progress?: number | null
   error?: string | null
   /** Past projects, shown under the upload. */
   children?: ReactNode
@@ -15,7 +17,7 @@ interface LoadScreenProps {
 }
 
 /** The start: a video in, and what Voltage will do with it. */
-export function LoadScreen({ onLoad, onLoadSample, loading, error, children, who, onSignOut }: LoadScreenProps) {
+export function LoadScreen({ onLoad, onLoadSample, loading, progress = null, error, children, who, onSignOut }: LoadScreenProps) {
   const inputRef = useRef<HTMLInputElement>(null)
 
   return (
@@ -65,8 +67,23 @@ export function LoadScreen({ onLoad, onLoadSample, loading, error, children, who
           <p className={styles.hint}>Up to 3 minutes, English, one speaker on camera.</p>
           {loading && (
             <div className={styles.progress} role="status">
-              <span className={styles.progressTrack} role="progressbar" aria-label="Uploading" aria-valuemin={0} aria-valuemax={100}><span className={styles.progressFill} /></span>
-              <span className={styles.hint}>Uploading and transcribing. This takes a little while for a long clip.</span>
+              <span
+                className={styles.progressTrack}
+                role="progressbar"
+                aria-label="Uploading"
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-valuenow={progress !== null && progress < 1 ? Math.round(progress * 100) : undefined}
+              >
+                {progress !== null && progress < 1
+                  ? <span className={styles.progressKnown} style={{ transform: `scaleX(${progress})` }} />
+                  : <span className={styles.progressFill} />}
+              </span>
+              <span className={styles.hint}>
+                {progress !== null && progress < 1
+                  ? `Uploading, ${Math.round(progress * 100)}%.`
+                  : 'Transcribing. This takes a little while for a long clip.'}
+              </span>
             </div>
           )}
           {error && <div className={styles.error} role="alert">{error}</div>}

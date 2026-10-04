@@ -119,6 +119,18 @@ def extract_audio(
     return dest, duration_of(dest)
 
 
+def extract_frame(source: str | Path, dest: str | Path, at: float, width: int = 512) -> Path:
+    """One still of the picture at `at` seconds, scaled to `width` px wide, as
+    a JPEG (UX-5): small enough to show in a strip and to send to a model."""
+    dest = Path(dest)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    _run(FFMPEG, [
+        "-y", "-loglevel", "error", "-ss", f"{max(0.0, at):.3f}", "-i", str(source),
+        "-frames:v", "1", "-vf", f"scale={int(width)}:-2", "-q:v", "4", str(dest),
+    ])
+    return dest
+
+
 def generate_tone(
     dest: str | Path, duration: float, frequency: float, sample_rate: int = 16000,
 ) -> tuple[Path, float]:

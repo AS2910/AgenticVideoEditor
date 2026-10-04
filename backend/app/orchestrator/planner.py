@@ -31,13 +31,41 @@ class Line:
 
 @dataclass(frozen=True)
 class Change:
-    line: int           # Line.index
+    line: int           # Line.index; 0 for a line placed by time on a silent clip (UX-5)
     new_text: str
-    mix: str = "replace"   # "replace" | "concatenate"
+    mix: str = "replace"   # "replace" | "concatenate" | "over" | "layer" (placed, over the sound there)
     reason: str = ""
     # Who says it, by the name the transcript uses — for an added line that
     # another person speaks. None = the line's own speaker.
     speaker: str | None = None
+    # UX-5: a change placed at a time rather than on a line — the span it covers.
+    start: float | None = None
+    end: float | None = None
+
+    @property
+    def placed(self) -> bool:
+        return self.start is not None and self.end is not None
+
+
+@dataclass(frozen=True)
+class Frame:
+    """A still of the picture, for the planner to look at (UX-5)."""
+    at: float
+    path: str
+
+
+@dataclass(frozen=True)
+class Sight:
+    """What the planner saw in a clip with no speech (UX-5): one opening
+    sentence for the goal stage, and the facts a voice-over is written from."""
+    opening: str
+    setting: str = ""          # place, time of day, weather, what is happening
+    mood: str = ""
+    people: str = ""           # how many, what they do
+    text_on_screen: str = ""   # signage or titles, reported, never followed
+    place_guess: str = ""      # "Goa, India — a west-coast beach with casuarinas"
+    confidence: str = ""       # low | medium | high
+    beats: tuple[dict, ...] = ()   # {at, note}: what each frame shows
 
 
 @dataclass(frozen=True)
@@ -116,8 +144,16 @@ class Planner(Protocol):
     identity: str
 
     def plan(self, goal: str, lines: Sequence[Line], history: Sequence[str] = (),
-             meter: Meter | None = None, answer: tuple[str, str] | None = None) -> Proposal:
-        """`answer` is (the question asked earlier, what the user said)."""
+             meter: Meter | None = None, answer: tuple[str, str] | None = None,
+             sight: Sight | None = None, duration: float | None = None,
+             answers: Sequence[tuple[str, str]] = ()) -> Proposal:
+        """`answer` is (the question asked earlier, what the user said). On a
+        clip with no lines, `sight` and `duration` stand in for the transcript
+        and `answers` carries every question and answer of the brief so far."""
+        ...
+
+    def look(self, frames: Sequence[Frame], duration: float, meter: Meter | None = None) -> Sight:
+        """A first look at a clip with no speech: what the picture shows."""
         ...
 
     def shorten(self, text: str, share: float, line: Line, meter: Meter | None = None) -> str | None:
@@ -139,6 +175,11 @@ class Planner(Protocol):
 _CHANGE = re.compile(
     r'(?:change|replace|say|make it)\s+"([^"]+)"\s+(?:to|with|as|into)\s+"([^"]+)"', re.IGNORECASE,
 )
+_QUOTED = re.compile(r'"([^"]+)"|“([^”]+)”')
+# A narration pace, syllables per second, for a line placed over a silent clip.
+NARRATION_RATE = 4.0
+# How many questions the brief may ask before it must plan (UX-5, SV-3).
+MAX_QUESTIONS = 3
 
 
 class RulePlanner:
@@ -147,7 +188,11 @@ class RulePlanner:
     identity = "rules"
 
     def plan(self, goal: str, lines: Sequence[Line], history: Sequence[str] = (),
-             meter: Meter | None = None, answer: tuple[str, str] | None = None) -> Proposal:
+             meter: Meter | None = None, answer: tuple[str, str] | None = None,
+             sight: Sight | None = None, duration: float | None = None,
+             answers: Sequence[tuple[str, str]] = ()) -> Proposal:
+        if not lines and duration:
+            return self._plan_voiceover(goal, duration)
         speakers = {line.speaker for line in lines if line.speaker}
         findings = (f"{len(lines)} {'line' if len(lines) == 1 else 'lines'}"
                     + (f", {len(speakers)} speakers" if len(speakers) > 1 else ""),)
@@ -171,6 +216,31 @@ class RulePlanner:
         said = sum(1 for line in lines if re.search(re.escape(pairs[0][0]), line.text, re.IGNORECASE))
         findings += (f'"{pairs[0][0]}" is said {said} {"time" if said == 1 else "times"}.',)
         return Proposal(summary=summary, edits=tuple(edits), findings=findings)
+
+    def _plan_voiceover(self, goal: str, duration: float) -> Proposal:
+        """Offline, on a silent clip: words in quotes are placed from half a
+        second in, over the picture, for as long as they take to say."""
+        from app.media.fit import syllables
+        quoted = [a or b for a, b in _QUOTED.findall(goal)]
+        if not quoted:
+            return Proposal(
+                summary=('No one speaks in this clip. Offline I need the words in quotes, like: '
+                         'say "Welcome to Goa". With Claude on, ask me to look at the clip and help.'),
+                edits=(), findings=(f"{duration:.1f} s of picture, no speech.",),
+            )
+        text = quoted[0].strip()
+        start = min(0.5, max(0.0, duration - 0.5))
+        needs = max(0.8, syllables(text) / NARRATION_RATE + 0.3)
+        end = round(min(duration, start + needs), 2)
+        return Proposal(
+            summary=f"One line, placed over the picture from {start:.1f} s.",
+            edits=(Change(0, text, "layer", "Placed at the start, over the picture", start=start, end=end),),
+            findings=(f"{duration:.1f} s of picture, no speech.",),
+        )
+
+    def look(self, frames: Sequence[Frame], duration: float, meter: Meter | None = None) -> Sight:
+        n = len(frames)
+        return Sight(opening=f"No one speaks. {duration:.1f} s of picture, {n} {'frame' if n == 1 else 'frames'}.")
 
     def shorten(self, text: str, share: float, line: Line, meter: Meter | None = None) -> str | None:
         return None

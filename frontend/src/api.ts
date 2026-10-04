@@ -49,13 +49,34 @@ async function post<T>(path: string, body?: unknown): Promise<T> {
  * `consent` records the uploader's confirmation that they may edit and clone
  * this speaker. The backend refuses to generate without it.
  */
-export async function createProject(file: File, consent: boolean): Promise<Project> {
+export async function createProject(file: File, consent: boolean, onProgress?: (share: number) => void): Promise<Project> {
   const body = new FormData()
   body.append('file', file)
   body.append('consent', String(consent))
+  if (onProgress && typeof XMLHttpRequest !== 'undefined') return uploadWithProgress(body, onProgress)
   const res = await fetch(`${BASE}/projects`, { method: 'POST', headers: FROM_VOLTAGE, body })
   if (!res.ok) return failure(res)
   return (await res.json()) as Project
+}
+
+/** The same POST through XMLHttpRequest, which is the only way a browser
+ *  reports upload progress (UX-6): `onProgress` gets 0..1 as the bytes go. */
+function uploadWithProgress(body: FormData, onProgress: (share: number) => void): Promise<Project> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest()
+    xhr.open('POST', `${BASE}/projects`)
+    for (const [k, v] of Object.entries(FROM_VOLTAGE)) xhr.setRequestHeader(k, v)
+    xhr.upload.onprogress = (e) => { if (e.lengthComputable && e.total > 0) onProgress(Math.min(1, e.loaded / e.total)) }
+    xhr.onerror = () => reject(new ApiError(0, 'The upload did not reach the server.'))
+    xhr.onload = () => {
+      let parsed: unknown = null
+      try { parsed = JSON.parse(xhr.responseText) } catch { parsed = null }
+      if (xhr.status >= 200 && xhr.status < 300) return resolve(parsed as Project)
+      const detail = parsed && typeof parsed === 'object' && 'detail' in parsed ? (parsed as { detail: unknown }).detail : null
+      reject(new ApiError(xhr.status, typeof detail === 'string' ? detail : `Request failed (${xhr.status})`))
+    }
+    xhr.send(body)
+  })
 }
 
 async function get<T>(path: string): Promise<T> {
@@ -199,14 +220,17 @@ async function put<T>(path: string, body: unknown): Promise<T> {
 
 /** Plans edits across the whole video from a goal. Under "draft" the plan
  *  comes back already running, with its `job_id`. */
-export const createPlan = (id: string, req: { goal: string; mode?: Autonomy }) =>
+export const createPlan = (id: string, req: { goal: string; mode?: Autonomy; voice_profile_id?: string }) =>
   post<Plan>(`/projects/${id}/plans`, req)
 
 export const getPlan = (id: string, planId: string) => get<Plan>(`/projects/${id}/plans/${planId}`)
 
 /** Answers the planner's question (empty = take its guess); it plans again. */
-export const clarifyPlan = (id: string, planId: string, answer?: string) =>
-  post<Plan>(`/projects/${id}/plans/${planId}/clarify`, answer ? { answer } : {})
+export const clarifyPlan = (id: string, planId: string, answer?: string, allGuesses = false) =>
+  post<Plan>(`/projects/${id}/plans/${planId}/clarify`, { ...(answer ? { answer } : {}), ...(allGuesses ? { all_guesses: true } : {}) })
+
+/** A frame of the picture (UX-5), for a clip with no speech. */
+export const frameUrl = (projectId: string, index: number) => `${BASE}/projects/${projectId}/frames/${index}`
 
 /** Untick, reword, or add / leave a suggestion. */
 export const updateItem = (

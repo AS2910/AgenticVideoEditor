@@ -41,3 +41,4 @@
 .progressTrack { flex: none; width: 120px; height: 4px; border-radius: 2px; background: var(--line); overflow: hidden; }
 .progressFill { display: block; width: 40%; height: 100%; border-radius: 2px; background: var(--accent); animation: slide 1.2s ease-in-out infinite; }
 @keyframes slide { from { transform: translateX(-100%); } to { transform: translateX(300%); } }
+.progressKnown { display: block; width: 100%; height: 100%; border-radius: 2px; background: var(--accent); transform-origin: left; transition: transform var(--t) var(--ease); }

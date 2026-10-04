@@ -1,6 +1,6 @@
 import logging
 import tempfile
-from dataclasses import replace
+from dataclasses import asdict, replace
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -22,6 +22,7 @@ from app.domain.transcript import (
 )
 from app.media.fit import speaking_rate, syllable_budget, syllables
 from app.config import load_settings
+from app.media import frames as frames_mod
 from app.media import ffmpeg, ingest
 from app.adapters.base import VendorError
 from app.adapters.mock import MockLipSyncAdapter
@@ -32,7 +33,7 @@ from app.adapters.selection import (
 from app.errors import NonRetryableError
 from app.budget import VoiceBudget, BudgetExceeded
 from app.orchestrator.intent import Turn, edit_context
-from app.orchestrator.planner import ItemView, Line, Proposal, Question, Revision
+from app.orchestrator.planner import ItemView, Line, Proposal, Question, Revision, MAX_QUESTIONS, Frame, Sight
 from app.orchestrator.questions import fit_question, mix_question
 from app.media.ffmpeg import SpanMismatch
 from app.orchestrator.pipeline import run_edit
@@ -325,6 +326,48 @@ def _owned(project_id: str, owner: str) -> ProjectRecord:
     return record
 
 
+# ── UX-5: the picture, for a clip with no speech ─────────────────────────────
+
+def _frames(record: ProjectRecord) -> list[frames_mod.Frame]:
+    """The clip's frames, extracted once beside its media."""
+    source = record.source
+    return frames_mod.extract_frames(source.media.path, source.duration, artifacts.root / source.project_id / "frames")
+
+
+def _frames_dict(record: ProjectRecord) -> list[dict]:
+    try:
+        return [{"index": i, "at": f.at} for i, f in enumerate(_frames(record))]
+    except Exception:  # noqa: BLE001 - a missing ffmpeg must not break reading a project
+        return []
+
+
+def _sight(project_id: str, record: ProjectRecord) -> Sight:
+    """What Voltage saw in the clip: looked at once, kept with the project."""
+    saved = repo.settings(project_id).get("sight")
+    if saved:
+        return Sight(**{**saved, "beats": tuple(saved.get("beats", ()))})
+    frames = [Frame(at=f.at, path=str(f.path)) for f in _frames(record)]
+    sight = planner.look(frames, record.source.duration, meter=_meter(project_id, "looking"))
+    repo.set_settings(project_id, sight=asdict(sight))
+    return sight
+
+
+@app.get("/projects/{project_id}/frames")
+def list_frames(project_id: str, owner: str = Depends(current_owner)) -> list[dict]:
+    """The clip's frames, by index and time; each is served at /frames/{index}."""
+    record = _owned(project_id, owner)
+    return _frames_dict(record)
+
+
+@app.get("/projects/{project_id}/frames/{index}")
+def get_frame(project_id: str, index: int, owner: str = Depends(current_owner)) -> FileResponse:
+    record = _owned(project_id, owner)
+    frames = _frames(record)
+    if not 0 <= index < len(frames):
+        raise HTTPException(status_code=404, detail="frame not found")
+    return FileResponse(frames[index].path, media_type="image/jpeg")
+
+
 def _project_dict(record: ProjectRecord) -> dict:
     source = record.source
     return {
@@ -346,6 +389,8 @@ def _project_dict(record: ProjectRecord) -> dict:
         "plan": _plan_dict(repo.latest_plan(source.project_id)),
         # UX-2: Voltage's first look at the clip, once it has had one.
         "reading": repo.settings(source.project_id).get("reading"),
+        # UX-5: a clip with no speech shows its frames where the transcript would be.
+        "frames": _frames_dict(record) if not record.transcript.words and not record.transcript.statements else [],
     }
 
 
@@ -588,7 +633,19 @@ def read_project(project_id: str, req: ReadRequest, owner: str = Depends(current
         return saved
     lines = _lines(record)
     if not lines:
-        raise HTTPException(status_code=422, detail="This video has no speech to read.")
+        # UX-5: nothing to read, so Voltage looks at the picture instead.
+        try:
+            _ensure_spend(project_id)
+            sight = _sight(project_id, record)
+        except SpendCeilingReached as exc:
+            raise HTTPException(status_code=402, detail=str(exc)) from exc
+        except NonRetryableError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        except VendorError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        out = {"opening": sight.opening, "roles": [], "sight": asdict(sight)}
+        repo.set_settings(project_id, reading=out)
+        return out
     try:
         _ensure_spend(project_id)
         reading = planner.read(lines, meter=_meter(project_id, "reading"))
@@ -1075,6 +1132,8 @@ class PlanRequest(BaseModel):
     goal: str
     # Overrides the project's autonomy setting for this plan.
     mode: Literal["ask", "draft"] | None = None
+    # UX-5: the voice a line placed on a silent clip is spoken in (the chat's default voice).
+    voice_profile_id: str | None = None
 
 
 class ItemUpdate(BaseModel):
@@ -1140,6 +1199,10 @@ def _plan_dict(plan: Plan | None) -> dict | None:
         "estimate": plan.estimate,
         "findings": list(plan.findings),
         "question": plan.question,
+        # UX-5: the brief so far, and how many questions may still come.
+        "answers": [list(a) for a in plan.answers],
+        "questions_left": max(0, MAX_QUESTIONS - len(plan.answers)) if plan.question else 0,
+        "voice": plan.voice,
         "spend_usd": round(ledger.spent_usd_since(plan.project_id, plan.created_at), 4) if plan.created_at else 0.0,
         "log": list(plan.log),
         "items": [_item_dict(plan.project_id, i) for i in plan.items],
@@ -1175,13 +1238,29 @@ def _estimate(project_id: str, items: tuple[PlanItem, ...]) -> dict:
     }
 
 
-def _items_of(proposal: Proposal, statements, names: dict[str, str] | None = None) -> tuple[PlanItem, ...]:
+def _items_of(proposal: Proposal, statements, names: dict[str, str] | None = None,
+              duration: float | None = None) -> tuple[PlanItem, ...]:
     """`names` maps a speaker's display name (lower-cased) to their label, so a
-    change that names who says it lands on the right person."""
+    change that names who says it lands on the right person. A change placed
+    by time (UX-5) becomes an item on its own span, with nothing to replace."""
     names = names or {}
     items: list[PlanItem] = []
     for kind, changes in (("planned", proposal.edits), ("suggestion", proposal.suggestions)):
         for change in changes:
+            if change.placed:
+                end = min(change.end, duration) if duration else change.end
+                if end <= change.start:
+                    continue
+                items.append(PlanItem(
+                    item_id=f"i{len(items) + 1}", selection=Selection(round(change.start, 2), round(end, 2)),
+                    old_text="", new_text=change.new_text, speaker=None,
+                    mix="concatenate" if change.mix == "concatenate" else "layer",
+                    reason=change.reason, kind=kind,
+                    enabled=kind == "planned", status="planned" if kind == "planned" else "suggested",
+                ))
+                continue
+            if not 1 <= change.line <= len(statements):
+                continue
             st = statements[change.line - 1]
             speaker = names.get((change.speaker or "").lower(), st.speaker)
             items.append(PlanItem(
@@ -1202,17 +1281,23 @@ def create_plan(project_id: str, req: PlanRequest, owner: str = Depends(current_
     goal = req.goal.strip()
     if not goal:
         raise HTTPException(status_code=422, detail="Say what the video should say.")
-    return _new_plan(project_id, record, goal, req.mode)
+    return _new_plan(project_id, record, goal, req.mode, req.voice_profile_id)
 
 
-def _new_plan(project_id: str, record: ProjectRecord, goal: str, mode: str | None) -> dict:
+def _new_plan(project_id: str, record: ProjectRecord, goal: str, mode: str | None,
+              voice_id: str | None = None) -> dict:
     lines = _lines(record)
-    if not lines:
-        raise HTTPException(status_code=422, detail="This video has no speech to change.")
+    # UX-5: a clip with no speech is planned from what the picture shows.
+    silent = not lines
     try:
         _ensure_spend(project_id)
+        sight = _sight(project_id, record) if silent else None
     except SpendCeilingReached as exc:
         raise HTTPException(status_code=402, detail=str(exc)) from exc
+    except NonRetryableError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    except VendorError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     mode = mode or _settings(project_id)["autonomy"]
     if mode == "draft" and record.consent is None:
         raise HTTPException(status_code=403, detail=CONSENT_REQUIRED)
@@ -1220,7 +1305,11 @@ def _new_plan(project_id: str, record: ProjectRecord, goal: str, mode: str | Non
     history = [earlier.goal] if earlier else []
     repo.add_message(project_id, "user", goal)
     try:
-        proposal = planner.plan(goal, lines, history, meter=_meter(project_id, "planning"))
+        if silent:
+            proposal = planner.plan(goal, [], history, meter=_meter(project_id, "planning"),
+                                    sight=sight, duration=record.source.duration)
+        else:
+            proposal = planner.plan(goal, lines, history, meter=_meter(project_id, "planning"))
     except NonRetryableError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
     except VendorError as exc:
@@ -1228,9 +1317,11 @@ def _new_plan(project_id: str, record: ProjectRecord, goal: str, mode: str | Non
     plan = Plan(
         plan_id=repo.next_plan_id(project_id), project_id=project_id, goal=goal,
         summary=proposal.summary, items=(), mode=mode, status="proposed", created_at=_now(),
+        voice=voice_id,
     )
     repo.save_plan(plan)
-    repo.append_log(project_id, plan.plan_id, f"Read your goal and all {len(lines)} lines",
+    repo.append_log(project_id, plan.plan_id,
+                    "Looked at the picture and read your goal" if silent else f"Read your goal and all {len(lines)} lines",
                     "Claude" if planner_label.startswith("anthropic") else "")
     return _take_proposal(project_id, record, plan.plan_id, proposal, mode)
 
@@ -1240,7 +1331,7 @@ def _take_proposal(project_id: str, record: ProjectRecord, plan_id: str, proposa
     as "clarifying" (the items are kept, built on the planner's guess); else it
     is proposed, and under "draft" it starts running."""
     names = {s.name.lower(): s.label for s in repo.speakers(project_id)}
-    items = _items_of(proposal, statements_of(record.transcript), names)
+    items = _items_of(proposal, statements_of(record.transcript), names, record.source.duration)
     planned = [i for i in items if i.kind == "planned"]
     speakers = {i.speaker for i in planned if i.speaker}
     question = ({"text": proposal.question.text, "options": list(proposal.question.options),
@@ -1269,6 +1360,8 @@ def _take_proposal(project_id: str, record: ProjectRecord, plan_id: str, proposa
 class ClarifyRequest(BaseModel):
     # One of the question's options, or the user's own words. Empty = the guess.
     answer: str | None = None
+    # UX-5: take the planner's guess for this and every further question.
+    all_guesses: bool = False
 
 
 @app.post("/projects/{project_id}/plans/{plan_id}/clarify")
@@ -1283,18 +1376,41 @@ def clarify_plan(
     answer = (req.answer or "").strip() or plan.question.get("guess") or plan.question["options"][0]
     repo.add_message(project_id, "user", answer)
     repo.append_log(project_id, plan_id, f"You said: {answer}")
+    lines = _lines(record)
+    silent = not lines
+    answers = plan.answers + ((plan.question["text"], answer),)
     try:
         _ensure_spend(project_id)
-        proposal = planner.plan(plan.goal, _lines(record), [], meter=_meter(project_id, "planning"),
-                                answer=(plan.question["text"], answer))
+        if silent:
+            # UX-5, the brief: the planner may ask again, one question at a
+            # time, up to MAX_QUESTIONS; "Go with your guesses" answers the
+            # rest with its own guesses.
+            sight = _sight(project_id, record)
+            while True:
+                proposal = planner.plan(plan.goal, [], [], meter=_meter(project_id, "planning"),
+                                        answer=answers[-1], sight=sight, duration=record.source.duration,
+                                        answers=answers)
+                if proposal.question is None or len(answers) >= MAX_QUESTIONS:
+                    break
+                if not req.all_guesses:
+                    break
+                guess = proposal.question.guess or (proposal.question.options[0] if proposal.question.options else "")
+                repo.append_log(project_id, plan_id, f"Asked: {proposal.question.text} — went with its guess: {guess}")
+                answers = answers + ((proposal.question.text, guess),)
+            if proposal.question is not None and len(answers) >= MAX_QUESTIONS:
+                proposal = replace(proposal, question=None)
+        else:
+            proposal = planner.plan(plan.goal, lines, [], meter=_meter(project_id, "planning"),
+                                    answer=(plan.question["text"], answer))
+            # On a clip with speech, asking twice is not allowed: a second question is dropped, the guess stands.
+            proposal = replace(proposal, question=None) if proposal.question else proposal
     except SpendCeilingReached as exc:
         raise HTTPException(status_code=402, detail=str(exc)) from exc
     except NonRetryableError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
     except VendorError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
-    # Asking twice is not allowed: a second question is dropped, the guess stands.
-    proposal = replace(proposal, question=None) if proposal.question else proposal
+    repo.update_plan(project_id, plan_id, answers=answers)
     return _take_proposal(project_id, record, plan_id, proposal, plan.mode)
 
 
@@ -1553,7 +1669,8 @@ def _run_plan(project_id: str, record: ProjectRecord, plan_id: str, item_ids: li
             step(0.05, "Synthesizing the new line")
             try:
                 _ensure_spend(project_id)
-                voice_id = _voice_for(project_id, record, item.selection, getattr(voice, "default_voice", "speaker-1"),
+                voice_id = _voice_for(project_id, record, item.selection,
+                                      plan.voice or getattr(voice, "default_voice", "speaker-1"),
                                       speaker=item.speaker)
                 candidate_id = repo.next_candidate_id(project_id)
                 candidate = with_retries(lambda: _generate(

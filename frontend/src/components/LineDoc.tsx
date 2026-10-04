@@ -9,6 +9,7 @@ import { speakerSlot } from '../transcript/speakers'
 import { verdict } from '../transcript/verdict'
 import { parseTime, timecode } from '../transcript/time'
 import { Avatar } from './Avatar'
+import { PlaceEditor } from './PlaceEditor'
 import styles from './LineDoc.module.css'
 
 import { addKeyOf, keyOf } from '../transcript/keys'
@@ -21,7 +22,7 @@ export interface LineRequest {
   voiceId: string | null
   onLong: LongLines
   delivery: string | null
-  mix: 'replace' | 'over' | 'concatenate'
+  mix: 'replace' | 'over' | 'concatenate' | 'layer'
   /** For an added line: a chosen start on the timeline instead of "after this line". */
   at?: number | null
 }
@@ -83,6 +84,8 @@ interface LineDocProps {
   onReword?: (statement: Statement, draft: string) => Promise<string[]>
   onLongLinesChange?: (value: LongLines) => void
   onEditingChange?: (statement: Statement | null) => void
+  /** UX-5: the clip's length, so a voice-over can be placed on a clip with no speech. */
+  duration?: number
 }
 
 const overlaps = (a: { start: number; end: number }, b: { start: number; end: number }) =>
@@ -120,7 +123,7 @@ export function LineDoc({
   statements, words = [], speakers = [], voices = [], revisions = [], selection, currentTime,
   pendingLines = [], lines = {}, longLines = 'pause', disabled, usdPerChar, playing, readouts = [],
   onSeek, onHear, onKeep, onAnother, onAnswer, onUndo, onRemove, onPlayTake, onDismiss, onReword,
-  onLongLinesChange, onEditingChange, onMove, onMoveKept, placing, onPlacing, onShift,
+  onLongLinesChange, onEditingChange, onMove, onMoveKept, placing, onPlacing, onShift, duration,
 }: LineDocProps) {
   const [at, setAt] = useState<string>('')          // the add editor's "starts at", as typed
   const [placeText, setPlaceText] = useState('')     // the placing control's time, as typed
@@ -140,6 +143,8 @@ export function LineDoc({
   // Backspace removes a line only when pressed twice within two seconds; Delete removes at once.
   const armed = useRef<{ index: number; at: number } | null>(null)
   const [armedRow, setArmedRow] = useState<number | null>(null)
+  // UX-5: another voice-over is being placed on a clip with no speech.
+  const [placingAnother, setPlacingAnother] = useState(false)
   // The control whose request is on its way: it waits, and says so (UX-6).
   const [pending, setPending] = useState<string | null>(null)
   const run = async (id: string, fn: () => void | Promise<unknown>) => {
@@ -180,6 +185,22 @@ export function LineDoc({
   }, [editing, statements, onEditingChange])
 
   if (statements.length === 0) {
+    // UX-5: nothing to read, so the first thing is where the voice-over goes.
+    if (duration) {
+      return (
+        <section className={styles.doc} aria-label="Transcript">
+          <div className={styles.heading}>
+            <h2 className={styles.title}>Voice-over</h2>
+            <span className={styles.hint}>No one speaks in this clip. Place a line where you want it, and say what it should say.</span>
+          </div>
+          <PlaceEditor
+            duration={duration} voices={voices} usdPerChar={usdPerChar} longLines={longLines} disabled={disabled}
+            placing={placing} onPlacing={onPlacing}
+            onHear={(span, request) => onHear(keyOf(span), request)}
+          />
+        </section>
+      )
+    }
     return <p className={styles.empty}>No lines to show. This video has no transcribed speech.</p>
   }
 
@@ -280,13 +301,13 @@ export function LineDoc({
   }
   const hear = (s: Statement) => {
     const text = draft.trim()
-    if (!editing || !text || (editing.mode === 'edit' && text === standing(s))) return
+    if (!editing || !text || (editing.mode === 'edit' && text === standing(s) && !s.placed)) return
     const key = editing.mode === 'edit' ? keyOf(s) : addKeyOf(s)
     const chosen = editing.mode === 'add' && at.trim() ? parseTime(at) : null
     if (editing.mode === 'add' && at.trim() && chosen === null) return   // an unreadable time is never dropped silently
     onHear(key, {
       selection: { start: s.start, end: s.end }, text, voiceId: voiceId || null, onLong,
-      delivery: (ownWords?.trim() || delivery) ?? null, mix: editing.mode === 'edit' ? 'replace' : mix,
+      delivery: (ownWords?.trim() || delivery) ?? null, mix: editing.mode === 'edit' ? (s.placed ? 'layer' : 'replace') : mix,
       ...(chosen !== null ? { at: chosen } : {}),
     })
     close()
@@ -680,7 +701,8 @@ export function LineDoc({
             {isEditing ? <div className={styles.reveal}>{editor(s, 'edit')}</div> : (
               <div className={styles.lineWrap}>
                 <button className={styles.line} onClick={() => open(i, 'edit')} title="Change the words" data-testid={shown ? 'revision' : undefined}>
-                  {removed ? <del className={styles.del}>{s.text}</del>
+                  {s.placed && !shown && !removed ? <span className={styles.placedLabel}>Voice-over, {timecode(s.start)}–{timecode(s.end)}</span>
+                    : removed ? <del className={styles.del}>{s.text}</del>
                     : shown ? trackedChanges(s, shown, words).map((run, k) => (
                       <Fragment key={k}>{k > 0 && ' '}
                         {run.kind === 'same' ? <span>{run.text}</span> : run.kind === 'del' ? <del className={styles.del}>{run.text}</del> : <ins className={styles.ins}>{run.text}</ins>}
@@ -763,9 +785,23 @@ export function LineDoc({
             <span className={styles.side}>{STATUS[added.status] && <span className={styles.chip} data-tone={TONE[added.status]} role="status">{STATUS[added.status]}</span>}</span>
           </div>
         )}
-        {!isAdding && !added && i === statements.length - 1 && (
+        {!isAdding && !added && i === statements.length - 1 && !(s.placed && placingAnother) && (
           <div className={styles.addRow} role="listitem">
-            <button className={styles.add} onClick={() => open(i, 'add')}><span aria-hidden="true">+</span> Add a line here</button>
+            <button className={styles.add} onClick={() => (s.placed && duration ? setPlacingAnother(true) : open(i, 'add'))}><span aria-hidden="true">+</span> {s.placed ? 'Add another voice-over' : 'Add a line here'}</button>
+          </div>
+        )}
+        {s.placed && placingAnother && duration && i === statements.length - 1 && (
+          <div className={styles.row} data-state="adding" role="listitem" aria-label="New voice-over">
+            <span className={styles.time} />
+            <span className={styles.who} />
+            <div className={styles.body}>
+              <PlaceEditor
+                duration={duration} voices={voices} usdPerChar={usdPerChar} longLines={longLines} disabled={disabled}
+                placing={placing} onPlacing={onPlacing} initialStart={Math.min(duration - 1, s.end + 0.3)}
+                onHear={(span, request) => { setPlacingAnother(false); onHear(keyOf(span), request) }}
+                onCancel={() => setPlacingAnother(false)}
+              />
+            </div>
           </div>
         )}
       </Fragment>

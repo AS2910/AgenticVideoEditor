@@ -55,6 +55,10 @@ class Plan:
     # One thing the planner wants to know first: {text, options, guess}. The
     # plan's status is "clarifying" until it is answered (or the guess taken).
     question: dict | None = None
+    # UX-5: the brief so far — every question asked and its answer, in order.
+    answers: tuple[tuple[str, str], ...] = ()
+    # UX-5: the voice a placed line is spoken in (the chat's default voice).
+    voice: str | None = None
 
     def item(self, item_id: str) -> PlanItem | None:
         return next((i for i in self.items if i.item_id == item_id), None)
@@ -89,4 +93,5 @@ def plan_from_dict(d: dict) -> Plan:
         status=d.get("status", "proposed"), created_at=d.get("created_at", ""),
         log=tuple(d.get("log", ())), estimate=d.get("estimate", {}),
         findings=tuple(d.get("findings", ())), question=d.get("question"),
+        answers=tuple((str(q), str(a)) for q, a in d.get("answers", ())), voice=d.get("voice"),
     )
