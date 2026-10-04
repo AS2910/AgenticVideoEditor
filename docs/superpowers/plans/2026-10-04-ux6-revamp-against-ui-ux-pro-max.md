@@ -1,6 +1,6 @@
 # UX-6 · The revamp: Voltage against ui-ux-pro-max
 
-**Date:** 2026-10-04 · **Status:** proposed. The user asked for the `ui-ux-pro-max` skill to be applied to the whole product, not only the silent-clip work, "so we will do a final revamp". This is the audit and the plan that follows from it. Nothing here is built yet.
+**Date:** 2026-10-04 · **Status:** built the same day, in five phases on `ux6-revamp`, each merged to main (as-built note at the end). The user asked for the `ui-ux-pro-max` skill to be applied to the whole product, not only the silent-clip work, "so we will do a final revamp". This is the audit and the plan that follows from it. Nothing here is built yet.
 
 ## How the audit was done
 
@@ -150,3 +150,24 @@ Tests to add along the way: a computed-style test over every rendered button for
 - The word timeline behind *Precise* stays hidden by default; it gets the touch and ARIA fixes but no redesign (G14 of the UX plan still says it is noise for most users).
 - Lip-sync, own voice, the picture that flexes: the natural-fit roadmap, not UI.
 - UX-5 (the silent clip) builds on R-1's classes and R-2's regions; it should follow R-1 and R-2 rather than precede them, so its new screens are built once.
+
+## As built (2026-10-04, same day)
+
+Five commits, each merged to main with build, lint, typecheck and tests clean: R-1 `2db5a03`, R-2 `d453f71`, R-3 `b86dffa`, R-4 `a154e27`, R-5 `5b16dbf`. Frontend tests 198 → 217 (23 files); backend 501, untouched. Nothing in the backend changed.
+
+**What landed, phase by phase.**
+
+- **R-1.** `theme.css` carries the type scale (`--fs-12…36`), the target floors (`--target` 44, `--chip` 36, `--target-gap` 8), one transition (`--t` 150ms, `--t-open` 250ms) and tokens for every colour a component used to spell out (`--surface-2`, `--text-bright`, `--monitor`, `--frame`, `--glow`, `--scrim`, `--orb-highlight`, `--accent-bright`). The body is 16px; every button, select and input is 44px by default; chips opt down to 36 with 8px gaps; text links keep their look and grow their hit area with padding and a negative margin. Disabled is `opacity: .5`. Fills animate `transform`; the orb's glow is a pseudo-element's opacity; `100dvh` everywhere; `color-scheme` and `theme-color` metas. `styles/theme.test.ts` keeps the contract from the stylesheets themselves: no raw colour, no outline removed without a ring, no text under 12px, `--faint` only on the grip, chips with a stated height, no `width`/`left` transitions, no `vh`.
+- **R-2.** `useModal` gives the Consent and Ship sheets what a modal owes the keyboard. The chat is a polite log that says who spoke. One status region per panel; progressbars with values; row chips and working blocks are status, failures are alerts. `h1` for the brand, `h2` for every panel and card title, `<main>` on every screen, a skip link. Transcript rows are listitems in a list (the old `role="row"` had no grid). Delivery chips carry `aria-pressed`. The grip's label promises a drag or Enter, and Enter opens the place control. An unreadable "Starts at" is `aria-invalid`, explained in rose, and Hear it is disabled. Escape cancels a rename; the role guess's reason is visible.
+- **R-3.** The row's actions are laid over its right edge (clipped away when hidden, so they neither squeeze the line nor catch taps), with a "…" button that opens them under the line on touch; the grip is a 44px target; Backspace asks twice, Delete removes at once. One export button: *Export MP4* → *Exporting…* → *Download MP4* with *Export again* beside it; the "inserts" sentence shows at every width. Delete is a strip across the row with Keep focused first and "Deleted · Undo" for five seconds before the request goes. Two takes stack under 600px; the transport wraps under 480px; timeline lanes are 44px tall on a coarse pointer; a disabled Approve says why.
+- **R-4.** Keep, Another take, Approve, Redo, Stop, Go ahead and the plan's ticks and pills show a pending state with `aria-busy` until their request returns. Plan and conversation failures are Voltage's reply in the thread; the strip under the player keeps render, export, move and keep errors. The send button is labelled *Plan it*, *Change the plan*, *Answer* or *Preview the change*. Three skeleton rows stand where the first plan will be; rows unfold with `grid-template-rows`. The upload shows a bar and a sentence. The voice's description and the approve-anyway note are visible. `clock()` never shows a negative time. `feedback.test.tsx` covers the pending states, the invalid time, the send label and the clock.
+- **R-5.** The timeline's words are a memoised child, so the playhead moves alone. A past project's frame mounts when its row nears the viewport. Roving focus in the transcript: Tab moves row to row and only the focused row exposes its controls.
+
+**The checklist, re-run.** No emoji icons (inline SVG throughout). `cursor: pointer` on every button (global). Hover and state transitions 150–250ms (global). Text contrast: `--faint` remains only on the grip glyph; everything readable is `--muted` or brighter. Focus visible: three `outline: none` sites remain, each with a 2px ring on the element or its container (the chat composer, the goal card, the transcript row). Reduced motion: the global rule zeroes every transition and animation, including the new shimmer, slide and unfold. Widths: the start screen was captured at 1440 and 500 — no horizontal scroll, long filenames wrap, Delete is a tap target; the upload state was captured by accident at 1440 and reads right (indeterminate bar, sentence, an inert button). Tooltips left on purpose: the avatar's name (its `aria-label` says the same), the send button (same as its label), the filename (full name on hover, shown in the ship sheet too), the spend meter's breakdown (also in its `aria-valuetext`).
+
+**Left for later.**
+
+- Real upload progress: an upload through `fetch` reports none; moving to XHR changes the test harness's fetch mocks. The bar is indeterminate for now.
+- The silent clip's empty transcript still reads as a sentence; the place editor is UX-5's.
+- The spend meter's breakdown as a visible popover rather than `aria-valuetext`.
+- Headless captures of the editor itself: Chrome's new headless mode reaches the project only under `--virtual-time-budget`, which takes minutes per capture; the editor was checked at 1440 before R-1 and the transcript's measure is to be confirmed live once the Chrome extension connects. A VoiceOver pass is the user's.
