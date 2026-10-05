@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Voltage · Row states</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="voltage.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=Instrument+Sans:wght@400;500;600&display=swap">
+<style>body{margin:0}</style>
+</helmet>
+<div style="width: 760px; min-height: 1060px; padding: 24px; background: var(--bg); color: var(--text); font-family: var(--ui); display: flex; flex-direction: column; gap: 14px;">
+  <p class="small muted">Every state a line can be in.</p>
+  <section class="script">
+    <div class="row g"><button class="grip" type="button" aria-label="Move this line: drag up or down, or press Enter to type a time"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="9" cy="6" r="1.8"/><circle cx="15" cy="6" r="1.8"/><circle cx="9" cy="12" r="1.8"/><circle cx="15" cy="12" r="1.8"/><circle cx="9" cy="18" r="1.8"/><circle cx="15" cy="18" r="1.8"/></svg></button><span class="t num">0:00.4</span><span class="who"><span class="dot a"></span>Untouched</span><span class="words">Welcome to Mehta's.</span><span class="state"><span class="actions"><button class="btn sm quiet" type="button">Change</button><button class="btn sm quiet" type="button">Add after</button><button class="btn sm quiet" type="button">Remove</button></span></span></div>
+
+    <div class="row g"><button class="grip" type="button" aria-label="Move this line: drag up or down, or press Enter to type a time"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="9" cy="6" r="1.8"/><circle cx="15" cy="6" r="1.8"/><circle cx="9" cy="12" r="1.8"/><circle cx="15" cy="12" r="1.8"/><circle cx="9" cy="18" r="1.8"/><circle cx="15" cy="18" r="1.8"/></svg></button><span class="t num">0:00.4</span><span class="who"><span class="dot a"></span>Planned</span><span class="words">…is <del>twenty</del> <ins>thirty</ins> percent off.</span><span class="state"><span class="pill amber">Planned</span></span><span class="sub">Not voiced yet. Nothing charged.</span></div>
+
+    <div class="row g" aria-busy="true"><button class="grip" type="button" aria-label="Move this line: drag up or down, or press Enter to type a time"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="9" cy="6" r="1.8"/><circle cx="15" cy="6" r="1.8"/><circle cx="9" cy="12" r="1.8"/><circle cx="15" cy="12" r="1.8"/><circle cx="9" cy="18" r="1.8"/><circle cx="15" cy="18" r="1.8"/></svg></button><span class="t num">0:06.8</span><span class="who"><span class="dot a"></span>Voicing</span><span class="words">Till <del>Sunday</del> <ins>Monday</ins>.</span><span class="state"><span class="pill grey"><span class="orb" style="width: 10px; height: 10px;"></span>Voicing…</span></span><span class="sub">Take 2. The first ran 9% long.</span></div>
+
+    <div class="row g"><button class="grip" type="button" aria-label="Move this line: drag up or down, or press Enter to type a time"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="9" cy="6" r="1.8"/><circle cx="15" cy="6" r="1.8"/><circle cx="9" cy="12" r="1.8"/><circle cx="15" cy="12" r="1.8"/><circle cx="9" cy="18" r="1.8"/><circle cx="15" cy="18" r="1.8"/></svg></button><span class="t num">0:06.8</span><span class="who"><span class="dot a"></span>Ready</span><span class="words">Till <del>Sunday</del> <ins>Monday</ins>.</span><span class="state"><span class="pill amber">Ready to hear</span></span><span class="sub">Sounds like him. <b>Hear it · Keep · Another take</b></span></div>
+
+    <div class="row g" style="box-shadow: inset 3px 0 0 var(--rose);"><button class="grip" type="button" aria-label="Move this line: drag up or down, or press Enter to type a time"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="9" cy="6" r="1.8"/><circle cx="15" cy="6" r="1.8"/><circle cx="9" cy="12" r="1.8"/><circle cx="15" cy="12" r="1.8"/><circle cx="9" cy="18" r="1.8"/><circle cx="15" cy="18" r="1.8"/></svg></button><span class="t num">0:11.0</span><span class="who"><span class="dot a"></span>Needs you</span><span class="words">Come in <ins>any day this week</ins> and we'll have the new range too.</span><span class="state"><span class="pill rose">Needs you</span></span><span class="sub rose">Runs 0.6 s long with nowhere to go. Voltage suggests: <b>"Come in this week for the new range."</b> · <span class="muted">or speed it up · or let it run past</span></span></div>
+
+    <div class="row g"><button class="grip" type="button" aria-label="Move this line: drag up or down, or press Enter to type a time"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="9" cy="6" r="1.8"/><circle cx="15" cy="6" r="1.8"/><circle cx="9" cy="12" r="1.8"/><circle cx="15" cy="12" r="1.8"/><circle cx="9" cy="18" r="1.8"/><circle cx="15" cy="18" r="1.8"/></svg></button><span class="t num">0:06.8</span><span class="who"><span class="dot a"></span>Kept</span><span class="words">Till <del>Sunday</del> <ins>Monday</ins>.</span><span class="state"><span class="pill ok">Kept</span><span class="actions"><button class="btn sm quiet" type="button">Undo</button><button class="btn sm quiet" type="button">Move</button></span></span></div>
+
+    <div class="row g"><button class="grip" type="button" aria-label="Move this line: drag up or down, or press Enter to type a time"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="9" cy="6" r="1.8"/><circle cx="15" cy="6" r="1.8"/><circle cx="9" cy="12" r="1.8"/><circle cx="15" cy="12" r="1.8"/><circle cx="9" cy="18" r="1.8"/><circle cx="15" cy="18" r="1.8"/></svg></button><span class="t num">0:11.0</span><span class="who"><span class="dot a"></span>Removed</span><span class="words"><del>Come in on Friday and we'll have the new range too.</del></span><span class="state"><span class="pill ok">Removed</span><button class="btn sm quiet" type="button">Undo</button></span><span class="sub">Room tone fills it.</span></div>
+
+    <div class="row g"><button class="grip" type="button" aria-label="Move this line: drag up or down, or press Enter to type a time"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="9" cy="6" r="1.8"/><circle cx="15" cy="6" r="1.8"/><circle cx="9" cy="12" r="1.8"/><circle cx="15" cy="12" r="1.8"/><circle cx="9" cy="18" r="1.8"/><circle cx="15" cy="18" r="1.8"/></svg></button><span class="t num">0:12.3</span><span class="who"><span class="dot a"></span>Moved</span><span class="words">Mehta's, on Hill Road.</span><span class="state"><span class="pill ok">Moved from 0:14.6</span><button class="btn sm quiet" type="button">Undo</button></span><span class="sub">As spoken. Nothing voiced.</span></div>
+
+    <div class="row g"><button class="grip" type="button" aria-label="Move this line: drag up or down, or press Enter to type a time"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="9" cy="6" r="1.8"/><circle cx="15" cy="6" r="1.8"/><circle cx="9" cy="12" r="1.8"/><circle cx="15" cy="12" r="1.8"/><circle cx="9" cy="18" r="1.8"/><circle cx="15" cy="18" r="1.8"/></svg></button><span class="t num">0:06.8</span><span class="who"><span class="dot a"></span>Held</span><span class="words">Till <del>Sunday</del> <ins>Monday</ins>.</span><span class="state"><span class="pill grey">Held</span><button class="btn sm quiet" type="button">Keep</button></span><span class="sub">Stays a draft when you ship.</span></div>
+
+    <div class="row g" style="box-shadow: inset 3px 0 0 var(--rose);"><button class="grip" type="button" aria-label="Move this line: drag up or down, or press Enter to type a time"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="9" cy="6" r="1.8"/><circle cx="15" cy="6" r="1.8"/><circle cx="9" cy="12" r="1.8"/><circle cx="15" cy="12" r="1.8"/><circle cx="9" cy="18" r="1.8"/><circle cx="15" cy="18" r="1.8"/></svg></button><span class="t num">0:00.4</span><span class="who"><span class="dot a"></span>Failed</span><span class="words">…is <ins>thirty</ins> percent off.</span><span class="state"><span class="pill rose">Couldn't voice it</span><button class="btn sm" type="button">Try again</button></span><span class="sub rose">The voice service didn't answer after three tries. Nothing was charged.</span></div>
+  </section>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":760,"height":1060}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

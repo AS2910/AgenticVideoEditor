@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Voltage · One line, in full</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="voltage.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=Instrument+Sans:wght@400;500;600&display=swap">
+<style>body{margin:0}</style>
+</helmet>
+<div style="width: 760px; min-height: 900px; padding: 24px; background: var(--bg); color: var(--text); font-family: var(--ui); display: flex; flex-direction: column; gap: 14px;">
+  <p class="small muted">A line opened for editing.</p>
+  <section class="script">
+    <div class="row g"><button class="grip" type="button" aria-label="Move this line: drag up or down, or press Enter to type a time"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="9" cy="6" r="1.8"/><circle cx="15" cy="6" r="1.8"/><circle cx="9" cy="12" r="1.8"/><circle cx="15" cy="12" r="1.8"/><circle cx="9" cy="18" r="1.8"/><circle cx="15" cy="18" r="1.8"/></svg></button><span class="t num">0:05.1</span><span class="who"><span class="dot b"></span>the Customer</span><span class="words">Even the blue one?</span><span class="state"></span></div>
+
+    <div class="row focus g" style="row-gap: 4px;"><button class="grip" type="button" aria-label="Move this line: drag up or down, or press Enter to type a time"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="9" cy="6" r="1.8"/><circle cx="15" cy="6" r="1.8"/><circle cx="9" cy="12" r="1.8"/><circle cx="15" cy="12" r="1.8"/><circle cx="9" cy="18" r="1.8"/><circle cx="15" cy="18" r="1.8"/></svg></button>
+      <span class="t num">0:06.8</span><span class="who"><span class="dot a"></span>the Shopkeeper</span>
+      <span class="words muted"><span class="label">As shot:</span> Even the blue one. Till Sunday.</span>
+      <span class="state"><button class="btn sm quiet" type="button">Cancel</button></span>
+
+      <div class="editor">
+        <div class="field">
+          <label for="words">New words</label>
+          <textarea id="words" rows="2">Even the blue one. Till Monday.</textarea>
+          <div style="display: flex; align-items: center; gap: 12px;"><button class="btn sm quiet" type="button" style="padding-left: 0;">Ask Voltage for wording</button><span class="small ok">Fits the slot with room to spare.</span></div>
+        </div>
+        <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px;">
+          <div class="field"><span class="label muted">How it's said</span><div class="chips"><button class="chip" type="button" aria-pressed="true">As spoken</button><button class="chip" type="button">Warmer</button><button class="chip" type="button">More excited</button><button class="chip" type="button">Calmer</button><button class="chip" type="button">Slower</button><button class="chip" type="button">Firmer</button></div></div>
+          <div class="field"><label for="voice" class="muted">Whose voice</label><select id="voice"><option>the Shopkeeper · stand-in: Daniel</option><option>the Customer · stand-in: Sarah</option></select></div>
+          <div class="field"><span class="label muted">Where the sound goes</span><div class="seg"><button type="button" aria-pressed="true">Replace the line</button><button type="button">Over the picture</button><button type="button">Hold the picture</button></div></div>
+          <div class="field"><span class="label muted">If it runs long</span><div class="seg"><button type="button" aria-pressed="true">Use the pause after</button><button type="button">Shorten it</button><button type="button">Ask me</button></div></div>
+          <div class="field"><label for="starts" class="muted">Starts at</label><div class="nudge"><button class="btn sm icon" type="button" aria-label="Earlier by a tenth of a second">−</button><input id="starts" type="text" value="0:06.80" class="num" aria-describedby="starts-hint"><button class="btn sm icon" type="button" aria-label="Later by a tenth of a second">+</button></div><span id="starts-hint" class="small faint">Type, nudge, or drag the grip.</span></div>
+        </div>
+        <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding-top: 4px;">
+          <span class="small muted num">About 1¢</span>
+          <div style="flex: 1;"></div>
+          <button class="btn primary" type="button"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>Hear it</button>
+        </div>
+      </div>
+
+      <div class="take" role="group" aria-label="The take">
+        <button class="btn sm" type="button"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>Hear it in place</button>
+        <span class="verdict">Sounds like him. Ran 0.2 s into the pause after.<span class="score num">0.91 · take 2 of 2</span></span>
+        <button class="btn sm primary" type="button">Keep <kbd style="margin-left: 4px;">K</kbd></button>
+        <button class="btn sm" type="button">Another take</button>
+      </div>
+      <span class="sub"><span class="muted">Take 1 ran 9% long and was set aside.</span> <button class="btn sm quiet" type="button" style="min-height: 28px; padding: 0 6px;">Hear it anyway</button></span>
+    </div>
+
+    <div class="row g"><button class="grip" type="button" aria-label="Move this line: drag up or down, or press Enter to type a time"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="9" cy="6" r="1.8"/><circle cx="15" cy="6" r="1.8"/><circle cx="9" cy="12" r="1.8"/><circle cx="15" cy="12" r="1.8"/><circle cx="9" cy="18" r="1.8"/><circle cx="15" cy="18" r="1.8"/></svg></button><span class="t num">0:09.2</span><span class="who"><span class="dot b"></span>the Customer</span><span class="words">I'll take it.</span><span class="state"></span></div>
+  </section>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":760,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Voltage · Moving a line</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="voltage.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=Instrument+Sans:wght@400;500;600&display=swap">
+<style>body{margin:0}</style>
+</helmet>
+<div style="width: 760px; min-height: 900px; padding: 24px; background: var(--bg); color: var(--text); font-family: var(--ui); display: flex; flex-direction: column; gap: 16px;">
+  <div style="display: flex; flex-direction: column; gap: 4px;">
+    <h2>Moving a line</h2>
+    <p class="small muted">Dragging changes <b>when</b> a line is said. Nothing is voiced.</p>
+  </div>
+
+  <section class="script" aria-label="The script, mid-drag">
+    <div class="script-head"><h3>1 · Drag the grip</h3></div>
+    <div class="row g"><button class="grip" type="button" aria-label="Move this line"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="9" cy="6" r="1.8"/><circle cx="15" cy="6" r="1.8"/><circle cx="9" cy="12" r="1.8"/><circle cx="15" cy="12" r="1.8"/><circle cx="9" cy="18" r="1.8"/><circle cx="15" cy="18" r="1.8"/></svg></button><span class="t num">0:06.8</span><span class="who"><span class="dot a"></span>the Shopkeeper</span><span class="words">Even the blue one. Till <ins>Monday</ins>.</span><span class="state"><span class="pill ok">Kept</span></span></div>
+    <div class="row g"><button class="grip" type="button" aria-label="Move this line"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="9" cy="6" r="1.8"/><circle cx="15" cy="6" r="1.8"/><circle cx="9" cy="12" r="1.8"/><circle cx="15" cy="12" r="1.8"/><circle cx="9" cy="18" r="1.8"/><circle cx="15" cy="18" r="1.8"/></svg></button><span class="t num">0:09.2</span><span class="who"><span class="dot b"></span>the Customer</span><span class="words">I'll take it.</span><span class="state"></span></div>
+    <div class="dropline" aria-hidden="true"><span class="num">Lands at 0:09.9</span></div>
+    <div class="row g dragging" aria-grabbed="true"><button class="grip" type="button" aria-label="Move this line" style="color: var(--accent);"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="9" cy="6" r="1.8"/><circle cx="15" cy="6" r="1.8"/><circle cx="9" cy="12" r="1.8"/><circle cx="15" cy="12" r="1.8"/><circle cx="9" cy="18" r="1.8"/><circle cx="15" cy="18" r="1.8"/></svg></button><span class="t num" style="color: var(--accent);">0:09.9</span><span class="who"><span class="dot a"></span>the Shopkeeper</span><span class="words">Mehta's, on Hill Road. Open late.</span><span class="state"><span class="pill amber">Moving · from 0:14.6</span></span></div>
+    <div class="row g"><button class="grip" type="button" aria-label="Move this line"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="9" cy="6" r="1.8"/><circle cx="15" cy="6" r="1.8"/><circle cx="9" cy="12" r="1.8"/><circle cx="15" cy="12" r="1.8"/><circle cx="9" cy="18" r="1.8"/><circle cx="15" cy="18" r="1.8"/></svg></button><span class="t num">0:11.0</span><span class="who"><span class="dot a"></span>the Shopkeeper</span><span class="words"><del>Come in on Friday and we'll have the new range too.</del></span><span class="state"><span class="pill ok">Removed</span></span></div>
+    <div class="row g ghost" aria-hidden="true"><button class="grip" type="button" tabindex="-1"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="9" cy="6" r="1.8"/><circle cx="15" cy="6" r="1.8"/><circle cx="9" cy="12" r="1.8"/><circle cx="15" cy="12" r="1.8"/><circle cx="9" cy="18" r="1.8"/><circle cx="15" cy="18" r="1.8"/></svg></button><span class="t num">0:14.6</span><span class="who"><span class="dot a"></span>the Shopkeeper</span><span class="words">Mehta's, on Hill Road. Open late.</span><span class="state"><span class="small muted">where it was</span></span></div>
+  </section>
+
+  <div style="display: grid; grid-template-columns: minmax(0, 1fr) 236px; gap: 16px; align-items: start;">
+    <section class="script" aria-label="After the drop">
+      <div class="script-head"><h3>2 · After the drop</h3></div>
+      <div class="row g"><button class="grip" type="button" aria-label="Move this line"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="9" cy="6" r="1.8"/><circle cx="15" cy="6" r="1.8"/><circle cx="9" cy="12" r="1.8"/><circle cx="15" cy="12" r="1.8"/><circle cx="9" cy="18" r="1.8"/><circle cx="15" cy="18" r="1.8"/></svg></button><span class="t num">0:09.9</span><span class="who"><span class="dot a"></span>the Shopkeeper</span><span class="words">Mehta's, on Hill Road. Open late.</span><span class="state"><span class="pill ok">Moved from 0:14.6</span><button class="btn sm quiet" type="button">Undo</button></span><span class="sub">0:14.6 now holds room tone.</span></div>
+    </section>
+
+    <div style="display: flex; flex-direction: column; gap: 10px;">
+      <h3>3 · Without dragging</h3>
+      <div class="menu" role="menu" aria-label="More for this line">
+        <button type="button" role="menuitem">Move up <kbd>⌥↑</kbd></button>
+        <button type="button" role="menuitem">Move down <kbd>⌥↓</kbd></button>
+        <button type="button" role="menuitem">Shift to a time… <kbd>M</kbd></button>
+        <hr>
+        <button type="button" role="menuitem">Play the original <kbd>O</kbd></button>
+        <button type="button" role="menuitem">Remove <kbd>⌫</kbd></button>
+      </div>
+      <p class="small muted">With the grip focused: <kbd>Enter</kbd> opens Starts at, <kbd>↑</kbd> <kbd>↓</kbd> move a tenth of a second, <kbd>Shift</kbd> a whole one.</p>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":760,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

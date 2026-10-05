@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Voltage · Shipped</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="voltage.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=Instrument+Sans:wght@400;500;600&display=swap">
+<style>body{margin:0}</style>
+</helmet>
+<div style="position: relative; min-height: 860px; display: flex; flex-direction: column; background: var(--bg); color: var(--text); font-family: var(--ui);">
+  <header class="bar">
+    <a href="Main.dc.html" class="brand" style="text-decoration: none; color: inherit;"><span class="orb"></span>Voltage</a>
+    <span class="muted" aria-hidden="true">/</span>
+    <span style="font-weight: 500;">mehtas-window-offer.mp4</span><span class="small muted num">0:16</span>
+    <div style="flex: 1;"></div>
+    <div class="meter"><span class="num">$0.07 of $2.00</span><div class="track"><div class="fill" style="width: 4%;"></div></div></div>
+    <button class="btn sm" type="button">Review</button>
+    <button class="btn sm" type="button">Shipped</button>
+  </header>
+  <div class="shell" aria-hidden="true">
+    <main class="main">
+      <section class="monitor"><div class="frame"><div class="scene"></div><div class="fig"></div><div class="fig b"></div><span class="time num">0:00.0</span></div><div class="transport"><div class="tl"><div class="seg a" style="left: 2%; width: 27%;"></div><div class="seg b" style="left: 31%; width: 9%;"></div><div class="seg a" style="left: 42%; width: 13%;"></div><div class="seg b" style="left: 57%; width: 7%;"></div><div class="seg a" style="left: 68%; width: 20%;"></div><div class="seg a" style="left: 90%; width: 9%;"></div></div></div></section>
+      <section class="script"><div class="script-head"><h2>The script</h2></div><div class="row"><span class="t num">0:00.4</span><span class="who"><span class="dot a"></span>the Shopkeeper</span><span class="words">Welcome to Mehta's. Everything in the window is thirty percent off this week.</span><span class="state"><span class="pill ok">Shipped</span></span></div><div class="row"><span class="t num">0:05.1</span><span class="who"><span class="dot b"></span>the Customer</span><span class="words">Even the blue one?</span><span class="state"></span></div><div class="row"><span class="t num">0:06.8</span><span class="who"><span class="dot a"></span>the Shopkeeper</span><span class="words">Even the blue one. Till Monday.</span><span class="state"><span class="pill ok">Shipped</span></span></div><div class="row"><span class="t num">0:09.2</span><span class="who"><span class="dot b"></span>the Customer</span><span class="words">I'll take it.</span><span class="state"></span></div><div class="row"><span class="t num">0:11.0</span><span class="who"><span class="dot a"></span>the Shopkeeper</span><span class="words">Come in on Friday and we'll have the new range too.</span><span class="state"><span class="pill amber">Removal held</span></span></div><div class="row"><span class="t num">0:14.6</span><span class="who"><span class="dot a"></span>the Shopkeeper</span><span class="words">Mehta's, on Hill Road. Open late.</span><span class="state"></span></div></section>
+    </main>
+    <aside class="panel"><div class="thread"></div></aside>
+  </div>
+
+  <div class="scrim"></div>
+  <div class="sheet" role="dialog" aria-labelledby="ship-title" aria-modal="true">
+    <div style="display: flex; align-items: flex-start; gap: 14px;">
+      <span class="orb lg" style="margin-top: 6px;"></span>
+      <div style="display: flex; flex-direction: column; gap: 4px;">
+        <h1 id="ship-title">It's shipped.</h1>
+        <p class="muted">Same length as before, 16.2 seconds.</p>
+      </div>
+    </div>
+
+    <div style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; padding: 16px; border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--bg);">
+      <div class="stat"><b class="num">2</b><span>lines changed</span></div>
+      <div class="stat"><b class="num">1</b><span>held as a draft</span></div>
+      <div class="stat"><b class="num">4</b><span>takes voiced</span></div>
+      <div class="stat"><b class="num">$0.07</b><span>spent, all in</span></div>
+    </div>
+
+    <div style="display: flex; flex-direction: column; gap: 4px;">
+      <h3>What's in the file</h3>
+      <div class="row" style="grid-template-columns: 64px minmax(0,1fr) auto; padding: 10px 0;"><span class="t num">0:00.4</span><span class="words small">…is <ins>thirty</ins> percent off this week. <span class="muted">Take 1, sounds like him.</span></span><button class="btn sm quiet" type="button">Undo</button></div>
+      <div class="row" style="grid-template-columns: 64px minmax(0,1fr) auto; padding: 10px 0;"><span class="t num">0:06.8</span><span class="words small">Even the blue one. Till <ins>Monday</ins>. <span class="muted">Take 2, into the pause after.</span></span><button class="btn sm quiet" type="button">Undo</button></div>
+      <div class="row" style="grid-template-columns: 64px minmax(0,1fr) auto; padding: 10px 0; border-bottom: 0;"><span class="t num">0:11.0</span><span class="words small muted">Removal held. The Friday line is still in.</span><span></span></div>
+    </div>
+
+    <p class="small muted">The new words are in a stand-in voice, and the mouth still moves to the old ones. Both are noted in the file.</p>
+
+    <div style="display: flex; gap: 10px; flex-wrap: wrap; align-items: center;">
+      <button class="btn primary" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 4v12m0 0 4-4m-4 4-4-4M4 18v2h16v-2"/></svg>Download MP4</button>
+      <button class="btn" type="button">Copy link</button>
+      <button class="btn" type="button">Make a variant</button>
+      <div style="flex: 1;"></div>
+      <a class="btn quiet" href="Main.dc.html" style="text-decoration: none;">Back to your videos</a>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1280,"height":1180}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Voltage · Phone</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="voltage.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=Instrument+Sans:wght@400;500;600&display=swap">
+<style>body{margin:0}</style>
+</helmet>
+<div class="ph" style="color: var(--text); font-family: var(--ui);">
+  <header class="bar">
+    <a href="Main.dc.html" class="brand" style="text-decoration: none; color: inherit; font-size: 20px;"><span class="orb"></span>Voltage</a>
+    <div style="flex: 1;"></div>
+    <a class="btn sm" href="Review.dc.html" style="text-decoration: none;">Review · 1</a>
+  </header>
+
+  <div style="padding: 12px 16px 0;">
+    <div class="frame" style="width: 100%; height: 200px; border-radius: 12px;"><div class="scene"></div><div class="fig"></div><div class="fig b"></div><span class="time num">0:00.4</span><div class="cap" style="font-size: 14px; bottom: 10px;">…is <ins>thirty</ins> percent off this week.</div></div>
+    <div style="display: flex; align-items: center; gap: 10px; padding: 10px 0 4px;">
+      <button class="btn icon" type="button" aria-label="Play"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg></button>
+      <div class="tl" style="flex: 1; height: 32px;"><div class="seg a" style="left: 2%; width: 27%; top: 10px;"></div><div class="seg changed" style="left: 19%; width: 7%; top: 10px;"></div><div class="seg b" style="left: 31%; width: 9%; top: 10px;"></div><div class="seg a" style="left: 42%; width: 13%; top: 10px;"></div><div class="seg changed" style="left: 50%; width: 5%; top: 10px;"></div><div class="seg b" style="left: 57%; width: 7%; top: 10px;"></div><div class="seg" style="left: 68%; width: 20%; top: 10px; background: #3A332E;"></div><div class="seg a" style="left: 90%; width: 9%; top: 10px;"></div><div class="head" style="left: 19%;"></div></div>
+      <span class="num small muted">0:00.4</span>
+    </div>
+  </div>
+
+  <section class="script" style="margin: 8px 16px 0; flex: 1; overflow: hidden; border-radius: 14px;">
+    <div class="row focus g"><button class="grip" type="button" aria-label="Move this line: press and hold, then drag"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="9" cy="6" r="1.8"/><circle cx="15" cy="6" r="1.8"/><circle cx="9" cy="12" r="1.8"/><circle cx="15" cy="12" r="1.8"/><circle cx="9" cy="18" r="1.8"/><circle cx="15" cy="18" r="1.8"/></svg></button>
+      <span class="t num">0:00.4</span>
+      <span class="words"><span class="label muted" style="display: block;"><span class="dot a" style="display: inline-block; margin-right: 6px;"></span>the Shopkeeper</span>…is <del>twenty</del> <ins>thirty</ins> percent off this week.</span>
+      <span class="state"><button class="btn sm icon quiet" type="button" aria-label="More actions"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg></button></span>
+      <div class="take" style="flex-direction: column; align-items: stretch;">
+        <span class="verdict">Sounds like him, a touch bright.<span class="score num">0.86</span></span>
+        <div style="display: flex; gap: 8px;"><button class="btn sm" type="button" style="flex: 1;">Hear it</button><button class="btn sm primary" type="button" style="flex: 1;">Keep</button><button class="btn sm" type="button" style="flex: 1;">Another</button></div>
+      </div>
+    </div>
+    <div class="row g"><button class="grip" type="button" aria-label="Move this line: press and hold, then drag"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="9" cy="6" r="1.8"/><circle cx="15" cy="6" r="1.8"/><circle cx="9" cy="12" r="1.8"/><circle cx="15" cy="12" r="1.8"/><circle cx="9" cy="18" r="1.8"/><circle cx="15" cy="18" r="1.8"/></svg></button><span class="t num">0:05.1</span><span class="words"><span class="label muted" style="display: block;"><span class="dot b" style="display: inline-block; margin-right: 6px;"></span>the Customer</span>Even the blue one?</span><span class="state"></span></div>
+    <div class="row g" aria-busy="true"><button class="grip" type="button" aria-label="Move this line: press and hold, then drag"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="9" cy="6" r="1.8"/><circle cx="15" cy="6" r="1.8"/><circle cx="9" cy="12" r="1.8"/><circle cx="15" cy="12" r="1.8"/><circle cx="9" cy="18" r="1.8"/><circle cx="15" cy="18" r="1.8"/></svg></button><span class="t num">0:06.8</span><span class="words"><span class="label muted" style="display: block;"><span class="dot a" style="display: inline-block; margin-right: 6px;"></span>the Shopkeeper</span>Till <del>Sunday</del> <ins>Monday</ins>.</span><span class="state"><span class="pill grey">Voicing…</span></span></div>
+    <div class="row g"><button class="grip" type="button" aria-label="Move this line: press and hold, then drag"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="9" cy="6" r="1.8"/><circle cx="15" cy="6" r="1.8"/><circle cx="9" cy="12" r="1.8"/><circle cx="15" cy="12" r="1.8"/><circle cx="9" cy="18" r="1.8"/><circle cx="15" cy="18" r="1.8"/></svg></button><span class="t num">0:09.2</span><span class="words"><span class="label muted" style="display: block;"><span class="dot b" style="display: inline-block; margin-right: 6px;"></span>the Customer</span>I'll take it.</span><span class="state"></span></div>
+  </section>
+
+  <div style="margin: 0 16px; padding: 12px 14px 20px; border: 1px solid var(--line); border-bottom: 0; border-radius: 16px 16px 0 0; background: var(--surface); display: flex; flex-direction: column; gap: 10px;">
+    <div style="display: flex; align-items: center; gap: 10px;"><span class="orb"></span><span class="small" style="flex: 1;">Voicing line 3, take 2. One ready to hear.</span><button class="btn sm quiet" type="button">Open</button></div>
+    <div class="box" style="display: flex; gap: 8px;"><input type="text" placeholder="Tell Voltage…" aria-label="Tell Voltage" style="flex: 1;"><button class="btn primary" type="button">Send</button></div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

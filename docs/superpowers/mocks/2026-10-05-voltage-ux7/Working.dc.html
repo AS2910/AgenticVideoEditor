@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Voltage · Running the plan</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="voltage.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=Instrument+Sans:wght@400;500;600&display=swap">
+<style>body{margin:0}</style>
+</helmet>
+<div style="min-height: 900px; display: flex; flex-direction: column; background: var(--bg); color: var(--text); font-family: var(--ui);">
+  <header class="bar">
+    <a href="Main.dc.html" class="brand" style="text-decoration: none; color: inherit;"><span class="orb"></span>Voltage</a>
+    <span class="muted" aria-hidden="true">/</span>
+    <span style="font-weight: 500;">mehtas-window-offer.mp4</span><span class="small muted num">0:16</span>
+    <div style="flex: 1;"></div>
+    <div class="meter"><span class="num">$0.04 of $2.00</span><div class="track"><div class="fill" style="width: 2%;"></div></div></div>
+    <a class="btn sm" href="Review.dc.html" style="text-decoration: none;">Review · 1 ready</a>
+    <button class="btn sm" type="button" aria-disabled="true">Ship</button>
+  </header>
+
+  <div class="shell">
+    <main class="main">
+      <section class="monitor" aria-label="Monitor">
+        <div class="frame"><div class="scene"></div><div class="fig"></div><div class="fig b"></div><span class="time num">0:00.4</span><div class="cap">Welcome to Mehta's. Everything in the window is <ins>thirty</ins> percent off this week.</div></div>
+        <div class="transport">
+          <div style="display: flex; align-items: center; gap: 12px;">
+            <button class="btn icon" type="button" aria-label="Play"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg></button>
+            <span class="num small muted">0:00.4 / 0:16.2</span>
+            <div class="seg" role="group" aria-label="Which version plays"><button type="button" aria-pressed="true">Edited</button><button type="button" aria-pressed="false">Original</button></div>
+          </div>
+          <div class="tl" aria-label="Timeline">
+            <div class="seg a" style="left: 2%; width: 27%;"></div><div class="seg changed" style="left: 19%; width: 7%;"></div>
+            <div class="seg b" style="left: 31%; width: 9%;"></div>
+            <div class="seg a" style="left: 42%; width: 13%;"></div><div class="seg changed" style="left: 50%; width: 5%; opacity: .5;"></div>
+            <div class="seg b" style="left: 57%; width: 7%;"></div>
+            <div class="seg" style="left: 68%; width: 20%; background: #3A332E;"></div>
+            <div class="seg a" style="left: 90%; width: 9%;"></div>
+            <div class="head" style="left: 19%;"></div>
+          </div>
+          <div class="ticks num" aria-hidden="true"><span>0:00</span><span>0:04</span><span>0:08</span><span>0:12</span><span>0:16</span></div>
+        </div>
+      </section>
+
+      <section class="script" aria-label="The script">
+        <div class="script-head"><h2>The script</h2></div>
+
+        <div class="row focus g"><button class="grip" type="button" aria-label="Move this line: drag up or down, or press Enter to type a time"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="9" cy="6" r="1.8"/><circle cx="15" cy="6" r="1.8"/><circle cx="9" cy="12" r="1.8"/><circle cx="15" cy="12" r="1.8"/><circle cx="9" cy="18" r="1.8"/><circle cx="15" cy="18" r="1.8"/></svg></button>
+          <span class="t num">0:00.4</span><span class="who"><span class="dot a"></span>the Shopkeeper</span>
+          <span class="words">Welcome to Mehta's. Everything in the window is <del>twenty</del> <ins>thirty</ins> percent off this week.</span>
+          <span class="state"><span class="pill amber">Ready to hear</span></span>
+          <div class="take" role="group" aria-label="The take">
+            <button class="btn sm" type="button"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>Hear it in place</button>
+            <span class="verdict">Sounds like him, a touch bright on "thirty".<span class="score num">0.86 · take 1</span></span>
+            <button class="btn sm primary" type="button">Keep</button>
+            <button class="btn sm" type="button">Another take</button>
+          </div>
+        </div>
+
+        <div class="row g"><button class="grip" type="button" aria-label="Move this line: drag up or down, or press Enter to type a time"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="9" cy="6" r="1.8"/><circle cx="15" cy="6" r="1.8"/><circle cx="9" cy="12" r="1.8"/><circle cx="15" cy="12" r="1.8"/><circle cx="9" cy="18" r="1.8"/><circle cx="15" cy="18" r="1.8"/></svg></button><span class="t num">0:05.1</span><span class="who"><span class="dot b"></span>the Customer</span><span class="words">Even the blue one?</span><span class="state"></span></div>
+
+        <div class="row g" aria-busy="true"><button class="grip" type="button" aria-label="Move this line: drag up or down, or press Enter to type a time"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="9" cy="6" r="1.8"/><circle cx="15" cy="6" r="1.8"/><circle cx="9" cy="12" r="1.8"/><circle cx="15" cy="12" r="1.8"/><circle cx="9" cy="18" r="1.8"/><circle cx="15" cy="18" r="1.8"/></svg></button>
+          <span class="t num">0:06.8</span><span class="who"><span class="dot a"></span>the Shopkeeper</span>
+          <span class="words">Even the blue one. Till <del>Sunday</del> <ins>Monday</ins>.</span>
+          <span class="state"><span class="pill grey"><span class="orb" style="width: 10px; height: 10px;"></span>Voicing…</span></span>
+          <span class="sub">Take 2. The first ran 9% long.</span>
+        </div>
+
+        <div class="row g"><button class="grip" type="button" aria-label="Move this line: drag up or down, or press Enter to type a time"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="9" cy="6" r="1.8"/><circle cx="15" cy="6" r="1.8"/><circle cx="9" cy="12" r="1.8"/><circle cx="15" cy="12" r="1.8"/><circle cx="9" cy="18" r="1.8"/><circle cx="15" cy="18" r="1.8"/></svg></button><span class="t num">0:09.2</span><span class="who"><span class="dot b"></span>the Customer</span><span class="words">I'll take it.</span><span class="state"></span></div>
+
+        <div class="row g"><button class="grip" type="button" aria-label="Move this line: drag up or down, or press Enter to type a time"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="9" cy="6" r="1.8"/><circle cx="15" cy="6" r="1.8"/><circle cx="9" cy="12" r="1.8"/><circle cx="15" cy="12" r="1.8"/><circle cx="9" cy="18" r="1.8"/><circle cx="15" cy="18" r="1.8"/></svg></button>
+          <span class="t num">0:11.0</span><span class="who"><span class="dot a"></span>the Shopkeeper</span>
+          <span class="words"><del>Come in on Friday and we'll have the new range too.</del></span>
+          <span class="state"><span class="pill ok">Removed</span><button class="btn sm quiet" type="button">Undo</button></span>
+          <span class="sub">Room tone fills 0:11.0 to 0:14.4.</span>
+        </div>
+
+        <div class="row g"><button class="grip" type="button" aria-label="Move this line: drag up or down, or press Enter to type a time"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="9" cy="6" r="1.8"/><circle cx="15" cy="6" r="1.8"/><circle cx="9" cy="12" r="1.8"/><circle cx="15" cy="12" r="1.8"/><circle cx="9" cy="18" r="1.8"/><circle cx="15" cy="18" r="1.8"/></svg></button><span class="t num">0:14.6</span><span class="who"><span class="dot a"></span>the Shopkeeper</span><span class="words">Mehta's, on Hill Road. Open late.</span><span class="state"></span></div>
+      </section>
+    </main>
+
+    <sc-if value="{{open}}" hint-placeholder-val="{{ true }}">
+    <aside class="panel" aria-label="Voltage">
+      <div class="panel-head">
+        <span class="orb"></span><h2>Voltage</h2><span class="status">voicing line 3 · 1 ready</span>
+        <div style="flex: 1;"></div>
+        <button class="btn sm quiet" type="button" onClick="{{hide}}" aria-label="Hide Voltage. Press backslash to show it again">Hide <kbd style="margin-left: 2px;">\</kbd><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg></button>
+      </div>
+      <div class="thread" role="log">
+        <div class="msg me"><div class="bubble">The offer is now 30%, it runs till Monday, and drop the Friday line.</div></div>
+        <div class="msg"><span class="orb lg"></span><div class="v">
+          <div class="card" role="status" aria-live="polite">
+            <div style="display: flex; align-items: center; gap: 10px;"><h3>Voicing 3 lines</h3><span class="small muted num">1 of 3 · about 30 s left</span></div>
+            <div class="meter" style="width: 100%;"><div class="track" style="flex: 1; width: auto;"><div class="fill" style="width: 40%;"></div></div></div>
+            <div class="log">
+              <span>Line 5 removed.</span>
+              <span>Line 1 ready. Pitch within a semitone of his.</span>
+              <span class="now">Line 3, take 2. The first ran 9% long.</span>
+            </div>
+            <div style="display: flex; gap: 8px; justify-content: flex-end;"><button class="btn sm" type="button">Stop</button></div>
+          </div>
+        </div></div>
+      </div>
+      <form class="composer">
+        <label for="revise" class="label muted">Change the plan in your words</label>
+        <div class="box"><textarea id="revise" placeholder="e.g. warmer on line 1 · leave the Friday line after all"></textarea><button class="btn" type="button">Revise</button></div>
+      </form>
+    </aside>
+    </sc-if>
+    <sc-if value="{{closed}}" hint-placeholder-val="{{ false }}">
+    <div class="rail" aria-label="Voltage, tucked away">
+      <button class="btn icon quiet" type="button" onClick="{{show}}" aria-label="Show Voltage. Voicing line 3, one ready to hear"><span class="orb lg"></span></button>
+      <span class="badge" aria-hidden="true">1</span>
+      <span class="vert" aria-hidden="true">voicing line 3 · 1 ready</span>
+      <div style="flex: 1;"></div>
+      <button class="btn icon quiet" type="button" onClick="{{show}}" aria-label="Show Voltage"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m15 6-6 6 6 6"/></svg></button>
+    </div>
+    </sc-if>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1280,"height":1200}}'>
+class Component extends DCLogic {
+  constructor(props) { super(props); this.state = { open: true }; }
+  renderVals() {
+    return {
+      open: this.state.open,
+      closed: !this.state.open,
+      hide: () => this.setState({ open: false }),
+      show: () => this.setState({ open: true })
+    };
+  }
+}
+</script>
+</body>
+</html>

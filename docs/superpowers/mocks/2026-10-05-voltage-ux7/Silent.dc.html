@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Voltage · A silent clip</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="voltage.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=Instrument+Sans:wght@400;500;600&display=swap">
+<style>body{margin:0}</style>
+</helmet>
+<div style="min-height: 860px; display: flex; flex-direction: column; background: var(--bg); color: var(--text); font-family: var(--ui);">
+  <header class="bar">
+    <a href="Main.dc.html" class="brand" style="text-decoration: none; color: inherit;"><span class="orb"></span>Voltage</a>
+    <span class="muted" aria-hidden="true">/</span>
+    <span style="font-weight: 500;">goa-dusk.mp4</span><span class="small muted num">0:07</span>
+    <div style="flex: 1;"></div>
+    <div class="meter"><span class="num">$0.02 of $2.00</span><div class="track"><div class="fill" style="width: 1%;"></div></div></div>
+    <button class="btn sm" type="button" aria-disabled="true">Ship</button>
+  </header>
+
+  <div class="shell">
+    <main class="main">
+      <section class="monitor" aria-label="Monitor">
+        <div class="frame beach"><span class="time num">0:00.5</span><div class="cap"><ins>Welcome to Goa, at the end of the day.</ins></div></div>
+        <div class="transport">
+          <div style="display: flex; align-items: center; gap: 12px;">
+            <button class="btn icon" type="button" aria-label="Play"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg></button>
+            <span class="num small muted">0:00.5 / 0:07.5</span>
+          </div>
+          <div class="tl" aria-label="Timeline">
+            <div class="seg" style="left: 1%; width: 98%; background: #2F2925;"></div>
+            <div class="seg changed" style="left: 7%; width: 49%;"></div>
+            <div class="head" style="left: 7%;"></div>
+          </div>
+          <div class="ticks num" aria-hidden="true"><span>0:00</span><span>0:02</span><span>0:04</span><span>0:06</span><span>0:07.5</span></div>
+        </div>
+      </section>
+
+      <section class="script" aria-label="The picture">
+        <div class="script-head"><h2>The picture</h2><span class="small muted">no one speaks</span></div>
+        <div style="padding: 12px 16px;">
+          <div class="strip">
+            <div class="frame beach lit"><span class="time num">0:00.3</span></div>
+            <div class="frame beach"><span class="time num">0:02.0</span></div>
+            <div class="frame beach"><span class="time num">0:04.0</span></div>
+            <div class="frame beach" style="background: linear-gradient(180deg,#4E4458 0%,#7A5E54 40%,#55636A 42%,#36434A 100%);"><span class="time num">0:06.0</span></div>
+            <div class="frame beach" style="background: linear-gradient(180deg,#463D50 0%,#6E554D 40%,#4D5A61 42%,#313D44 100%);"><span class="time num">0:07.2</span></div>
+          </div>
+        </div>
+        <div class="row focus" style="grid-template-columns: 110px minmax(0,1fr) auto;">
+          <span class="t num">0:00.5 → 0:04.2</span>
+          <div style="display: flex; flex-direction: column; gap: 6px; min-width: 0;">
+            <span class="label muted">Voice-over · over the picture · Daniel, calm</span>
+            <span class="words"><ins>Welcome to Goa, at the end of the day.</ins></span>
+            <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;"><span class="small muted">Or:</span><button class="chip" type="button">This is Goa, just before the light goes.</button><button class="chip" type="button">Morjim beach. Dusk.</button></div>
+          </div>
+          <span class="state"><span class="pill amber">Planned</span><span class="actions"><button class="btn sm quiet" type="button">Change the words</button><button class="btn sm quiet" type="button">Move</button></span></span>
+        </div>
+        <div class="row" style="grid-template-columns: 110px minmax(0,1fr) auto; min-height: 60px;">
+          <span class="t"></span>
+          <button class="btn sm quiet" type="button" style="justify-self: start;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>Add another voice-over</button>
+          <span></span>
+        </div>
+      </section>
+    </main>
+
+    <aside class="panel" aria-label="Voltage">
+      <div class="panel-head">
+        <span class="orb"></span><h2>Voltage</h2><span class="status">has looked at the clip</span>
+        <div style="flex: 1;"></div>
+        <button class="btn sm quiet" type="button" aria-label="Hide Voltage. Press backslash to show it again">Hide <kbd style="margin-left: 2px;">\</kbd><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg></button>
+      </div>
+      <div class="thread" role="log">
+        <div class="msg"><span class="orb lg"></span><div class="v">
+          <p>A wide, empty beach at dusk, palms on the left, two people far off along the water. One shot, seven and a half seconds, and only the sea on the track.</p>
+        </div></div>
+        <div class="msg me"><div class="bubble">Look at it and help me decide what to say.</div></div>
+        <div class="msg"><span class="orb lg"></span><div class="v">
+          <div class="card q">
+            <p>Who's this for? A diary wants a quiet first-person line; an ad names the place up front.</p>
+            <p class="small muted">My guess: a diary. One unhurried shot, nobody posing.</p>
+            <div style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center;"><button class="btn sm primary" type="button">Go with your guesses</button><button class="btn sm" type="button">It's an ad</button><span class="small muted">1 of up to 3</span></div>
+          </div>
+        </div></div>
+        <div class="msg me"><div class="bubble">Go with your guesses.</div></div>
+        <div class="msg"><span class="orb lg"></span><div class="v">
+          <p>One calm line on the opening shot, ending before the two people reach the frame. It's in the script, with two alternatives.</p>
+          <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;"><span class="small muted num">About 2¢ · 20 seconds</span><div style="flex: 1;"></div><button class="btn primary" type="button">Go ahead</button></div>
+        </div></div>
+      </div>
+      <form class="composer">
+        <label for="goal" class="label muted">Say it differently, or place it yourself</label>
+        <div class="box"><textarea id="goal" placeholder="e.g. warmer · say it in Hindi · start it later"></textarea><button class="btn" type="button">Revise</button></div>
+        <div style="display: flex; align-items: center; gap: 12px;"><span class="small muted">Default voice:</span><select aria-label="Default voice"><option>Daniel · calm, low</option><option>Sarah · bright</option></select></div>
+      </form>
+    </aside>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1280,"height":1180}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>
