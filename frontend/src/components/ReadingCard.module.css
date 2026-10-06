@@ -1,0 +1,23 @@
+/* Voltage's first message (UX-7c): what it read, who speaks, what to ask for. */
+.card { display: flex; flex-direction: column; gap: 12px; }
+.opening { margin: 0; font-size: var(--fs-16); line-height: 1.55; }
+.opening strong { font-weight: 500; }
+.dim { color: var(--muted); }
+.lead { margin: 0; color: var(--muted); font-size: var(--fs-14); line-height: 1.5; }
+.label { color: var(--muted); font-size: var(--fs-13); white-space: nowrap; }
+.cast { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; font-size: var(--fs-14); }
+.member { display: flex; align-items: center; gap: 7px; }
+.memberName { font-weight: 500; }
+.guess { color: var(--muted); font-weight: 400; font-size: var(--fs-13); }
+.rename { width: 140px; min-height: var(--chip); padding: 0 8px; font-size: var(--fs-14); background: var(--bg-deep); color: var(--text); border: 1px solid var(--accent-line); border-radius: 8px; box-shadow: var(--recess), var(--ring); }
+.confirm { margin-left: auto; min-height: var(--chip); padding: 0 12px; border-radius: 999px; font-size: var(--fs-13); font-weight: 500; background: var(--accent-tint); color: var(--accent); border: 1px solid var(--accent-line); }
+.confirm:hover { border-color: var(--accent); box-shadow: var(--hl); }
+.link { background: none; border: none; min-height: 0; padding: 10px 4px; margin: -10px -4px; color: var(--accent); font-size: var(--fs-13); }
+.link:hover { text-decoration: underline; }
+.noticed { display: flex; flex-direction: column; gap: 8px; }
+.noticedList { margin: 0; padding: 0; list-style: none; display: flex; flex-wrap: wrap; gap: 6px 8px; }
+.noticedItem { padding: 4px 10px; border-radius: 999px; font-size: var(--fs-13); background: var(--raised); color: var(--text); white-space: nowrap; box-shadow: var(--hl); }
+.place { display: flex; flex-wrap: wrap; align-items: center; gap: var(--target-gap) 10px; font-size: var(--fs-14); }
+.examples { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.example { min-height: var(--chip); padding: 0 14px; border-radius: 999px; font-size: var(--fs-14); background: var(--surface); color: var(--text); border: 1px solid var(--line); box-shadow: var(--hl); text-align: left; }
+.example:hover { background: var(--raised); border-color: var(--line-strong); }

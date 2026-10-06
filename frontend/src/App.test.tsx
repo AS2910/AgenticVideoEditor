@@ -147,17 +147,16 @@ function routeFetch(approveStatus = 200, job: unknown = JOB_DONE) {
   })
 }
 
-/** load -> the goal stage, where Voltage has read the clip. */
+/** load -> the workspace, where Voltage has read the clip (its first message, UX-7c). */
 async function reachGoal(user: ReturnType<typeof userEvent.setup>) {
   await user.click(await screen.findByRole('button', { name: /sample ad/i }))
-  await screen.findByText('What should this video say?')
+  await screen.findByTestId('reading')
+  await screen.findByText('Get 20% off today only.')
 }
 
-/** load -> goal -> editor, hands-on, leaving the app on the editor screen. */
+/** load -> the workspace, with the word timeline open. */
 async function reachEditor(user: ReturnType<typeof userEvent.setup>) {
   await reachGoal(user)
-  await user.click(screen.getByRole('button', { name: /edit a line yourself/i }))
-  await screen.findByText('Get 20% off today only.')
   // The word timeline sits behind Precise; most of these tests select a word on it.
   await user.click(screen.getByRole('button', { name: 'Precise' }))
   await waitFor(() => expect(screen.getByText('20%')).toBeInTheDocument())
@@ -648,10 +647,9 @@ describe('App reopening from the URL (redesign)', () => {
     }))
     window.location.hash = 'p1'
     render(<App />)
-    // A fresh project opens on the goal stage; hands-on is one click away.
-    expect(await screen.findByText('What should this video say?')).toBeInTheDocument()
+    // A fresh project opens in the workspace, read by Voltage; every line is there to click.
+    expect(await screen.findByTestId('reading')).toBeInTheDocument()
     expect(screen.queryByRole('checkbox')).not.toBeInTheDocument()
-    await userEvent.setup().click(screen.getByRole('button', { name: /edit a line yourself/i }))
     expect(await screen.findByText('Get 20% off today only.')).toBeInTheDocument()
   })
 })
@@ -804,9 +802,9 @@ describe('App the agent (Phase 13)', () => {
     const { container } = render(<App />)
     await reachGoal(user)
 
-    // W1: the goal, on its own stage.
-    await user.type(screen.getByRole('textbox', { name: /what the video should say/i }), 'make it 30% off')
-    await user.click(screen.getByRole('button', { name: /plan it with me/i }))
+    // W1: the goal, in Voltage's box.
+    await user.type(screen.getByRole('textbox', { name: /describe a change/i }), 'make it 30% off')
+    await user.click(screen.getByRole('button', { name: /^plan it$/i }))
 
     // W3: the plan waits, with what Voltage noticed.
     expect(await screen.findByText('I read 1 line. One change does it.')).toBeInTheDocument()
@@ -865,7 +863,7 @@ describe('App the agent (Phase 13)', () => {
     const user = userEvent.setup()
     render(<App />)
     await reachGoal(user)
-    await user.type(screen.getByRole('textbox', { name: /what the video should say/i }), 'make it 30% off{Enter}')
+    await user.type(screen.getByRole('textbox', { name: /describe a change/i }), 'make it 30% off{Enter}')
     await user.click(await screen.findByRole('button', { name: 'Go ahead' }))
     await user.click(await screen.findByRole('button', { name: 'Review 2 ready changes' }))
 
@@ -898,7 +896,7 @@ describe('App the agent (Phase 13)', () => {
     const user = userEvent.setup()
     render(<App />)
     await reachGoal(user)
-    await user.type(screen.getByRole('textbox', { name: /what the video should say/i }), 'make it 30% off{Enter}')
+    await user.type(screen.getByRole('textbox', { name: /describe a change/i }), 'make it 30% off{Enter}')
     await screen.findByRole('checkbox', { name: 'Include the change at 0:00' })
 
     await user.click(screen.getByRole('checkbox', { name: 'Include the change at 0:00' }))
@@ -922,7 +920,7 @@ describe('App the agent (Phase 13)', () => {
     const user = userEvent.setup()
     render(<App />)
     await reachGoal(user)
-    await user.type(screen.getByRole('textbox', { name: /what the video should say/i }), 'make it 30% off{Enter}')
+    await user.type(screen.getByRole('textbox', { name: /describe a change/i }), 'make it 30% off{Enter}')
 
     expect(await screen.findByText('Needs you')).toBeInTheDocument()
     expect(screen.getByText('Voltage recommends')).toBeInTheDocument()
@@ -940,7 +938,7 @@ describe('App the agent (Phase 13)', () => {
     const user = userEvent.setup()
     render(<App />)
     await reachGoal(user)
-    await user.type(screen.getByRole('textbox', { name: /what the video should say/i }), 'make it 30% off{Enter}')
+    await user.type(screen.getByRole('textbox', { name: /describe a change/i }), 'make it 30% off{Enter}')
 
     await user.click(await screen.findByRole('button', { name: 'Add to plan' }))
 
@@ -969,7 +967,7 @@ describe('App the agent (Phase 13)', () => {
     const user = userEvent.setup()
     render(<App />)
     await reachGoal(user)
-    await user.type(screen.getByRole('textbox', { name: /what the video should say/i }), 'make it 30% off{Enter}')
+    await user.type(screen.getByRole('textbox', { name: /describe a change/i }), 'make it 30% off{Enter}')
 
     const thinking = await screen.findByTestId('thinking')
     expect(thinking).toHaveTextContent('The offer is said once, at 0:00.')
@@ -990,7 +988,7 @@ describe('App the agent (Phase 13)', () => {
     const user = userEvent.setup()
     render(<App />)
     await reachGoal(user)
-    await user.type(screen.getByRole('textbox', { name: /what the video should say/i }), 'make it 30% off{Enter}')
+    await user.type(screen.getByRole('textbox', { name: /describe a change/i }), 'make it 30% off{Enter}')
     await screen.findByTestId('clarify')
 
     await user.type(screen.getByRole('textbox', { name: /describe a change/i }), 'go{Enter}')
@@ -1003,7 +1001,7 @@ describe('App the agent (Phase 13)', () => {
     const user = userEvent.setup()
     const { container } = render(<App />)
     await reachGoal(user)
-    await user.type(screen.getByRole('textbox', { name: /what the video should say/i }), 'make it 30% off{Enter}')
+    await user.type(screen.getByRole('textbox', { name: /describe a change/i }), 'make it 30% off{Enter}')
     await user.click(await screen.findByRole('button', { name: 'Go ahead' }))
     await user.click(await screen.findByRole('button', { name: 'Review 1 ready change' }))
 
@@ -1045,7 +1043,7 @@ describe('App the agent (Phase 13)', () => {
     const user = userEvent.setup()
     render(<App />)
     await reachGoal(user)
-    await user.type(screen.getByRole('textbox', { name: /what the video should say/i }), 'make it 30% off{Enter}')
+    await user.type(screen.getByRole('textbox', { name: /describe a change/i }), 'make it 30% off{Enter}')
     await screen.findByRole('checkbox', { name: 'Include the change at 0:00' })
 
     const box = screen.getByRole('textbox', { name: /describe a change/i })
@@ -1065,7 +1063,7 @@ describe('App the agent (Phase 13)', () => {
     const user = userEvent.setup()
     render(<App />)
     await reachGoal(user)
-    await user.type(screen.getByRole('textbox', { name: /what the video should say/i }), 'make it 30% off{Enter}')
+    await user.type(screen.getByRole('textbox', { name: /describe a change/i }), 'make it 30% off{Enter}')
     await screen.findByRole('checkbox', { name: 'Include the change at 0:00' })
     await user.click(within(screen.getByRole('group', { name: 'Delivery at 0:00' })).getByRole('button', { name: 'calmer' }))
     await waitFor(() => expect(calls.some((c) => c.url.includes('/items/i1') && (c.body as { delivery?: string }).delivery === 'calmer')).toBe(true))
@@ -1088,7 +1086,7 @@ describe('App the agent (Phase 13)', () => {
     window.location.hash = 'p1'
     render(<App />)
     expect(await screen.findByText("Take · Brian's voice")).toBeInTheDocument()
-    expect(screen.queryByText('What should this video say?')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('reading')).not.toBeInTheDocument()
   })
 })
 
@@ -1131,7 +1129,7 @@ describe('App panel order', () => {
     expect(ids[ids.length - 1]).toBe('next-action')
   })
 
-  it('takes a clip with no speech to the goal stage, with its frames, and plans a voice-over (UX-5)', async () => {
+  it('opens a clip with no speech in the workspace: Voltage says what it saw, the place editor is the transcript (UX-5, UX-7c)', async () => {
     const base = routeFetch()
     vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
       if (url.endsWith('/projects') && init?.method === 'POST') return ok({ ...PROJECT, transcript: [], statements: [], frames: [{ index: 0, at: 0.3 }, { index: 1, at: 1.2 }, { index: 2, at: 2.0 }] })
@@ -1141,12 +1139,13 @@ describe('App panel order', () => {
     const user = userEvent.setup()
     render(<App />)
     await user.click(await screen.findByRole('button', { name: /sample ad/i }))
-    expect(await screen.findByText('What should this video say?')).toBeInTheDocument()
     expect(await screen.findByText(/No one speaks\. A beach at dusk\./)).toBeInTheDocument()
-    const frames = within(screen.getByTestId('frames')).getAllByRole('button')
-    expect(frames.map((b) => b.getAttribute('aria-label'))).toEqual(['Jump to 0:00', 'Jump to 0:01', 'Jump to 0:02'])
-    expect(screen.getByRole('button', { name: 'Place a voice-over yourself instead' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Introduce the place' })).toBeInTheDocument()
+    expect(within(screen.getByTestId('noticed')).getAllByRole('listitem').map((li) => li.textContent)).toEqual(['A wide beach at dusk'])
+    expect(screen.getByRole('button', { name: 'Looks right' })).toBeInTheDocument()
+    expect(screen.getByText('Where should the voice-over go?')).toBeInTheDocument()
+    // An example goes into the box, to send or change.
+    await user.click(screen.getByRole('button', { name: 'Introduce the place' }))
+    expect(screen.getByRole('textbox', { name: /describe a change/i })).toHaveValue('Introduce the place')
   })
 })
 
@@ -1292,6 +1291,31 @@ describe('App: shifting original speech (UX-1c)', () => {
   })
 })
 
+describe('App: one workspace, Voltage that hides (UX-7c)', () => {
+  it('tucks Voltage away to a rail with its state and brings it back, by the button or backslash', async () => {
+    vi.stubGlobal('fetch', routeFetch())
+    const user = userEvent.setup()
+    render(<App />)
+    await reachGoal(user)
+    expect(screen.getByRole('complementary', { name: 'Voltage' })).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: /hide voltage/i }))
+    expect(screen.queryByRole('complementary', { name: 'Voltage' })).not.toBeInTheDocument()
+    const rail = screen.getByTestId('rail')
+    expect(rail).toHaveTextContent('ready')
+    // The work is still on the page: the transcript and the monitor stay.
+    expect(screen.getByText('Get 20% off today only.')).toBeInTheDocument()
+    await user.click(within(rail).getAllByRole('button', { name: /show voltage/i })[0])
+    expect(screen.getByRole('complementary', { name: 'Voltage' })).toBeInTheDocument()
+    await user.keyboard('\\')
+    expect(screen.getByTestId('rail')).toBeInTheDocument()
+    await user.keyboard('\\')
+    expect(screen.getByRole('complementary', { name: 'Voltage' })).toBeInTheDocument()
+    // Typing a backslash in the box is just typing.
+    await user.type(screen.getByRole('textbox', { name: /describe a change/i }), 'a\\b')
+    expect(screen.getByRole('complementary', { name: 'Voltage' })).toBeInTheDocument()
+  })
+})
+
 describe('App: the monitor (UX-7b)', () => {
   it('captions the picture with the line at the playhead, the changed words lit, and draws the lines on the timeline', async () => {
     vi.stubGlobal('fetch', routeFetch())
@@ -1420,11 +1444,10 @@ describe('App sign-in (Phase 9c)', () => {
     render(<App />)
     expect(await screen.findByTestId('who')).toHaveTextContent('Ash')
     await user.click(await screen.findByRole('button', { name: /sample ad/i }))
-    await screen.findByText('What should this video say?')
+    await screen.findByText('Get 20% off today only.')
     const upload = calls.find((c) => c.url.endsWith('/projects') && c.init?.method === 'POST')
     expect((upload!.init!.headers as Record<string, string>)['X-Requested-With']).toBe('voltage')
 
-    await user.click(screen.getByRole('button', { name: /edit a line yourself/i }))
     await user.click(await screen.findByRole('button', { name: 'Sign out' }))
     expect(calls.some((c) => c.url.endsWith('/auth/logout') && c.init?.method === 'POST')).toBe(true)
     expect(await screen.findByRole('link', { name: /sign in with google/i })).toBeInTheDocument()

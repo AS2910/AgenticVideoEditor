@@ -22,7 +22,7 @@ import type { LineKey } from './transcript/keys'
 import { PlanCard } from './components/PlanCard'
 import { ReviewPanel } from './components/ReviewPanel'
 import { ActivityLog } from './components/ActivityLog'
-import { GoalStage } from './components/GoalStage'
+import { ReadingCard } from './components/ReadingCard'
 import { AutonomySwitch } from './components/AutonomySwitch'
 import { Orb } from './components/Orb'
 import { VoicePicker } from './components/VoicePicker'
@@ -57,7 +57,7 @@ const DEFAULT_VOICE = 'speaker-1'
 /** An answer to a question: the line already read, and the choices so far. */
 interface Answer { text: string; fit?: Fit; mix?: Mix; on_long?: LongLines; delivery?: string }
 
-type Stage = 'load' | 'goal' | 'editor'
+type Stage = 'load' | 'editor'
 
 /** Words that mean "take your guess" when Voltage has asked something. */
 const GO = /^(go|ok|okay|yes|sure|go ahead|fine|yep|do it)[.!]?$/i
@@ -127,6 +127,12 @@ export default function App() {
   const [reading, setReading] = useState<Reading | null>(null)
   const [readingBusy, setReadingBusy] = useState(false)
   const readFor = useRef<string | null>(null)
+  // A fresh project gets read once it opens; one with a plan or edits does not.
+  const wantReading = useRef(false)
+  // UX-7c: Voltage's panel can be tucked away to a rail; `\` toggles it.
+  const [panelHidden, setPanelHidden] = useState(false)
+  // An example picked from Voltage's first message, put into the composer.
+  const [seed, setSeed] = useState<{ text: string; id: number } | null>(null)
   const [planBusy, setPlanBusy] = useState(false)
   const [planProgress, setPlanProgress] = useState<{ value: number; step: string } | null>(null)
   const [review, setReview] = useState(false)
@@ -159,7 +165,7 @@ export default function App() {
   }, [])
 
   useEffect(() => {
-    if (stage === 'load' || stage === 'goal') void refreshProjects()
+    if (stage === 'load') void refreshProjects()
   }, [stage, refreshProjects])
 
   // Who is here (Phase 9c), then — a reload keeps you in the project you
@@ -245,8 +251,21 @@ export default function App() {
       if (e.key !== '/' || e.metaKey || e.ctrlKey || e.altKey) return
       const t = e.target as HTMLElement | null
       if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return
-      const box = composerRef.current ?? document.querySelector<HTMLTextAreaElement>('textarea[aria-label="What the video should say"]')
+      const box = composerRef.current
       if (box) { e.preventDefault(); box.focus() }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
+
+  // "\" hides Voltage to a rail and brings it back (UX-7c), from anywhere that is not typing.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== '\\' || e.metaKey || e.ctrlKey || e.altKey) return
+      const t = e.target as HTMLElement | null
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return
+      e.preventDefault()
+      setPanelHidden((h) => !h)
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
@@ -286,10 +305,10 @@ export default function App() {
       .catch(() => {}) // without the list, edits use the default voice
   }, [stage, voices.length])
 
-  // On the goal stage, Voltage takes the clip in once: an opening line and a
-  // role for each speaker (UX-2).
+  // When a fresh project opens, Voltage takes the clip in once: an opening
+  // line and a role for each speaker (UX-2), as its first message (UX-7c).
   useEffect(() => {
-    if (stage !== 'goal' || !projectId || reading || readFor.current === projectId) return
+    if (stage !== 'editor' || !projectId || !wantReading.current || reading || readFor.current === projectId) return
     readFor.current = projectId
     setReadingBusy(true)
     readProject(projectId)
@@ -308,8 +327,10 @@ export default function App() {
     setAutonomy(loaded.settings?.autonomy ?? 'ask')
     setPlan(loaded.plan ?? null)
     setReading(loaded.reading ?? null)
-    // UX-5: a clip with no speech starts on the goal stage too — Voltage looks at it.
-    setStage(loaded.plan || edited ? 'editor' : 'goal')
+    // UX-7c: one workspace. A fresh project is read on arrival (a clip with
+    // no speech is looked at); one with a plan or edits opens as it was.
+    wantReading.current = !loaded.plan && !edited
+    setStage('editor')
     window.location.hash = loaded.project_id
   }
 
@@ -1087,23 +1108,6 @@ export default function App() {
       </LoadScreen>
     )
   }
-  if (stage === 'goal') {
-    return (
-      <GoalStage
-        project={project}
-        reading={readingBusy ? null : reading}
-        busy={planning}
-        onPlan={(goal) => void makePlan(goal)}
-        onHandsOn={() => setStage('editor')}
-        onName={(label, name) => void changeSpeaker(label, { name })}
-        onPlace={(place) => void confirmThePlace(place)}
-      >
-        {error && <div className={styles.error} role="alert">{error}</div>}
-        <ProjectList projects={projects} onOpen={(id) => void openProject(id)} onDelete={(id) => void removeProject(id)} />
-      </GoalStage>
-    )
-  }
-
   const showEdited = view === 'edited' && rendered !== null
   const speakers = project.speakers ?? []
   const statements = statementsNow()
@@ -1200,7 +1204,7 @@ export default function App() {
   const caption = captionRuns?.map((r, k) => <Fragment key={k}>{k > 0 && ' '}{r.kind === 'ins' ? <ins>{r.text}</ins> : r.text}</Fragment>)
 
   return (
-    <div className={styles.app}>
+    <div className={styles.app} data-panel={panelHidden ? 'hidden' : undefined}>
       <a className="skip" href="#main">Skip to the transcript</a>
       <header className={styles.header}>
         <button className={styles.back} onClick={leave}>← Projects</button>
@@ -1330,12 +1334,28 @@ export default function App() {
         )}
       </main>
 
+      {panelHidden ? (
+        <aside className={styles.rail} aria-label="Voltage, tucked away" data-testid="rail">
+          <button className={styles.railShow} onClick={() => setPanelHidden(false)} aria-label={`Show Voltage. ${stateWord[0].toUpperCase()}${stateWord.slice(1)}`}>
+            <Orb size={26} working={busy} idle={!busy && !plan} />
+          </button>
+          {(needsYou.length > 0 || readyLines.length > 0) && (
+            <span className={styles.railBadge} data-tone={needsYou.length > 0 ? 'rose' : undefined} aria-hidden="true">{needsYou.length > 0 ? needsYou.length : readyLines.length}</span>
+          )}
+          <span className={styles.railWord} aria-hidden="true">{stateWord}</span>
+          <span className={styles.spacer} />
+          <button className={styles.railShow} onClick={() => setPanelHidden(false)} aria-label="Show Voltage">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="m15 6-6 6 6 6" /></svg>
+          </button>
+        </aside>
+      ) : (
       <aside className={styles.panel} aria-label="Voltage" aria-busy={busy || undefined}>
         <ChatPanel
           messages={messages}
           canSubmit
           onSubmit={submitComposer}
           inputRef={composerRef}
+          seed={seed}
           placeholder={placeholder}
           sendLabel={sendLabel}
           hint={clarifying ? 'Pick an answer above, or just say "go" and Voltage will use its guess.'
@@ -1350,15 +1370,22 @@ export default function App() {
               <span className={styles.panelNote} role="status">{stateWord}</span>
               <span className={styles.spacer} />
               <AutonomySwitch value={autonomy} onChange={(v) => void rememberAutonomy(v)} />
+              <button className={styles.hide} onClick={() => setPanelHidden(true)} aria-label="Hide Voltage. Press backslash to show it again">
+                Hide <kbd aria-hidden="true">\</kbd>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="m9 6 6 6-6 6" /></svg>
+              </button>
             </div>
           }
         >
           {!plan && messages.length === 0 && !generating && !planning && (
-            <div className={styles.welcome}>
-              {(project.statements?.length ?? 0) === 0
-                ? 'No one speaks in this clip. Tell me what it should say, or ask me to look at it and help; or place a voice-over yourself on the left.'
-                : "Tell me what this video should say and I'll plan it across every line it touches. Or click any line to change it yourself; I'll stay out of the way."}
-            </div>
+            <ReadingCard
+              project={project}
+              reading={readingBusy ? null : (reading ?? undefined)}
+              speakers={speakers}
+              onName={(label, name) => void changeSpeaker(label, { name })}
+              onPlace={(place) => void confirmThePlace(place)}
+              onExample={(text) => setSeed({ text, id: Date.now() })}
+            />
           )}
           {planning && !plan && (
             <div className={styles.skeleton} aria-hidden="true" data-testid="skeleton">
@@ -1497,6 +1524,7 @@ export default function App() {
           )}
         </ChatPanel>
       </aside>
+      )}
       {consentAsk && (
         <ConsentSheet who={consentAsk.who} busy={consenting} onConfirm={() => void confirmConsent()} onCancel={() => setConsentAsk(null)} />
       )}

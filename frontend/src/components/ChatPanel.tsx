@@ -19,6 +19,8 @@ interface ChatPanelProps {
   inputRef?: RefObject<HTMLInputElement | null>
   /** What the send button will do: Plan it, Change the plan, Answer… */
   sendLabel?: string
+  /** Words put into the box from outside (an example picked), to send or change. */
+  seed?: { text: string; id: number } | null
 }
 
 // The panel shows the latest exchange; earlier messages open on request.
@@ -27,10 +29,16 @@ const RECENT = 6
 /** The conversation with Voltage: what you ask for, and what comes back — a
  *  reply, a question, a take. */
 export function ChatPanel({
-  messages, canSubmit, onSubmit, children, toolbar, header, hint, inputRef, sendLabel = 'Send',
+  messages, canSubmit, onSubmit, children, toolbar, header, hint, inputRef, sendLabel = 'Send', seed,
   placeholder = 'Ask for a change, e.g. say "30% off" instead',
 }: ChatPanelProps) {
   const [prompt, setPrompt] = useState('')
+  // An example picked lands in the box with the cursor after it.
+  useEffect(() => {
+    if (!seed) return
+    setPrompt(seed.text)
+    inputRef?.current?.focus()
+  }, [seed, inputRef])
   const [showAll, setShowAll] = useState(false)
   const list = useRef<HTMLDivElement>(null)
   const disabled = !canSubmit || prompt.trim() === ''
