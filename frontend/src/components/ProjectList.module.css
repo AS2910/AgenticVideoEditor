@@ -1,37 +1,49 @@
-.list { width: 100%; display: flex; flex-direction: column; }
-.heading { margin: 0 0 6px; color: var(--muted); font-size: var(--fs-13); font-weight: 400; font-family: var(--ui); }
-.rows { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; }
-.row { display: flex; gap: 8px; align-items: center; border-top: 1px solid var(--line); }
-.open {
-  flex: 1; min-width: 0; display: flex; gap: 12px; align-items: center; text-align: left;
-  padding: 8px 0; background: none; border: none; color: var(--text);
+/* Recent projects as cards (UX-7f). */
+.list { width: 100%; display: flex; flex-direction: column; gap: 14px; }
+.heading { margin: 0; font-family: var(--serif); font-size: 21px; font-weight: 500; letter-spacing: -0.012em; }
+.cards { margin: 0; padding: 0; list-style: none; display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 18px; }
+.card {
+  position: relative; display: flex; flex-direction: column; min-width: 0; overflow: hidden;
+  border: 1px solid var(--line-soft); border-radius: var(--radius-lg); background: var(--surface-bg); box-shadow: var(--card-shadow);
+  transition: transform var(--t) var(--ease), box-shadow var(--t) var(--ease), border-color var(--t) var(--ease);
 }
+.card:hover { transform: translateY(-2px); box-shadow: var(--shadow); border-color: var(--line-strong); }
+.open { display: flex; flex-direction: column; width: 100%; min-width: 0; padding: 0; text-align: left; background: none; border: none; color: var(--text); border-radius: 0; }
+.open:focus-visible { outline-offset: -2px; }
+.frame { position: relative; display: block; width: 100%; aspect-ratio: 16 / 9; background: var(--frame); overflow: hidden; }
+.video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: block; }
+.time { position: absolute; left: 8px; bottom: 8px; padding: 2px 8px; border-radius: 6px; background: var(--caption-bg); backdrop-filter: blur(6px); font-size: var(--fs-12); color: var(--text); letter-spacing: 0.02em; font-variant-numeric: tabular-nums; }
+.body { display: flex; flex-direction: column; gap: 4px; padding: 12px 14px 14px; min-width: 0; }
+.line { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; }
+.name { min-width: 0; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .open:hover .name { color: var(--accent); }
-.frame { width: 56px; height: 36px; flex: none; border-radius: 6px; background: var(--frame); object-fit: cover; display: block; }
-.text { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-.line { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; }
-.name { min-width: 0; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.state { display: inline-flex; align-items: center; gap: 6px; font-size: var(--fs-12); font-weight: 500; padding: 2px 9px 2px 8px; white-space: nowrap; border-radius: 999px; background: var(--raised); color: var(--muted); }
+.state { display: inline-flex; align-items: center; gap: 6px; flex: none; font-size: var(--fs-12); font-weight: 500; padding: 2px 9px 2px 8px; white-space: nowrap; border-radius: 999px; background: var(--raised); color: var(--muted); }
 .state::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
 .state[data-state="shipped"] { color: var(--ok); background: var(--ok-tint); }
 .state[data-state="draft"] { color: var(--accent); background: var(--accent-tint); }
 .state[data-state="shipped"]::before, .state[data-state="draft"]::before { box-shadow: 0 0 6px currentColor; }
 .meta { color: var(--muted); font-size: var(--fs-14); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.delete, .cancel, .confirm, .undo {
-  padding: 0 14px; border-radius: 8px; font-size: var(--fs-14);
-  background: transparent; color: var(--muted); border: 1px solid transparent; white-space: nowrap;
+/* Delete sits in the card's corner, quiet until the card is under the pointer; always there on a touch screen. */
+.delete {
+  position: absolute; right: 8px; top: 8px; min-height: var(--chip); padding: 0 12px; border-radius: 8px; font-size: var(--fs-13);
+  background: var(--caption-bg); color: var(--muted); border: 1px solid transparent; white-space: nowrap; backdrop-filter: blur(6px);
+  opacity: 0; transition: opacity var(--t) var(--ease), color var(--t) var(--ease);
 }
-.delete:hover, .cancel:hover { border-color: var(--line); color: var(--text); }
-.cancel { color: var(--text); border-color: var(--line); background: var(--btn-bg); box-shadow: var(--btn-shadow); }
-/* The confirm sits in a strip across the row, never where Delete was tapped. */
-.confirm { color: var(--rose); border-color: var(--rose-line); margin-left: auto; }
+.card:hover .delete, .delete:focus-visible { opacity: 1; }
+.delete:hover { color: var(--text); border-color: var(--line); }
+@media (hover: none) { .delete { opacity: 1; } }
+.cancel, .confirm, .undo { padding: 0 14px; border-radius: 8px; font-size: var(--fs-14); white-space: nowrap; }
+.cancel { color: var(--text); border: 1px solid var(--line); background: var(--btn-bg); box-shadow: var(--btn-shadow); }
+.cancel:hover { border-color: var(--line-strong); background: var(--btn-bg-hover); }
+/* The confirm is a strip across the card, never where Delete was tapped. */
+.confirm { color: var(--rose); border: 1px solid var(--rose-line); background: transparent; }
 .confirm:hover { border-color: var(--rose); background: var(--rose-tint); }
-.undo { color: var(--accent); margin-left: auto; }
+.undo { color: var(--accent); border: 1px solid transparent; background: transparent; margin-left: auto; }
 .undo:hover { text-decoration: underline; }
 .strip {
-  flex: 1; display: flex; flex-wrap: wrap; align-items: center; gap: var(--target-gap) 12px;
-  padding: 8px 0 8px 12px; min-height: 52px; color: var(--muted); font-size: var(--fs-14);
-  border-left: 2px solid var(--rose-line);
+  display: flex; flex-direction: column; gap: var(--target-gap); padding: 14px 14px 14px 16px; min-height: 120px; justify-content: center;
+  color: var(--muted); font-size: var(--fs-14); line-height: 1.5; border-left: 3px solid var(--rose-line);
 }
 .strip strong { color: var(--text); font-weight: 500; }
+.stripButtons { display: flex; flex-wrap: wrap; gap: var(--target-gap); }
 .empty { margin: 0; color: var(--muted); font-size: var(--fs-14); }

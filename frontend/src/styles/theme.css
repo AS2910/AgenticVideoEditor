@@ -84,6 +84,7 @@
   --dot-shadow: inset 0 -3px 5px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.35);
   --stage-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.04), 0 10px 30px rgba(0, 0, 0, 0.45);
   --caption-bg: rgba(5, 9, 13, 0.72);
+  --drop-bg: radial-gradient(600px 200px at 50% 0%, rgba(63, 200, 180, 0.10), transparent 70%), var(--surface);
   /* The monitor's timeline: a block per line, by speaker; a changed span lit. */
   --block-x: var(--line);
   --block-stripe: repeating-linear-gradient(90deg, transparent 0 6px, rgba(0, 0, 0, 0.22) 6px 7px);

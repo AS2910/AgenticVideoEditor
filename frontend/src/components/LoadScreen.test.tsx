@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { LoadScreen } from './LoadScreen'
 
@@ -45,6 +45,25 @@ describe('LoadScreen', () => {
 
   it('states the limits up front', () => {
     setup()
-    expect(screen.getByText(/3 minutes/i)).toBeInTheDocument()
+    expect(screen.getByText(/three minutes/i)).toBeInTheDocument()
+  })
+})
+
+describe('LoadScreen as Your videos (UX-7f)', () => {
+  it('takes a file dropped on the zone', () => {
+    const { onLoad } = setup()
+    const file = new File(['video-bytes'], 'dropped.mp4', { type: 'video/mp4' })
+    const zone = screen.getByTestId('drop-zone')
+    fireEvent.dragOver(zone)
+    expect(zone).toHaveAttribute('data-over', 'true')
+    fireEvent.drop(zone, { dataTransfer: { files: [file] } })
+    expect(onLoad).toHaveBeenCalledWith(file)
+    expect(zone).not.toHaveAttribute('data-over')
+  })
+
+  it('ignores a drop while an upload is running', () => {
+    const { onLoad } = setup({ loading: true })
+    fireEvent.drop(screen.getByTestId('drop-zone'), { dataTransfer: { files: [new File(['x'], 'x.mp4', { type: 'video/mp4' })] } })
+    expect(onLoad).not.toHaveBeenCalled()
   })
 })

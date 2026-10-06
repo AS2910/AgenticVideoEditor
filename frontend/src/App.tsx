@@ -130,7 +130,9 @@ export default function App() {
   // A fresh project gets read once it opens; one with a plan or edits does not.
   const wantReading = useRef(false)
   // UX-7c: Voltage's panel can be tucked away to a rail; `\` toggles it.
-  const [panelHidden, setPanelHidden] = useState(false)
+  const [panelHidden, setPanelHidden] = useState(() => typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia('(max-width: 960px)').matches)
+  const panelRef = useRef<HTMLElement>(null)
+  const showPanel = () => { setPanelHidden(false); window.setTimeout(() => panelRef.current?.scrollIntoView?.({ block: 'start', behavior: 'smooth' }), 0) }
   // An example picked from Voltage's first message, put into the composer.
   const [seed, setSeed] = useState<{ text: string; id: number } | null>(null)
   const [planBusy, setPlanBusy] = useState(false)
@@ -1351,7 +1353,7 @@ export default function App() {
 
       {panelHidden ? (
         <aside className={styles.rail} aria-label="Voltage, tucked away" data-testid="rail">
-          <button className={styles.railShow} onClick={() => setPanelHidden(false)} aria-label={`Show Voltage. ${stateWord[0].toUpperCase()}${stateWord.slice(1)}`}>
+          <button className={styles.railShow} onClick={showPanel} aria-label={`Show Voltage. ${stateWord[0].toUpperCase()}${stateWord.slice(1)}`}>
             <Orb size={26} working={busy} idle={!busy && !plan} />
           </button>
           {(needsYou.length > 0 || readyLines.length > 0) && (
@@ -1359,12 +1361,13 @@ export default function App() {
           )}
           <span className={styles.railWord} aria-hidden="true">{stateWord}</span>
           <span className={styles.spacer} />
-          <button className={styles.railShow} onClick={() => setPanelHidden(false)} aria-label="Show Voltage">
+          <button className={styles.railOpen} onClick={showPanel}>Open</button>
+          <button className={styles.railShow} onClick={showPanel} aria-label="Show Voltage">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="m15 6-6 6 6 6" /></svg>
           </button>
         </aside>
       ) : (
-      <aside className={styles.panel} aria-label="Voltage" aria-busy={busy || undefined}>
+      <aside ref={panelRef} className={styles.panel} aria-label="Voltage" aria-busy={busy || undefined}>
         <ChatPanel
           messages={messages}
           canSubmit
