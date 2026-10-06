@@ -44,6 +44,20 @@
   padding: 12px 20px; border-bottom: 1px solid var(--line-soft);
 }
 .panelTitle { margin: 0; font-family: var(--serif); font-size: 17px; font-weight: 600; }
+/* UX-7c: Voltage hides to a rail. */
+.hide { display: inline-flex; align-items: center; gap: 6px; min-height: var(--chip); padding: 0 10px; border-radius: 9px; font-size: var(--fs-14); font-weight: 500; background: transparent; color: var(--muted); border: 1px solid transparent; white-space: nowrap; }
+.hide:hover { color: var(--text); background: var(--raised); }
+.hide kbd { display: inline-block; min-width: 22px; padding: 1px 6px; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 5px; background: var(--surface); font: 12px/18px var(--ui); color: var(--muted); text-align: center; }
+.app[data-panel="hidden"] { grid-template-columns: minmax(0, 1fr) 64px; }
+.rail {
+  grid-area: panel; display: flex; flex-direction: column; align-items: center; gap: 14px; padding: 14px 0; min-height: 0;
+  border-left: 1px solid var(--line-soft); background: var(--surface-bg); box-shadow: var(--panel-shadow);
+}
+.railShow { width: var(--target); height: var(--target); padding: 0; border-radius: 10px; background: transparent; color: var(--muted); border: 1px solid transparent; display: flex; align-items: center; justify-content: center; }
+.railShow:hover { color: var(--text); background: var(--raised); }
+.railBadge { min-width: 22px; height: 22px; padding: 0 7px; border-radius: 11px; background: var(--accent); color: var(--accent-ink); font-size: var(--fs-12); font-weight: 600; display: flex; align-items: center; justify-content: center; box-shadow: 0 0 10px var(--glow-color); }
+.railBadge[data-tone="rose"] { background: var(--rose); color: var(--rose-ink); box-shadow: none; }
+.railWord { writing-mode: vertical-rl; transform: rotate(180deg); font-size: var(--fs-13); color: var(--muted); white-space: nowrap; line-height: 1; letter-spacing: 0.02em; }
 .brand { margin: 0; display: flex; align-items: center; gap: 10px; font-family: var(--serif); font-size: 18px; font-weight: 600; letter-spacing: -0.01em; }
 .welcome { font-size: var(--fs-16); line-height: 1.6; color: var(--muted); }
 .thinking { display: flex; flex-direction: column; gap: 10px; padding: 2px 0 0 2px; font-size: 14px; line-height: 1.5; }
@@ -131,6 +145,9 @@
   .header .spacer { display: none; }
   .main { padding: 16px 16px 24px; overflow: visible; }
   .panel { border-left: none; border-top: 1px solid var(--line); min-height: 60vh; }
+  .app[data-panel="hidden"] { grid-template-columns: minmax(0, 1fr); }
+  .rail { flex-direction: row; padding: 8px 16px; border-left: none; border-top: 1px solid var(--line); box-shadow: none; }
+  .railWord { writing-mode: horizontal-tb; transform: none; }
 }
 
 /* Phase 9c: who is signed in, in the header; a blank while we ask. */

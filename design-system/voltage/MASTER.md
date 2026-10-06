@@ -85,7 +85,7 @@ Depth is allowed and specified, and every piece of it is a token, so a component
 
 ## Components in use
 
-`LineDoc` rows (states: Planned, Voicing…, Ready to hear, Needs you, Kept, Removed, Moved, Couldn't voice it), the line editor (words, Delivery chips, Voice, Sound meets picture, If it runs long, cost, Hear it), `QuestionCard` (a sentence in quotes + option chips + the agent's guess first), `PlanCard`, `Player` with the monitor bar and the Move block, `GoalStage`, `ProjectList` cards (frame, state word, last change), `ConsentSheet`, `SpendMeter`.
+`LineDoc` rows (states: Planned, Voicing…, Ready to hear, Needs you, Kept, Removed, Moved, Couldn't voice it), the line editor (words, Delivery chips, Voice, Sound meets picture, If it runs long, cost, Hear it), `QuestionCard` (a sentence in quotes + option chips + the agent's guess first), `PlanCard`, `Player` as the monitor (UX-7b: the 16:9 stage with the caption at the playhead, the timeline of speaker blocks, changed spans, word ticks, playhead and ruler, the Move block), `ReadingCard` (UX-7c: Voltage's first message — what it read or saw, the cast with role guesses to confirm or rename, the place to confirm, example chips that seed the composer; the goal stage is gone), the panel header with its state word and Hide (`\`), the 64 px rail when Voltage is tucked away (orb, count badge — coral for a question — the state word written vertically), `ProjectList` cards (frame, state word, last change), `ConsentSheet`, `SpendMeter`.
 
 ## UX-7 (2026-10-05): the room changes — applied in UX-7a, 2026-10-06
 
