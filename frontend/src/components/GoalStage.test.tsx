@@ -70,22 +70,43 @@ describe('GoalStage on a clip with no speech (UX-5)', () => {
   it('shows the frames where the lines would be, a voice-over brief, and its own examples', () => {
     const silent: Project = { ...PROJECT, statements: [], speakers: [], frames: [{ index: 0, at: 0.3 }, { index: 1, at: 3.9 }, { index: 2, at: 7.2 }] }
     const reading = { opening: 'No one speaks. A beach at dusk.', roles: [], sight: { opening: 'No one speaks. A beach at dusk.', setting: 'A wide beach at dusk', mood: 'calm', people: 'two', text_on_screen: '', place_guess: 'Goa', confidence: 'medium', beats: [] } }
-    render(<GoalStage project={silent} reading={reading} onPlan={noop} onHandsOn={noop} onName={noop} />)
+    render(<GoalStage project={silent} reading={reading} onPlan={noop} onHandsOn={noop} onName={noop} onPlace={noop} />)
     expect(screen.getByText(/I've looked at/)).toBeInTheDocument()
     expect(screen.getByText(/No one speaks\. A beach at dusk\./)).toBeInTheDocument()
     const frames = within(screen.getByTestId('frames')).getAllByRole('button')
     expect(frames).toHaveLength(3)
-    expect(frames[1]).toHaveAttribute('aria-label', 'Frame at 0:03: say it from here')
+    expect(frames[1]).toHaveAttribute('aria-label', 'Jump to 0:03')
     expect(within(frames[1]).getByRole('presentation', { hidden: true })).toHaveAttribute('src', '/api/projects/p3/frames/1')
-    expect(screen.getByText('A wide beach at dusk · Goa')).toBeInTheDocument()
+    // The clip itself is there to play, and what Voltage noticed is short lines plus one decision.
+    expect(screen.getByLabelText('bhaji.mp4, 48.9 seconds')).toHaveAttribute('src', `/api/projects/p3/artifacts/${'s'.repeat(64)}`)
+    expect(within(screen.getByTestId('noticed')).getAllByRole('listitem').map((li) => li.textContent)).toEqual(['A wide beach at dusk'])
+    expect(screen.getByRole('button', { name: 'Looks right' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Introduce the place' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Place a voice-over yourself instead' })).toBeInTheDocument()
   })
 
-  it('clicking a frame starts the goal from that moment', async () => {
-    const silent: Project = { ...PROJECT, statements: [], speakers: [], frames: [{ index: 0, at: 0.3 }] }
+  it('clicking a frame jumps the clip there, and offers to say it from that moment', async () => {
+    const silent: Project = { ...PROJECT, statements: [], speakers: [], frames: [{ index: 0, at: 3.9 }] }
     render(<GoalStage project={silent} reading={null} onPlan={noop} onHandsOn={noop} />)
-    await userEvent.click(screen.getByRole('button', { name: 'Frame at 0:00: say it from here' }))
-    expect(screen.getByRole('textbox', { name: 'What the video should say' })).toHaveValue('Say it from 0:00: ')
+    await userEvent.click(screen.getByRole('button', { name: 'Jump to 0:03' }))
+    expect((screen.getByLabelText('bhaji.mp4, 48.9 seconds') as HTMLVideoElement).currentTime).toBe(3.9)
+    await userEvent.click(screen.getByRole('button', { name: 'Say it from 0:03' }))
+    expect(screen.getByRole('textbox', { name: 'What the video should say' })).toHaveValue('Say it from 0:03: ')
+  })
+
+  it('lets you confirm the place Voltage guessed, or name the real one', async () => {
+    const onPlace = vi.fn()
+    const silent: Project = { ...PROJECT, statements: [], speakers: [], frames: [] }
+    const reading = { opening: 'No one speaks.', roles: [], sight: { opening: 'No one speaks.', setting: 'beach', mood: 'calm', people: 'two', text_on_screen: '', place_guess: 'a west-coast Indian beach', confidence: 'medium', beats: [], details: ['tyre tracks in the sand', 'a parasail at the end'] } }
+    const { rerender } = render(<GoalStage project={silent} reading={reading} onPlan={noop} onHandsOn={noop} onPlace={onPlace} />)
+    expect(within(screen.getByTestId('noticed')).getAllByRole('listitem').map((li) => li.textContent)).toEqual(['tyre tracks in the sand', 'a parasail at the end'])
+    await userEvent.click(screen.getByRole('button', { name: 'Looks right' }))
+    expect(onPlace).toHaveBeenCalledWith('a west-coast Indian beach')
+    await userEvent.click(screen.getByRole('button', { name: 'Somewhere else…' }))
+    await userEvent.type(screen.getByRole('textbox', { name: 'Where is this?' }), 'Morjim, Goa{Enter}')
+    expect(onPlace).toHaveBeenLastCalledWith('Morjim, Goa')
+    rerender(<GoalStage project={silent} reading={{ ...reading, sight: { ...reading.sight, place_confirmed: 'Morjim, Goa' } }} onPlan={noop} onHandsOn={noop} onPlace={onPlace} />)
+    expect(screen.getByText('Morjim, Goa')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Change' })).toBeInTheDocument()
   })
 })

@@ -64,3 +64,21 @@ Contrast: `--text` on `--bg` ≈ 14:1; `--muted` on `--surface` ≈ 6.5:1; `--fa
 ## Components in use
 
 `LineDoc` rows (states: Planned, Voicing…, Ready to hear, Needs you, Kept, Removed, Moved, Couldn't voice it), the line editor (words, Delivery chips, Voice, Sound meets picture, If it runs long, cost, Hear it), `QuestionCard` (a sentence in quotes + option chips + the agent's guess first), `PlanCard`, `Player` with the monitor bar and the Move block, `GoalStage`, `ProjectList` cards (frame, state word, last change), `ConsentSheet`, `SpendMeter`.
+
+## UX-7 (2026-10-05): the room changes
+
+Signed off from the mocks in `docs/superpowers/mocks/2026-10-05-voltage-ux7/` (plan: `docs/superpowers/plans/2026-10-05-ux7-the-workspace.md`). From UX-7a on, the tokens above are superseded by these; `voltage.css` in the mocks folder is the source until `theme.css` carries them.
+
+| Role | Token | Hex |
+|---|---|---|
+| Background / deep (inputs, tracks) | `--bg` / `--bg-deep` | `#0E141C` / `#0A0F15` |
+| Surface / raised / raised-2 | `--surface` / `--raised` / `--raised-2` | `#151E28` / `#1D2834` / `#243140` |
+| Line / soft line | `--line` / `--line-soft` | `#283645` / `#1F2B38` |
+| Text / muted / faint | `--text` / `--muted` / `--faint` | `#EDF2F6` / `#9BABBC` / `#6E7D8E` |
+| Accent: changed words, ready, focus, the orb | `--accent` / `--accent-fill` / `--accent-ink` | `#3FC8B4` / `#17A997` / `#04110F` |
+| Accent highlight / low / glow | `--accent-hi` / `--accent-lo` / `--glow` | `#B4F2E6` / `#0C6C62` / teal 42% |
+| Needs you | `--rose` | `#F08A6E` |
+| Kept / ok | `--ok` | `#86C98F` |
+| Speakers A / B | `--spk-a` / `--spk-b` | `#7FB8F0` / `#C9A2E8` |
+
+Amber is retired. Depth is allowed and specified: a hairline top highlight (`--hl`) on raised surfaces, three shadow steps (`--sh-1..3`), recessed inputs, raised buttons that press 1px, a frosted bar, the orb breathing on a 4.5 s cycle (off under `prefers-reduced-motion`). Fonts, sizes, targets, motion timings and interaction rules above stand. Alternatives B (light, indigo) and C (slate, coral) are on the mocks' Palettes board and are one token block to switch.

@@ -182,6 +182,10 @@ export interface Sight {
   place_guess: string
   confidence: string
   beats: { at: number; note: string }[]
+  /** Three to five short things worth noticing. */
+  details?: string[]
+  /** The place as the user confirmed or corrected it. */
+  place_confirmed?: string
 }
 
 /** A still of the picture, served at /projects/{id}/frames/{index} (UX-5). */

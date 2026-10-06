@@ -66,6 +66,8 @@ class Sight:
     place_guess: str = ""      # "Goa, India — a west-coast beach with casuarinas"
     confidence: str = ""       # low | medium | high
     beats: tuple[dict, ...] = ()   # {at, note}: what each frame shows
+    details: tuple[str, ...] = ()  # three to five short things worth noticing, as noun phrases
+    place_confirmed: str = ""      # the place as the user confirmed or corrected it
 
 
 @dataclass(frozen=True)

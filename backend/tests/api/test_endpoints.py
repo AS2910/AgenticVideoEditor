@@ -2181,3 +2181,16 @@ def test_shifting_silence_is_refused(client, project, monkeypatch):
     from app.domain.models import Transcript, Word
     speechless(monkeypatch, main, Transcript(words=(Word("Get", 0.0, 0.4),)))
     assert client.post("/projects/p1/lines/shift", json={"start": 1.5, "end": 2.0, "to": 0.1}).status_code == 422
+
+
+def test_the_place_voltage_guessed_can_be_confirmed_or_corrected(client, project, monkeypatch):
+    """UX-5: the sight's place is a decision, not a paragraph — confirmed or
+    renamed, it is kept with the project and with the saved reading."""
+    import app.api.main as main
+    from app.domain.models import Transcript
+    speechless(monkeypatch, main, Transcript(words=()))
+    client.post("/projects/p1/reading", json={})
+    body = client.put("/projects/p1/sight", json={"place": "Morjim, Goa"}).json()
+    assert body["place_confirmed"] == "Morjim, Goa"
+    assert client.get("/projects/p1").json()["reading"]["sight"]["place_confirmed"] == "Morjim, Goa"
+    assert client.put("/projects/p1/sight", json={"place": ""}).json()["place_confirmed"] == ""

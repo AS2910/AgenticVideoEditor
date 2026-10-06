@@ -1,0 +1,30 @@
+{
+  "v": 3,
+  "attachments": {},
+  "boards": {
+    "Line.dc.html": {"h": 900, "title": "8 · One line, in full", "w": 760, "x": 1360, "y": 2640},
+    "Main.dc.html": {"expand": "fill", "h": 820, "title": "1 · Projects", "w": 1280, "x": 0, "y": 0},
+    "Phone.dc.html": {"h": 844, "title": "10 · Phone", "w": 390, "x": 3040, "y": 2640},
+    "Plan.dc.html": {"expand": "fill", "h": 1200, "title": "3 · Workspace · the plan waits", "w": 1280, "x": 2720, "y": 0},
+    "Read.dc.html": {"expand": "fill", "h": 1180, "title": "2 · Workspace · just opened", "w": 1280, "x": 1360, "y": 0},
+    "Review.dc.html": {"expand": "fill", "h": 1180, "title": "5 · Review · Voltage tucked away", "w": 1280, "x": 1360, "y": 1320},
+    "Ship.dc.html": {"expand": "fill", "h": 1180, "title": "6 · Shipped · the receipt", "w": 1280, "x": 2720, "y": 1320},
+    "Silent.dc.html": {"expand": "fill", "h": 1180, "title": "7 · A silent clip", "w": 1280, "x": 0, "y": 2640},
+    "States.dc.html": {"h": 1060, "title": "9 · Row states", "w": 760, "x": 2200, "y": 2640},
+    "Working.dc.html": {"expand": "fill", "h": 1200, "title": "4 · Workspace · running (press Play, then Hide)", "w": 1280, "x": 0, "y": 1320, "is_interactive": true},
+    "Palettes.dc.html": {"h": 760, "title": "11 · Three palettes, same row", "w": 1280, "x": 0, "y": 3940},
+    "Move.dc.html": {"h": 900, "title": "12 · Moving a line", "w": 760, "x": 1360, "y": 3940}
+  },
+  "createdOnFiles": {"at": "2026-10-04T23:40:00Z", "v": 1},
+  "designSystems": [],
+  "launch": {"view": "canvas"},
+  "notes": {
+    "t1": {"kind": "title1", "maxW": 3000, "text": "1 · Arrive, read, ask", "w": 240, "x": 0, "y": -280},
+    "t2": {"kind": "title1", "maxW": 3000, "text": "2 · Run, judge, ship", "w": 240, "x": 0, "y": 1040},
+    "t3": {"kind": "title1", "maxW": 3000, "text": "3 · A silent clip · the row · its states · the phone", "w": 240, "x": 0, "y": 2360},
+    "t4": {"kind": "title1", "maxW": 3000, "text": "4 · Colour (A live; B and C one line to switch) · Moving a line", "w": 240, "x": 0, "y": 3660}
+  },
+  "order": ["Main.dc.html", "Read.dc.html", "Plan.dc.html", "Working.dc.html", "Review.dc.html", "Ship.dc.html", "Silent.dc.html", "Line.dc.html", "States.dc.html", "Phone.dc.html", "Palettes.dc.html", "Move.dc.html"],
+  "pages": [],
+  "title": "Voltage UX Mocks"
+}

@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Voltage · Workspace, just opened</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="voltage.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=Instrument+Sans:wght@400;500;600&display=swap">
+<style>body{margin:0}</style>
+</helmet>
+<div style="min-height: 860px; display: flex; flex-direction: column; background: var(--bg); color: var(--text); font-family: var(--ui);">
+  <header class="bar">
+    <a href="Main.dc.html" class="brand" style="text-decoration: none; color: inherit;"><span class="orb"></span>Voltage</a>
+    <span class="muted" aria-hidden="true">/</span>
+    <span style="font-weight: 500;">mehtas-window-offer.mp4</span><span class="small muted num">0:16</span>
+    <div style="flex: 1;"></div>
+    <div class="meter"><span class="num">$0.00 of $2.00</span><div class="track"><div class="fill" style="width: 0%;"></div></div></div>
+    <button class="btn sm" type="button" aria-disabled="true">Ship</button>
+  </header>
+
+  <div class="shell">
+    <main class="main">
+      <section class="monitor" aria-label="Monitor">
+        <div class="frame"><div class="scene"></div><div class="fig"></div><div class="fig b"></div><span class="time num">0:00.0</span><div class="cap">Welcome to Mehta's. Everything in the window is twenty percent off this week.</div></div>
+        <div class="transport">
+          <div style="display: flex; align-items: center; gap: 12px;">
+            <button class="btn icon" type="button" aria-label="Play"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg></button>
+            <span class="num small muted">0:00.0 / 0:16.2</span>
+          </div>
+          <div class="tl" aria-label="Timeline">
+            <div class="seg a" style="left: 2%; width: 27%;"></div>
+            <div class="seg b" style="left: 31%; width: 9%;"></div>
+            <div class="seg a" style="left: 42%; width: 13%;"></div>
+            <div class="seg b" style="left: 57%; width: 7%;"></div>
+            <div class="seg a" style="left: 68%; width: 20%;"></div>
+            <div class="seg a" style="left: 90%; width: 9%;"></div>
+            <div class="head" style="left: 2%;"></div>
+          </div>
+          <div class="ticks num" aria-hidden="true"><span>0:00</span><span>0:04</span><span>0:08</span><span>0:12</span><span>0:16</span></div>
+        </div>
+      </section>
+
+      <section class="script" aria-label="The script">
+        <div class="script-head">
+          <h2>The script</h2>
+          <span class="small muted">6 lines · 2 people</span>
+          <div style="flex: 1;"></div>
+          <button class="chip" type="button"><span class="dot a" style="margin-right: 8px;"></span>the Shopkeeper</button>
+          <button class="chip" type="button"><span class="dot b" style="margin-right: 8px;"></span>the Customer</button>
+          <button class="btn sm" type="button">Looks right</button>
+        </div>
+        <div class="row"><span class="t num">0:00.4</span><span class="who"><span class="dot a"></span>the Shopkeeper</span><span class="words">Welcome to Mehta's. Everything in the window is twenty percent off this week.</span><span class="state"></span></div>
+        <div class="row"><span class="t num">0:05.1</span><span class="who"><span class="dot b"></span>the Customer</span><span class="words">Even the blue one?</span><span class="state"></span></div>
+        <div class="row focus"><span class="t num">0:06.8</span><span class="who"><span class="dot a"></span>the Shopkeeper</span><span class="words">Even the blue one. Till Sunday.</span>
+          <span class="state"><span class="actions"><button class="btn sm quiet" type="button">Change</button><button class="btn sm quiet" type="button">Add after</button><button class="btn sm quiet" type="button">Remove</button><button class="btn sm icon quiet" type="button" aria-label="More"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg></button></span></span>
+        </div>
+        <div class="row"><span class="t num">0:09.2</span><span class="who"><span class="dot b"></span>the Customer</span><span class="words">I'll take it.</span><span class="state"></span></div>
+        <div class="row"><span class="t num">0:11.0</span><span class="who"><span class="dot a"></span>the Shopkeeper</span><span class="words">Come in on Friday and we'll have the new range too.</span><span class="state"></span></div>
+        <div class="row"><span class="t num">0:14.6</span><span class="who"><span class="dot a"></span>the Shopkeeper</span><span class="words">Mehta's, on Hill Road. Open late.</span><span class="state"></span></div>
+      </section>
+
+      <p class="small muted"><kbd>↑</kbd> <kbd>↓</kbd> move · <kbd>Enter</kbd> change · <kbd>Space</kbd> play · <kbd>A</kbd> add after · <kbd>Delete</kbd> remove · <kbd>/</kbd> Voltage · <kbd>\</kbd> hide Voltage</p>
+    </main>
+
+    <aside class="panel" aria-label="Voltage">
+      <div class="panel-head">
+        <span class="orb"></span><h2>Voltage</h2><span class="status">has read the clip</span>
+        <div style="flex: 1;"></div>
+        <button class="btn sm quiet" type="button" aria-label="Hide Voltage. Press backslash to show it again">Hide <kbd style="margin-left: 2px;">\</kbd><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg></button>
+      </div>
+      <div class="thread" role="log">
+        <div class="msg"><span class="orb lg"></span><div class="v">
+          <p>Two people: <b>the Shopkeeper</b> gives the offer, twenty percent off till Sunday, and <b>the Customer</b> buys the blue one. The shop's name is said twice, the price never.</p>
+        </div></div>
+        <div style="display: flex; flex-wrap: wrap; gap: 8px; padding-left: 40px;">
+          <button class="chip" type="button">The offer is now 30%</button>
+          <button class="chip" type="button">It runs till Monday</button>
+          <button class="chip" type="button">Drop the Friday line</button>
+          <button class="chip" type="button">Say the address once more</button>
+        </div>
+      </div>
+      <form class="composer">
+        <label for="goal" class="label muted">What should this video say?</label>
+        <div class="box">
+          <textarea id="goal" placeholder="e.g. The offer is now 30% and runs till Monday"></textarea>
+          <button class="btn primary" type="button">Plan it</button>
+        </div>
+        <div class="seg" role="group" aria-label="How to run the plan" style="align-self: flex-start;"><button type="button" aria-pressed="true">Check with me</button><button type="button" aria-pressed="false">Just do it</button></div>
+      </form>
+    </aside>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1280,"height":1180}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

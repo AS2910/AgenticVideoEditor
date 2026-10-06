@@ -76,3 +76,12 @@
 .frameImg { display: block; width: 100%; height: 100%; object-fit: cover; }
 .frameTime { position: absolute; left: 6px; bottom: 6px; padding: 1px 7px; border-radius: 999px; font-size: var(--fs-12); background: var(--scrim); color: var(--text); white-space: nowrap; }
 .sightLine { margin: 0; color: var(--muted); font-size: var(--fs-14); line-height: 1.5; }
+
+/* UX-5: the clip itself on the goal stage, then what Voltage noticed as short lines and one decision. */
+.clipVideo { display: block; width: 100%; aspect-ratio: 16 / 9; max-height: 36vh; border-radius: 12px; background: var(--monitor); object-fit: contain; }
+.noticed { display: flex; flex-direction: column; gap: 8px; padding-top: 10px; border-top: 1px solid var(--line); }
+.noticedLabel { color: var(--muted); font-size: var(--fs-13); }
+.noticedList { margin: 0; padding: 0; list-style: none; display: flex; flex-wrap: wrap; gap: 6px 8px; }
+.noticedItem { padding: 4px 10px; border-radius: 999px; font-size: var(--fs-13); background: var(--raised); color: var(--text); white-space: nowrap; }
+.place { display: flex; flex-wrap: wrap; align-items: center; gap: var(--target-gap) 10px; font-size: var(--fs-14); }
+.placeText { color: var(--text); }
