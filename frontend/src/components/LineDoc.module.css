@@ -14,8 +14,8 @@
 
 .row {
   position: relative;
-  display: grid; grid-template-columns: 34px 22px minmax(0, 1fr) auto;
-  column-gap: 12px; align-items: start; padding: 8px 10px; border-radius: 12px;
+  display: grid; grid-template-columns: 24px 34px 22px minmax(0, 1fr) auto;
+  column-gap: 12px; align-items: start; padding: 8px 10px 8px 6px; border-radius: 12px;
 }
 .row { min-height: var(--target); transition: background-color var(--t) var(--ease), box-shadow var(--t) var(--ease); }
 .row[data-state], .row[data-selected="true"] { background: var(--surface); }
@@ -68,7 +68,7 @@
 .action { min-height: var(--chip); padding: 0 10px; border-radius: 8px; font-size: var(--fs-13); background: var(--btn-bg); color: var(--text); border: 1px solid var(--line); box-shadow: var(--btn-shadow); white-space: nowrap; }
 .action:hover { border-color: var(--line-strong); background: var(--btn-bg-hover); }
 
-.addRow { padding: 4px 10px 4px 78px; }
+.addRow { padding: 4px 10px 4px 110px; }
 .add { display: flex; align-items: center; gap: 8px; padding: 0 12px; border-radius: 10px; font-size: var(--fs-14); background: transparent; color: var(--muted); border: 1px dashed var(--line); }
 .add:hover { color: var(--text); border-color: var(--line-strong); background: var(--surface); }
 
@@ -140,20 +140,25 @@
 @keyframes rise { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: none; } }
 @media (max-width: 960px) {
   .keys { display: none; }
-  .row { grid-template-columns: 34px 22px minmax(0, 1fr); row-gap: 6px; }
-  .side { grid-column: 3; flex-direction: row; flex-wrap: wrap; align-items: center; justify-content: flex-start; }
+  .row { grid-template-columns: 24px 34px 22px minmax(0, 1fr); row-gap: 6px; }
+  .side { grid-column: 4; flex-direction: row; flex-wrap: wrap; align-items: center; justify-content: flex-start; }
   .side:empty { display: none; }
 }
 
-/* UX-1c: drag a row up or down to shift it; the moved line's own row. */
+/* UX-1c, UX-7e: every row that can move has a grip at its left edge — drag
+   it, or press Enter for Starts at, ↑ ↓ to nudge. 44px to the pointer, 24px wide. */
+.gripCell { display: flex; align-items: flex-start; }
 .grip {
-  display: inline-flex; align-items: center; justify-content: center; width: var(--target); height: var(--target); min-height: var(--target);
-  padding: 0; border-radius: 10px; font-size: 14px; letter-spacing: -2px; line-height: 1;
+  display: inline-flex; align-items: center; justify-content: center; width: 24px; height: var(--target); min-height: var(--target);
+  margin: -10px 0; padding: 0; border-radius: 8px; line-height: 1;
   background: transparent; color: var(--faint); border: 1px solid transparent; cursor: grab; touch-action: none; user-select: none;
-  opacity: 0; transition: opacity var(--t) var(--ease), color var(--t) var(--ease), border-color var(--t) var(--ease);
+  opacity: 0.6; transition: opacity var(--t) var(--ease), color var(--t) var(--ease), background-color var(--t) var(--ease);
 }
-.row:hover .grip, .row:focus-within .grip { opacity: 1; }
-.grip:hover { color: var(--text); background: var(--raised); }
+.grip::before { content: ''; position: absolute; inset: 0 -10px; }
+.grip { position: relative; }
+.row:hover .grip, .row:focus-within .grip, .grip:focus-visible { opacity: 1; }
+.grip:hover, .grip:focus-visible { color: var(--text); background: var(--raised); }
+.grip:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .grip:active { cursor: grabbing; }
 .row[data-dragging] { opacity: 0.45; }
 .row[data-state="moved"] { background: var(--surface); box-shadow: inset 2px 0 0 var(--ok); }
@@ -162,7 +167,7 @@
   position: absolute; right: 0; top: -11px; padding: 2px 8px; border-radius: 999px; font-size: var(--fs-12);
   background: var(--accent); color: var(--accent-ink); font-weight: 600;
 }
-@media (max-width: 960px) { .grip { opacity: 1; } }
+@media (max-width: 960px) { .grip { opacity: 1; margin: -4px 0; } }
 
 /* No hover: the actions live under the line, opened by the "…" button. */
 @media (hover: none) {

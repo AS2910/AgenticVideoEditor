@@ -609,6 +609,46 @@ export function LineDoc({
     </div>
   )
 
+  /** The grip on a row that can move (UX-7e): drag it up or down the
+   *  transcript; Enter opens Starts at; ↑ ↓ nudge a tenth of a second, with
+   *  Shift a whole one, on the bar above; Escape lets go. Nothing is voiced. */
+  const gripButton = (key: string, id: string, text: string, start: number, duration: number, apply: (to: number) => void) => {
+    if (!onPlacing) return null
+    const nudge = (delta: number) => {
+      const current = placing?.id === id ? placing.start : start
+      const t = Math.round(Math.max(0, current + delta) * 100) / 100
+      onPlacing({ id, start: t, duration })
+      setPlaceText(timecode(t))
+    }
+    return (
+      <button
+        type="button"
+        className={styles.grip}
+        aria-label={`Move the line at ${clock(start)}: drag it, or press Enter to type a time`}
+        onPointerDown={(e) => startDrag(e, key, text, start, duration, apply)}
+        onClick={() => { if (dragged.current) { dragged.current = false; return } onPlacing({ id, start, duration }); setPlaceText(timecode(start)) }}
+        onKeyDown={(e) => {
+          if (e.key === 'ArrowUp' || e.key === 'ArrowDown') { e.preventDefault(); nudge((e.key === 'ArrowUp' ? -1 : 1) * (e.shiftKey ? 1 : 0.1)) }
+          if (e.key === 'Escape' && placing?.id === id) { e.preventDefault(); onPlacing(null) }
+        }}
+      >
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+          <circle cx="9" cy="6" r="1.8" /><circle cx="15" cy="6" r="1.8" /><circle cx="9" cy="12" r="1.8" /><circle cx="15" cy="12" r="1.8" /><circle cx="9" cy="18" r="1.8" /><circle cx="15" cy="18" r="1.8" />
+        </svg>
+      </button>
+    )
+  }
+
+  /** Move up / Move down, without dragging: the line lands where the row
+   *  above the gap ends, as a drop would. */
+  const stepTo = (key: string, direction: -1 | 1): number | null => {
+    const order = rows.findIndex((r) => rowKey(r) === key)
+    if (order < 0) return null
+    if (direction < 0) return order === 0 ? null : order === 1 ? 0 : Math.round(rows[order - 2].end * 100) / 100
+    const next = rows[order + 1]
+    return next ? Math.round(next.end * 100) / 100 : null
+  }
+
   /** A line's words where they now play, after a shift: its own row, with
    *  where it came from, Undo, Move, and a grip to drag it again. */
   const movedRow = (entry: Extract<Row, { kind: 'moved' }>, order: number) => {
@@ -629,6 +669,9 @@ export function LineDoc({
           role="listitem"
           aria-label={`Moved line at ${clock(rev.start)}${label ? `, ${label}` : ''}`}
         >
+          <span className={styles.gripCell}>
+            {rev.edit_id && onMoveKept && gripButton(key, `edit-${rev.edit_id}`, s.text, rev.start, Math.max(0.05, rev.end - rev.start), (t) => onMoveKept(rev.edit_id!, t))}
+          </span>
           <button className={styles.time} onClick={() => onSeek({ ...s, start: rev.start, end: rev.end })} aria-label={`Go to ${clock(rev.start)}`}>{clock(rev.start)}</button>
           <span className={styles.who}>{label && <Avatar name={label} slot={speakerSlot(speakers, s.speaker)} />}</span>
           <div className={styles.body}>
@@ -643,15 +686,6 @@ export function LineDoc({
           </div>
           <span className={styles.side}>
             <span className={styles.chip} data-tone="ok">Moved</span>
-            {rev.edit_id && onMoveKept && onPlacing && (
-              <button
-                type="button"
-                className={styles.grip}
-                aria-label={`Move the line at ${clock(rev.start)}: drag it, or press Enter to type a time`}
-                onPointerDown={(e) => startDrag(e, key, s.text, rev.start, Math.max(0.05, rev.end - rev.start), (t) => onMoveKept(rev.edit_id!, t))}
-                onClick={() => { if (dragged.current) { dragged.current = false; return } onPlacing({ id: `edit-${rev.edit_id}`, start: rev.start, duration: Math.max(0.05, rev.end - rev.start) }); setPlaceText(timecode(rev.start)) }}
-              >⋮⋮</button>
-            )}
           </span>
         </div>
       </Fragment>
@@ -680,6 +714,13 @@ export function LineDoc({
     const isEditing = editing?.index === i && editing.mode === 'edit'
     const isAdding = editing?.index === i && editing.mode === 'add'
     const added = lines[addKey]
+    // UX-7e: an untouched line shifts; a kept line moves with its take; the rest stay put.
+    const mover: { id: string; start: number; duration: number; apply: (to: number) => void } | null =
+      !revision && onShift ? { id: `shift-${key}`, start: s.start, duration: Math.max(0.05, s.end - s.start), apply: (t) => onShift(s, t) }
+      : revision && !removed && revision.edit_id && onMoveKept ? { id: `edit-${revision.edit_id}`, start: revision.start, duration: Math.max(0.05, revision.end - revision.start), apply: (t) => onMoveKept(revision.edit_id!, t) }
+      : null
+    const up = mover ? stepTo(key, -1) : null
+    const down = mover ? stepTo(key, 1) : null
     return (
       <Fragment key={`${s.start}-${i}`}>
         {drag && dropIndexFor(drag.to) === order && dropMarker()}
@@ -700,6 +741,9 @@ export function LineDoc({
           onFocus={(e) => { if (e.target === e.currentTarget) setFocusedRow(i) }}
           onBlur={(e) => { if (e.target === e.currentTarget) setFocusedRow((f) => (f === i ? null : f)) }}
         >
+          <span className={styles.gripCell}>
+            {mover && !isEditing && !isAdding && gripButton(key, mover.id, s.text, mover.start, mover.duration, mover.apply)}
+          </span>
           <button className={styles.time} onClick={() => onSeek(s)} aria-label={`Go to ${clock(s.start)}`}>{clock(s.start)}</button>
           <span className={styles.who}>{newSpeaker && label && <Avatar name={label} slot={speakerSlot(speakers, s.speaker)} />}</span>
           <div className={styles.body}>
@@ -747,15 +791,6 @@ export function LineDoc({
                   aria-expanded={actionsOpen === i}
                   onClick={() => setActionsOpen((o) => (o === i ? null : i))}
                 >…</button>
-                {!revision && onShift && onPlacing && (
-                <button
-                type="button"
-                className={styles.grip}
-                aria-label={`Move the line at ${clock(s.start)}: drag it, or press Enter to type a time`}
-                onPointerDown={(e) => startDrag(e, key, s.text, s.start, Math.max(0.05, s.end - s.start), (t) => onShift(s, t))}
-                onClick={() => { if (dragged.current) { dragged.current = false; return } onPlacing({ id: `shift-${key}`, start: s.start, duration: Math.max(0.05, s.end - s.start) }); setPlaceText(timecode(s.start)) }}
-                >⋮⋮</button>
-                )}
               </span>
             )}
             {!isEditing && !isAdding && (
@@ -764,8 +799,10 @@ export function LineDoc({
                 <button className={styles.action} onClick={() => { setActionsOpen(null); open(i, 'edit', true) }}>Change the delivery</button>
                 <button className={styles.action} onClick={() => { setActionsOpen(null); open(i, 'add') }}>Add a line after</button>
                 {!removed && <button className={styles.action} onClick={() => { setActionsOpen(null); onRemove(s) }}>Remove</button>}
-                {!revision && onShift && onPlacing && (
-                  <button className={styles.action} onClick={() => { onPlacing({ id: `shift-${key}`, start: s.start, duration: Math.max(0.05, s.end - s.start) }); setPlaceText(timecode(s.start)) }}>Shift</button>
+                {mover && up !== null && <button className={styles.action} onClick={() => { setActionsOpen(null); mover.apply(up) }}>Move up</button>}
+                {mover && down !== null && <button className={styles.action} onClick={() => { setActionsOpen(null); mover.apply(down) }}>Move down</button>}
+                {mover && onPlacing && (
+                  <button className={styles.action} onClick={() => { onPlacing({ id: mover.id, start: mover.start, duration: mover.duration }); setPlaceText(timecode(mover.start)) }}>Shift to a time…</button>
                 )}
                 <button className={styles.action} onClick={() => onSeek(s)}>Play original</button>
                 </span>
@@ -774,6 +811,7 @@ export function LineDoc({
         </div>
         {isAdding && (
           <div className={styles.row} data-state="adding" role="listitem" aria-label={`New line after ${clock(s.start)}`}>
+            <span className={styles.gripCell} />
             <span className={styles.time} />
             <span className={styles.who} />
             <div className={styles.body}><div className={styles.reveal}>{editor(s, 'add')}</div></div>
@@ -781,6 +819,7 @@ export function LineDoc({
         )}
         {added && !isAdding && (
           <div className={styles.row} data-state={added.status} role="listitem" aria-label={`New line after ${clock(s.start)}`}>
+            <span className={styles.gripCell} />
             <span className={styles.time}>{clock(s.end)}</span>
             <span className={styles.who} />
             <div className={styles.body}>
@@ -797,6 +836,7 @@ export function LineDoc({
         )}
         {s.placed && placingAnother && duration && i === statements.length - 1 && (
           <div className={styles.row} data-state="adding" role="listitem" aria-label="New voice-over">
+            <span className={styles.gripCell} />
             <span className={styles.time} />
             <span className={styles.who} />
             <div className={styles.body}>

@@ -325,7 +325,7 @@ describe('LineDoc: shifting a line of the original speech (UX-1c)', () => {
     const h = doc({ onShift, onPlacing })
     void h
     const actions = screen.getByRole('group', { name: 'Actions for 0:07' })
-    await user.click(within(actions).getByRole('button', { name: 'Shift' }))
+    await user.click(within(actions).getByRole('button', { name: 'Shift to a time…' }))
     expect(onPlacing).toHaveBeenCalledWith({ id: `shift-${KEY}`, start: 7.54, duration: expect.closeTo(1.48, 2) })
   })
 
@@ -385,3 +385,49 @@ describe('LineDoc: shifting a line of the original speech (UX-1c)', () => {
   })
 })
 const KEY0 = keyOf({ start: 5.2, end: 6.94 })
+
+describe('LineDoc: the grip on every row, and moving without dragging (UX-7e)', () => {
+  it('nudges on the bar from the grip with the arrow keys: a tenth, or a second with Shift; Escape lets go', () => {
+    const onPlacing = vi.fn()
+    doc({ onShift: vi.fn(), onPlacing })
+    const grip = screen.getByRole('button', { name: /move the line at 0:07/i })
+    fireEvent.keyDown(grip, { key: 'ArrowUp' })
+    expect(onPlacing).toHaveBeenLastCalledWith({ id: `shift-${KEY}`, start: 7.44, duration: expect.closeTo(1.48, 2) })
+    fireEvent.keyDown(grip, { key: 'ArrowDown', shiftKey: true })
+    expect(onPlacing).toHaveBeenLastCalledWith({ id: `shift-${KEY}`, start: 8.54, duration: expect.closeTo(1.48, 2) })
+  })
+
+  it('continues a nudge from where the bar already is, and Escape lets go', () => {
+    const onPlacing = vi.fn()
+    doc({ onShift: vi.fn(), onPlacing, placing: { id: `shift-${KEY}`, start: 12.3, duration: 1.48 } })
+    const grip = screen.getByRole('button', { name: /move the line at 0:07/i })
+    fireEvent.keyDown(grip, { key: 'ArrowDown' })
+    expect(onPlacing).toHaveBeenLastCalledWith({ id: `shift-${KEY}`, start: 12.4, duration: expect.closeTo(1.48, 2) })
+    fireEvent.keyDown(grip, { key: 'Escape' })
+    expect(onPlacing).toHaveBeenLastCalledWith(null)
+  })
+
+  it('moves a line up or down from its menu: it lands where the row above the gap ends', async () => {
+    const user = userEvent.setup()
+    const onShift = vi.fn()
+    doc({ onShift, onPlacing: vi.fn() })
+    // The second line, up: before the first, at 0.
+    await user.click(within(screen.getByRole('group', { name: 'Actions for 0:07' })).getByRole('button', { name: 'Move up' }))
+    expect(onShift).toHaveBeenLastCalledWith(STATEMENTS[1], 0)
+    // The first line, down: where the second ends.
+    await user.click(within(screen.getByRole('group', { name: 'Actions for 0:05' })).getByRole('button', { name: 'Move down' }))
+    expect(onShift).toHaveBeenLastCalledWith(STATEMENTS[0], 9.02)
+    // The first line has nothing above it; the last has nothing below.
+    expect(within(screen.getByRole('group', { name: 'Actions for 0:05' })).queryByRole('button', { name: 'Move up' })).not.toBeInTheDocument()
+    expect(within(screen.getByRole('group', { name: 'Actions for 0:09' })).queryByRole('button', { name: 'Move down' })).not.toBeInTheDocument()
+  })
+
+  it('gives a kept line a grip that moves it with its take', () => {
+    const onMoveKept = vi.fn()
+    const onPlacing = vi.fn()
+    doc({ onMoveKept, onPlacing, onShift: vi.fn(), revisions: [{ edit_id: 'e1', start: 7.54, end: 9.02, text: 'Start a live Bhaji Cam session.', mix: 'replace' }] })
+    const grip = screen.getByRole('button', { name: /move the line at 0:07/i })
+    fireEvent.keyDown(grip, { key: 'ArrowDown' })
+    expect(onPlacing).toHaveBeenLastCalledWith({ id: 'edit-e1', start: 7.64, duration: expect.closeTo(1.48, 2) })
+  })
+})
