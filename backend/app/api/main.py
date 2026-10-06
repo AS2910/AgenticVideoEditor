@@ -345,11 +345,32 @@ def _sight(project_id: str, record: ProjectRecord) -> Sight:
     """What Voltage saw in the clip: looked at once, kept with the project."""
     saved = repo.settings(project_id).get("sight")
     if saved:
-        return Sight(**{**saved, "beats": tuple(saved.get("beats", ()))})
+        known = {k: v for k, v in saved.items() if k in Sight.__dataclass_fields__}
+        return Sight(**{**known, "beats": tuple(saved.get("beats", ())), "details": tuple(saved.get("details", ()))})
     frames = [Frame(at=f.at, path=str(f.path)) for f in _frames(record)]
     sight = planner.look(frames, record.source.duration, meter=_meter(project_id, "looking"))
     repo.set_settings(project_id, sight=asdict(sight))
     return sight
+
+
+class SightRequest(BaseModel):
+    # The place, as the user confirms or corrects it; empty clears a confirmation.
+    place: str = ""
+
+
+@app.put("/projects/{project_id}/sight")
+def confirm_sight(project_id: str, req: SightRequest, owner: str = Depends(current_owner)) -> dict:
+    """UX-5: the user confirms the place Voltage guessed, or names the real
+    one. The plan then uses that name and never guesses."""
+    record = _owned(project_id, owner)
+    sight = _sight(project_id, record)
+    sight = replace(sight, place_confirmed=req.place.strip())
+    repo.set_settings(project_id, sight=asdict(sight))
+    reading = repo.settings(project_id).get("reading")
+    if reading and "sight" in reading:
+        reading = {**reading, "sight": asdict(sight)}
+        repo.set_settings(project_id, reading=reading)
+    return asdict(sight)
 
 
 @app.get("/projects/{project_id}/frames")

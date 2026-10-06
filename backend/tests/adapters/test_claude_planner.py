@@ -186,7 +186,7 @@ def test_the_request_for_a_silent_clip_describes_the_picture_and_the_brief():
                                answers=(("What is the audio for?", "A warm welcome"),))
     assert "The clip has no speech. It is 7.5 s long." in text
     assert "- Setting: A wide beach at dusk" in text
-    assert "- Place: Goa, India (medium confidence)" in text
+    assert "- Place: Goa, India (medium confidence; do not state it as fact)" in text
     assert "- 0.3s: wide shot of the beach" in text
     assert "syllables fit in the whole clip" in text
     assert "You asked: What is the audio for?\nThe user answered: A warm welcome" in text
@@ -221,3 +221,14 @@ def test_looking_sends_the_frames_as_images_and_reads_back_a_sight(tmp_path):
     assert content[1]["type"] == "image" and content[1]["source"]["media_type"] == "image/jpeg"
     assert messages.calls[0]["output_config"] == {"effort": "low"}
     assert sight.opening == "No one speaks. A beach." and sight.beats == ({"at": 0.3, "note": "sand"},)
+
+
+def test_a_confirmed_place_is_stated_and_a_guess_is_hedged():
+    from app.orchestrator.planner import Sight
+    guessed = Sight(opening="x", place_guess="a west-coast Indian beach", confidence="medium", details=("tyre tracks", "a parasail"))
+    text = render_plan_request("Introduce it", [], [], sight=guessed, duration=7.5)
+    assert "- Worth noticing: tyre tracks; a parasail" in text
+    assert "- Place: a west-coast Indian beach (medium confidence; do not state it as fact)" in text
+    confirmed = Sight(opening="x", place_guess="somewhere", confidence="low", place_confirmed="Morjim, Goa")
+    text = render_plan_request("Introduce it", [], [], sight=confirmed, duration=7.5)
+    assert "- Place: Morjim, Goa (confirmed by the user — use this name)" in text

@@ -121,3 +121,12 @@ Two commits on `ux6-revamp`, merged to main: the backend (`92f740b`) and the fro
 - Several lines across a longer silent clip have no notion of pacing between them.
 - Resizing the span by dragging a handle on the bar: the end is typed or nudged today.
 - The `fallbacks: "default"` server-side fallback the claude-api skill suggests for new Opus 5 calls is not on the look call: it needs the beta messages client, and the planner's test harness fakes `messages.parse`.
+
+## Follow-up (2026-10-06): the place is a decision, and the clip plays
+
+Found uncommitted on `ux6-revamp` on 2026-10-06, finished and merged. Tests: backend 512 → 514; frontend 223 → 224.
+
+- **The clip itself is on the silent goal stage**, 16:9 under the heading, with controls. Clicking a frame now *jumps* the clip to that moment (`aria-label` "Jump to 0:03", `aria-pressed` on the picked frame) and an extra example chip, *Say it from 0:03*, appears to start the goal from there; the frame no longer writes into the goal box by itself.
+- **What Voltage noticed is short lines, not a paragraph.** `Sight.details` (three to five noun phrases of at most six words, asked for in the look prompt) render as chips under "I noticed"; without details the setting is cut at sentence boundaries into at most four. The prompt also caps setting (twelve words), mood (two or three), people (eight) and place guess (eight).
+- **The place is confirmed or corrected, once.** `Sight.place_confirmed`; `PUT /projects/{id}/sight {place}` keeps it on the project's sight and on the saved reading (empty clears it). The stage shows "*guess* · my guess, medium confidence" with *Looks right* and *Somewhere else…* (an input, Enter or *Use this*); confirmed, it shows "*place* · you confirmed" with *Change*. `render_plan_request` tells the planner "confirmed by the user — use this name" or "do not state it as fact", so a guessed place is never asserted in a voice-over.
+- Loading a saved Sight ignores unknown keys, so older projects keep working as fields are added.

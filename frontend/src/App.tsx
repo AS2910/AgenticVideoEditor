@@ -27,7 +27,7 @@ import { SpeakersBar } from './components/SpeakersBar'
 import { clock } from './transcript/format'
 import { speakerSlot } from './transcript/speakers'
 import {
-  createProject, previewEdit, approveEdit, exportProject, artifactUrl,
+  createProject, confirmPlace, previewEdit, approveEdit, exportProject, artifactUrl,
   pollJob, PollCancelled, ApiError, listProjects, getProject, deleteProject, getUsage, listVoices, updateSpeaker, detectSpeakers,
   revertEdit, updateSettings, rewordLine, removeLine, moveCandidate, moveEdit, shiftLine,
   createPlan, getPlan, updateItem, runPlan, answerItem, redoItem, approvePlan, clarifyPlan,
@@ -683,6 +683,17 @@ export default function App() {
     }
   }
 
+  /** UX-5: the place Voltage guessed, confirmed or corrected; the plan uses it by name. */
+  const confirmThePlace = async (place: string) => {
+    if (!projectId) return
+    try {
+      const sight = await confirmPlace(projectId, place)
+      setReading((r) => (r ? { ...r, sight } : r))
+    } catch (e) {
+      tell(e instanceof ApiError ? e.message : "I couldn't keep that place. Try again.")
+    }
+  }
+
   /** A goal for the whole video: Voltage plans the edits. */
   const makePlan = async (goal: string) => {
     if (!projectId) return
@@ -1082,6 +1093,7 @@ export default function App() {
         onPlan={(goal) => void makePlan(goal)}
         onHandsOn={() => setStage('editor')}
         onName={(label, name) => void changeSpeaker(label, { name })}
+        onPlace={(place) => void confirmThePlace(place)}
       >
         {error && <div className={styles.error} role="alert">{error}</div>}
         <ProjectList projects={projects} onOpen={(id) => void openProject(id)} onDelete={(id) => void removeProject(id)} />

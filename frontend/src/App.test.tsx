@@ -1144,7 +1144,7 @@ describe('App panel order', () => {
     expect(await screen.findByText('What should this video say?')).toBeInTheDocument()
     expect(await screen.findByText(/No one speaks\. A beach at dusk\./)).toBeInTheDocument()
     const frames = within(screen.getByTestId('frames')).getAllByRole('button')
-    expect(frames.map((b) => b.getAttribute('aria-label'))).toEqual(['Frame at 0:00: say it from here', 'Frame at 0:01: say it from here', 'Frame at 0:02: say it from here'])
+    expect(frames.map((b) => b.getAttribute('aria-label'))).toEqual(['Jump to 0:00', 'Jump to 0:01', 'Jump to 0:02'])
     expect(screen.getByRole('button', { name: 'Place a voice-over yourself instead' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Introduce the place' })).toBeInTheDocument()
   })

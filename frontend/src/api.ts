@@ -1,6 +1,6 @@
 import type {
   Project, ApprovedResult, ExportManifest, EditRequest, Job, ProjectSummary, ProjectDetail, Usage, Voice, Speaker,
-  ProjectSettings, LongLines, Rewording, Autonomy, Plan, Fit, Mix, Selection, Candidate, Reading,
+  ProjectSettings, LongLines, Rewording, Autonomy, Plan, Fit, Mix, Selection, Candidate, Reading, Sight,
 } from './types'
 
 const BASE = '/api'
@@ -228,6 +228,9 @@ export const getPlan = (id: string, planId: string) => get<Plan>(`/projects/${id
 /** Answers the planner's question (empty = take its guess); it plans again. */
 export const clarifyPlan = (id: string, planId: string, answer?: string, allGuesses = false) =>
   post<Plan>(`/projects/${id}/plans/${planId}/clarify`, { ...(answer ? { answer } : {}), ...(allGuesses ? { all_guesses: true } : {}) })
+
+/** UX-5: confirm the place Voltage guessed, or name the real one; empty clears it. */
+export const confirmPlace = (id: string, place: string) => put<Sight>(`/projects/${id}/sight`, { place })
 
 /** A frame of the picture (UX-5), for a clip with no speech. */
 export const frameUrl = (projectId: string, index: number) => `${BASE}/projects/${projectId}/frames/${index}`
