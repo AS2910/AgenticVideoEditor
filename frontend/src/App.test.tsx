@@ -1275,7 +1275,7 @@ describe('App: shifting original speech (UX-1c)', () => {
     render(<App />)
     await reachEditor(user)
 
-    await user.click(within(screen.getByRole('group', { name: 'Actions for 0:00' })).getByRole('button', { name: 'Shift' }))
+    await user.click(within(screen.getByRole('group', { name: 'Actions for 0:00' })).getByRole('button', { name: 'Shift to a time…' }))
     const box = screen.getByRole('textbox', { name: 'Starts at' })
     await user.clear(box)
     await user.type(box, '0:01.00')

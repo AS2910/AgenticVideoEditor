@@ -95,3 +95,11 @@ Branch `ux7-workspace`, merged to main. Frontend tests unchanged at 233 (the rev
 - **The Ship button is in the bar and counts**: *Ship* (disabled) with nothing kept, *Ship 2 changes* when every ready change is kept, *Ship 1 of 2* when some are held. Keep/Hold decisions live in the app (`decisions`), so a hold stands across a ship and an undo; a take that failed its sound check starts held (C6).
 - **The ship sheet is the receipt** (G1, G3, D6, E2): "It's shipped." with the length in one sentence, stat tiles (lines changed, added, removed, held, the plan's spend), *What's in the file* as the lines at their times with the added words lit and the take's note, each with *Undo* (the line goes back to a draft and the receipt counts it as held), one line for what was held, the stand-in voice said plainly ("The new words are in a stand-in voice, and the mouth still moves to the old ones."), then Download MP4, Copy link, Make a variant, Back to the transcript.
 - Not done: a count of takes voiced on the receipt — the plan does not carry it, and the receipt shows only what it knows.
+
+### UX-7e · Grip and move (2026-10-06)
+
+Branch `ux7-workspace`, merged to main. Frontend tests 233 → 237.
+
+- **The grip is on every row that can move**, at the row's left edge in its own column (24 px wide, 44 px to the pointer, drawn as six dots in SVG, dim until the row is under the pointer or has focus): an untouched line shifts (`onShift`), a kept line moves with its take (`onMoveKept`), a moved line moves again; a removed, planned or voicing row has none. One helper, `gripButton`, serves them all.
+- **Three ways to move, nothing voiced** (H2): drag the grip up or down the transcript with the drop line saying *Starts at m:ss.ss* and the block riding the monitor's timeline; the row's menu (the hover actions, or ⋯ on a touch screen) with *Move up*, *Move down* and *Shift to a time…* — up and down land where the row above the gap ends, as a drop does, and are absent at the ends; and the keyboard: with the grip focused, Enter opens *Starts at* with its nudges, ↑ ↓ move the block a tenth of a second, Shift ↑ ↓ a second, Escape lets go, and *Put it here* or Enter in the field applies the one move. The row's own `S` key still opens *Starts at*.
+- The *Shift* action is now *Shift to a time…* in the menu.
