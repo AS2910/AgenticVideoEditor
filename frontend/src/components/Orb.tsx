@@ -1,6 +1,6 @@
 import styles from './Orb.module.css'
 
-/** Voltage's presence: a soft amber glow. It breathes while working. */
+/** Voltage's presence: a teal glow that breathes slowly, and faster while working. */
 export function Orb({ size = 26, working = false, idle = false }: { size?: number; working?: boolean; idle?: boolean }) {
   return (
     <span

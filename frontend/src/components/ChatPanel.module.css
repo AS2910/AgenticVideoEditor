@@ -10,22 +10,23 @@
 }
 .message {
   align-self: flex-end; max-width: 86%; padding: 11px 15px;
-  border-radius: 16px 16px 4px 16px; background: var(--raised); line-height: 1.5;
+  border-radius: 16px 16px 4px 16px; background: var(--seg-on-bg); box-shadow: var(--btn-shadow); line-height: 1.5;
 }
 .reply { align-self: flex-start; max-width: 92%; line-height: 1.55; color: var(--text); }
-.foot { flex: none; padding: 12px 20px 16px; display: flex; flex-direction: column; gap: 8px; border-top: 1px solid var(--line); }
+.foot { flex: none; padding: 12px 20px 16px; display: flex; flex-direction: column; gap: 8px; border-top: 1px solid var(--line-soft); background: var(--bg-deep); }
 .composer {
   display: flex; align-items: center; gap: 8px; min-height: var(--target); padding: 8px 8px 8px 16px;
-  border-radius: 16px; background: var(--surface); border: 1px solid var(--line);
+  border-radius: 16px; background: var(--bg-deep); border: 1px solid var(--line); box-shadow: var(--recess);
 }
-.composer:focus-within { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.composer:focus-within { border-color: var(--accent-line); box-shadow: var(--recess), var(--ring); }
 .input { flex: 1; min-width: 0; min-height: 0; padding: 4px 0; background: transparent; color: var(--text); border: none; }
 .input::placeholder { color: var(--muted); }
 .input:focus { outline: none; }
 .send {
   width: 44px; height: 44px; flex: none; border-radius: 50%; border: none;
-  background: var(--accent); color: var(--accent-ink); display: flex; align-items: center; justify-content: center;
+  background: var(--btn-primary-bg); color: var(--accent-ink); box-shadow: var(--btn-primary-shadow); display: flex; align-items: center; justify-content: center;
 }
+.send:hover:not(:disabled) { box-shadow: var(--btn-primary-shadow-hover); }
 .send:disabled { background: var(--raised); color: var(--muted); }
 .under { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; min-height: 18px; }
 .hint { color: var(--muted); font-size: var(--fs-14); }

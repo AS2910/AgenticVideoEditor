@@ -1,14 +1,18 @@
-/* Voltage's presence. The glow is a pseudo-element whose opacity breathes,
-   so the animation never repaints a box-shadow. */
+/* Voltage's presence: teal, lit from the top left, breathing on a 4.5 s cycle.
+   While it works the glow pulses faster; the glow is a pseudo-element whose
+   opacity breathes, so the animation never repaints a box-shadow. Reduced
+   motion stops both (theme.css). */
 .orb {
   position: relative; display: inline-block; flex: none; border-radius: 50%;
-  background: radial-gradient(circle at 35% 30%, var(--orb-highlight) 0%, var(--accent) 45%, var(--accent-fill) 100%);
+  background: radial-gradient(circle at 35% 32%, var(--orb-highlight) 0%, var(--accent) 52%, var(--accent-lo) 100%);
   box-shadow: var(--glow-soft);
+  animation: swell 4.5s ease-in-out infinite;
 }
 .orb::after {
   content: ''; position: absolute; inset: 0; border-radius: 50%;
   box-shadow: var(--glow-strong); opacity: 0;
 }
-.orb[data-idle] { box-shadow: none; opacity: 0.8; }
+.orb[data-idle] { box-shadow: none; opacity: 0.8; animation: none; }
 .orb[data-working]::after { animation: breathe 1.6s ease-in-out infinite; }
 @keyframes breathe { 0%, 100% { opacity: 0; } 50% { opacity: 1; } }
+@keyframes swell { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.07); } }

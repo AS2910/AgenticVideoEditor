@@ -2,7 +2,7 @@
 .caption { color: var(--muted); }
 .select {
   max-width: 200px; min-height: var(--chip); padding: 0 8px; font-size: var(--fs-13);
-  background: var(--raised); color: var(--text); border: 1px solid var(--line); border-radius: 6px;
+  background: var(--bg-deep); color: var(--text); border: 1px solid var(--line); box-shadow: var(--recess); border-radius: 8px;
 }
 .about { flex: 1 1 100%; color: var(--muted); font-size: var(--fs-13); line-height: 1.4; }
 .picker { flex-wrap: wrap; }

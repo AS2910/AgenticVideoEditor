@@ -2,13 +2,14 @@
 .scroller { overflow-x: auto; overflow-y: hidden; padding-bottom: 4px; }
 .zoom { display: flex; gap: var(--target-gap); justify-content: flex-end; margin-bottom: 6px; }
 .zoom button {
-  min-width: var(--chip); min-height: var(--chip); padding: 0 10px; border-radius: 6px; font-size: var(--fs-13);
+  min-width: var(--chip); min-height: var(--chip); padding: 0 10px; border-radius: 8px; font-size: var(--fs-13);
   background: transparent; color: var(--muted); border: 1px solid var(--line);
 }
-.zoom button:hover, .zoom button[aria-pressed="true"] { color: var(--text); border-color: var(--muted); }
+.zoom button:hover { color: var(--text); border-color: var(--line-strong); }
+.zoom button[aria-pressed="true"] { color: var(--text); background: var(--seg-on-bg); box-shadow: var(--btn-shadow); }
 .track {
   position: relative; height: 64px;
-  background: var(--surface); border-radius: 10px;
+  background: var(--bg-deep); border-radius: 10px; box-shadow: var(--recess-deep);
   cursor: col-resize; user-select: none; touch-action: none;
 }
 /* A word: a block as long as it is spoken, its label above; two rows. */
@@ -21,7 +22,7 @@
 }
 .word[data-lane="0"] { top: 5px; }
 .word[data-lane="1"] { top: 33px; }
-.word:hover { background: var(--line); z-index: 1; }
+.word:hover { background: var(--raised-2); z-index: 1; }
 .selection {
   position: absolute; top: 0; height: 100%;
   background: var(--accent-tint);
@@ -30,7 +31,7 @@
 }
 .playhead {
   position: absolute; top: -3px; height: calc(100% + 6px); width: 2px;
-  background: var(--text); pointer-events: none; z-index: 3;
+  background: var(--text-bright); box-shadow: 0 0 6px var(--glow-color); pointer-events: none; z-index: 3;
 }
 .empty {
   position: absolute; inset: 0; display: grid; place-items: center;
