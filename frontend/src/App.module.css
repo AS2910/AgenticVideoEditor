@@ -58,6 +58,7 @@
 .railBadge { min-width: 22px; height: 22px; padding: 0 7px; border-radius: 11px; background: var(--accent); color: var(--accent-ink); font-size: var(--fs-12); font-weight: 600; display: flex; align-items: center; justify-content: center; box-shadow: 0 0 10px var(--glow-color); }
 .railBadge[data-tone="rose"] { background: var(--rose); color: var(--rose-ink); box-shadow: none; }
 .railWord { writing-mode: vertical-rl; transform: rotate(180deg); font-size: var(--fs-13); color: var(--muted); white-space: nowrap; line-height: 1; letter-spacing: 0.02em; }
+.railOpen { display: none; min-height: var(--chip); padding: 0 12px; border-radius: 9px; font-size: var(--fs-14); font-weight: 500; background: var(--btn-bg); color: var(--text); border: 1px solid var(--line); box-shadow: var(--btn-shadow); }
 .brand { margin: 0; display: flex; align-items: center; gap: 10px; font-family: var(--serif); font-size: 18px; font-weight: 600; letter-spacing: -0.01em; }
 .welcome { font-size: var(--fs-16); line-height: 1.6; color: var(--muted); }
 .thinking { display: flex; flex-direction: column; gap: 10px; padding: 2px 0 0 2px; font-size: 14px; line-height: 1.5; }
@@ -154,8 +155,10 @@
   .main { padding: 16px 16px 24px; overflow: visible; }
   .panel { border-left: none; border-top: 1px solid var(--line); min-height: 60vh; }
   .app[data-panel="hidden"] { grid-template-columns: minmax(0, 1fr); }
-  .rail { flex-direction: row; padding: 8px 16px; border-left: none; border-top: 1px solid var(--line); box-shadow: none; }
-  .railWord { writing-mode: horizontal-tb; transform: none; }
+  .rail { flex-direction: row; gap: 10px; padding: 8px 16px; border-left: none; border-top: 1px solid var(--line); box-shadow: none; position: sticky; bottom: 0; z-index: 3; background: var(--bar-bg); backdrop-filter: blur(14px); }
+  .railWord { writing-mode: horizontal-tb; transform: none; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  .railOpen { display: inline-flex; align-items: center; }
+  .rail .railShow:last-child { display: none; }
 }
 
 /* Phase 9c: who is signed in, in the header; a blank while we ask. */

@@ -1,4 +1,4 @@
-import { useRef } from 'react'
+import { useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import styles from './LoadScreen.module.css'
 import { Orb } from './Orb'
@@ -10,21 +10,27 @@ interface LoadScreenProps {
   /** UX-6: how much of the upload has gone, 0..1; null while transcribing or unknown. */
   progress?: number | null
   error?: string | null
-  /** Past projects, shown under the upload. */
+  /** Past projects, shown under the drop zone. */
   children?: ReactNode
   /** Phase 9c: who is signed in, with a way out. */
   who?: { name: string; picture?: string | null } | null
   onSignOut?: () => void
 }
 
-/** The start: a video in, and what Voltage will do with it. */
+/** Your videos (UX-7f): a drop zone, the sample, and the projects as cards. */
 export function LoadScreen({ onLoad, onLoadSample, loading, progress = null, error, children, who, onSignOut }: LoadScreenProps) {
   const inputRef = useRef<HTMLInputElement>(null)
+  const [over, setOver] = useState(false)
+  const dropped = (files: FileList | null) => {
+    const file = files?.[0]
+    if (file && !loading) onLoad(file)
+  }
 
   return (
     <div className={styles.screen}>
       <header className={styles.header}>
         <span className={styles.brand}><Orb size={14} />Voltage</span>
+        <span className={styles.spacer} />
         {who && (
           <span className={styles.who} data-testid="who">
             {who.picture ? <img className={styles.face} src={who.picture} alt="" referrerPolicy="no-referrer" /> : null}
@@ -35,14 +41,21 @@ export function LoadScreen({ onLoad, onLoadSample, loading, progress = null, err
       </header>
 
       <main className={styles.main}>
-      <div className={styles.hero}>
-        <h1 className={styles.title}>Change what's said in a video you've already shot.</h1>
-        <p className={styles.tagline}>
-          Upload a clip. Voltage transcribes it, finds who speaks, and lets you rewrite any line in a
-          voice that fits — checking each one sounds right before anything is final.
-        </p>
+        <h1 className={styles.title}>Your videos</h1>
 
-        <div className={styles.card} aria-busy={loading || undefined}>
+        <section
+          className={styles.drop}
+          data-over={over || undefined}
+          aria-label="Start a new video"
+          aria-busy={loading || undefined}
+          data-testid="drop-zone"
+          onDragOver={(e) => { e.preventDefault(); if (!loading) setOver(true) }}
+          onDragLeave={() => setOver(false)}
+          onDrop={(e) => { e.preventDefault(); setOver(false); dropped(e.dataTransfer?.files ?? null) }}
+        >
+          <svg className={styles.dropIcon} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d="M12 16V4m0 0 4 4m-4-4-4 4M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3" /></svg>
+          <h2 className={styles.dropTitle}>Drop a video here</h2>
+          <p className={styles.hint}>Up to three minutes. With speech, or without any at all.</p>
           <input
             ref={inputRef}
             className={styles.fileInput}
@@ -61,11 +74,8 @@ export function LoadScreen({ onLoad, onLoadSample, loading, progress = null, err
             <button className={styles.load} onClick={() => inputRef.current?.click()} disabled={loading}>
               {loading ? 'Uploading…' : 'Choose a video'}
             </button>
-            <button className={styles.sample} onClick={onLoadSample} disabled={loading}>
-              or use the sample ad
-            </button>
+            <button className={styles.sample} onClick={onLoadSample} disabled={loading}>Try the sample ad</button>
           </div>
-          <p className={styles.hint}>Up to 3 minutes, English, one speaker on camera.</p>
           {loading && (
             <div className={styles.progress} role="status">
               <span
@@ -88,10 +98,9 @@ export function LoadScreen({ onLoad, onLoadSample, loading, progress = null, err
             </div>
           )}
           {error && <div className={styles.error} role="alert">{error}</div>}
-        </div>
-      </div>
+        </section>
 
-      <div className={styles.recent}>{children}</div>
+        <div className={styles.recent}>{children}</div>
       </main>
     </div>
   )

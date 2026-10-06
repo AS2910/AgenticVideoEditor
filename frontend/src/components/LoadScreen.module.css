@@ -1,45 +1,54 @@
-.screen {
-  min-height: 100dvh; display: flex; flex-direction: column; align-items: center;
-  background: var(--glow), var(--bg);
+/* Your videos (UX-7f): the bar, a drop zone, the cards. */
+.screen { min-height: 100dvh; display: flex; flex-direction: column; background: var(--glow), var(--bg); }
+.header {
+  display: flex; align-items: center; gap: 12px; height: 60px; padding: 0 20px; border-bottom: 1px solid var(--line-soft);
+  position: relative; z-index: 2; background: var(--bar-bg); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); box-shadow: var(--bar-shadow);
 }
-.header { width: 100%; height: 56px; display: flex; align-items: center; gap: 12px; padding: 0 24px; }
-.who { margin-left: auto; display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 13px; }
+.brand { display: flex; align-items: center; gap: 10px; font-family: var(--serif); font-size: 22px; font-weight: 600; letter-spacing: -0.01em; }
+.spacer { flex: 1; }
+.who { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: var(--fs-14); }
 .face { width: 22px; height: 22px; border-radius: 50%; }
 .signOut { background: var(--btn-bg); border: 1px solid var(--line); border-radius: 8px; padding: 0 12px; color: var(--muted); font-size: var(--fs-13); box-shadow: var(--btn-shadow); }
 .signOut:hover { color: var(--text); border-color: var(--line-strong); background: var(--btn-bg-hover); }
-.brand { display: flex; align-items: center; gap: 10px; font-family: var(--serif); font-size: 20px; font-weight: 600; letter-spacing: -0.01em; }
-.main { width: 100%; display: flex; flex-direction: column; align-items: center; }
-.hero { width: min(760px, 100% - 32px); margin-top: clamp(32px, 12vh, 120px); display: flex; flex-direction: column; gap: 18px; }
-.title { margin: 0; font-family: var(--serif); font-size: clamp(30px, 4.5vw, 44px); font-weight: 500; letter-spacing: -0.02em; line-height: 1.1; }
-.tagline { margin: 0; color: var(--muted); font-size: 16px; line-height: 1.5; }
-.card {
-  display: flex; flex-direction: column; gap: 12px; padding: 16px;
-  border-radius: 18px; background: var(--surface-bg); border: 1px solid var(--line-soft); box-shadow: var(--shadow);
+.main { width: min(1120px, 100%); margin: 0 auto; padding: 32px 24px 48px; display: flex; flex-direction: column; gap: 28px; }
+.title { margin: 0; font-family: var(--serif); font-size: 34px; font-weight: 500; letter-spacing: -0.012em; line-height: 1.15; }
+/* The drop zone: dashed teal, lit from the top, brighter with a file over it. */
+.drop {
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 44px 24px;
+  border: 1.5px dashed var(--accent-line); border-radius: var(--radius-xl); background: var(--drop-bg); text-align: center; box-shadow: var(--hl);
+  transition: border-color var(--t) var(--ease), background-color var(--t) var(--ease), box-shadow var(--t) var(--ease);
 }
-.actions { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; }
+.drop[data-over] { border-color: var(--accent); box-shadow: var(--hl), var(--ring); }
+.dropIcon { width: 28px; height: 28px; color: var(--accent); }
+.dropTitle { margin: 0; font-family: var(--serif); font-size: 21px; font-weight: 500; letter-spacing: -0.012em; }
+.hint { color: var(--muted); font-size: var(--fs-16); margin: 0; }
+.actions { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 12px; margin-top: 4px; }
 .load {
-  padding: 11px 18px; border: none; border-radius: 12px;
-  background: var(--btn-primary-bg); color: var(--accent-ink); font-weight: 600; box-shadow: var(--btn-primary-shadow);
+  padding: 0 18px; border: 1px solid transparent; border-radius: 10px; font-size: 15px; font-weight: 600;
+  background: var(--btn-primary-bg); color: var(--accent-ink); box-shadow: var(--btn-primary-shadow);
 }
 .load:hover:not(:disabled) { box-shadow: var(--btn-primary-shadow-hover); }
 .load:disabled { background: var(--raised); color: var(--muted); }
 /* The real input is driven by the styled button above it. Kept interactive
    rather than `pointer-events: none` so assistive tech and tests can reach it. */
 .fileInput { position: absolute; width: 1px; height: 1px; opacity: 0; overflow: hidden; }
-.sample { background: none; border: none; min-height: 0; padding: 10px 4px; margin: -10px -4px; color: var(--muted); font-size: var(--fs-14); text-decoration: underline; }
-.sample:hover { color: var(--text); }
-.sample:disabled { color: var(--muted); }
-.hint { color: var(--muted); font-size: var(--fs-14); margin: 0; }
-.error {
-  color: var(--rose); font-size: var(--fs-14); padding: 8px 10px;
-  border-radius: 8px; background: var(--rose-tint); border: 1px solid var(--rose-line);
-}
-.recent { width: min(760px, 100% - 32px); margin: 48px 0; }
+.sample { padding: 0 16px; border-radius: 10px; font-size: 15px; font-weight: 500; background: var(--btn-bg); color: var(--text); border: 1px solid var(--line); box-shadow: var(--btn-shadow); }
+.sample:hover:not(:disabled) { border-color: var(--line-strong); background: var(--btn-bg-hover); }
+.error { color: var(--rose); font-size: var(--fs-14); padding: 8px 10px; border-radius: 8px; background: var(--rose-tint); border: 1px solid var(--rose-line); }
+.recent { display: flex; flex-direction: column; }
 
 /* UX-6: the upload shows a bar and a sentence while it runs. The bar is
-   indeterminate (an upload through fetch reports no progress). */
+   indeterminate until the request reports progress. */
 .progress { display: flex; align-items: center; gap: 12px; }
+.progress .hint { font-size: var(--fs-14); }
 .progressTrack { flex: none; width: 120px; height: 5px; border-radius: 3px; background: var(--bg-deep); box-shadow: var(--recess); overflow: hidden; }
 .progressFill { display: block; width: 40%; height: 100%; border-radius: 3px; background: var(--fill-bg); box-shadow: var(--fill-shadow); animation: slide 1.2s ease-in-out infinite; }
 @keyframes slide { from { transform: translateX(-100%); } to { transform: translateX(300%); } }
 .progressKnown { display: block; width: 100%; height: 100%; border-radius: 3px; background: var(--fill-bg); box-shadow: var(--fill-shadow); transform-origin: left; transition: transform var(--t) var(--ease); }
+
+@media (max-width: 600px) {
+  .main { padding: 20px 16px 32px; gap: 20px; }
+  .title { font-size: 28px; }
+  .drop { padding: 28px 16px; }
+  .header { height: 56px; padding: 0 16px; }
+}
