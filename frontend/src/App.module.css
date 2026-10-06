@@ -98,10 +98,18 @@
 .panelNote { color: var(--muted); font-size: 13px; }
 
 .reviewButton {
-  padding: 7px 12px; border-radius: 8px; font-size: 13px; font-weight: 500;
-  background: var(--btn-primary-bg); color: var(--accent-ink); border: 1px solid transparent; box-shadow: var(--btn-primary-shadow); white-space: nowrap;
+  padding: 0 12px; border-radius: 9px; font-size: var(--fs-14); font-weight: 500; white-space: nowrap;
+  background: var(--btn-bg); color: var(--text); border: 1px solid var(--line); box-shadow: var(--btn-shadow);
 }
-.reviewButton:hover { box-shadow: var(--btn-primary-shadow-hover); }
+.reviewButton:hover { border-color: var(--line-strong); background: var(--btn-bg-hover); }
+.reviewButton[aria-pressed="true"] { border-color: var(--accent-line); background: var(--accent-tint); color: var(--accent); }
+/* UX-7d: the Ship button says what it will do. */
+.ship {
+  padding: 0 14px; border-radius: 9px; font-size: var(--fs-14); font-weight: 600; white-space: nowrap;
+  background: var(--btn-primary-bg); color: var(--accent-ink); border: 1px solid transparent; box-shadow: var(--btn-primary-shadow);
+}
+.ship:hover:not(:disabled) { box-shadow: var(--btn-primary-shadow-hover); }
+.ship:disabled { background: var(--raised); color: var(--muted); border-color: var(--line); }
 .versions { display: flex; gap: 2px; padding: 3px; border-radius: 10px; background: var(--bg-deep); border: 1px solid var(--line); box-shadow: var(--recess); }
 .version, .versionOn { min-height: var(--chip); padding: 0 12px; border-radius: 6px; font-size: var(--fs-13); border: none; }
 .version { background: transparent; color: var(--muted); }

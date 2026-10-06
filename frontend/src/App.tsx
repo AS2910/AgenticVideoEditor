@@ -136,6 +136,8 @@ export default function App() {
   const [planBusy, setPlanBusy] = useState(false)
   const [planProgress, setPlanProgress] = useState<{ value: number; step: string } | null>(null)
   const [review, setReview] = useState(false)
+  // UX-7d: Keep or Hold per change, decided in the script; a take that failed its sound check starts held.
+  const [decisions, setDecisions] = useState<Record<string, 'keep' | 'hold'>>({})
   // While Voltage reads, the transcript line it is "on" is lit in turn.
   const [readingAt, setReadingAt] = useState(0)
   // The line open in the hands-on editor, so the panel can stand by.
@@ -1131,6 +1133,10 @@ export default function App() {
   ]
   const readyCount = plan?.items.filter((i) => i.status === 'ready').length ?? 0
   const reviewable = (plan?.items.filter((i) => i.status === 'ready' || i.status === 'approved').length ?? 0) > 0
+  const reviewCount = plan?.items.filter((i) => i.kind === 'planned' && (i.status === 'ready' || i.status === 'approved')).length ?? 0
+  const isHeld = (item: PlanItem) => (decisions[item.item_id] ? decisions[item.item_id] === 'hold' : !(item.candidate?.continuity.passed ?? true))
+  const readyItems = plan?.items.filter((i) => i.kind === 'planned' && i.status === 'ready') ?? []
+  const keptItems = readyItems.filter((i) => !isHeld(i))
   const busy = generating || planBusy || planning
   const clarifying = plan?.status === 'clarifying'
   const planned = plan?.items.filter((i) => i.kind === 'planned' && i.enabled) ?? []
@@ -1223,9 +1229,20 @@ export default function App() {
             <button className={styles.signOut} onClick={() => void signOut()}>Sign out</button>
           </span>
         )}
-        {reviewable && !review && (
-          <button className={styles.reviewButton} onClick={() => setReview(true)}>
-            {readyCount > 0 ? `Review ${readyCount} ready ${readyCount === 1 ? 'change' : 'changes'}` : 'Review changes'}
+        {reviewable && (
+          <button className={styles.reviewButton} aria-pressed={review} onClick={() => setReview((r) => !r)}>
+            {review ? 'Back to the script' : readyCount > 0 ? `Review · ${readyCount} ready` : 'Review'}
+          </button>
+        )}
+        {reviewable && (
+          <button
+            className={styles.ship}
+            onClick={() => void approveAll(keptItems.map((i) => i.item_id))}
+            disabled={busy || keptItems.length === 0}
+          >
+            {keptItems.length === 0 ? 'Ship'
+              : keptItems.length === readyItems.length ? `Ship ${keptItems.length} ${keptItems.length === 1 ? 'change' : 'changes'}`
+              : `Ship ${keptItems.length} of ${readyItems.length}`}
           </button>
         )}
         <ExportBar segments={segments} inserts={inserts} onExport={() => void runExport()} download={download} busy={exporting} />
@@ -1263,20 +1280,6 @@ export default function App() {
           )}
         </Player>
         {error && <div className={styles.error} role="alert">{error}</div>}
-        {review && plan ? (
-          <ReviewPanel
-            plan={plan}
-            speakers={speakers}
-            projectId={project.project_id}
-            busy={busy}
-            onCompare={compareItem}
-            onRedo={(item) => void redoTheItem(item)}
-            onShip={(ids) => void approveAll(ids)}
-            onUndo={(item) => { if (item.edit_id) void revert(item.edit_id) }}
-            onBack={() => setReview(false)}
-          />
-        ) : (
-          <>
         {precise && (
           <Timeline
             key={project.project_id}
@@ -1329,9 +1332,21 @@ export default function App() {
           onLongLinesChange={(v) => void rememberLongLines(v)}
           onEditingChange={setEditingLine}
           duration={project.duration}
+          filter={reviewable && plan ? { count: reviewCount, on: review, onChange: setReview } : undefined}
+          review={review && plan ? (
+            <ReviewPanel
+              plan={plan}
+              speakers={speakers}
+              projectId={project.project_id}
+              busy={busy}
+              onCompare={compareItem}
+              onRedo={(item) => void redoTheItem(item)}
+              onUndo={(item) => { if (item.edit_id) void revert(item.edit_id) }}
+              isHeld={isHeld}
+              onDecide={(item, keep) => setDecisions((d) => ({ ...d, [item.item_id]: keep ? 'keep' : 'hold' }))}
+            />
+          ) : undefined}
         />
-          </>
-        )}
       </main>
 
       {panelHidden ? (
@@ -1529,7 +1544,17 @@ export default function App() {
         <ConsentSheet who={consentAsk.who} busy={consenting} onConfirm={() => void confirmConsent()} onCancel={() => setConsentAsk(null)} />
       )}
       {shipped && (
-        <ShipSheet shipped={shipped} busy={varianting} onVariant={() => void makeVariant()} onClose={() => { setShipped(null); setReview(false) }} />
+        <ShipSheet
+          shipped={shipped}
+          busy={varianting}
+          onVariant={() => void makeVariant()}
+          onUndo={(item) => {
+            if (!item.edit_id) return
+            void revert(item.edit_id)
+            setShipped((sh) => (sh ? { ...sh, items: sh.items.filter((i) => i.item_id !== item.item_id), held: sh.held + 1 } : sh))
+          }}
+          onClose={() => { setShipped(null); setReview(false) }}
+        />
       )}
     </div>
   )
