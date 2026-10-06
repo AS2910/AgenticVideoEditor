@@ -63,7 +63,7 @@ describe('the design system, as the stylesheets keep it', () => {
   it('uses --faint only where the design system allows it: glyphs, dividers, and a label beside larger text', () => {
     // The classes allowed to be faint. Anything else in --faint is a sentence,
     // a time or a cost that someone must read, and belongs in --muted.
-    const allowed = new Set(['.grip', '.slash'])
+    const allowed = new Set(['.grip', '.slash', '.tick'])  // .tick: a 1px word mark on the monitor's timeline (UX-7b)
     const offenders: string[] = []
     for (const p of sheets) {
       for (const { selector, body } of blocks(read(p))) {

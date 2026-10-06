@@ -1,14 +1,33 @@
-.player { display: flex; flex-direction: column; gap: 10px; }
-/* The monitor: neutral black surround so picture reads true. */
+/* The monitor (UX-7b): the picture at 16:9 across the column, the line being
+   said captioned over it, the transport under it, and the timeline — the
+   lines as blocks by speaker, the changes lit, the words as ticks, a
+   playhead and a ruler. */
+.player {
+  display: flex; flex-direction: column; gap: 14px; padding: 10px 10px 14px;
+  border: 1px solid var(--line-soft); border-radius: var(--radius-xl);
+  background: var(--surface-bg); box-shadow: var(--shadow);
+}
+/* Neutral black surround so the picture reads true; the column's full width,
+   held to the viewport so the script stays in reach. */
 .stage {
-  aspect-ratio: 16 / 9; max-height: 46vh; position: relative; overflow: hidden;
-  background: var(--monitor); border-radius: var(--radius-lg);
+  position: relative; width: 100%; aspect-ratio: 16 / 9; max-height: 56vh; overflow: hidden;
+  background: var(--monitor); border-radius: 14px; box-shadow: var(--stage-shadow);
 }
 /* Pinned to the stage rather than sized by percentage: `height: 100%` does not
    resolve against an aspect-ratio box, which let a portrait video grow to its
    natural height and be clipped to its middle. */
 .video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; background: var(--monitor); }
+/* The caption: one line, centred, on a frosted strip; an added word lit. */
+.caption {
+  position: absolute; z-index: 1; left: 50%; bottom: 16px; transform: translateX(-50%);
+  max-width: 78%; padding: 7px 14px; border-radius: 9px;
+  background: var(--caption-bg); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+  font-size: var(--fs-16); line-height: 1.35; text-align: center; color: var(--text);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; box-shadow: var(--sh-1);
+}
+.caption ins { color: var(--accent-hi); background: var(--accent-tint); border-radius: 4px; padding: 0 4px; text-decoration: none; box-shadow: inset 0 0 0 1px var(--accent-line-soft); }
 
+.transport { display: flex; flex-direction: column; gap: 8px; padding: 0 4px; }
 .controls { display: flex; align-items: center; gap: 12px; }
 .play {
   width: 44px; height: 44px; flex: none; border-radius: 50%; border: 1px solid var(--line);
@@ -18,34 +37,41 @@
 .timecode { font-size: var(--fs-14); white-space: nowrap; }
 .of { color: var(--muted); }
 
-/* The progress bar: a thin track, the played part, markers where the changes
-   are, and the real range input laid invisibly over it so it stays a slider. */
-.bar { position: relative; flex: 1; height: 6px; border-radius: 3px; background: var(--bg-deep); box-shadow: var(--recess); }
-.played { position: absolute; left: 0; top: 0; height: 6px; border-radius: 3px; background: var(--fill-bg); box-shadow: var(--fill-shadow); pointer-events: none; }
-.mark {
-  position: absolute; top: -3px; width: 3px; height: 12px; margin-left: -1px;
-  border-radius: 2px; background: var(--accent-hi); box-shadow: 0 0 6px var(--glow-color); pointer-events: none;
+/* The timeline: a recessed track; everything on it is placed by time. */
+.track {
+  position: relative; height: 40px; border-radius: 8px; overflow: hidden;
+  background: var(--bg-deep); box-shadow: var(--recess-deep);
 }
-.stage { box-shadow: var(--shadow), inset 0 0 0 1px var(--line-soft); }
-.stageCompact {
-  height: 220px; position: relative; overflow: hidden;
-  background: var(--monitor); border-radius: var(--radius-lg); box-shadow: var(--shadow);
-}
+.block { position: absolute; top: 11px; height: 18px; border-radius: 4px; background: var(--block-x); box-shadow: var(--hl); pointer-events: none; }
+.block::after { content: ''; position: absolute; inset: 0; border-radius: 4px; background: var(--block-stripe); opacity: 0.9; }
+.block[data-tone="a"] { background: var(--block-a); }
+.block[data-tone="b"] { background: var(--block-b); }
+.block[data-tone="c"] { background: var(--block-c); }
+.block[data-tone="d"] { background: var(--block-d); }
+.block[data-tone="changed"] { background: var(--block-changed); box-shadow: 0 0 10px var(--glow-color); z-index: 1; }
+.tick { position: absolute; bottom: 4px; width: 1px; height: 5px; background: var(--faint); opacity: 0.6; pointer-events: none; }
+.head { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px; background: var(--text-bright); box-shadow: 0 0 6px var(--glow-color); z-index: 2; pointer-events: none; }
+.head::before { content: ''; position: absolute; top: 0; left: 50%; transform: translateX(-50%); border: 6px solid transparent; border-top: 7px solid var(--text-bright); border-bottom: 0; }
 .placing {
-  position: absolute; top: -6px; height: 16px; border-radius: 6px; cursor: grab; z-index: 2;
+  position: absolute; top: 7px; height: 26px; border-radius: 6px; cursor: grab; z-index: 3;
   background: var(--accent-tint); border: 1px solid var(--accent); box-shadow: var(--ring), 0 0 10px var(--glow-color);
   touch-action: none;
 }
 .placing::before { content: ''; position: absolute; left: 0; right: 0; top: -14px; bottom: -14px; }
 .placing:active { cursor: grabbing; }
-.scrubber {
-  position: absolute; left: 0; top: -20px; width: 100%; height: 44px; margin: 0;
-  opacity: 0; cursor: pointer;
-}
+.scrubber { position: absolute; left: 0; top: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: pointer; z-index: 2; }
 .scrubber:focus-visible { opacity: 1; }
 
-/* UX-6: on a phone the transport row wraps, and the bar takes its own line. */
+/* The ruler under the track: a label every few seconds, the end flush right. */
+.ruler { position: relative; height: 16px; font-size: var(--fs-12); color: var(--muted); letter-spacing: 0.03em; white-space: nowrap; }
+.rulerMark { position: absolute; top: 0; transform: translateX(-50%); }
+.rulerMark:first-child { transform: none; }
+.rulerMark[data-end] { transform: translateX(-100%); }
+
+/* UX-6: on a phone the transport row wraps. */
 @media (max-width: 480px) {
   .controls { flex-wrap: wrap; row-gap: 10px; }
-  .bar { flex: 1 1 100%; order: 3; margin: 10px 0 6px; }
+  .player { padding: 6px 6px 12px; }
+  .stage { border-radius: 10px; }
+  .caption { max-width: 92%; font-size: var(--fs-14); bottom: 10px; }
 }

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { act, render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import App from './App'
 
@@ -1289,6 +1289,31 @@ describe('App: shifting original speech (UX-1c)', () => {
     await waitFor(() => expect(f.mock.calls.some(([url]) => String(url).endsWith('/edits/e8/revert'))).toBe(true))
     await waitFor(() => expect(screen.queryByText('Moved')).not.toBeInTheDocument())
     expect(screen.queryByText('Moved away')).not.toBeInTheDocument()
+  })
+})
+
+describe('App: the monitor (UX-7b)', () => {
+  it('captions the picture with the line at the playhead, the changed words lit, and draws the lines on the timeline', async () => {
+    vi.stubGlobal('fetch', routeFetch())
+    const user = userEvent.setup()
+    const { container } = render(<App />)
+    await reachEditor(user)
+    // At rest at 0:00 the picture is bare; once it moves, the line at the playhead is on it.
+    expect(screen.queryByTestId('caption')).not.toBeInTheDocument()
+    const video = container.querySelector('video') as HTMLVideoElement
+    video.currentTime = 1
+    fireEvent.timeUpdate(video)
+    expect(screen.getByTestId('caption')).toHaveTextContent('Get 20% off today only.')
+    expect(screen.getAllByTestId('block').map((b) => b.getAttribute('data-tone'))).toContain('x')
+    expect(screen.getAllByTestId('tick').length).toBeGreaterThan(0)
+    // A rewrite in flight shows its new words on the picture.
+    await user.click(screen.getAllByText('Get 20% off today only.').find((el) => el.tagName === 'BUTTON')!)
+    const box = screen.getByRole('textbox', { name: /new wording/i })
+    await user.clear(box)
+    await user.type(box, 'Get 30% off today only.{Enter}')
+    await screen.findByTestId('take')
+    fireEvent.timeUpdate(video)
+    expect(screen.getByTestId('caption').querySelector('ins')).toBeTruthy()
   })
 })
 

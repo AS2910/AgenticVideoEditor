@@ -1,6 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
+import type { Word } from '../types'
+import { rulerMarks } from '../timeline/ruler'
 import styles from './Player.module.css'
+
+/** A span on the monitor's timeline: who speaks it, or that it changed. */
+export interface Block { start: number; end: number; tone: 'a' | 'b' | 'c' | 'd' | 'x' | 'changed' }
 
 interface PlayerProps {
   src: string
@@ -13,12 +18,14 @@ interface PlayerProps {
    *  for the same time twice still move the video. With `play`, playback
    *  starts there; with `until`, it stops at that moment. */
   seekRequest?: { time: number; id: number; play?: boolean; until?: number } | null
-  /** Moments to mark on the progress bar: where the changes are. */
-  marks?: number[]
+  /** The lines on the timeline, coloured by speaker, and the spans that changed (UX-7b). */
+  blocks?: Block[]
+  /** The words, as ticks along the foot of the timeline. */
+  words?: Word[]
+  /** The line being said at the playhead, shown over the picture. */
+  caption?: ReactNode
   /** Shown at the end of the transport row (e.g. the Edited / Original switch). */
   children?: ReactNode
-  /** A small monitor, for working on lines; large for review. */
-  compact?: boolean
   /** The original's sound off while a replacement take plays over it. */
   muted?: boolean
   /** A take being placed: a block of its length on the bar, draggable. */
@@ -41,7 +48,7 @@ const timecode = (t: number) => {
 }
 
 export function Player({
-  src, duration, currentTime, onSeek, onTimeUpdate, seekRequest, marks = [], children, compact, muted, placing, onPlace,
+  src, duration, currentTime, onSeek, onTimeUpdate, seekRequest, blocks = [], words = [], caption, children, muted, placing, onPlace,
 }: PlayerProps) {
   const barRef = useRef<HTMLDivElement>(null)
 
@@ -100,10 +107,11 @@ export function Player({
     onSeek(t)
   }
 
-  const played = length > 0 ? Math.min(100, (currentTime / length) * 100) : 0
+  const pct = (t: number) => `${length > 0 ? Math.min(100, Math.max(0, (t / length) * 100)) : 0}%`
+  const head = length > 0 ? Math.min(100, (currentTime / length) * 100) : 0
   return (
-    <div className={styles.player}>
-      <div className={compact ? styles.stageCompact : styles.stage}>
+    <section className={styles.player} aria-label="Monitor">
+      <div className={styles.stage}>
         <video
           ref={videoRef}
           className={styles.video}
@@ -125,20 +133,41 @@ export function Player({
           }}
           onEnded={() => setPlaying(false)}
         />
+        {/* The line at the playhead, as the picture shows it, once the picture
+            moves. The transcript carries the same words, so this is not read
+            out as it changes. */}
+        {caption && (playing || currentTime > 0) && <div className={styles.caption} data-testid="caption" aria-hidden="true">{caption}</div>}
       </div>
-      <div className={styles.controls}>
-        <button className={styles.play} onClick={toggle} aria-label={playing ? 'Pause' : 'Play'}>
-          {playing ? (
-            <svg width="10" height="12" viewBox="0 0 10 12" aria-hidden="true"><path d="M1 1h3v10H1zM6 1h3v10H6z" fill="currentColor" /></svg>
-          ) : (
-            <svg width="10" height="12" viewBox="0 0 10 12" aria-hidden="true"><path d="M1 1l8 5-8 5z" fill="currentColor" /></svg>
-          )}
-        </button>
-        <span className={styles.timecode} data-testid="timecode">
-          {timecode(currentTime)} <span className={styles.of}>/ {timecode(length)}</span>
-        </span>
-        <div className={styles.bar} ref={barRef}>
-          <div className={styles.played} style={{ width: `${played}%` }} />
+      <div className={styles.transport}>
+        <div className={styles.controls}>
+          <button className={styles.play} onClick={toggle} aria-label={playing ? 'Pause' : 'Play'}>
+            {playing ? (
+              <svg width="12" height="14" viewBox="0 0 10 12" aria-hidden="true"><path d="M1 1h3v10H1zM6 1h3v10H6z" fill="currentColor" /></svg>
+            ) : (
+              <svg width="12" height="14" viewBox="0 0 10 12" aria-hidden="true"><path d="M1 1l8 5-8 5z" fill="currentColor" /></svg>
+            )}
+          </button>
+          <span className={styles.timecode} data-testid="timecode">
+            {timecode(currentTime)} <span className={styles.of}>/ {timecode(length)}</span>
+          </span>
+          {children}
+        </div>
+        {/* The timeline: the lines as blocks, the changes lit, the words as
+            ticks, the playhead, and the real range input laid invisibly over
+            it all so it stays a slider. */}
+        <div className={styles.track} ref={barRef}>
+          {blocks.filter((b) => b.end > 0 && b.start < length).map((b, i) => (
+            <span
+              key={i}
+              className={styles.block}
+              data-tone={b.tone}
+              data-testid="block"
+              style={{ left: pct(b.start), width: `${Math.max(0.4, ((Math.min(b.end, length) - Math.max(0, b.start)) / Math.max(length, 0.001)) * 100)}%` }}
+            />
+          ))}
+          {words.filter((w) => w.start >= 0 && w.start <= length).map((w, i) => (
+            <span key={i} className={styles.tick} data-testid="tick" style={{ left: pct(w.start) }} />
+          ))}
           {placing && length > 0 && (
             <div
               className={styles.placing}
@@ -159,9 +188,7 @@ export function Player({
               }}
             />
           )}
-          {marks.filter((t) => t >= 0 && t <= length).map((t, i) => (
-            <span key={i} className={styles.mark} data-testid="mark" style={{ left: `${(t / length) * 100}%` }} />
-          ))}
+          <span className={styles.head} data-testid="head" style={{ left: `${head}%` }} />
           <input
             className={styles.scrubber}
             type="range"
@@ -174,8 +201,12 @@ export function Player({
             aria-valuetext={`${timecode(currentTime)} of ${timecode(length)}`}
           />
         </div>
-        {children}
+        <div className={styles.ruler} aria-hidden="true" data-testid="ruler">
+          {rulerMarks(length).map((m, i, all) => (
+            <span key={i} className={styles.rulerMark} data-end={i === all.length - 1 || undefined} style={{ left: pct(m.at) }}>{m.label}</span>
+          ))}
+        </div>
       </div>
-    </div>
+    </section>
   )
 }
