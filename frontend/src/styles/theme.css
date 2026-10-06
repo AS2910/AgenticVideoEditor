@@ -82,6 +82,16 @@
   --bar-bg: linear-gradient(180deg, rgba(29, 40, 52, 0.92), rgba(21, 30, 40, 0.92));
   --bar-shadow: 0 1px 0 rgba(255, 255, 255, 0.03), 0 6px 20px rgba(0, 0, 0, 0.25);
   --dot-shadow: inset 0 -3px 5px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.35);
+  --stage-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.04), 0 10px 30px rgba(0, 0, 0, 0.45);
+  --caption-bg: rgba(5, 9, 13, 0.72);
+  /* The monitor's timeline: a block per line, by speaker; a changed span lit. */
+  --block-x: var(--line);
+  --block-stripe: repeating-linear-gradient(90deg, transparent 0 6px, rgba(0, 0, 0, 0.22) 6px 7px);
+  --block-a: linear-gradient(180deg, rgba(127, 184, 240, 0.75), rgba(127, 184, 240, 0.45));
+  --block-b: linear-gradient(180deg, rgba(201, 162, 232, 0.75), rgba(201, 162, 232, 0.45));
+  --block-c: linear-gradient(180deg, rgba(233, 196, 106, 0.75), rgba(233, 196, 106, 0.45));
+  --block-d: linear-gradient(180deg, rgba(242, 166, 166, 0.75), rgba(242, 166, 166, 0.45));
+  --block-changed: linear-gradient(180deg, var(--accent-hi), var(--accent));
   --fill-bg: linear-gradient(90deg, var(--accent-lo), var(--accent));
   --fill-shadow: 0 0 8px var(--glow-color);
 

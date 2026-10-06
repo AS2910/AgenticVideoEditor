@@ -1,10 +1,13 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { Fragment, useCallback, useEffect, useRef, useState } from 'react'
 import { ConsentSheet } from './components/ConsentSheet'
 import { SignIn } from './components/SignIn'
 import { ShipSheet } from './components/ShipSheet'
 import type { Shipped } from './components/ShipSheet'
 import { LoadScreen } from './components/LoadScreen'
 import { Player } from './components/Player'
+import type { Block } from './components/Player'
+import { captionAt } from './transcript/caption'
+import type { CaptionPending } from './transcript/caption'
 import { Timeline } from './components/Timeline'
 import { ChatPanel } from './components/ChatPanel'
 import { CandidateCard } from './components/CandidateCard'
@@ -1176,7 +1179,25 @@ export default function App() {
     const i = statements.findIndex((s) => keyOf({ start: s.start, end: s.end }) === key || `add-${s.end.toFixed(3)}` === key)
     return i >= 0 ? clock(statements[i].start) : key
   }
-  const marks = approved.map((r) => (showEdited ? renderTime(r.start, inserts) : r.start))
+  // UX-7b: the monitor's timeline and caption. Times follow the version that
+  // plays: an insert in the edited render pushes everything after it later.
+  const toRender = (t: number) => (showEdited ? renderTime(t, inserts) : t)
+  const blocks: Block[] = [
+    ...statements.map((s) => ({ start: toRender(s.start), end: toRender(s.end), tone: speakerSlot(speakers, s.speaker) as Block['tone'] })),
+    ...approved.filter((r) => r.mix !== 'remove').map((r) => ({ start: toRender(r.start), end: toRender(r.end), tone: 'changed' as const })),
+    ...pendingLines.filter((l) => l.text).map((l) => ({ start: toRender(l.selection.start), end: toRender(l.selection.end), tone: 'changed' as const })),
+  ]
+  // A take in hand, not yet kept, is captioned with its words too: the picture
+  // shows what you are about to hear.
+  const takesInHand: CaptionPending[] = [
+    ...Object.values(lines).flatMap((l) => {
+      const take = l.takes[l.takes.length - 1]
+      return take ? [{ selection: take.plan.selection, text: take.plan.new_text, mix: take.plan.mix }] : []
+    }),
+    ...(candidate ? [{ selection: candidate.plan.selection, text: candidate.plan.new_text, mix: candidate.plan.mix }] : []),
+  ]
+  const captionRuns = captionAt(sourceClock, statements, approved, [...pendingLines, ...takesInHand], transcript, rendered !== null && view === 'original')
+  const caption = captionRuns?.map((r, k) => <Fragment key={k}>{k > 0 && ' '}{r.kind === 'ins' ? <ins>{r.text}</ins> : r.text}</Fragment>)
 
   return (
     <div className={styles.app}>
@@ -1214,8 +1235,9 @@ export default function App() {
           onSeek={setCurrentTime}
           onTimeUpdate={setCurrentTime}
           seekRequest={seekRequest}
-          marks={marks}
-          compact={!review}
+          blocks={blocks}
+          words={transcript}
+          caption={caption}
           muted={playingTake !== null && playingMix === 'replace'}
           placing={placing}
           onPlace={(start) => setPlacing((p) => (p ? { ...p, start } : p))}

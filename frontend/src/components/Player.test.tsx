@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import { fireEvent } from '@testing-library/react'
 import { Player } from './Player'
+import { rulerMarks } from '../timeline/ruler'
 
 describe('Player', () => {
   it('renders a scrubber bound to duration and reports seeks', () => {
@@ -74,5 +75,38 @@ describe('Player placing (UX-1b)', () => {
     expect(onPlace).toHaveBeenCalledWith(2.1)
     fireEvent.keyDown(block, { key: 'ArrowLeft', shiftKey: true })
     expect(onPlace).toHaveBeenCalledWith(1)
+  })
+})
+
+describe('Player as the monitor (UX-7b)', () => {
+  it('captions the picture with the line at the playhead', () => {
+    render(<Player src="/a.mp4" duration={8} currentTime={1} onSeek={() => {}} caption={<>Get <ins>30%</ins> off</>} />)
+    expect(screen.getByTestId('caption')).toHaveTextContent('Get 30% off')
+    expect(screen.getByTestId('caption').querySelector('ins')).toHaveTextContent('30%')
+  })
+
+  it('draws the lines as blocks by speaker, the changed span lit, and the words as ticks', () => {
+    render(
+      <Player
+        src="/a.mp4" duration={10} currentTime={2.5} onSeek={() => {}}
+        blocks={[{ start: 0, end: 4, tone: 'a' }, { start: 5, end: 8, tone: 'b' }, { start: 1, end: 2, tone: 'changed' }]}
+        words={[{ text: 'Get', start: 0, end: 0.4 }, { text: 'off', start: 0.9, end: 1.3 }]}
+      />,
+    )
+    const blocks = screen.getAllByTestId('block')
+    expect(blocks.map((b) => b.getAttribute('data-tone'))).toEqual(['a', 'b', 'changed'])
+    expect(blocks[0].style.left).toBe('0%')
+    expect(blocks[0].style.width).toBe('40%')
+    expect(blocks[1].style.left).toBe('50%')
+    expect(screen.getAllByTestId('tick')).toHaveLength(2)
+    expect(screen.getByTestId('head').style.left).toBe('25%')
+  })
+
+  it('rules the timeline with a label every few seconds and the end', () => {
+    expect(rulerMarks(16.2).map((m) => m.label)).toEqual(['0:00', '0:05', '0:10', '0:15', '0:16'])
+    expect(rulerMarks(7.5).map((m) => m.label)).toEqual(['0:00', '0:02', '0:04', '0:06', '0:07.5'])
+    expect(rulerMarks(48.9).map((m) => m.label)).toEqual(['0:00', '0:10', '0:20', '0:30', '0:40', '0:49'])
+    expect(rulerMarks(52.42).map((m) => m.label)).toEqual(['0:00', '0:10', '0:20', '0:30', '0:40', '0:52'])
+    expect(rulerMarks(0)).toEqual([])
   })
 })
