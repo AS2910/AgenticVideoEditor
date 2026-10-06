@@ -1,5 +1,6 @@
 import { Fragment, useEffect, useRef, useState } from 'react'
 import type React from 'react'
+import type { ReactNode } from 'react'
 import type {
   Candidate, ItemStatus, LineStatus, LongLines, Mix, Question, QuestionOption, Revision, Selection, Speaker, Statement, Voice, Word,
 } from '../types'
@@ -86,6 +87,10 @@ interface LineDocProps {
   onEditingChange?: (statement: Statement | null) => void
   /** UX-5: the clip's length, so a voice-over can be placed on a clip with no speech. */
   duration?: number
+  /** UX-7d: review is the script filtered to what changed — a segmented control in the heading. */
+  filter?: { count: number; on: boolean; onChange: (on: boolean) => void }
+  /** The review rows, shown in place of the lines while the filter is on. */
+  review?: ReactNode
 }
 
 const overlaps = (a: { start: number; end: number }, b: { start: number; end: number }) =>
@@ -120,7 +125,7 @@ const PlayIcon = () => <svg width="10" height="12" viewBox="0 0 10 12" aria-hidd
 /** The transcript as the working surface: every line carries its own state,
  *  actions, editor and takes. Nothing about a line happens anywhere else. */
 export function LineDoc({
-  statements, words = [], speakers = [], voices = [], revisions = [], selection, currentTime,
+  statements, words = [], speakers = [], voices = [], revisions = [], selection, currentTime, filter, review,
   pendingLines = [], lines = {}, longLines = 'pause', disabled, usdPerChar, playing, readouts = [],
   onSeek, onHear, onKeep, onAnother, onAnswer, onUndo, onRemove, onPlayTake, onDismiss, onReword,
   onLongLinesChange, onEditingChange, onMove, onMoveKept, placing, onPlacing, onShift, duration,
@@ -812,8 +817,15 @@ export function LineDoc({
     <section className={styles.doc} aria-label="Transcript">
       <div className={styles.heading}>
         <h2 className={styles.title}>Transcript</h2>
+        {filter && (
+          <div className={styles.seg} role="group" aria-label="Show">
+            <button className={filter.on ? styles.segOn : styles.segOff} aria-pressed={filter.on} onClick={() => filter.onChange(true)}>Changes · {filter.count}</button>
+            <button className={filter.on ? styles.segOff : styles.segOn} aria-pressed={!filter.on} onClick={() => filter.onChange(false)}>The whole script</button>
+          </div>
+        )}
         <span className={styles.hint}>
-          {editing ? (editing.mode === 'edit' ? `Editing ${clock(statements[editing.index].start)}. Enter to hear it, Esc to cancel.` : `Adding a line after ${clock(statements[editing.index].start)}. Esc to cancel.`)
+          {review ? 'Keep what sounds right; hold the rest as drafts. The Ship button in the bar counts what you keep.'
+            : editing ? (editing.mode === 'edit' ? `Editing ${clock(statements[editing.index].start)}. Enter to hear it, Esc to cancel.` : `Adding a line after ${clock(statements[editing.index].start)}. Esc to cancel.`)
             : pendingLines.some((p) => p.status === 'reading') ? "Voltage is reading. The line it's on is lit."
             : focusedRow !== null ? <span className={styles.keys} data-testid="keys"><kbd>↑</kbd><kbd>↓</kbd> move · <kbd>Enter</kbd> change the words · <kbd>Space</kbd> play · <kbd>A</kbd> add after · <kbd>S</kbd> shift (or drag ⋮⋮) · <kbd>K</kbd> keep · <kbd>U</kbd> undo · <kbd>/</kbd> ask Voltage</span>
             : armedRow !== null ? <span role="status">Press Backspace again to remove the line at {clock(statements[armedRow].start)}.</span>
@@ -821,10 +833,12 @@ export function LineDoc({
         </span>
       </div>
 
+      {review ?? (
       <div role="list" className={styles.doc} ref={list} onFocusCapture={() => setFocusTick((t) => t + 1)} onBlurCapture={() => setFocusTick((t) => t + 1)} data-focus-tick={focusTick}>
         {rows.map((entry, order) => (entry.kind === 'moved' ? movedRow(entry, order) : lineRow(entry.s, entry.i, order)))}
         {drag && dropIndexFor(drag.to) === rows.length && dropMarker()}
       </div>
+      )}
     </section>
   )
 }

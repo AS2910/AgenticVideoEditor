@@ -824,18 +824,21 @@ describe('App the agent (Phase 13)', () => {
     expect(screen.getByTestId('activity')).toHaveTextContent('$0.01 for this plan')
 
     // W5: review and ship.
-    await user.click(screen.getByRole('button', { name: 'Review 1 ready change' }))
-    expect(screen.getByText('One change, ready to ship')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Review · 1 ready' }))
+    expect(screen.getByRole('button', { name: 'Changes · 1' })).toHaveAttribute('aria-pressed', 'true')
     expect(screen.getByTestId('review-row')).toHaveTextContent('Before')
-    await user.click(screen.getByRole('button', { name: /ship it/i }))
+    await user.click(screen.getByRole('button', { name: 'Ship 1 change' }))
 
     await waitFor(() => expect((container.querySelector('video') as HTMLVideoElement).getAttribute('src'))
       .toBe(`/api/projects/p1/artifacts/${'r'.repeat(64)}`))
     expect(calls.some((c) => c.url.endsWith('/plans/plan1/approve'))).toBe(true)
     // UX-3: the sheet says what is in the file.
     const sheet = await screen.findByTestId('ship-sheet')
-    expect(sheet).toHaveTextContent('1 line changed. 0:02.3 → 0:02.3, the same length. $0.01 for this plan.')
-    expect(sheet).toHaveTextContent('Said “Get 30% off today only.”')
+    expect(sheet).toHaveTextContent('Same length as before, 2.3 seconds.')
+    expect(within(sheet).getByText('line changed')).toBeInTheDocument()
+    expect(sheet).toHaveTextContent('$0.01')
+    expect(within(sheet).getByRole('list', { name: 'What was said' })).toHaveTextContent('Get 30% off today only.')
+    expect(sheet).toHaveTextContent('stand-in voice')
     expect(within(sheet).getByRole('link', { name: 'Download MP4' })).toHaveAttribute('download', 'sample-ad-edited.mp4')
     await user.click(within(sheet).getByRole('button', { name: 'Back to the transcript' }))
     expect(screen.queryByTestId('ship-sheet')).not.toBeInTheDocument()
@@ -865,10 +868,10 @@ describe('App the agent (Phase 13)', () => {
     await reachGoal(user)
     await user.type(screen.getByRole('textbox', { name: /describe a change/i }), 'make it 30% off{Enter}')
     await user.click(await screen.findByRole('button', { name: 'Go ahead' }))
-    await user.click(await screen.findByRole('button', { name: 'Review 2 ready changes' }))
+    await user.click(await screen.findByRole('button', { name: 'Review · 2 ready' }))
 
     // Hold the second; ship the first.
-    expect(screen.getByText('Two changes, ready to ship')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Changes · 2' })).toHaveAttribute('aria-pressed', 'true')
     await user.click(within(screen.getByRole('group', { name: 'Keep or hold the change at 0:00' })).getByRole('button', { name: 'Hold' }))
     expect(screen.getByText('1 kept, 1 held as a draft.')).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'Ship 1 of 2' }))
@@ -879,12 +882,13 @@ describe('App the agent (Phase 13)', () => {
     await user.click(within(sheet).getByRole('button', { name: 'Back to the transcript' }))
 
     // Review again: one shipped with Undo, one still a draft.
-    await user.click(screen.getByRole('button', { name: 'Review 1 ready change' }))
+    await user.click(screen.getByRole('button', { name: 'Review · 1 ready' }))
     await user.click(screen.getByRole('button', { name: 'Undo' }))
     await waitFor(() => expect(calls.some((c) => c.url.endsWith('/edits/e1/revert'))).toBe(true))
 
+    // The hold on the first change stands; the undone one is kept again.
     // A variant: the same clip, the plan as a draft, opened as its own project.
-    await user.click(screen.getByRole('button', { name: 'Ship it' }))
+    await user.click(screen.getByRole('button', { name: 'Ship 1 of 2' }))
     await user.click(within(await screen.findByTestId('ship-sheet')).getByRole('button', { name: 'Make a variant' }))
     await waitFor(() => expect(calls.some((c) => c.url.endsWith('/projects/p1/variants'))).toBe(true))
     await waitFor(() => expect(window.location.hash).toBe('#p2'))
@@ -1003,9 +1007,9 @@ describe('App the agent (Phase 13)', () => {
     await reachGoal(user)
     await user.type(screen.getByRole('textbox', { name: /describe a change/i }), 'make it 30% off{Enter}')
     await user.click(await screen.findByRole('button', { name: 'Go ahead' }))
-    await user.click(await screen.findByRole('button', { name: 'Review 1 ready change' }))
+    await user.click(await screen.findByRole('button', { name: 'Review · 1 ready' }))
 
-    await user.click(screen.getByRole('button', { name: /hear the seam/i }))
+    await user.click(screen.getByRole('button', { name: /play the seam/i }))
 
     // No render yet, so the original at that line, from a moment before it.
     const video = container.querySelector('video') as HTMLVideoElement

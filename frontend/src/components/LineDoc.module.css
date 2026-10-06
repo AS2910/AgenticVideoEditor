@@ -2,7 +2,13 @@
    the line inside its row. */
 .doc { display: flex; flex-direction: column; gap: 2px; }
 .empty { padding: 24px 0; margin: 0; color: var(--muted); }
-.heading { display: flex; align-items: baseline; gap: 10px; padding: 4px 10px 8px; }
+.heading { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; padding: 4px 10px 8px; }
+/* UX-7d: Changes · N | The whole script. */
+.seg { display: inline-flex; gap: 2px; padding: 3px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg-deep); box-shadow: var(--recess); }
+.segOn, .segOff { min-height: 34px; padding: 0 12px; border-radius: 7px; font-size: var(--fs-14); font-weight: 500; border: none; white-space: nowrap; }
+.segOn { background: var(--seg-on-bg); color: var(--text); box-shadow: var(--btn-shadow); }
+.segOff { background: transparent; color: var(--muted); }
+.segOff:hover { color: var(--text); }
 .title { margin: 0; font-size: inherit; font-family: var(--ui); font-weight: 600; }
 .hint { color: var(--muted); font-size: var(--fs-14); }
 
