@@ -1,6 +1,7 @@
 import { useRef } from 'react'
 import type { ReactNode } from 'react'
 import styles from './LoadScreen.module.css'
+import { Orb } from './Orb'
 
 interface LoadScreenProps {
   onLoad: (file: File) => void
@@ -23,7 +24,7 @@ export function LoadScreen({ onLoad, onLoadSample, loading, progress = null, err
   return (
     <div className={styles.screen}>
       <header className={styles.header}>
-        <span className={styles.brand}>Voltage</span>
+        <span className={styles.brand}><Orb size={14} />Voltage</span>
         {who && (
           <span className={styles.who} data-testid="who">
             {who.picture ? <img className={styles.face} src={who.picture} alt="" referrerPolicy="no-referrer" /> : null}

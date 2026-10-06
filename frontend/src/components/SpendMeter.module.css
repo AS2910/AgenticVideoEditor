@@ -2,9 +2,9 @@
 .near { color: var(--amber); }
 .nearWord { font-weight: 500; }
 .label { font-variant-numeric: tabular-nums; }
-.track { width: 72px; height: 4px; border-radius: 2px; background: var(--line); overflow: hidden; display: inline-block; }
-.fill { display: block; width: 100%; height: 100%; transform-origin: left; background: var(--accent); }
-.near .fill { background: var(--amber); }
+.track { width: 96px; height: 6px; border-radius: 3px; background: var(--bg-deep); box-shadow: var(--recess); overflow: hidden; display: inline-block; }
+.fill { display: block; width: 100%; height: 100%; transform-origin: left; background: var(--fill-bg); box-shadow: var(--fill-shadow); border-radius: 3px; }
+.near .fill { background: var(--rose); box-shadow: none; }
 .detail { color: var(--muted); }
 @media (max-width: 1200px) { .detail { display: none; } }
 @media (max-width: 960px) { .track { display: none; } }

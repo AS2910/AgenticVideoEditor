@@ -1,7 +1,7 @@
 .overlay { position: fixed; inset: 0; z-index: 20; display: grid; place-items: center; padding: 24px; overflow-y: auto; background: var(--scrim); backdrop-filter: blur(4px); }
 .sheet {
-  width: min(480px, 100%); padding: 22px 24px; border-radius: 18px;
-  background: var(--surface); border: 1px solid var(--line); box-shadow: var(--shadow);
+  width: min(480px, 100%); padding: 22px 24px; border-radius: 22px;
+  background: var(--sheet-bg); border: 1px solid var(--line); box-shadow: var(--sheet-shadow);
   max-height: calc(100dvh - 48px); overflow-y: auto;
   animation: rise var(--t-open) var(--ease) both;
 }
@@ -10,6 +10,8 @@
 .text { margin: 0 0 8px; font-size: 15px; line-height: 1.55; }
 .fine { margin: 0 0 18px; font-size: var(--fs-14); color: var(--muted); line-height: 1.5; }
 .actions { display: flex; justify-content: flex-end; gap: 8px; }
-.primary { padding: 0 16px; border-radius: 12px; font-weight: 600; background: var(--accent); color: var(--accent-ink); border: 1px solid var(--accent); }
+.primary { padding: 0 16px; border-radius: 12px; font-weight: 600; background: var(--btn-primary-bg); color: var(--accent-ink); border: 1px solid transparent; box-shadow: var(--btn-primary-shadow); }
+.primary:hover:not(:disabled) { box-shadow: var(--btn-primary-shadow-hover); }
 .primary:disabled { background: var(--raised); color: var(--muted); border-color: var(--line); }
-.secondary { padding: 0 14px; border-radius: 12px; font-weight: 500; background: var(--raised); color: var(--text); border: 1px solid var(--line); }
+.secondary { padding: 0 14px; border-radius: 12px; font-weight: 500; background: var(--btn-bg); color: var(--text); border: 1px solid var(--line); box-shadow: var(--btn-shadow); }
+.secondary:hover { border-color: var(--line-strong); background: var(--btn-bg-hover); }

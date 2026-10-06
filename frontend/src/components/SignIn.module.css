@@ -3,20 +3,20 @@
   background: var(--glow), var(--bg);
 }
 .header { width: 100%; height: 56px; display: flex; align-items: center; padding: 0 24px; }
-.brand { font-family: var(--serif); font-size: 20px; font-weight: 600; letter-spacing: -0.01em; }
+.brand { display: flex; align-items: center; gap: 10px; font-family: var(--serif); font-size: 20px; font-weight: 600; letter-spacing: -0.01em; }
 .main { width: 100%; display: flex; flex-direction: column; align-items: center; }
 .hero { width: min(640px, 100% - 32px); margin-top: clamp(32px, 14vh, 140px); display: flex; flex-direction: column; gap: 18px; }
 .title { margin: 0; font-family: var(--serif); font-size: clamp(30px, 4.5vw, 44px); font-weight: 500; letter-spacing: -0.02em; line-height: 1.1; }
 .tagline { margin: 0; color: var(--muted); font-size: 16px; line-height: 1.5; }
 .card {
   display: flex; flex-direction: column; gap: 12px; padding: 16px;
-  border-radius: 18px; background: var(--surface); border: 1px solid var(--line); box-shadow: var(--shadow);
+  border-radius: 18px; background: var(--surface-bg); border: 1px solid var(--line-soft); box-shadow: var(--shadow);
 }
 .google {
   align-self: flex-start; display: inline-flex; align-items: center; gap: 10px;
   min-height: var(--target); padding: 0 18px; border-radius: 12px; font-weight: 600; text-decoration: none;
-  background: var(--accent); color: var(--accent-ink);
+  background: var(--btn-primary-bg); color: var(--accent-ink); box-shadow: var(--btn-primary-shadow);
 }
-.google:hover { color: var(--accent-ink); filter: brightness(1.05); }
+.google:hover { color: var(--accent-ink); box-shadow: var(--btn-primary-shadow-hover); }
 .hint { margin: 0; color: var(--muted); font-size: var(--fs-14); line-height: 1.5; }
-.error { color: var(--amber); font-size: var(--fs-14); padding: 8px 10px; border-radius: 8px; background: var(--amber-tint); border: 1px solid var(--amber-line); }
+.error { color: var(--rose); font-size: var(--fs-14); padding: 8px 10px; border-radius: 8px; background: var(--rose-tint); border: 1px solid var(--rose-line); }

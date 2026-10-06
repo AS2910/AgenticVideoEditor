@@ -54,3 +54,15 @@ Not drawn: the consent sentence (D5) and the *Needs you* answer flow (F2's quest
 - **UX-7f · Projects and phone.** The cards, the drop zone, the phone layout with the rail as a strip. Exit: A5, G2, H4.
 
 Each phase ships on its own, build, lint and tests clean, then merges. Blocked items go to the backlog.
+
+## As built
+
+### UX-7a · Tokens and chrome (2026-10-06)
+
+Branch `ux7-workspace`, merged to main. Tests unchanged in count (224 frontend / 514 backend) and unchanged in text: the exit criterion was that every existing screen renders in the new look with no test change, and it did.
+
+- `theme.css` carries the Ink and teal tokens from `voltage.css`, with every older name (`--amber`, `--speaker-a..d`, `--accent-bright`, `--shadow`, `--glow`) kept as an alias so no component broke. Everything that gives depth is a token too — `--hl`, `--sh-1..3`, `--card-bg`, `--surface-bg`, `--sheet-bg`, `--recess`, `--ring`, `--bar-bg`, `--btn-bg`, `--btn-primary-bg`, `--seg-on-bg`, `--fill-bg` — because the stylesheet contract test forbids a colour in a component sheet, and that now covers gradients and shadows as well.
+- The chrome: the bar is frosted (`--bar-bg`, `backdrop-filter`) with the orb beside the brand word on every screen; raised buttons with a hairline highlight that press 1px (a global `button:active` rule); the primary button lit from above with a glow under the pointer; chips with the hairline; segmented controls (Edited / Original, Precise, Check with me / Just do it, the timeline zoom) as a recessed track with a raised chosen segment; inputs, selects and the composer recessed with a teal ring on focus; sheets on `--sh-3` at 22px; the spend meter, play bar and progress bars as recessed tracks with a lit fill; inserted words in `--accent-hi` on a teal tint with a soft ring, struck words with a coral strike; the orb teal, breathing on a 4.5 s cycle, faster while working; project-list states as pills with a lit dot.
+- Placeholders stay `--muted`: the mocks had them faint, but the design system says a sentence is never faint, and the contract test agrees.
+- Not changed, on purpose: layout (UX-7b onward), and the phone layout's clipped right edge at 420 px (the segmented control and the transcript hint run past the viewport) — it was there before UX-7a, checked against main's build, and belongs to UX-7f.
+- Checked in headless Chrome against the preview build on the Bhaji Cam clip (`p3`) and the project list, at 1440 and 420 px. The preview server listens on IPv6 only, so the capture URL is `http://localhost:4173`, not `127.0.0.1`.

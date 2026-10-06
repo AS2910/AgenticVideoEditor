@@ -87,7 +87,7 @@ export function GoalStage({ project, reading, onPlan, onHandsOn, onName, onPlace
   return (
     <div className={styles.stage}>
       <header className={styles.header}>
-        <span className={styles.brand}>Voltage</span>
+        <span className={styles.brand}><Orb size={14} />Voltage</span>
       </header>
       <main className={styles.main}>
       <div className={styles.hero}>

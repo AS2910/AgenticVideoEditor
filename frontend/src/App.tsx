@@ -1183,7 +1183,7 @@ export default function App() {
       <a className="skip" href="#main">Skip to the transcript</a>
       <header className={styles.header}>
         <button className={styles.back} onClick={leave}>← Projects</button>
-        <h1 className={styles.brand}>Voltage</h1>
+        <h1 className={styles.brand}><Orb size={14} />Voltage</h1>
         <span className={styles.slash} aria-hidden="true">/</span>
         <span className={styles.filename} title={project.filename}>{project.filename}</span>
         <span className={styles.meta}>

@@ -11,29 +11,29 @@
 
 .controls { display: flex; align-items: center; gap: 12px; }
 .play {
-  width: 44px; height: 44px; flex: none; border-radius: 50%; border: none;
-  background: var(--text); color: var(--bg); display: flex; align-items: center; justify-content: center;
+  width: 44px; height: 44px; flex: none; border-radius: 50%; border: 1px solid var(--line);
+  background: var(--btn-bg); color: var(--text); box-shadow: var(--btn-shadow); display: flex; align-items: center; justify-content: center;
 }
-.play:hover { background: var(--text-bright); }
+.play:hover { background: var(--btn-bg-hover); border-color: var(--line-strong); color: var(--text-bright); }
 .timecode { font-size: var(--fs-14); white-space: nowrap; }
 .of { color: var(--muted); }
 
 /* The progress bar: a thin track, the played part, markers where the changes
    are, and the real range input laid invisibly over it so it stays a slider. */
-.bar { position: relative; flex: 1; height: 4px; border-radius: 2px; background: var(--line); }
-.played { position: absolute; left: 0; top: 0; height: 4px; border-radius: 2px; background: var(--text); pointer-events: none; }
+.bar { position: relative; flex: 1; height: 6px; border-radius: 3px; background: var(--bg-deep); box-shadow: var(--recess); }
+.played { position: absolute; left: 0; top: 0; height: 6px; border-radius: 3px; background: var(--fill-bg); box-shadow: var(--fill-shadow); pointer-events: none; }
 .mark {
-  position: absolute; top: -3px; width: 3px; height: 10px; margin-left: -1px;
-  border-radius: 2px; background: var(--accent); pointer-events: none;
+  position: absolute; top: -3px; width: 3px; height: 12px; margin-left: -1px;
+  border-radius: 2px; background: var(--accent-hi); box-shadow: 0 0 6px var(--glow-color); pointer-events: none;
 }
-.stage { box-shadow: var(--shadow); }
+.stage { box-shadow: var(--shadow), inset 0 0 0 1px var(--line-soft); }
 .stageCompact {
   height: 220px; position: relative; overflow: hidden;
   background: var(--monitor); border-radius: var(--radius-lg); box-shadow: var(--shadow);
 }
 .placing {
   position: absolute; top: -6px; height: 16px; border-radius: 6px; cursor: grab; z-index: 2;
-  background: var(--accent-tint); border: 1px solid var(--accent); box-shadow: 0 0 0 3px var(--accent-tint);
+  background: var(--accent-tint); border: 1px solid var(--accent); box-shadow: var(--ring), 0 0 10px var(--glow-color);
   touch-action: none;
 }
 .placing::before { content: ''; position: absolute; left: 0; right: 0; top: -14px; bottom: -14px; }

@@ -1,12 +1,13 @@
 import { loginUrl } from '../api'
 import styles from './SignIn.module.css'
+import { Orb } from './Orb'
 
 /** Phase 9c: the door, when sign-in is on. */
 export function SignIn({ error }: { error?: string | null }) {
   return (
     <div className={styles.screen}>
       <header className={styles.header}>
-        <span className={styles.brand}>Voltage</span>
+        <span className={styles.brand}><Orb size={14} />Voltage</span>
       </header>
       <main className={styles.main}>
       <div className={styles.hero}>

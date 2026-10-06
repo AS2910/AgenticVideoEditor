@@ -1,19 +1,19 @@
 /* In the header: where the edits fall, and one export button that says where
    things stand (UX-6): Export MP4 → Exporting… → Download MP4 + Export again. */
 .bar { display: flex; align-items: center; gap: 10px; }
-.strip { width: 120px; height: 6px; border-radius: 3px; display: flex; overflow: hidden; background: var(--surface); }
+.strip { width: 120px; height: 6px; border-radius: 3px; display: flex; overflow: hidden; background: var(--bg-deep); box-shadow: var(--recess); }
 .original { background: var(--raised); }
 .edited { background: var(--ok); }
 .export {
   padding: 0 14px; border-radius: 8px; font-size: var(--fs-14); font-weight: 500; white-space: nowrap;
-  background: var(--raised); color: var(--text); border: 1px solid var(--line);
+  background: var(--btn-bg); color: var(--text); border: 1px solid var(--line); box-shadow: var(--btn-shadow);
 }
-.export:hover { border-color: var(--muted); }
+.export:hover { border-color: var(--line-strong); background: var(--btn-bg-hover); }
 .download {
   display: inline-flex; align-items: center; min-height: var(--target); padding: 0 14px; border-radius: 8px; font-size: var(--fs-14); font-weight: 500;
-  background: var(--accent); color: var(--accent-ink); text-decoration: none; white-space: nowrap;
+  background: var(--btn-primary-bg); color: var(--accent-ink); box-shadow: var(--btn-primary-shadow); text-decoration: none; white-space: nowrap;
 }
-.download:hover { color: var(--accent-ink); }
+.download:hover { color: var(--accent-ink); box-shadow: var(--btn-primary-shadow-hover); }
 .again { background: none; border: none; min-height: 0; padding: 10px 4px; margin: -10px -4px; color: var(--muted); font-size: var(--fs-14); white-space: nowrap; }
 .again:hover { color: var(--text); text-decoration: underline; }
 /* The sentence that explains a longer export is shown at every width; it wraps

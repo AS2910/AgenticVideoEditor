@@ -1,47 +1,98 @@
-/* Editor theme — the warm agentic pass (2026-10-03), from the "Warm agentic"
-   mocks: a warm dark room, cream text, one amber accent, rose only for
-   "needs you", a serif for headings and for Voltage's name.
+/* Editor theme — UX-7a (2026-10-06): the Ink and teal room, from the UX-7
+   mocks (docs/superpowers/mocks/2026-10-05-voltage-ux7/voltage.css). A deep
+   blue-black ground, teal for anything Voltage touched or wants heard, coral
+   for "needs you", soft green for kept, a serif for headings and for
+   Voltage's name. Depth is allowed and specified: a hairline top highlight on
+   raised surfaces, three shadow steps, recessed inputs, raised buttons that
+   press, a frosted bar, an orb that breathes.
 
-   UX-6 (2026-10-04): the foundations of the revamp live here — a 16px base
-   and a written type scale, a 44px floor for every target, one transition
-   for every state change, a focus ring that is never removed without a
-   replacement, and tokens for every colour a component used to spell out.
+   UX-6 (2026-10-04) foundations stand: a 16px base and a written type scale,
+   a 44px floor for every target, one transition for every state change, a
+   focus ring that is never removed without a replacement, and a token for
+   every colour a component uses. Components spell no colour of their own:
+   every gradient and shadow they need is a token here.
    See design-system/voltage/MASTER.md. */
 :root {
-  --bg: #171412;
-  --surface: #1F1B18;
-  --surface-2: #1B1714;        /* the panel's top: a shade between bg and surface */
-  --raised: #2A2522;
-  --line: #3A332E;
-  --text: #F3EDE4;
+  --bg: #0E141C;
+  --bg-deep: #0A0F15;          /* inputs, tracks, anything recessed */
+  --surface: #151E28;
+  --surface-low: #121A23;      /* the foot of a panel or card gradient */
+  --surface-2: var(--surface-low);
+  --raised: #1D2834;
+  --raised-2: #243140;         /* a raised thing under the pointer */
+  --line: #283645;
+  --line-soft: #1F2B38;        /* dividers inside a surface */
+  --line-strong: #34465A;      /* a border under the pointer */
+  --text: #EDF2F6;
   --text-bright: #FFFFFF;      /* a line under the pointer, the play button's hover */
-  --muted: #A89F94;            /* 6.6:1 on surface: every secondary sentence, time and cost */
-  --faint: #7A7168;            /* 3.6:1: glyphs and dividers, or a label beside larger text — never a sentence */
+  --muted: #9BABBC;            /* 6.7:1 on surface: every secondary sentence, time and cost */
+  --faint: #6E7D8E;            /* 3.6:1: glyphs and dividers, or a label beside larger text — never a sentence */
   --monitor: #000000;          /* the picture's surround */
-  --frame: #000000;            /* a frame slot before its image arrives */
+  --frame: var(--bg-deep);     /* a frame slot before its image arrives */
 
-  --accent: #E9A860;            /* changed words, ready, links, focus */
-  --accent-bright: #F2C08A;     /* a link under the pointer */
-  --accent-fill: #C9823D;       /* deep amber */
-  --accent-ink: #1A1511;        /* text on an amber button */
-  --accent-tint: rgba(233, 168, 96, 0.14);
-  --accent-line: rgba(233, 168, 96, 0.4);
-  --orb-highlight: #F6D3A4;     /* the orb's lit side */
-  --glow: radial-gradient(ellipse 60% 40% at 50% 0%, rgba(233, 168, 96, 0.10) 0%, rgba(233, 168, 96, 0) 70%);
-  --glow-soft: 0 0 0 3px var(--accent-tint), 0 0 18px rgba(233, 168, 96, 0.35);
-  --glow-strong: 0 0 0 6px var(--accent-tint), 0 0 28px rgba(233, 168, 96, 0.55);
-  --amber: #E5897B;             /* needs you: rose, kept under the old name */
-  --amber-tint: rgba(229, 137, 123, 0.12);
-  --amber-line: rgba(229, 137, 123, 0.4);
-  --ok: #5FBFAD;
-  --ok-tint: rgba(95, 191, 173, 0.14);
-  --speaker-a: #5FBFAD;
-  --speaker-b: #D08BB8;
-  --speaker-c: #E9A860;
-  --speaker-d: #8FB3E8;
-  --scrim: rgba(23, 20, 18, 0.72);
+  --accent: #3FC8B4;            /* changed words, ready, links, focus, the orb */
+  --accent-hi: #B4F2E6;         /* the orb's lit side, an inserted word, a link under the pointer */
+  --accent-lo: #0C6C62;         /* the orb's dark side, the foot of a fill */
+  --accent-bright: var(--accent-hi);
+  --accent-fill: #17A997;       /* a primary button's body */
+  --accent-fill-hi: #34C9B5;    /* a primary button's lit top */
+  --accent-ink: #04110F;        /* text on a teal button */
+  --accent-tint: rgba(63, 200, 180, 0.13);
+  --accent-line: rgba(63, 200, 180, 0.42);
+  --accent-line-soft: rgba(63, 200, 180, 0.25);
+  --orb-highlight: var(--accent-hi);
+  --glow-color: rgba(63, 200, 180, 0.42);
+  --glow: radial-gradient(1200px 500px at 20% -10%, rgba(63, 200, 180, 0.07) 0%, rgba(63, 200, 180, 0) 60%);
+  --glow-soft: 0 0 14px 2px var(--glow-color), inset 0 -2px 4px rgba(0, 0, 0, 0.35);
+  --glow-strong: 0 0 24px 5px var(--glow-color), inset 0 -3px 6px rgba(0, 0, 0, 0.35);
+  --rose: #F08A6E;              /* needs you */
+  --rose-tint: rgba(240, 138, 110, 0.13);
+  --rose-line: rgba(240, 138, 110, 0.42);
+  --rose-ink: #1A0E0A;
+  --amber: var(--rose);         /* needs you, kept under the older name */
+  --amber-tint: var(--rose-tint);
+  --amber-line: var(--rose-line);
+  --ok: #86C98F;                /* kept */
+  --ok-tint: rgba(134, 201, 143, 0.13);
+  --spk-a: #7FB8F0;
+  --spk-b: #C9A2E8;
+  --speaker-a: var(--spk-a);
+  --speaker-b: var(--spk-b);
+  --speaker-c: #E9C46A;
+  --speaker-d: #F2A6A6;
+  --scrim: rgba(6, 10, 14, 0.66);
 
-  --shadow: 0 1px 0 rgba(255, 255, 255, 0.04) inset, 0 12px 32px rgba(0, 0, 0, 0.28);
+  /* Depth: a hairline top highlight on anything raised, and three shadow steps. */
+  --hl: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  --sh-1: 0 1px 2px rgba(0, 0, 0, 0.35);
+  --sh-2: 0 8px 24px rgba(0, 0, 0, 0.35), 0 1px 2px rgba(0, 0, 0, 0.4);
+  --sh-3: 0 24px 64px rgba(0, 0, 0, 0.55), 0 2px 6px rgba(0, 0, 0, 0.4);
+  --shadow: var(--hl), var(--sh-2);                     /* a card or a panel */
+  --card-shadow: var(--hl), var(--sh-1);                /* a small card inside a panel */
+  --card-bg: linear-gradient(180deg, var(--raised) 0%, var(--surface) 100%);
+  --card-q-bg: linear-gradient(180deg, rgba(63, 200, 180, 0.16), rgba(63, 200, 180, 0.06));
+  --card-q-shadow: var(--hl), 0 0 0 1px rgba(63, 200, 180, 0.08), 0 8px 24px rgba(0, 0, 0, 0.25);
+  --surface-bg: linear-gradient(180deg, var(--surface) 0%, var(--surface-low) 100%);
+  --panel-shadow: -12px 0 32px rgba(0, 0, 0, 0.18);
+  --sheet-bg: linear-gradient(180deg, var(--raised) 0%, var(--surface) 100%);
+  --sheet-shadow: var(--hl), var(--sh-3);
+  --recess: inset 0 1px 2px rgba(0, 0, 0, 0.4);         /* an input or a track */
+  --recess-deep: inset 0 1px 3px rgba(0, 0, 0, 0.6), inset 0 0 0 1px rgba(255, 255, 255, 0.03);
+  --ring: 0 0 0 3px var(--accent-tint);                 /* an input with focus */
+  --bar-bg: linear-gradient(180deg, rgba(29, 40, 52, 0.92), rgba(21, 30, 40, 0.92));
+  --bar-shadow: 0 1px 0 rgba(255, 255, 255, 0.03), 0 6px 20px rgba(0, 0, 0, 0.25);
+  --dot-shadow: inset 0 -3px 5px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.35);
+  --fill-bg: linear-gradient(90deg, var(--accent-lo), var(--accent));
+  --fill-shadow: 0 0 8px var(--glow-color);
+
+  /* Buttons: raised and pressable; the primary one is teal and lit from above. */
+  --btn-bg: linear-gradient(180deg, var(--raised) 0%, var(--surface) 100%);
+  --btn-bg-hover: linear-gradient(180deg, var(--raised-2) 0%, var(--raised) 100%);
+  --btn-shadow: var(--hl), var(--sh-1);
+  --btn-primary-bg: linear-gradient(180deg, var(--accent-fill-hi) 0%, var(--accent-fill) 100%);
+  --btn-primary-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.28), 0 1px 2px rgba(0, 0, 0, 0.45);
+  --btn-primary-shadow-hover: inset 0 1px 0 rgba(255, 255, 255, 0.28), 0 2px 6px rgba(0, 0, 0, 0.4), 0 0 18px -2px var(--glow-color);
+  --seg-on-bg: linear-gradient(180deg, var(--raised-2), var(--raised));
 
   /* aliases older components still use */
   --bay: var(--bg);
@@ -50,15 +101,16 @@
   --rule: var(--line);
   --revision: var(--accent-fill);
   --revision-on-dark: var(--accent);
-  --caution: var(--amber);
+  --caution: var(--rose);
   --electric: var(--accent-fill);
   --cyan: var(--accent);
-  --warn: var(--amber);
+  --warn: var(--rose);
   --pass: var(--accent);
   --border: var(--line);
 
   --radius: 10px;
   --radius-lg: 16px;
+  --radius-xl: 20px;
   --ui: 'Instrument Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
   --serif: 'Fraunces', Georgia, 'Times New Roman', serif;
 
@@ -78,8 +130,9 @@
   --chip: 36px;
   --target-gap: 8px;
 
-  /* One rhythm for every state change. */
+  /* One rhythm for every state change; a press is quicker. */
   --t: 150ms;
+  --t-press: 120ms;
   --t-open: 250ms;
   --ease: cubic-bezier(0.2, 0, 0, 1);
 }
@@ -95,7 +148,9 @@ body {
   line-height: 1.5;
   font-variant-numeric: tabular-nums;
   -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
+h1, h2, h3 { letter-spacing: -0.012em; }
 button, input, select, textarea { font: inherit; color: inherit; }
 /* The 44px floor. A component opts a chip down to --chip, and grows a text
    link's hit area with padding and a negative margin instead. */
@@ -103,14 +158,18 @@ button, select, textarea, input:not([type="range"]):not([type="checkbox"]):not([
   min-height: var(--target);
 }
 button { cursor: pointer; touch-action: manipulation; }
-button:disabled { cursor: default; opacity: 0.5; }
+button:disabled { cursor: default; opacity: 0.5; box-shadow: none; }
 button, a, input, select, textarea, [role="button"] {
   transition: color var(--t) var(--ease), background-color var(--t) var(--ease), border-color var(--t) var(--ease),
-    box-shadow var(--t) var(--ease), opacity var(--t) var(--ease);
+    box-shadow var(--t) var(--ease), opacity var(--t) var(--ease), transform var(--t-press) var(--ease);
 }
+/* A raised button presses: one pixel down, its drop shadow gone. */
+button:active:not(:disabled) { transform: translateY(1px); }
 a { color: var(--accent); }
-a:hover { color: var(--accent-bright); }
+a:hover { color: var(--accent-hi); }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+::placeholder { color: var(--muted); }
+::selection { background: var(--accent-line); color: var(--text-bright); }
 /* Keep for screen readers, hide from sight. */
 .srOnly {
   position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden;
