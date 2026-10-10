@@ -107,7 +107,8 @@ To see the continuity *failure* path, the voice profile has to be `unknown`, whi
 Both suites are offline and deterministic. No running server required.
 
 ```sh
-cd backend && .venv/bin/python -m pytest      # 525 tests
+cd backend && .venv/bin/python -m pytest      # 537 tests
+cd backend && .venv/bin/python -m app.bench gate   # the bench (Phase 19): the labelled corpus against its baseline
 cd frontend && npm test                        # 246 tests, 26 files
 ```
 

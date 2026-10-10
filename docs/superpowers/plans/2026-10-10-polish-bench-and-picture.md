@@ -46,6 +46,18 @@ Branch `phase-19-bench`. "Every metric computed in CI; a quality gate per rung s
 
 Exit: the gate fails a deliberately broken fit in a test; CI file present; results reproducible run to run (bit-exact ffmpeg flags).
 
+### As built — Phase 19, 2026-10-10
+
+Branch `phase-19-bench`, merged to main the same day. 537 backend tests (12 new under `tests/bench/`); the frontend is untouched.
+
+- **The corpus** (`app/bench/corpus.py`): thirteen cases. The sample ad with Whisper's word times gives nine — the speaker's own line (good), the recorded ElevenLabs take (good), the own line run 12% long and 12% short (good: the ladder fits them), run 60% long (ask), pitched ±6 semitones and drowned in noise (bad), and the own line added after with the picture held (good, `concatenate`). A synthetic 4 s clip built by ffmpeg — three tone bursts, A B A, on a solid picture — gives four: A's pitch (good), B's pitch in A's slot (bad), A 9.5 dB too loud (good: inside the 12 dB the engine corrects), A 50% long (ask). Real clips: `bench/clips/<name>.json` manifests (git-ignored), one case per edit.
+- **The metrics** (`app/bench/runner.py`): the ratio of take to slot, the rung the ladder used (none / gaps / tempo / gaps+tempo / ask, read from the fit notes), the measured engine's prosody and audio integration and its verdict, and two new ones. The **seam discontinuity** (`app/continuity/seam.py`): the RMS level step in dB and the spectral-centroid step in semitones across 50 ms either side of each seam on the *rendered* export, **relative to the original's own step at the same point** — a line's edge steps anyway, so only what the edit adds counts; for an insert both seams are compared with the one original moment they split. The **frozen seconds**: the export's held frames (the insert case reads 0.96 s today; Phase 16 is to bring it to zero).
+- **The gate** (`app/bench/gate.py`): labels are absolute (good passes, bad fails, ask is asked); against `bench/baseline.json` no score may fall by more than 0.02, no seam gain more than 1 dB or 1 semitone, and a frozen frame may not grow by more than 10 ms. `python -m app.bench run | gate | accept`; the baseline and `bench/rungs.json` are committed, runs go to `bench/results/` (git-ignored). Two runs are byte-identical apart from the timestamp (bit-exact ffmpeg flags throughout).
+- **The ladder by predicted score** (`fit.ladder`, `fit.rungs_table`, `fit.band`): `rungs.json` holds the mean score each rung earned per ratio band; once both rungs have three or more measurements in a band the better goes first, and when "tempo" leads and the tempo alone is inside its limits the pauses are left alone. With thirteen cases no band has reached three, so the fixed order stands everywhere — the table is real, the choice waits for data. `AVE_RUNGS` points at another file.
+- **CI** (`.github/workflows/ci.yml`): backend tests and `bench gate` on Ubuntu with ffmpeg, frontend lint, tests and build; the bench run is kept as an artifact.
+
+Left: the twenty-clip corpus and the 20-line listening panel need real clips and people — drop clips into `bench/clips/` with manifests and the same gate covers them.
+
 ## Phase 16 · Picture that flexes
 
 Branch `phase-16-picture`. No frozen frame unless there is nothing else left, and then it is said.

@@ -38,3 +38,7 @@ pnpm-debug.log*
 
 # Generated media (content-addressed artifact store)
 backend/var/
+
+# The bench (Phase 19): runs and real clips stay local; the baseline and rungs table are committed
+backend/bench/results/
+backend/bench/clips/
