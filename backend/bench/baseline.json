@@ -1,0 +1,297 @@
+{
+  "at": "2026-10-10T06:16:18+00:00",
+  "cases": [
+    {
+      "name": "sample-ad \u00b7 the speaker's own line",
+      "label": "good",
+      "tags": [
+        "speech"
+      ],
+      "mix": "replace",
+      "ratio": 1.0,
+      "rung": "none",
+      "fit_notes": [],
+      "passed": true,
+      "prosody": 0.9751485523948882,
+      "audio_integration": 0.9999810837203997,
+      "warnings": [],
+      "seam_level_db": 2.466,
+      "seam_colour_st": 0.07,
+      "frozen_seconds": 0,
+      "render_seconds": 2.3,
+      "ok": true
+    },
+    {
+      "name": "sample-ad \u00b7 ElevenLabs stock voice, 30% off",
+      "label": "good",
+      "tags": [
+        "speech",
+        "vendor"
+      ],
+      "mix": "replace",
+      "ratio": 0.822,
+      "rung": "gaps+tempo",
+      "fit_notes": [
+        "opened the pauses by 42 ms",
+        "speech at 0.87\u00d7 speed"
+      ],
+      "passed": true,
+      "prosody": 0.9753766167336261,
+      "audio_integration": 0.9998316128265071,
+      "warnings": [],
+      "seam_level_db": 9.245,
+      "seam_colour_st": 11.217,
+      "frozen_seconds": 0,
+      "render_seconds": 2.3,
+      "ok": true
+    },
+    {
+      "name": "sample-ad \u00b7 own line, runs 12% long",
+      "label": "good",
+      "tags": [
+        "speech",
+        "long"
+      ],
+      "mix": "replace",
+      "ratio": 1.097,
+      "rung": "gaps+tempo",
+      "fit_notes": [
+        "trimmed 30 ms of pauses",
+        "speech at 1.07\u00d7 speed"
+      ],
+      "passed": true,
+      "prosody": 0.9783003215306113,
+      "audio_integration": 0.9998523209217486,
+      "warnings": [],
+      "seam_level_db": 2.315,
+      "seam_colour_st": 1.659,
+      "frozen_seconds": 0,
+      "render_seconds": 2.3,
+      "ok": true
+    },
+    {
+      "name": "sample-ad \u00b7 own line, runs 12% short",
+      "label": "good",
+      "tags": [
+        "speech",
+        "short"
+      ],
+      "mix": "replace",
+      "ratio": 0.871,
+      "rung": "tempo",
+      "fit_notes": [
+        "speech at 0.87\u00d7 speed"
+      ],
+      "passed": true,
+      "prosody": 0.9923393517338409,
+      "audio_integration": 0.9999946772058707,
+      "warnings": [],
+      "seam_level_db": 3.234,
+      "seam_colour_st": 2.425,
+      "frozen_seconds": 0,
+      "render_seconds": 2.3,
+      "ok": true
+    },
+    {
+      "name": "sample-ad \u00b7 own line, runs 60% long",
+      "label": "ask",
+      "tags": [
+        "speech",
+        "long"
+      ],
+      "mix": "replace",
+      "ratio": 1.568,
+      "rung": "ask",
+      "fit_notes": [],
+      "passed": null,
+      "prosody": null,
+      "audio_integration": null,
+      "warnings": [],
+      "seam_level_db": null,
+      "seam_colour_st": null,
+      "frozen_seconds": 0.0,
+      "render_seconds": null,
+      "ok": true
+    },
+    {
+      "name": "sample-ad \u00b7 pitched up 6 semitones",
+      "label": "bad",
+      "tags": [
+        "speech",
+        "pitch"
+      ],
+      "mix": "replace",
+      "ratio": 0.974,
+      "rung": "none",
+      "fit_notes": [],
+      "passed": false,
+      "prosody": 0.7279209157958397,
+      "audio_integration": 0.9999937478645049,
+      "warnings": [
+        "Pitch is +5.4 semitones off the surrounding speech."
+      ],
+      "seam_level_db": 4.124,
+      "seam_colour_st": 7.735,
+      "frozen_seconds": 0,
+      "render_seconds": 2.3,
+      "ok": true
+    },
+    {
+      "name": "sample-ad \u00b7 pitched down 6 semitones",
+      "label": "bad",
+      "tags": [
+        "speech",
+        "pitch"
+      ],
+      "mix": "replace",
+      "ratio": 1.003,
+      "rung": "none",
+      "fit_notes": [],
+      "passed": false,
+      "prosody": 0.6708979176181455,
+      "audio_integration": 0.999993087154113,
+      "warnings": [
+        "Pitch is -6.6 semitones off the surrounding speech."
+      ],
+      "seam_level_db": 3.785,
+      "seam_colour_st": 3.959,
+      "frozen_seconds": 0,
+      "render_seconds": 2.3,
+      "ok": true
+    },
+    {
+      "name": "sample-ad \u00b7 drowned in noise",
+      "label": "bad",
+      "tags": [
+        "speech",
+        "noise"
+      ],
+      "mix": "replace",
+      "ratio": 1.0,
+      "rung": "none",
+      "fit_notes": [],
+      "passed": false,
+      "prosody": 0.958947543320236,
+      "audio_integration": 0.605461434921704,
+      "warnings": [
+        "The new line is noisier than the surrounding audio."
+      ],
+      "seam_level_db": 14.77,
+      "seam_colour_st": 12.318,
+      "frozen_seconds": 0,
+      "render_seconds": 2.3,
+      "ok": true
+    },
+    {
+      "name": "sample-ad \u00b7 a line added after, the picture holds",
+      "label": "good",
+      "tags": [
+        "speech",
+        "insert"
+      ],
+      "mix": "concatenate",
+      "ratio": 1.0,
+      "rung": "none",
+      "fit_notes": [],
+      "passed": true,
+      "prosody": 0.9848289103330418,
+      "audio_integration": 0.9964883217101591,
+      "warnings": [],
+      "seam_level_db": 17.126,
+      "seam_colour_st": 15.429,
+      "frozen_seconds": 0.96,
+      "render_seconds": 3.267,
+      "ok": true
+    },
+    {
+      "name": "synth \u00b7 A's own pitch",
+      "label": "good",
+      "tags": [
+        "synthetic"
+      ],
+      "mix": "replace",
+      "ratio": 1.0,
+      "rung": "none",
+      "fit_notes": [],
+      "passed": true,
+      "prosody": 0.9999970709340865,
+      "audio_integration": 0.9999507996138114,
+      "warnings": [],
+      "seam_level_db": 3.837,
+      "seam_colour_st": 2.063,
+      "frozen_seconds": 0,
+      "render_seconds": 4.0,
+      "ok": true
+    },
+    {
+      "name": "synth \u00b7 B's pitch in A's slot",
+      "label": "bad",
+      "tags": [
+        "synthetic",
+        "pitch"
+      ],
+      "mix": "replace",
+      "ratio": 1.0,
+      "rung": "none",
+      "fit_notes": [],
+      "passed": false,
+      "prosody": 0.6490225430266829,
+      "audio_integration": 0.9986883339633497,
+      "warnings": [
+        "Pitch is +7.0 semitones off the surrounding speech."
+      ],
+      "seam_level_db": 2.639,
+      "seam_colour_st": 6.417,
+      "frozen_seconds": 0,
+      "render_seconds": 4.0,
+      "ok": true
+    },
+    {
+      "name": "synth \u00b7 A, 9.5 dB too loud (corrected)",
+      "label": "good",
+      "tags": [
+        "synthetic",
+        "level"
+      ],
+      "mix": "replace",
+      "ratio": 1.0,
+      "rung": "none",
+      "fit_notes": [],
+      "passed": true,
+      "prosody": 0.9999968430180736,
+      "audio_integration": 0.9999778286469692,
+      "warnings": [],
+      "seam_level_db": 1.515,
+      "seam_colour_st": 2.656,
+      "frozen_seconds": 0,
+      "render_seconds": 4.0,
+      "ok": true
+    },
+    {
+      "name": "synth \u00b7 A, runs 50% long",
+      "label": "ask",
+      "tags": [
+        "synthetic",
+        "long"
+      ],
+      "mix": "replace",
+      "ratio": 1.5,
+      "rung": "ask",
+      "fit_notes": [],
+      "passed": null,
+      "prosody": null,
+      "audio_integration": null,
+      "warnings": [],
+      "seam_level_db": null,
+      "seam_colour_st": null,
+      "frozen_seconds": 0.0,
+      "render_seconds": null,
+      "ok": true
+    }
+  ],
+  "summary": {
+    "cases": 13,
+    "expectations_met": 13,
+    "frozen_seconds": 0.96
+  }
+}

@@ -15,6 +15,8 @@ Everything here works on the vendor's mono 16-bit WAV at its own rate.
 """
 from __future__ import annotations
 
+import json
+import os
 import re
 import wave
 from dataclasses import dataclass, replace
@@ -40,6 +42,17 @@ KEEP_GAP_MS = 40
 KEEP_EDGE_MS = 20
 MAX_GROW = 0.6
 FRAME_MS = 10
+
+# The ladder (Phase 19): which rung a long or short take is fitted by first.
+# "gaps" moves the pauses, "tempo" changes the speech's speed. The bench
+# writes `rungs.json` — the mean score each rung earned per ratio band — and
+# when it is there the rung with the better predicted score goes first.
+DEFAULT_LADDER = ("gaps", "tempo")
+RUNGS_PATH = Path(os.environ.get("AVE_RUNGS", Path(__file__).resolve().parents[2] / "bench" / "rungs.json"))
+RUNG_MIN_N = 3              # fewer measurements than this say nothing
+# Ratio bands, by how far the take's natural length is from the slot.
+BANDS = ((0.0, 0.8, "<0.80"), (0.8, 0.95, "0.80-0.95"), (0.95, 1.05, "0.95-1.05"),
+         (1.05, 1.25, "1.05-1.25"), (1.25, float("inf"), ">1.25"))
 
 _WORD = re.compile(r"[A-Za-z']+|\d+%?")
 _VOWELS = re.compile(r"[aeiouy]+", re.IGNORECASE)
@@ -80,6 +93,47 @@ def speaking_rate(transcript: Transcript, speaker: str | None = None) -> float:
 def syllable_budget(rate: float, seconds: float) -> int:
     """How many syllables fit in `seconds` at `rate`."""
     return max(1, int(round(rate * seconds)))
+
+
+def band(ratio: float) -> str:
+    """The name of the ratio band `ratio` (natural / target) falls in."""
+    for lo, hi, name in BANDS:
+        if lo <= ratio < hi:
+            return name
+    return BANDS[-1][2]
+
+
+_rungs_cache: tuple[float, dict] | None = None
+
+
+def rungs_table(path: Path | None = None) -> dict:
+    """The bench's rungs table, {band: {rung: {"n", "score"}}}; {} when there is none."""
+    global _rungs_cache
+    path = path or RUNGS_PATH
+    try:
+        stamp = path.stat().st_mtime
+    except OSError:
+        return {}
+    if _rungs_cache and _rungs_cache[0] == stamp:
+        return _rungs_cache[1]
+    try:
+        table = json.loads(path.read_text()).get("bands", {})
+    except (OSError, ValueError):
+        table = {}
+    _rungs_cache = (stamp, table)
+    return table
+
+
+def ladder(ratio: float, table: dict | None = None) -> tuple[str, ...]:
+    """The rungs to try, best predicted score first. The fixed order stands
+    until the bench has measured both rungs enough times in this band."""
+    table = rungs_table() if table is None else table
+    scores = table.get(band(ratio), {}) if table else {}
+    known = {r: float(v["score"]) for r, v in scores.items()
+             if r in DEFAULT_LADDER and int(v.get("n", 0)) >= RUNG_MIN_N}
+    if len(known) < len(DEFAULT_LADDER):
+        return DEFAULT_LADDER
+    return tuple(sorted(DEFAULT_LADDER, key=lambda r: -known[r]))
 
 
 @dataclass(frozen=True)
@@ -263,7 +317,12 @@ def fit_elastically(
     notes: list[str] = []
     edits: list[GapEdit] = []
     dest = Path(dest)
-    if abs(natural / target - 1) > tolerance:
+    # The bench may have found that, in this band, a plain tempo change
+    # scores better than moving the pauses; then the pauses are left alone
+    # whenever the tempo alone can do it.
+    order = ladder(natural / target)
+    tempo_alone = order[0] == "tempo" and MIN_TEMPO <= natural / target <= MAX_TEMPO
+    if abs(natural / target - 1) > tolerance and not tempo_alone:
         gaps = find_gaps(x, rate, words)
         wanted = int(round((target - natural) * rate))
         x, moved, edits = _resize_gaps(x, rate, gaps, wanted)
