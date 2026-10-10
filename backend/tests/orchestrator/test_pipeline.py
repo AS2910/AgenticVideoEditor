@@ -254,3 +254,15 @@ def test_the_candidate_carries_how_its_take_was_fitted(store):
     candidate = run_edit("c1", EditPlan(Selection(0.4, 1.3), "x", "speaker-1"), make_source(),
                          voice, MockLipSyncAdapter(store), ContinuityEngine())
     assert candidate.fit_notes == ("nearest of 3 takes", "trimmed 120 ms of pauses")
+
+
+def test_the_candidate_carries_the_takes_own_words(store):
+    from app.adapters.mock import MockLipSyncAdapter, MockVoiceAdapter
+    from app.continuity.engine import ContinuityEngine
+    from app.domain.models import EditPlan, Selection, Word
+    from tests.factories import make_source
+    voice = MockVoiceAdapter(store)
+    voice.last_words = (Word("30%", 0.0, 0.4), Word("off", 0.45, 0.85))
+    candidate = run_edit("c1", EditPlan(Selection(0.4, 1.3), "x", "speaker-1"), make_source(),
+                         voice, MockLipSyncAdapter(store), ContinuityEngine())
+    assert [w.text for w in candidate.words] == ["30%", "off"]

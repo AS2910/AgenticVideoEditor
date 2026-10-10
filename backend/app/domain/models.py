@@ -139,6 +139,9 @@ class EditCandidate:
     # What was done to make the take fit its slot, in words (Phase 14):
     # "nearest of 3 takes", "trimmed 120 ms of pauses", "speech at 1.08× speed".
     fit_notes: tuple[str, ...] = ()
+    # The take's own words with their times, relative to the take's start
+    # (P-3): from the vendor's alignment, remapped through the fit.
+    words: tuple[Word, ...] = ()
 
 
 @dataclass(frozen=True)

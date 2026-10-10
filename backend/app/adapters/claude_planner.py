@@ -132,11 +132,13 @@ line only.\
 
 READ_SYSTEM = """\
 You read the transcript of a short video and introduce it to the person about \
-to edit its dialogue. Return `opening`: one or two plain sentences on what is \
-there — who speaks and how many lines, and the one or two things worth knowing \
-before deciding what to change (what is said once, what is never said, where \
-the pitch is), with times as m:ss. For example: "Two people, twenty lines. The \
-offer is never said; the brand name comes up once, at 0:07." Return `roles`: \
+to edit its dialogue. Return `opening`: one plain sentence, under thirty words \
+(a second only when one cannot carry it), leading with the one thing worth \
+knowing before deciding what to change — what is said once, what is never \
+said, where the offer, brand or price lands — with times as m:ss. The screen \
+already shows how many lines and speakers there are and the file's name, so \
+never repeat those. For example: "The offer is never said; the brand comes up \
+once, at 0:07." Return `roles`: \
 for each speaker, by the name the transcript shows, the role they play in the \
 clip as a short noun phrase a person would call them by — "Customer", \
 "Shopkeeper", "Presenter", "Narrator", "Host", "Guest" — and `why` in one \

@@ -1466,6 +1466,8 @@ def test_each_item_carries_what_is_happening_to_it_and_the_plans_spend(client, p
     assert "Synthesizing the new line" in seen and "Checking continuity" in seen
     assert done["items"][0]["progress"] is None          # cleared once ready
     assert done["spend_usd"] == 0.0                      # the mock voice is free
+    assert done["takes_voiced"] == 0                     # and records no takes (P-1)
+    assert done["items"][0]["candidate"]["words"] == []  # the mock has no word times (P-3)
 
 
 def test_prefer_a_shorter_wording_shortens_a_long_line_without_asking(client, project, monkeypatch):

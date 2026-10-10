@@ -44,9 +44,9 @@ describe('the design system, as the stylesheets keep it', () => {
         if (!/outline:\s*(none|0)/.test(body)) continue
         // A block that drops the outline must put a ring back: a box-shadow of
         // its own, or sit on an element whose container draws the ring
-        // (the chat composer and the goal card, which are listed here on purpose).
+        // (the chat composer, the strip's composer and the goal card, which are listed here on purpose).
         const replaced = /box-shadow/.test(body)
-        const containerRing = /\.input:focus$/.test(selector) && /composer:focus-within|card:focus-within/.test(read(p))
+        const containerRing = /\.(input|railInput):focus$/.test(selector) && /composer:focus-within|card:focus-within|railComposer:focus-within/.test(read(p))
         if (!replaced && !containerRing) offenders.push(`${name(p)} ${selector}`)
       }
     }

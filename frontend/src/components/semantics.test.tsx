@@ -76,9 +76,10 @@ describe('what is announced', () => {
       lines: [{ vendor: 'elevenlabs', what: 'voice', unit: 'chars', units: 120, usd: 1.7, calls: 3 }],
     }
     render(<SpendMeter usage={usage} />)
-    const meter = screen.getByRole('meter', { name: 'Spend on this project' })
+    const meter = screen.getByRole('meter', { name: 'Spend against the cap' })
     expect(meter).toHaveAttribute('aria-valuenow', '1.7')
-    expect(meter.getAttribute('aria-valuetext')).toMatch(/^Spent \$1\.70 of \$2\.00, near the cap/)
+    // The meter is a button that opens the breakdown; its name carries the words.
+    expect(screen.getByRole('button', { name: /^Spent \$1\.70 of \$2\.00 on this project, near the cap\. Show the breakdown$/ })).toHaveAttribute('aria-expanded', 'false')
     expect(screen.getByRole('status')).toHaveTextContent('near the cap')
   })
 

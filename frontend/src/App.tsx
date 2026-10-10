@@ -6,7 +6,7 @@ import type { Shipped } from './components/ShipSheet'
 import { LoadScreen } from './components/LoadScreen'
 import { Player } from './components/Player'
 import type { Block } from './components/Player'
-import { captionAt } from './transcript/caption'
+import { captionAt, takeCaption } from './transcript/caption'
 import type { CaptionPending } from './transcript/caption'
 import { Timeline } from './components/Timeline'
 import { ChatPanel } from './components/ChatPanel'
@@ -21,6 +21,7 @@ import { keyOf } from './transcript/keys'
 import type { LineKey } from './transcript/keys'
 import { PlanCard } from './components/PlanCard'
 import { ReviewPanel } from './components/ReviewPanel'
+import type { SeamPlaying } from './components/ReviewPanel'
 import { ActivityLog } from './components/ActivityLog'
 import { ReadingCard } from './components/ReadingCard'
 import { AutonomySwitch } from './components/AutonomySwitch'
@@ -152,6 +153,12 @@ export default function App() {
   // The take playing in place of the line, with its own audio under the video.
   const [playingTake, setPlayingTake] = useState<string | null>(null)
   const takeAudio = useRef<HTMLAudioElement | null>(null)
+  // The take playing in place, whole: its words light up as they are said (the polish pass).
+  const playingCandidate = useRef<Candidate | null>(null)
+  // The seam a review row is playing in the monitor, and how far along it is.
+  const [seam, setSeam] = useState<SeamPlaying | null>(null)
+  // What the phone's strip composer holds while Voltage is tucked away.
+  const [railText, setRailText] = useState('')
   // The word timeline is for exact spans; hidden until asked for.
   const [precise, setPrecise] = useState(false)
   // A take or kept line being dragged to a new start on the bar.
@@ -637,10 +644,12 @@ export default function App() {
     if (playingTake === c.candidate_id) {
       audio.pause()
       setPlayingTake(null)
+      playingCandidate.current = null
       return
     }
     audio.src = artifactUrl(project.project_id, c.audio.sha256)
-    audio.onended = () => setPlayingTake(null)
+    audio.onended = () => { setPlayingTake(null); playingCandidate.current = null }
+    playingCandidate.current = c
     const span = c.plan.selection
     setView('original')
     setSeekRequest((r) => ({ time: span.start, id: (r?.id ?? 0) + 1, play: true, until: span.start + c.audio.duration + 0.3 }))
@@ -871,6 +880,7 @@ export default function App() {
           after: result.export.render.duration,
           download,
           spendUsd: result.plan.spend_usd,
+          takesVoiced: result.plan.takes_voiced ?? 0,
         })
       }
       if (result.skipped.length > 0) {
@@ -911,6 +921,13 @@ export default function App() {
     const until = (edited ? renderTime(span.end, inserts) : span.end) + (item.mix === 'concatenate' && item.candidate ? item.candidate.audio.duration : 0) + 1.5
     setSeekRequest((r) => ({ time: from, id: (r?.id ?? 0) + 1, play: true, until }))
     setCurrentTime(from)
+    setSeam({ itemId: item.item_id, from, until, now: from })
+  }
+
+  /** The review row's Stop: the monitor pauses where it is. */
+  const stopSeam = () => {
+    setSeekRequest((r) => ({ time: currentTime, id: (r?.id ?? 0) + 1, stop: true }))
+    setSeam(null)
   }
 
   /** Ask Claude for tighter wordings of a line: two, for the editor to offer. */
@@ -1176,7 +1193,8 @@ export default function App() {
   const voiceLine = usage?.lines.find((l) => l.vendor === 'elevenlabs' && l.units > 0)
   const usdPerChar = voiceLine ? voiceLine.usd / voiceLine.units : null
   const playingMix = playingTake
-    ? Object.values(lines).flatMap((l) => l.takes).find((c) => c.candidate_id === playingTake)?.plan.mix ?? 'replace'
+    ? (playingCandidate.current?.candidate_id === playingTake ? playingCandidate.current.plan.mix : null)
+      ?? Object.values(lines).flatMap((l) => l.takes).find((c) => c.candidate_id === playingTake)?.plan.mix ?? 'replace'
     : null
   // What is waiting on you, line by line, for the panel's last word.
   const lineEntries = Object.entries(lines)
@@ -1209,7 +1227,13 @@ export default function App() {
     ...(candidate ? [{ selection: candidate.plan.selection, text: candidate.plan.new_text, mix: candidate.plan.mix }] : []),
   ]
   const captionRuns = captionAt(sourceClock, statements, approved, [...pendingLines, ...takesInHand], transcript, rendered !== null && view === 'original')
-  const caption = captionRuns?.map((r, k) => <Fragment key={k}>{k > 0 && ' '}{r.kind === 'ins' ? <ins>{r.text}</ins> : r.text}</Fragment>)
+  // A take playing in place with word times (the polish pass): its words, lit as they are said.
+  const spoken = playingTake && playingCandidate.current?.candidate_id === playingTake && playingCandidate.current.words?.length
+    ? takeCaption(playingCandidate.current.words, currentTime - playingCandidate.current.plan.selection.start)
+    : null
+  const caption = spoken
+    ? spoken.map((w, k) => <Fragment key={k}>{k > 0 && ' '}<ins data-said={w.said || undefined}>{w.text}</ins></Fragment>)
+    : captionRuns?.map((r, k) => <Fragment key={k}>{k > 0 && ' '}{r.kind === 'ins' ? <ins>{r.text}</ins> : r.text}</Fragment>)
 
   return (
     <div className={styles.app} data-panel={panelHidden ? 'hidden' : undefined}>
@@ -1256,7 +1280,8 @@ export default function App() {
           duration={showEdited ? rendered.duration : project.duration}
           currentTime={currentTime}
           onSeek={setCurrentTime}
-          onTimeUpdate={setCurrentTime}
+          onTimeUpdate={(t) => { setCurrentTime(t); setSeam((s) => (s ? { ...s, now: t } : s)) }}
+          onPlayingChange={(p) => { if (!p) setSeam(null) }}
           seekRequest={seekRequest}
           blocks={blocks}
           words={transcript}
@@ -1339,9 +1364,12 @@ export default function App() {
             <ReviewPanel
               plan={plan}
               speakers={speakers}
-              projectId={project.project_id}
               busy={busy}
               onCompare={compareItem}
+              onStop={stopSeam}
+              seam={seam}
+              onPlayTake={playTake}
+              playingTake={playingTake}
               onRedo={(item) => void redoTheItem(item)}
               onUndo={(item) => { if (item.edit_id) void revert(item.edit_id) }}
               isHeld={isHeld}
@@ -1361,6 +1389,32 @@ export default function App() {
           )}
           <span className={styles.railWord} aria-hidden="true">{stateWord}</span>
           <span className={styles.spacer} />
+          {/* On a phone the strip carries the composer too (the polish pass): sending brings Voltage back so the reply is seen. */}
+          <form
+            className={styles.railComposer}
+            onSubmit={(e) => {
+              e.preventDefault()
+              const text = railText.trim()
+              if (!text) return
+              setRailText('')
+              showPanel()
+              submitComposer(text)
+            }}
+          >
+            <input
+              className={styles.railInput}
+              type="text"
+              aria-label="Ask Voltage"
+              placeholder={placeholder}
+              value={railText}
+              onChange={(e) => setRailText(e.target.value)}
+            />
+            <button type="submit" className={styles.railSend} aria-label={sendLabel} title={sendLabel} disabled={railText.trim() === ''}>
+              <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
+                <path d="M8 13V3M3.5 7.5L8 3l4.5 4.5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </button>
+          </form>
           <button className={styles.railOpen} onClick={showPanel}>Open</button>
           <button className={styles.railShow} onClick={showPanel} aria-label="Show Voltage">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="m15 6-6 6 6 6" /></svg>

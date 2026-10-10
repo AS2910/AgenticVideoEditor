@@ -17,6 +17,8 @@ export interface Shipped {
   after: number
   download: { url: string; filename: string }
   spendUsd: number
+  /** Voice calls made for the plan: how many takes it took (the polish pass). */
+  takesVoiced?: number
 }
 
 interface ShipSheetProps {
@@ -59,6 +61,7 @@ export function ShipSheet({ shipped, onVariant, onUndo, onClose, busy }: ShipShe
     ...(added > 0 ? [{ n: String(added), label: added === 1 ? 'line added' : 'lines added' }] : []),
     ...(removed > 0 ? [{ n: String(removed), label: removed === 1 ? 'line removed' : 'lines removed' }] : []),
     { n: String(shipped.held), label: shipped.held === 1 ? 'held as a draft' : 'held as drafts' },
+    ...(shipped.takesVoiced ? [{ n: String(shipped.takesVoiced), label: shipped.takesVoiced === 1 ? 'take voiced' : 'takes voiced' }] : []),
     { n: `$${shipped.spendUsd.toFixed(2)}`, label: 'for this plan' },
   ]
   return (

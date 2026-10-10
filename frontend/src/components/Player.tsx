@@ -16,8 +16,12 @@ interface PlayerProps {
   onTimeUpdate?: (t: number) => void
   /** A seek asked for from outside (e.g. the transcript). `id` makes asking
    *  for the same time twice still move the video. With `play`, playback
-   *  starts there; with `until`, it stops at that moment. */
-  seekRequest?: { time: number; id: number; play?: boolean; until?: number } | null
+   *  starts there; with `until`, it stops at that moment. With `stop`, the
+   *  video only pauses where it is (a row's Stop button). */
+  seekRequest?: { time: number; id: number; play?: boolean; until?: number; stop?: boolean } | null
+  /** Told whenever the video starts or stops, so a row elsewhere can say
+   *  Stop while its seam plays and go quiet when it ends. */
+  onPlayingChange?: (playing: boolean) => void
   /** The lines on the timeline, coloured by speaker, and the spans that changed (UX-7b). */
   blocks?: Block[]
   /** The words, as ticks along the foot of the timeline. */
@@ -48,7 +52,7 @@ const timecode = (t: number) => {
 }
 
 export function Player({
-  src, duration, currentTime, onSeek, onTimeUpdate, seekRequest, blocks = [], words = [], caption, children, muted, placing, onPlace,
+  src, duration, currentTime, onSeek, onTimeUpdate, seekRequest, blocks = [], words = [], caption, children, muted, placing, onPlace, onPlayingChange,
 }: PlayerProps) {
   const barRef = useRef<HTMLDivElement>(null)
 
@@ -81,10 +85,19 @@ export function Player({
     setLength(duration)
   }, [src, duration])
 
+  // Whoever asked for a seam or a take to play hears when it has stopped.
+  useEffect(() => { onPlayingChange?.(playing) }, [playing, onPlayingChange])
+
   const stopAt = useRef<number | null>(null)
   useEffect(() => {
     const video = videoRef.current
     if (!seekRequest || !video) return
+    if (seekRequest.stop) {
+      stopAt.current = null
+      video.pause()
+      setPlaying(false)
+      return
+    }
     video.currentTime = seekRequest.time
     stopAt.current = seekRequest.until ?? null
     if (seekRequest.play) {

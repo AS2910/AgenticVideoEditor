@@ -68,7 +68,7 @@ const PLAN_CLARIFYING = { ...PLAN, status: 'clarifying',
   question: { text: 'Who speaks for the brand?', options: ['The Shopkeeper', 'The Customer'], guess: 'The Shopkeeper' } }
 const BRIAN_TAKE = { ...CANDIDATE, plan: { ...CANDIDATE.plan, voice_profile_id: 'nPczCjzI2devNBz1zQrb' } }
 const PLAN_DONE = { ...PLAN, status: 'done', items: [{ ...PLAN_ITEM, status: 'ready', candidate: BRIAN_TAKE }] }
-const PLAN_APPROVED = { ...PLAN, status: 'done', items: [{ ...PLAN_ITEM, status: 'approved', candidate: BRIAN_TAKE, edit_id: 'e1' }],
+const PLAN_APPROVED = { ...PLAN, status: 'done', takes_voiced: 3, items: [{ ...PLAN_ITEM, status: 'approved', candidate: BRIAN_TAKE, edit_id: 'e1' }],
   log: [...PLAN.log, { at: '2026-10-02T10:01:00Z', text: 'Rendered the edited video', detail: '$0.02 in total' }] }
 
 const READING = { opening: 'One person, one line. The offer is said once, at 0:00.', roles: [] }
@@ -837,6 +837,7 @@ describe('App the agent (Phase 13)', () => {
     expect(sheet).toHaveTextContent('Same length as before, 2.3 seconds.')
     expect(within(sheet).getByText('line changed')).toBeInTheDocument()
     expect(sheet).toHaveTextContent('$0.01')
+    expect(within(sheet).getByText('takes voiced')).toBeInTheDocument()   // the polish pass: 3 voice calls for the plan
     expect(within(sheet).getByRole('list', { name: 'What was said' })).toHaveTextContent('Get 30% off today only.')
     expect(sheet).toHaveTextContent('stand-in voice')
     expect(within(sheet).getByRole('link', { name: 'Download MP4' })).toHaveAttribute('download', 'sample-ad-edited.mp4')
@@ -1091,6 +1092,26 @@ describe('App the agent (Phase 13)', () => {
     render(<App />)
     expect(await screen.findByText("Take · Brian's voice")).toBeInTheDocument()
     expect(screen.queryByTestId('reading')).not.toBeInTheDocument()
+  })
+
+  it("the strip carries a composer while Voltage is tucked away: sending brings the panel back (the polish pass)", async () => {
+    const calls = agent()
+    const user = userEvent.setup()
+    render(<App />)
+    await reachGoal(user)
+    await user.click(screen.getByRole('button', { name: /hide voltage/i }))
+    const rail = screen.getByTestId('rail')
+    // The strip's composer is for phone width; at the desktop width jsdom
+    // assumes it is display: none, so it is reached as hidden and driven directly.
+    const box = within(rail).getByRole('textbox', { name: 'Ask Voltage', hidden: true })
+    expect(within(rail).getByRole('button', { name: /^plan it$/i, hidden: true })).toBeDisabled()
+    fireEvent.change(box, { target: { value: 'make it 30% off' } })
+    expect(within(rail).getByRole('button', { name: /^plan it$/i, hidden: true })).toBeEnabled()
+    fireEvent.submit(box.closest('form')!)
+    // Voltage is back, with the goal sent from the strip.
+    expect(screen.getByRole('complementary', { name: 'Voltage' })).toBeInTheDocument()
+    expect(await screen.findByText('I read 1 line. One change does it.')).toBeInTheDocument()
+    expect(calls[0]).toMatchObject({ body: { goal: 'make it 30% off' } })
   })
 })
 

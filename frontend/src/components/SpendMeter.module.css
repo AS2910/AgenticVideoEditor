@@ -1,10 +1,28 @@
-.meter, .near { display: flex; align-items: center; gap: 8px; font-size: var(--fs-13); color: var(--muted); white-space: nowrap; }
-.near { color: var(--amber); }
+.wrap { position: relative; display: flex; align-items: center; }
+.meter, .near {
+  display: flex; align-items: center; gap: 8px; min-height: var(--chip); padding: 0 10px; border-radius: 9px;
+  font-size: var(--fs-13); color: var(--muted); white-space: nowrap; background: transparent; border: 1px solid transparent;
+}
+.meter:hover, .near:hover, .meter[aria-expanded="true"], .near[aria-expanded="true"] { color: var(--text); background: var(--raised); border-color: var(--line); }
+.near { color: var(--rose); }
 .nearWord { font-weight: 500; }
 .label { font-variant-numeric: tabular-nums; }
 .track { width: 96px; height: 6px; border-radius: 3px; background: var(--bg-deep); box-shadow: var(--recess); overflow: hidden; display: inline-block; }
 .fill { display: block; width: 100%; height: 100%; transform-origin: left; background: var(--fill-bg); box-shadow: var(--fill-shadow); border-radius: 3px; }
 .near .fill { background: var(--rose); box-shadow: none; }
 .detail { color: var(--muted); }
+/* The breakdown, under the meter, right-aligned to it. */
+.pop {
+  position: absolute; top: calc(100% + 8px); right: 0; z-index: 5; min-width: 260px; padding: 12px 14px;
+  border-radius: var(--radius-lg); background: var(--card-bg); border: 1px solid var(--line); box-shadow: var(--sh-3), var(--hl);
+  animation: pop-in 180ms ease-out;
+}
+@keyframes pop-in { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .pop { animation: none; } }
+.rows { margin: 0; display: flex; flex-direction: column; gap: 6px; }
+.row { display: flex; justify-content: space-between; gap: 16px; font-size: var(--fs-14); }
+.row dt { color: var(--muted); }
+.row dd { margin: 0; color: var(--text); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.calls { color: var(--muted); }
 @media (max-width: 1200px) { .detail { display: none; } }
-@media (max-width: 960px) { .track { display: none; } }
+@media (max-width: 960px) { .track { display: none; } .pop { right: auto; left: 0; } }

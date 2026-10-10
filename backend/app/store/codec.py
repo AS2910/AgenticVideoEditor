@@ -56,6 +56,7 @@ def candidate(d: dict) -> EditCandidate:
         candidate_id=d["candidate_id"], plan=plan(d["plan"]), audio=artifact(d["audio"]),
         frames=artifact(d["frames"]), continuity=report(d["continuity"]),
         fit_notes=tuple(d.get("fit_notes", ())),
+        words=tuple(Word(**w) for w in d.get("words", ())),
     )
 
 
