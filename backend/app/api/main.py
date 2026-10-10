@@ -31,6 +31,7 @@ from app.adapters.selection import (
     select_continuity, select_interpreter, select_planner, select_transcriber, select_voice,
 )
 from app.errors import NonRetryableError
+from app import chaos as chaos_module
 from app.budget import VoiceBudget, BudgetExceeded
 from app.orchestrator.intent import Turn, edit_context
 from app.orchestrator.planner import ItemView, Line, Proposal, Question, Revision, MAX_QUESTIONS, Frame, Sight
@@ -67,12 +68,14 @@ artifacts = ArtifactStore(settings.data_dir / "artifacts")
 budget = VoiceBudget(
     ceiling=settings.voice_budget_chars, ledger=ledger, usd_per_1k=settings.elevenlabs_usd_per_1k,
 )
-transcriber, transcriber_label = select_transcriber(settings)
-voice, voice_label = select_voice(settings, artifacts, budget)
+# The chaos pass: faults injected at the vendor seams for a game day (AVE_CHAOS); None in normal use.
+chaos = chaos_module.from_settings(settings.chaos, settings.auth_mode, settings.chaos_force)
+transcriber, transcriber_label = select_transcriber(settings, chaos)
+voice, voice_label = select_voice(settings, artifacts, budget, chaos)
 lipsync = MockLipSyncAdapter(artifacts)
 continuity, continuity_label = select_continuity(voice.identity, artifacts)
-interpreter, interpreter_label = select_interpreter(settings)
-planner, planner_label = select_planner(settings)
+interpreter, interpreter_label = select_interpreter(settings, chaos)
+planner, planner_label = select_planner(settings, chaos)
 jobs = JobStore()
 runner = JobRunner(jobs)
 # Phase 9c: who signs people in. None while AVE_AUTH=off.
@@ -93,6 +96,9 @@ def health() -> dict:
         "intent": interpreter_label,
         "planner": planner_label,
         "auth": settings.auth_mode,
+        # The chaos pass: is the worker pool alive and busy, and are faults being injected.
+        "jobs": runner.snapshot(),
+        "chaos": chaos.describe() if chaos else None,
     }
 
 

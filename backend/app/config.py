@@ -92,6 +92,9 @@ class Settings:
     allowed_emails: tuple[str, ...] = ()
     # Per-user ceiling on estimated spend across all their projects.
     user_budget_usd: float = DEFAULT_USER_BUDGET_USD
+    # The chaos pass: faults to inject at the vendor seams (see app/chaos.py); never with sign-in on unless forced.
+    chaos: str | None = None
+    chaos_force: bool = False
 
     @property
     def has_anthropic(self) -> bool:
@@ -158,6 +161,8 @@ def load_settings() -> Settings:
         session_secret=os.environ.get("AVE_SESSION_SECRET") or None,
         public_url=(os.environ.get("AVE_PUBLIC_URL") or "http://localhost:5173").rstrip("/"),
         allowed_emails=tuple(e.strip() for e in os.environ.get("AVE_ALLOWED_EMAILS", "").split(",") if e.strip()),
+        chaos=os.environ.get("AVE_CHAOS") or None,
+        chaos_force=os.environ.get("AVE_CHAOS_FORCE", "").strip().lower() in _TRUTHY,
         user_budget_usd=_amount("AVE_USER_BUDGET_USD", DEFAULT_USER_BUDGET_USD),
     )
 

@@ -89,6 +89,10 @@ class Database:
         with self._lock:
             if path != ":memory:":
                 self._conn.execute("PRAGMA journal_mode=WAL")
+            # The chaos pass: another process on the same file (a second server,
+            # a script) holds a write lock for a moment; wait up to 5 s rather
+            # than failing the request with "database is locked".
+            self._conn.execute("PRAGMA busy_timeout=5000")
             self._conn.executescript(SCHEMA)
             for table, column, definition in MIGRATIONS:
                 have = {r["name"] for r in self._conn.execute(f"PRAGMA table_info({table})")}

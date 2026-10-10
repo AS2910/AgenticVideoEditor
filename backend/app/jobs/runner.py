@@ -12,6 +12,7 @@ from typing import Callable
 
 from app.adapters.base import VendorError
 from app.errors import NonRetryableError
+from app.media.ffmpeg import FFmpegError
 from app.jobs.store import Job, JobStore
 
 log = logging.getLogger(__name__)
@@ -100,6 +101,12 @@ class JobRunner:
                 job_id, status="failed", step="Failed",
                 error="Generation failed after several attempts. Try again.",
             )
+        except (FFmpegError, OSError) as exc:
+            # The chaos pass: a missing ffmpeg or a full disk is said plainly,
+            # not hidden behind "Something went wrong".
+            log.exception("job %s could not process media", job_id)
+            self.jobs.update(job_id, status="failed", step="Failed",
+                             error=f"Could not process the media: {exc}")
         except Exception:  # noqa: BLE001 - a job must never kill the worker
             log.exception("job %s crashed", job_id)
             self.jobs.update(
@@ -109,6 +116,14 @@ class JobRunner:
             self.jobs.update(
                 job_id, status="succeeded", progress=1.0, step="Ready", result=result,
             )
+
+    def snapshot(self) -> dict:
+        """Where the pool stands, for /health (the chaos pass): how many jobs
+        are running or still queued against how many workers. Two hung vendor
+        calls fill the default pool, and this is where that shows."""
+        running = sum(1 for j in self.jobs.all() if j.status == "running")
+        queued = sum(1 for j in self.jobs.all() if j.status == "queued")
+        return {"workers": self._pool._max_workers, "running": running, "queued": queued}
 
     def shutdown(self) -> None:
         self._pool.shutdown(wait=False, cancel_futures=True)

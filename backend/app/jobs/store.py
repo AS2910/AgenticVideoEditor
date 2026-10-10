@@ -53,6 +53,10 @@ class JobStore:
             self._jobs[job.job_id] = job
             return job
 
+    def all(self) -> list[Job]:
+        with self._lock:
+            return list(self._jobs.values())
+
     def get(self, job_id: str) -> Job | None:
         with self._lock:
             return self._jobs.get(job_id)
