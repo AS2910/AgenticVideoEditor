@@ -47,7 +47,11 @@ FRAME_MS = 10
 # "gaps" moves the pauses, "tempo" changes the speech's speed. The bench
 # writes `rungs.json` — the mean score each rung earned per ratio band — and
 # when it is there the rung with the better predicted score goes first.
-DEFAULT_LADDER = ("gaps", "tempo")
+DEFAULT_LADDER = ("gaps", "flex", "tempo")
+# Phase 16: "flex" lets the picture over the slot run a little slower or faster
+# so the take fits at natural speech. The limit comes from settings (1.0 = never).
+DEFAULT_MAX_FLEX = 1.12
+_FLEX_NOTE = re.compile(r"the picture at ([0-9.]+)×")
 RUNGS_PATH = Path(os.environ.get("AVE_RUNGS", Path(__file__).resolve().parents[2] / "bench" / "rungs.json"))
 RUNG_MIN_N = 3              # fewer measurements than this say nothing
 # Ratio bands, by how far the take's natural length is from the slot.
@@ -297,9 +301,18 @@ def remap_words(words: Sequence[Word], edits: Sequence[GapEdit], rate: int, temp
     return tuple(replace(w, start=a, end=max(a, b)) for w, a, b in zip(words, starts, ends))
 
 
+def flex_of(notes: Sequence[str]) -> float:
+    """The picture factor a fit's notes record (1.0 when the picture was left alone)."""
+    for note in notes:
+        m = _FLEX_NOTE.search(note)
+        if m:
+            return float(m.group(1))
+    return 1.0
+
+
 def fit_elastically(
     source: str | Path, dest: str | Path, target: float, tolerance: float = DEFAULT_TOLERANCE,
-    words: Sequence[Word] = (),
+    words: Sequence[Word] = (), flex_max: float = 1.0,
 ) -> tuple[Path, float, list[str], tuple[Word, ...]]:
     """Fit a take to `target` seconds: pauses first, speech last.
 
@@ -311,6 +324,11 @@ def fit_elastically(
 
     `words` are the take's own word times (P-3); they keep the pauses honest
     and come back remapped to the fitted audio as the fourth value.
+
+    With `flex_max` above 1 (Phase 16) the picture is a rung of the ladder
+    too: the slot's picture may run up to that much slower or faster, so the
+    take is fitted to `target × flex` and the note says "the picture at 1.08×".
+    The returned duration is that stretched slot; `flex_of(notes)` reads the factor.
     """
     x, rate = _read(source)
     natural = len(x) / rate
@@ -331,15 +349,31 @@ def fit_elastically(
         elif moved > 0:
             notes.append(f"opened the pauses by {moved * 1000 // rate} ms")
     adjusted = len(x) / rate
-    tempo = adjusted / target
-    if tempo > MAX_TEMPO or adjusted < ffmpeg.MIN_SPEECH_SHARE * target:
+    # What is left after the pauses, shared out along the ladder: each rung
+    # takes what it can, in the ladder's order, until the take is within tolerance.
+    flex = 1.0
+    remaining = adjusted / target
+    if abs(remaining - 1) > tolerance:
+        for rung in order:
+            if rung == "flex" and flex_max > 1.0:
+                flex = min(flex_max, max(1 / flex_max, remaining))
+                remaining /= flex
+            elif rung == "tempo":
+                remaining /= min(MAX_TEMPO, max(MIN_TEMPO, remaining))
+            if abs(remaining - 1) <= tolerance:
+                break
+    slot = target * flex
+    tempo = adjusted / slot
+    if tempo > MAX_TEMPO or adjusted < ffmpeg.MIN_SPEECH_SHARE * slot:
         raise SpanMismatch(adjusted, target)
     with_gaps = dest.with_name(dest.stem + ".gaps.wav")
     _write(with_gaps, x, rate)
     try:
-        path, duration = ffmpeg.fit_duration(with_gaps, dest, target)
+        path, duration = ffmpeg.fit_duration(with_gaps, dest, slot)
     finally:
         with_gaps.unlink(missing_ok=True)
+    if abs(flex - 1) > 1e-6:
+        notes.append(f"the picture at {flex:.2f}×")
     if abs(tempo - 1) > tolerance:
         notes.append(f"speech at {max(tempo, MIN_TEMPO):.2f}× speed")
     return path, duration, notes, remap_words(words, edits, rate, max(tempo, MIN_TEMPO))
@@ -348,13 +382,13 @@ def fit_elastically(
 def place(
     source: str | Path, dest: str | Path, target: float,
     fit: str | None = None, mix: str = "replace", tolerance: float = DEFAULT_TOLERANCE,
-    words: Sequence[Word] = (),
+    words: Sequence[Word] = (), flex_max: float = 1.0,
 ) -> tuple[Path, float, list[str], tuple[Word, ...]]:
     """`ffmpeg.place`, with the automatic case fitted elastically. The words
     come back at their new times (a tempo change scales them; a line placed
     at natural speed or held keeps them; "stretch" scales by the ratio)."""
     if fit is None and mix != "concatenate":
-        return fit_elastically(source, dest, target, tolerance, words)
+        return fit_elastically(source, dest, target, tolerance, words, flex_max)
     natural = ffmpeg.duration_of(source)
     path, duration = ffmpeg.place(source, dest, target, fit, mix)
     scale = natural / target if fit == "stretch" and mix != "concatenate" and natural > 0 else 1.0

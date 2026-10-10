@@ -71,6 +71,25 @@ describe('ExportBar inserts', () => {
         inserts={[{ at: 5.9, duration: 0.74, artifact }]}
       />,
     )
-    expect(screen.getByTestId('inserts')).toHaveTextContent('+1 added line, holding the frame for 0.74s')
+    expect(screen.getByTestId('inserts')).toHaveTextContent('+1 added line; the picture makes room for 0.74 s.')
+  })
+
+  it('says how the picture made room, what was held, and what flexed (Phase 16)', () => {
+    const artifact = { kind: 'audio' as const, sha256: 'a'.repeat(64), duration: 0.74, container: 'wav' }
+    const pieces = [
+      { start: 0, end: 2.0, out_start: 0, out_end: 2.2, kind: 'flex' as const, factor: 1.1 },
+      { start: 2.0, end: 5.9, out_start: 2.2, out_end: 6.1, kind: 'copy' as const, factor: 1 },
+      { start: 5.9, end: 6.4, out_start: 6.1, out_end: 6.9, kind: 'living' as const, factor: 1.6 },
+      { start: 6.4, end: 6.4, out_start: 6.9, out_end: 7.14, kind: 'hold' as const, factor: null },
+      { start: 6.4, end: 9.0, out_start: 7.14, out_end: 9.74, kind: 'copy' as const, factor: 1 },
+    ]
+    render(<ExportBar segments={[]} onExport={() => {}} inserts={[{ at: 5.9, duration: 0.74, artifact, held: 0.24 }]} pieces={pieces} />)
+    // Room = the living piece's 0.8 s plus the held 0.24 s; the hold is said only because there is one.
+    expect(screen.getByTestId('inserts')).toHaveTextContent('+1 added line; the picture makes room for 1.04 s, 0.24 s of it held. 1 line flexed the picture by up to 10%.')
+  })
+
+  it('says only what flexed when nothing was added', () => {
+    render(<ExportBar segments={[]} onExport={() => {}} pieces={[{ start: 0, end: 1, out_start: 0, out_end: 0.92, kind: 'flex', factor: 0.92 }]} />)
+    expect(screen.getByTestId('inserts')).toHaveTextContent('1 line flexed the picture by up to 8%.')
   })
 })

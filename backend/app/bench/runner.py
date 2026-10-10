@@ -11,9 +11,9 @@ from app.bench.corpus import Case
 from app.continuity.measured import MeasuredContinuityEngine
 from app.continuity.seam import discontinuity, worst
 from app.domain.models import ApprovedEdit, EditPlan, MediaArtifact
-from app.media import ffmpeg, fit
+from app.media import ffmpeg, fit, motion
 from app.media.ffmpeg import SpanMismatch
-from app.render import compose
+from app.render import compose, retime
 from app.render.renderer import render
 from app.store.artifacts import ArtifactStore
 from tests.factories import make_source  # the same builder the suite uses; the bench is a test of the product
@@ -45,9 +45,15 @@ class Result:
 
 
 def _rung(notes: Sequence[str]) -> str:
-    gaps = any(n.startswith(("trimmed", "opened")) for n in notes)
-    tempo = any(n.startswith("speech at") for n in notes)
-    return "gaps+tempo" if gaps and tempo else "gaps" if gaps else "tempo" if tempo else "none"
+    """The rungs the fit used, in the ladder's order, joined with "+"; "none" when the take fitted as it was."""
+    used = []
+    if any(n.startswith(("trimmed", "opened")) for n in notes):
+        used.append("gaps")
+    if any(n.startswith("the picture at") for n in notes):
+        used.append("flex")
+    if any(n.startswith("speech at") for n in notes):
+        used.append("tempo")
+    return "+".join(used) or "none"
 
 
 def _expectation_met(label: str, rung: str, passed: bool | None) -> bool:
@@ -69,7 +75,7 @@ def run_case(case: Case, workdir: Path) -> Result:
     natural = ffmpeg.duration_of(take)
     plan = EditPlan(case.selection, "bench", "bench-voice", mix=case.mix)
     try:
-        fitted, fitted_len, notes, _ = fit.place(take, d / "fitted.wav", span, None, case.mix)
+        fitted, fitted_len, notes, _ = fit.place(take, d / "fitted.wav", span, None, case.mix, flex_max=fit.DEFAULT_MAX_FLEX)
     except SpanMismatch:
         return Result(case.name, case.label, list(case.tags), case.mix, round(natural / span, 3), "ask", [],
                       None, None, None, [], None, None, 0.0, None, _expectation_met(case.label, "ask", None))
@@ -79,20 +85,30 @@ def run_case(case: Case, workdir: Path) -> Result:
     assessed = MeasuredContinuityEngine(store).assess(source, case.transcript, plan, audio)
     report = assessed.report
 
-    # Render the edit as the export would, and listen at its seams.
+    # Render the edit as the export would (Phase 16: flexed, living or held), and listen at its seams.
+    flex = fit.flex_of(notes)
+    if abs(flex - 1) > 1e-6:
+        plan = EditPlan(case.selection, "bench", "bench-voice", mix=case.mix, flex=flex)
     edit = ApprovedEdit("e1", "c1", plan, assessed.audio, assessed.audio)
     manifest = render(source, [edit])
-    out = compose.compose(source, manifest.segments, d / "render.mp4", inserts=manifest.inserts)
+    fps = ffmpeg.frame_rate(case.clip)
+    motion_fn = lambda a, b: motion.motion(case.clip, a, b)   # noqa: E731
+    flexed = retime.flex_pieces([edit], motion_fn)
+    living = retime.living_pieces(manifest.inserts, case.transcript, duration, (), motion_fn,
+                                  taken=[(p.start, p.end) for p in flexed])
+    pieces = retime.tile(duration, [*flexed, *living], fps)
+    out = compose.compose(source, manifest.segments, d / "render.mp4", inserts=manifest.inserts, pieces=pieces)
     rendered = compose.decode(out)
     original = compose.decode(case.clip, channels=rendered.shape[1])
     if case.mix == "concatenate":
         # The line sits between two halves of one moment of the original.
         at = min(case.selection.end, duration)
-        seams, original_seams = [at, at + fitted_len], [at, at]
+        seams, original_seams = [retime.render_time(at, pieces), retime.render_time(at, pieces) + fitted_len], [at, at]
     else:
-        seams = original_seams = [case.selection.start, case.selection.end]
+        original_seams = [case.selection.start, case.selection.end]
+        seams = [retime.render_time(t, pieces) for t in original_seams]
     level, colour = worst(discontinuity(rendered, original, compose.OUT_RATE, seams, original_seams))
-    frozen = sum(i.duration for i in manifest.inserts)
+    frozen = retime.held_seconds(pieces)
     return Result(
         case.name, case.label, list(case.tags), case.mix, round(natural / span, 3), rung, list(notes),
         report.passed, report.prosody, report.audio_integration, list(report.warnings),

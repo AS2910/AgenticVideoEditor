@@ -2196,3 +2196,31 @@ def test_the_place_voltage_guessed_can_be_confirmed_or_corrected(client, project
     assert body["place_confirmed"] == "Morjim, Goa"
     assert client.get("/projects/p1").json()["reading"]["sight"]["place_confirmed"] == "Morjim, Goa"
     assert client.put("/projects/p1/sight", json={"place": ""}).json()["place_confirmed"] == ""
+
+
+def test_export_describes_the_output_as_pieces_and_nothing_is_held(client, project):
+    """Phase 16: the manifest tiles the output. "today" follows "off" at once, so there is no
+    pause to stretch after the added line; the tail of the line itself is the living window,
+    and no frame is frozen."""
+    candidate = preview(client, text="Hurry!", mix="concatenate", start=0.4, end=1.3)
+    assert client.post("/projects/p1/edits", json={"candidate_id": candidate["candidate_id"]}).status_code == 200
+    export = client.post("/projects/p1/export").json()
+    pieces = export["pieces"]
+    assert [p["kind"] for p in pieces] == ["copy", "living", "copy"]
+    assert pieces[0]["out_start"] == 0.0 and pieces[-1]["out_end"] == pytest.approx(export["render"]["duration"], abs=0.1)
+    living = pieces[1]
+    assert living["end"] == pytest.approx(1.3, abs=0.05) and living["start"] == pytest.approx(0.9, abs=0.05)
+    assert (living["out_end"] - living["out_start"]) - (living["end"] - living["start"]) == pytest.approx(candidate["audio"]["duration"], abs=0.05)
+    assert living["factor"] > 1.0
+    [insert] = export["inserts"]
+    assert insert["held"] == 0.0
+    # The cuts were looked for once and kept with the project.
+    assert client.get("/projects/p1").json()  # still fine
+    export_again = client.post("/projects/p1/export").json()
+    assert export_again["pieces"] == pieces
+
+
+def test_a_plan_without_edits_exports_copies_only(client, project):
+    export = client.post("/projects/p1/export").json()
+    assert [p["kind"] for p in export["pieces"]] == ["copy"]
+    assert export["inserts"] == []

@@ -92,6 +92,7 @@ export function ShipSheet({ shipped, onVariant, onUndo, onClose, busy }: ShipShe
                       <Fragment key={k}>{k > 0 && ' '}{run.kind === 'ins' ? <ins className={styles.ins}>{run.text}</ins> : run.text}</Fragment>
                     ))}
                   {i.note && <span className={styles.quiet}> {i.note}{/[.!?]$/.test(i.note) ? '' : '.'}</span>}
+                  {i.candidate?.plan.flex != null && Math.abs(i.candidate.plan.flex - 1) > 0.005 && <span className={styles.quiet}> picture at {i.candidate.plan.flex.toFixed(2)}×</span>}
                 </span>
                 {onUndo && i.edit_id && <button className={styles.undo} onClick={() => onUndo(i)} disabled={busy}>Undo</button>}
               </li>

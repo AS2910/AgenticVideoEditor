@@ -74,6 +74,32 @@ def _run(binary: str, args: list[str]) -> str:
     return proc.stdout
 
 
+def run_capture(args: list[str], binary: str = FFMPEG, text: bool = True) -> tuple[str | bytes, str]:
+    """Run ffmpeg and hand back (stdout, stderr): for filters that report on
+    stderr (`showinfo`) and for raw frames on stdout (`text=False`)."""
+    if shutil.which(binary) is None:
+        raise FFmpegNotInstalled(f"{binary!r} is not on PATH. Install it with `brew install ffmpeg`.")
+    proc = subprocess.run([binary, *args], capture_output=True)
+    if proc.returncode != 0:
+        tail = proc.stderr.decode("utf-8", "replace").strip().splitlines()[-5:]
+        raise FFmpegError(f"{binary} exited {proc.returncode}: {' / '.join(tail)}")
+    out = proc.stdout.decode("utf-8", "replace") if text else proc.stdout
+    return out, proc.stderr.decode("utf-8", "replace")
+
+
+def frame_rate(path: str | Path) -> float:
+    """The video's average frame rate (25.0 when there is no video stream)."""
+    for stream in probe(path)["streams"]:
+        if stream.get("codec_type") == "video":
+            for key in ("avg_frame_rate", "r_frame_rate"):
+                raw = stream.get(key) or ""
+                if "/" in raw:
+                    num, den = raw.split("/")
+                    if float(den) > 0 and float(num) > 0:
+                        return float(num) / float(den)
+    return 25.0
+
+
 def probe(path: str | Path) -> dict:
     """ffprobe's format + streams JSON for a media file."""
     out = _run(FFPROBE, [

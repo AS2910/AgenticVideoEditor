@@ -10,7 +10,12 @@ from typing import Sequence
 from app.bench.runner import Result
 from app.media.fit import band
 
-RUNG_OF = {"gaps": "gaps", "gaps+tempo": "gaps", "tempo": "tempo"}
+# A case's rung is the rungs it used, joined with "+"; each is evidence for that rung.
+RUNGS = ("gaps", "flex", "tempo")
+
+
+def rungs_used(rung: str) -> list[str]:
+    return [r for r in rung.split("+") if r in RUNGS]
 
 
 def build(results: Sequence[Result]) -> dict:
@@ -18,10 +23,8 @@ def build(results: Sequence[Result]) -> dict:
     that reached a rung is evidence for it, pass or fail."""
     sums: dict[str, dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
     for r in results:
-        rung = RUNG_OF.get(r.rung)
-        if rung is None:
-            continue
-        sums[band(r.ratio)][rung].append(r.score)
+        for rung in rungs_used(r.rung):
+            sums[band(r.ratio)][rung].append(r.score)
     return {
         "bands": {
             b: {rung: {"n": len(v), "score": round(sum(v) / len(v), 4)} for rung, v in rungs.items()}

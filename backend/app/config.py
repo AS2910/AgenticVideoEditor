@@ -45,6 +45,9 @@ DEFAULT_USER_BUDGET_USD = 10.0
 # all and keep the nearest; and how far off the slot counts as a miss.
 DEFAULT_TAKES_PER_LINE = 3
 DEFAULT_FIT_TOLERANCE = 0.05
+DEFAULT_MAX_FLEX = 1.12         # Phase 16: the roadmap's undetectable band
+DEFAULT_MAX_LIVING = 1.6        # how far a pause may stretch for an added line
+DEFAULT_INTERPOLATOR = "minterpolate"
 # ElevenLabs bills by plan; this is the rate used for the USD estimate only.
 # 0.30 per 1k characters is roughly Creator-plan overage.
 DEFAULT_ELEVENLABS_USD_PER_1K = 0.30
@@ -72,6 +75,12 @@ class Settings:
     elevenlabs_usd_per_1k: float = DEFAULT_ELEVENLABS_USD_PER_1K
     takes_per_line: int = DEFAULT_TAKES_PER_LINE
     fit_tolerance: float = DEFAULT_FIT_TOLERANCE
+    # Phase 16: how far the picture may slow or speed so a take fits (1.0 = never);
+    # how far a pause may stretch to make room for an added line; and how the
+    # frames in between are made ("minterpolate", "none", or "rife").
+    max_flex: float = DEFAULT_MAX_FLEX
+    max_living: float = DEFAULT_MAX_LIVING
+    interpolator: str = DEFAULT_INTERPOLATOR
     # Phase 9c: "off" keeps the single local owner; "google" requires sign-in.
     auth_mode: str = "off"
     google_client_id: str | None = None
@@ -140,6 +149,9 @@ def load_settings() -> Settings:
         elevenlabs_usd_per_1k=_amount("AVE_ELEVENLABS_USD_PER_1K", DEFAULT_ELEVENLABS_USD_PER_1K),
         takes_per_line=max(1, _whole_number("AVE_TAKES_PER_LINE", DEFAULT_TAKES_PER_LINE)),
         fit_tolerance=_amount("AVE_FIT_TOLERANCE", DEFAULT_FIT_TOLERANCE),
+        max_flex=max(1.0, _amount("AVE_MAX_FLEX", DEFAULT_MAX_FLEX)),
+        max_living=max(1.0, _amount("AVE_MAX_LIVING", DEFAULT_MAX_LIVING)),
+        interpolator=(os.environ.get("AVE_INTERPOLATOR") or DEFAULT_INTERPOLATOR).strip().lower(),
         auth_mode=_auth_mode(),
         google_client_id=os.environ.get("GOOGLE_CLIENT_ID") or None,
         google_client_secret=os.environ.get("GOOGLE_CLIENT_SECRET") or None,

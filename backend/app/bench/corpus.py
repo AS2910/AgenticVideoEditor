@@ -116,7 +116,7 @@ def sample_ad_cases() -> list[Case]:
         Case("sample-ad · pitched up 6 semitones", clip, SAMPLE_WORDS, SAMPLE_SLOT, _pitched(clip, s, e, 6), "bad", tags=("speech", "pitch")),
         Case("sample-ad · pitched down 6 semitones", clip, SAMPLE_WORDS, SAMPLE_SLOT, _pitched(clip, s, e, -6), "bad", tags=("speech", "pitch")),
         Case("sample-ad · drowned in noise", clip, SAMPLE_WORDS, SAMPLE_SLOT, _noisy(clip, s, e), "bad", tags=("speech", "noise")),
-        Case("sample-ad · a line added after, the picture holds", clip, SAMPLE_WORDS, SAMPLE_SLOT, _segment(clip, s, e), "good", mix="concatenate", tags=("speech", "insert")),
+        Case("sample-ad · a line added after, no pause to stretch", clip, SAMPLE_WORDS, SAMPLE_SLOT, _segment(clip, s, e), "good", mix="concatenate", tags=("speech", "insert")),
     ]
 
 
@@ -181,6 +181,8 @@ def synthetic_cases(clip: Path) -> list[Case]:
         Case("synth · B's pitch in A's slot", clip, words, first, b, "bad", tags=("synthetic", "pitch")),
         Case("synth · A, 9.5 dB too loud (corrected)", clip, words, first, loud, "good", tags=("synthetic", "level")),
         Case("synth · A, runs 50% long", clip, words, first, long, "ask", tags=("synthetic", "long")),
+        # Phase 16: the 0.5 s pause after A's line stretches (and loops) to make room; nothing is frozen.
+        Case("synth · a line added after A, over the pause", clip, words, first, long, "good", mix="concatenate", tags=("synthetic", "insert", "living")),
     ]
 
 

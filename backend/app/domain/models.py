@@ -71,6 +71,9 @@ class EditPlan:
     fit: str | None = None
     mix: str = "replace"
     delivery: str | None = None
+    # Phase 16: the picture over the selection runs this many times slower
+    # (1.08 = 8% slower) so the take fits at natural speech; None = as shot.
+    flex: float | None = None
 
 
 @dataclass(frozen=True)

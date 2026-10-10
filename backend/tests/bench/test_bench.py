@@ -35,16 +35,25 @@ def test_a_take_that_cannot_fit_is_asked_about_not_stretched(results):
 def test_long_and_short_takes_are_fitted_by_the_ladder(results):
     long = next(r for r in results if "runs 12% long" in r.name)
     short = next(r for r in results if "runs 12% short" in r.name)
-    assert long.rung in ("gaps", "gaps+tempo", "tempo") and long.ratio == pytest.approx(1.12, abs=0.03)
-    assert short.rung in ("gaps", "gaps+tempo", "tempo") and short.ratio == pytest.approx(0.88, abs=0.03)
+    assert long.rung != "none" and long.rung != "ask" and long.ratio == pytest.approx(1.12, abs=0.03)
+    assert short.rung != "none" and short.rung != "ask" and short.ratio == pytest.approx(0.88, abs=0.03)
 
 
-def test_seams_are_measured_on_the_render_and_the_insert_freezes_the_frame(results):
+def test_seams_are_measured_on_the_render_and_no_frame_is_frozen(results):
     fitted = [r for r in results if r.rung != "ask"]
     assert all(r.seam_level_db is not None and r.seam_colour_st is not None for r in fitted)
-    insert = next(r for r in results if r.mix == "concatenate")
-    assert insert.frozen_seconds > 0.5          # Phase 16 brings this to zero
-    assert all(r.frozen_seconds == 0.0 for r in fitted if r.mix != "concatenate")
+    inserts = [r for r in results if r.mix == "concatenate"]
+    assert len(inserts) >= 2
+    # Phase 16: an added line stretches the pause after it, or the tail of the line when
+    # there is no pause; the export never freezes a frame on the corpus.
+    assert all(r.frozen_seconds == 0.0 for r in results)
+
+
+def test_long_and_short_takes_flex_the_picture_before_the_speech(results):
+    long = next(r for r in results if "runs 12% long" in r.name)
+    short = next(r for r in results if "runs 12% short" in r.name)
+    assert "flex" in long.rung and "tempo" not in long.rung
+    assert short.rung == "flex"
 
 
 def test_results_round_trip_through_json_and_the_table_has_a_row_per_case(results):
@@ -67,7 +76,7 @@ def test_the_gate_is_open_against_itself_and_closes_on_a_regression(results):
 def test_the_rungs_table_scores_each_rung_per_band(results):
     t = rungs.build(results)
     assert "bands" in t
-    reached = {fit.band(r.ratio) for r in results if r.rung in rungs.RUNG_OF}
+    reached = {fit.band(r.ratio) for r in results if rungs.rungs_used(r.rung)}
     assert set(t["bands"]) == reached
     for b in t["bands"].values():
         for v in b.values():
@@ -75,15 +84,17 @@ def test_the_rungs_table_scores_each_rung_per_band(results):
 
 
 def test_the_ladder_puts_the_better_rung_first_once_the_bench_has_enough(tmp_path):
-    table = {"1.05-1.25": {"gaps": {"n": 5, "score": 0.7}, "tempo": {"n": 5, "score": 0.9}}}
-    assert fit.ladder(1.1, table) == ("tempo", "gaps")
-    assert fit.ladder(1.1, {"1.05-1.25": {"gaps": {"n": 1, "score": 0.1}, "tempo": {"n": 5, "score": 0.9}}}) == fit.DEFAULT_LADDER
+    table = {"1.05-1.25": {"gaps": {"n": 5, "score": 0.7}, "flex": {"n": 4, "score": 0.95}, "tempo": {"n": 5, "score": 0.9}}}
+    assert fit.ladder(1.1, table) == ("flex", "tempo", "gaps")
+    # Every rung needs enough measurements before the order changes.
+    assert fit.ladder(1.1, {"1.05-1.25": {"gaps": {"n": 1, "score": 0.1}, "flex": {"n": 5, "score": 0.9}, "tempo": {"n": 5, "score": 0.9}}}) == fit.DEFAULT_LADDER
+    assert fit.ladder(1.1, {"1.05-1.25": {"gaps": {"n": 5, "score": 0.7}, "tempo": {"n": 5, "score": 0.9}}}) == fit.DEFAULT_LADDER
     assert fit.ladder(0.5, table) == fit.DEFAULT_LADDER
     assert fit.ladder(1.1, {}) == fit.DEFAULT_LADDER
     # From a file, too, and re-read when it changes.
     path = tmp_path / "rungs.json"
     path.write_text(json.dumps({"bands": table}))
-    assert fit.ladder(1.1, fit.rungs_table(path)) == ("tempo", "gaps")
+    assert fit.ladder(1.1, fit.rungs_table(path)) == ("flex", "tempo", "gaps")
 
 
 def test_when_tempo_leads_the_pauses_are_left_alone(tmp_path, monkeypatch):
@@ -101,7 +112,7 @@ def test_when_tempo_leads_the_pauses_are_left_alone(tmp_path, monkeypatch):
     _, _, default_notes, _ = fit.fit_elastically(take, tmp_path / "a.wav", target)
     assert any(n.startswith("trimmed") for n in default_notes)
     monkeypatch.setattr(fit, "rungs_table", lambda path=None: {fit.band(1.5 / target): {
-        "gaps": {"n": 9, "score": 0.5}, "tempo": {"n": 9, "score": 0.9}}})
+        "gaps": {"n": 9, "score": 0.5}, "flex": {"n": 9, "score": 0.6}, "tempo": {"n": 9, "score": 0.9}}})
     _, duration, notes, _ = fit.fit_elastically(take, tmp_path / "b.wav", target)
     assert not any(n.startswith("trimmed") for n in notes)
     assert any(n.startswith("speech at") for n in notes)
