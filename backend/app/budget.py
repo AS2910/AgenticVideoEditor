@@ -67,6 +67,15 @@ class VoiceBudget:
                  amount * self.usd_per_1k / 1000, datetime.now(timezone.utc).isoformat()),
             )
 
+    def refund(self, project_id: str, amount: int) -> None:
+        """Give back a charge for a call that failed before anything was made
+        (the chaos pass): the ledger is append-only, so a negative row. The
+        budget's accounting stays exact; a 429 storm no longer eats the cap."""
+        if amount <= 0:
+            return
+        self.ledger.record(project_id, self.VENDOR, self.WHAT, -amount, self.UNIT,
+                           -amount * self.usd_per_1k / 1000)
+
     def reset(self) -> None:
         """Forget all spend. Intended for test isolation."""
         with self.ledger.db.tx() as c:

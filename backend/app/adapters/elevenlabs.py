@@ -269,10 +269,18 @@ class ElevenLabsVoiceAdapter:
         return wanted if _VOICE_ID.fullmatch(wanted) else self._voice_id
 
     def _take(self, project_id: str, voice_id: str, body: dict, plan: EditPlan) -> tuple[bytes, tuple[Word, ...]]:
-        # Charged per attempt, before the call: a retry is real spend.
-        self._budget.charge(project_id, self.cost_of(plan))
-        status, content, text = self._post(voice_id, body, self._api_key, self._timeout)
+        # Charged per attempt, before the call, so concurrent jobs can never
+        # squeeze under the ceiling together; a call that fails before anything
+        # is made gives the charge back (the chaos pass: a 429 storm used to eat the cap).
+        cost = self.cost_of(plan)
+        self._budget.charge(project_id, cost)
+        try:
+            status, content, text = self._post(voice_id, body, self._api_key, self._timeout)
+        except VoiceError:
+            self._budget.refund(project_id, cost)
+            raise
         if status != 200:
+            self._budget.refund(project_id, cost)
             _raise_for(status, text.replace(self._api_key, "***"))
         return decode_response(content)
 
