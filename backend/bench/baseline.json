@@ -1,5 +1,5 @@
 {
-  "at": "2026-10-10T06:16:18+00:00",
+  "at": "2026-10-10T08:30:17+00:00",
   "cases": [
     {
       "name": "sample-ad \u00b7 the speaker's own line",
@@ -17,7 +17,7 @@
       "warnings": [],
       "seam_level_db": 2.466,
       "seam_colour_st": 0.07,
-      "frozen_seconds": 0,
+      "frozen_seconds": 0.0,
       "render_seconds": 2.3,
       "ok": true
     },
@@ -30,19 +30,19 @@
       ],
       "mix": "replace",
       "ratio": 0.822,
-      "rung": "gaps+tempo",
+      "rung": "gaps+flex",
       "fit_notes": [
         "opened the pauses by 42 ms",
-        "speech at 0.87\u00d7 speed"
+        "the picture at 0.89\u00d7"
       ],
       "passed": true,
-      "prosody": 0.9753766167336261,
-      "audio_integration": 0.9998316128265071,
+      "prosody": 0.9768731790279638,
+      "audio_integration": 0.9999418202194084,
       "warnings": [],
-      "seam_level_db": 9.245,
-      "seam_colour_st": 11.217,
-      "frozen_seconds": 0,
-      "render_seconds": 2.3,
+      "seam_level_db": 9.607,
+      "seam_colour_st": 12.167,
+      "frozen_seconds": 0.0,
+      "render_seconds": 2.2,
       "ok": true
     },
     {
@@ -54,19 +54,19 @@
       ],
       "mix": "replace",
       "ratio": 1.097,
-      "rung": "gaps+tempo",
+      "rung": "gaps+flex",
       "fit_notes": [
         "trimmed 30 ms of pauses",
-        "speech at 1.07\u00d7 speed"
+        "the picture at 1.07\u00d7"
       ],
       "passed": true,
-      "prosody": 0.9783003215306113,
-      "audio_integration": 0.9998523209217486,
+      "prosody": 0.9754954075793209,
+      "audio_integration": 0.9968480853718797,
       "warnings": [],
-      "seam_level_db": 2.315,
-      "seam_colour_st": 1.659,
-      "frozen_seconds": 0,
-      "render_seconds": 2.3,
+      "seam_level_db": 11.126,
+      "seam_colour_st": 2.739,
+      "frozen_seconds": 0.0,
+      "render_seconds": 2.367,
       "ok": true
     },
     {
@@ -78,18 +78,18 @@
       ],
       "mix": "replace",
       "ratio": 0.871,
-      "rung": "tempo",
+      "rung": "flex",
       "fit_notes": [
-        "speech at 0.87\u00d7 speed"
+        "the picture at 0.89\u00d7"
       ],
       "passed": true,
-      "prosody": 0.9923393517338409,
-      "audio_integration": 0.9999946772058707,
+      "prosody": 0.9993474599806821,
+      "audio_integration": 0.9999735852869921,
       "warnings": [],
-      "seam_level_db": 3.234,
-      "seam_colour_st": 2.425,
-      "frozen_seconds": 0,
-      "render_seconds": 2.3,
+      "seam_level_db": 8.106,
+      "seam_colour_st": 2.382,
+      "frozen_seconds": 0.0,
+      "render_seconds": 2.2,
       "ok": true
     },
     {
@@ -132,7 +132,7 @@
       ],
       "seam_level_db": 4.124,
       "seam_colour_st": 7.735,
-      "frozen_seconds": 0,
+      "frozen_seconds": 0.0,
       "render_seconds": 2.3,
       "ok": true
     },
@@ -155,7 +155,7 @@
       ],
       "seam_level_db": 3.785,
       "seam_colour_st": 3.959,
-      "frozen_seconds": 0,
+      "frozen_seconds": 0.0,
       "render_seconds": 2.3,
       "ok": true
     },
@@ -178,12 +178,12 @@
       ],
       "seam_level_db": 14.77,
       "seam_colour_st": 12.318,
-      "frozen_seconds": 0,
+      "frozen_seconds": 0.0,
       "render_seconds": 2.3,
       "ok": true
     },
     {
-      "name": "sample-ad \u00b7 a line added after, the picture holds",
+      "name": "sample-ad \u00b7 a line added after, no pause to stretch",
       "label": "good",
       "tags": [
         "speech",
@@ -197,9 +197,9 @@
       "prosody": 0.9848289103330418,
       "audio_integration": 0.9964883217101591,
       "warnings": [],
-      "seam_level_db": 17.126,
-      "seam_colour_st": 15.429,
-      "frozen_seconds": 0.96,
+      "seam_level_db": 23.293,
+      "seam_colour_st": 18.77,
+      "frozen_seconds": 0.0,
       "render_seconds": 3.267,
       "ok": true
     },
@@ -219,7 +219,7 @@
       "warnings": [],
       "seam_level_db": 3.837,
       "seam_colour_st": 2.063,
-      "frozen_seconds": 0,
+      "frozen_seconds": 0.0,
       "render_seconds": 4.0,
       "ok": true
     },
@@ -242,7 +242,7 @@
       ],
       "seam_level_db": 2.639,
       "seam_colour_st": 6.417,
-      "frozen_seconds": 0,
+      "frozen_seconds": 0.0,
       "render_seconds": 4.0,
       "ok": true
     },
@@ -263,7 +263,7 @@
       "warnings": [],
       "seam_level_db": 1.515,
       "seam_colour_st": 2.656,
-      "frozen_seconds": 0,
+      "frozen_seconds": 0.0,
       "render_seconds": 4.0,
       "ok": true
     },
@@ -287,11 +287,33 @@
       "frozen_seconds": 0.0,
       "render_seconds": null,
       "ok": true
+    },
+    {
+      "name": "synth \u00b7 a line added after A, over the pause",
+      "label": "good",
+      "tags": [
+        "synthetic",
+        "insert",
+        "living"
+      ],
+      "mix": "concatenate",
+      "ratio": 1.5,
+      "rung": "none",
+      "fit_notes": [],
+      "passed": true,
+      "prosody": 0.9999965745803735,
+      "audio_integration": 0.9999674847556475,
+      "warnings": [],
+      "seam_level_db": 50.404,
+      "seam_colour_st": 47.333,
+      "frozen_seconds": 0.0,
+      "render_seconds": 5.2,
+      "ok": true
     }
   ],
   "summary": {
-    "cases": 13,
-    "expectations_met": 13,
-    "frozen_seconds": 0.96
+    "cases": 14,
+    "expectations_met": 14,
+    "frozen_seconds": 0.0
   }
 }

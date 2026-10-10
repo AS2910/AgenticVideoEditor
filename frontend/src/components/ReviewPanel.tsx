@@ -135,7 +135,7 @@ export function ReviewPanel({
                 </span>
               </span>
               {item.mix === 'concatenate' && item.candidate && (
-                <span className={styles.note}>Added after the line; the video holds the frame for {item.candidate.audio.duration.toFixed(1)} s.</span>
+                <span className={styles.note}>Added after the line; the picture makes {item.candidate.audio.duration.toFixed(1)} s of room.</span>
               )}
               {item.note && item.mix !== 'concatenate' && <span className={styles.note}>{item.note}{/[.!?]$/.test(item.note) ? '' : '.'}</span>}
               <div className={styles.verdictRow}>

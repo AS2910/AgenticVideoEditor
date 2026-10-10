@@ -172,3 +172,40 @@ def test_place_scales_the_words_for_an_explicit_stretch(tmp_path):
     assert stretched[1].start == pytest.approx(0.5, abs=0.01)
     _, _, _, held = place(path, tmp_path / "c.wav", 0.8, mix="concatenate", words=words)
     assert held == words
+
+
+# ── Phase 16: the picture as a rung ─────────────────────────────────────────────
+from app.media import fit  # noqa: E402
+
+def test_a_long_take_flexes_the_picture_before_the_speech_is_sped_up(tmp_path):
+    take = tmp_path / "take.wav"
+    _write(take, _tone(1.10))
+    path, duration, notes, _ = fit.fit_elastically(take, tmp_path / "out.wav", 1.0, flex_max=1.12)
+    assert duration == pytest.approx(1.10, abs=0.02)        # the slot stretched to the take
+    assert fit.flex_of(notes) == pytest.approx(1.10, abs=0.01)
+    assert not any(n.startswith("speech at") for n in notes)
+
+
+def test_past_the_flex_limit_the_speech_takes_the_rest(tmp_path):
+    take = tmp_path / "take.wav"
+    _write(take, _tone(1.20))
+    path, duration, notes, _ = fit.fit_elastically(take, tmp_path / "out.wav", 1.0, flex_max=1.12)
+    assert fit.flex_of(notes) == pytest.approx(1.12, abs=0.001)
+    assert duration == pytest.approx(1.12, abs=0.02)
+    assert any(n.startswith("speech at 1.07") for n in notes)
+
+
+def test_a_short_take_speeds_the_picture_a_touch(tmp_path):
+    take = tmp_path / "take.wav"
+    _write(take, _tone(0.92))
+    path, duration, notes, _ = fit.fit_elastically(take, tmp_path / "out.wav", 1.0, flex_max=1.12)
+    assert fit.flex_of(notes) == pytest.approx(0.92, abs=0.01)
+    assert duration == pytest.approx(0.92, abs=0.02)
+
+
+def test_without_a_flex_limit_the_picture_is_left_alone(tmp_path):
+    take = tmp_path / "take.wav"
+    _write(take, _tone(1.10))
+    path, duration, notes, _ = fit.fit_elastically(take, tmp_path / "out.wav", 1.0)
+    assert fit.flex_of(notes) == 1.0 and duration == pytest.approx(1.0, abs=0.02)
+    assert fit.flex_of(["nearest of 3 takes"]) == 1.0

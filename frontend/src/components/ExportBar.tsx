@@ -1,4 +1,4 @@
-import type { Insert, Segment } from '../types'
+import type { Insert, Piece, Segment } from '../types'
 import styles from './ExportBar.module.css'
 
 interface ExportBarProps {
@@ -8,6 +8,8 @@ interface ExportBarProps {
   download?: { url: string; filename: string } | null
   /** Lines added after a point; each makes the export longer. */
   inserts?: Insert[]
+  /** Phase 16: the render as pieces — how the picture made room, and what flexed. */
+  pieces?: Piece[]
   /** A render is running: one button, disabled, saying so (UX-6). */
   busy?: boolean
 }
@@ -17,7 +19,12 @@ const secs = (t: number) => `${Math.floor(t / 60)}:${(t % 60).toFixed(1).padStar
 /** The header's export: one button that says where things stand — Export,
  *  Exporting…, then Download with Export again beside it — and a strip of
  *  where the edits fall, described in words for a screen reader. */
-export function ExportBar({ segments, onExport, download, inserts = [], busy }: ExportBarProps) {
+export function ExportBar({ segments, onExport, download, inserts = [], pieces = [], busy }: ExportBarProps) {
+  const length = (p: Piece) => p.out_end - p.out_start
+  const room = pieces.filter((p) => p.kind === 'living' || p.kind === 'hold').reduce((t, p) => t + length(p), 0)
+  const held = pieces.filter((p) => p.kind === 'hold').reduce((t, p) => t + length(p), 0)
+  const flexed = pieces.filter((p) => p.kind === 'flex' && p.factor != null && Math.abs(p.factor - 1) > 0.005)
+  const flexPct = flexed.length ? Math.round(Math.max(...flexed.map((p) => Math.abs((p.factor as number) - 1))) * 100) : 0
   const total = segments.length ? segments[segments.length - 1].end : 0
   const edited = segments.filter((s) => s.kind === 'edited')
   const stripLabel = edited.length === 0
@@ -38,10 +45,15 @@ export function ExportBar({ segments, onExport, download, inserts = [], busy }: 
           ))}
         </div>
       )}
-      {inserts.length > 0 && (
+      {(inserts.length > 0 || flexed.length > 0) && (
         <div className={styles.inserts} data-testid="inserts">
-          +{inserts.length} added {inserts.length === 1 ? 'line' : 'lines'}, holding the frame for{' '}
-          {inserts.reduce((t, i) => t + i.duration, 0).toFixed(2)}s
+          {inserts.length > 0 && (
+            <>+{inserts.length} added {inserts.length === 1 ? 'line' : 'lines'}; the picture makes room for{' '}
+            {(pieces.length ? room : inserts.reduce((t, i) => t + i.duration, 0)).toFixed(2)} s{held > 0.005 ? `, ${held.toFixed(2)} s of it held` : ''}.</>
+          )}
+          {flexed.length > 0 && (
+            <>{inserts.length > 0 ? ' ' : ''}{flexed.length} {flexed.length === 1 ? 'line' : 'lines'} flexed the picture by up to {flexPct}%.</>
+          )}
         </div>
       )}
       {busy ? (

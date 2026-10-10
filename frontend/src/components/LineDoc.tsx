@@ -110,7 +110,7 @@ const LONG_OPTIONS: { value: LongLines; label: string }[] = [
   { value: 'ask', label: 'Ask me' },
 ]
 const MIX_NOTE: Record<string, string | null> = {
-  replace: null, layer: 'plays over the picture', over: 'plays over the picture', concatenate: 'the picture holds while it plays', remove: null,
+  replace: null, layer: 'plays over the picture', over: 'plays over the picture', concatenate: 'the picture makes room while it plays', remove: null,
 }
 const voiceLabel = (v: Voice) => (v.gender ? `${v.name} (${v.gender})` : v.name)
 
@@ -823,7 +823,7 @@ export function LineDoc({
             <span className={styles.time}>{clock(s.end)}</span>
             <span className={styles.who} />
             <div className={styles.body}>
-              <div className={styles.meta}>New line after {clock(s.start)}{added.request ? ` · ${added.request.mix === 'over' ? 'plays over the picture' : 'the picture holds'}` : ''}</div>
+              <div className={styles.meta}>New line after {clock(s.start)}{added.request ? ` · ${added.request.mix === 'over' ? 'plays over the picture' : 'the picture makes room'}` : ''}</div>
               {lineBlock(addKey, s, i)}
             </div>
             <span className={styles.side}>{STATUS[added.status] && <span className={styles.chip} data-tone={TONE[added.status]} role="status">{STATUS[added.status]}</span>}</span>

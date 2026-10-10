@@ -22,7 +22,7 @@ from app.domain.transcript import (
 )
 from app.media.fit import speaking_rate, syllable_budget, syllables
 from app.config import load_settings
-from app.media import frames as frames_mod
+from app.media import frames as frames_mod, motion, shots
 from app.media import ffmpeg, ingest
 from app.adapters.base import VendorError
 from app.adapters.mock import MockLipSyncAdapter
@@ -44,6 +44,7 @@ from app.store.repository import ProjectRecord, ProjectRepository, LOCAL_OWNER
 from app.store.artifacts import ArtifactStore
 from app.render.renderer import render
 from app.render.compose import compose
+from app.render import retime
 from app.jobs.store import JobStore, Job
 from app.jobs.runner import JobRunner, with_retries
 
@@ -184,6 +185,7 @@ def _candidate_dict(candidate: EditCandidate) -> dict:
             "fit": candidate.plan.fit,
             "mix": candidate.plan.mix,
             "delivery": candidate.plan.delivery,
+            "flex": candidate.plan.flex,
         },
         "audio": _artifact_dict(candidate.audio),
         "frames": _artifact_dict(candidate.frames),
@@ -547,6 +549,7 @@ def get_project(project_id: str, owner: str = Depends(current_owner)) -> dict:
                 "selection": {"start": e.plan.selection.start, "end": e.plan.selection.end},
                 "mix": e.plan.mix,
                 "delivery": e.plan.delivery,
+                "flex": e.plan.flex,
                 "overridden": e.overridden,
                 "reverted": e.reverted,
                 "partner": e.partner,
@@ -1116,22 +1119,52 @@ def export_project(project_id: str, owner: str = Depends(current_owner)) -> dict
     return _export(_owned(project_id, owner))
 
 
+def _cuts(project_id: str, record: ProjectRecord) -> list[float]:
+    """Where the picture cuts (Phase 16), found once and kept with the project."""
+    saved = repo.settings(project_id).get("shots")
+    if saved and saved.get("sha") == record.source.media.sha256:
+        return [float(c) for c in saved.get("cuts", ())]
+    found = shots.cuts(record.source.media.path)
+    repo.set_settings(project_id, shots={"sha": record.source.media.sha256, "cuts": found})
+    return found
+
+
+def _pieces(record: ProjectRecord, manifest) -> list[retime.Piece]:
+    """The export as pieces (Phase 16): flexed lines, living holds for added
+    lines, copies between. The picture's motion steers where time is added."""
+    source = record.source
+    edits = [e for e in repo.list_edits(source.project_id) if not e.reverted]
+    motion_fn = lambda a, b: motion.motion(source.media.path, a, b)   # noqa: E731
+    flexed = retime.flex_pieces(edits, motion_fn, settings.max_flex)
+    living = retime.living_pieces(
+        manifest.inserts, record.transcript, source.duration,
+        _cuts(source.project_id, record) if manifest.inserts else (), motion_fn, settings.max_living,
+        taken=[(p.start, p.end) for p in flexed],
+    )
+    return retime.tile(source.duration, [*flexed, *living], ffmpeg.frame_rate(source.media.path))
+
+
 def _export(record: ProjectRecord) -> dict:
     project_id = record.source.project_id
     manifest = render(record.source, repo.list_edits(project_id))
-    # Synchronous: the video is stream-copied and only the audio re-encoded,
-    # so even a 3-minute source renders in seconds.
+    pieces = _pieces(record, manifest)
+    # Synchronous: with nothing but copies the video is stream-copied and only
+    # the audio re-encoded, so even a 3-minute source renders in seconds; a
+    # flexed or living piece re-encodes the picture.
     with tempfile.TemporaryDirectory() as tmp:
         path = compose(
             record.source, manifest.segments, Path(tmp) / "export.mp4",
-            inserts=manifest.inserts,
+            inserts=manifest.inserts, pieces=pieces, interpolator=settings.interpolator,
         )
         rendered = artifacts.put_file(
             project_id, path, kind="video", container="mp4",
             duration=ffmpeg.duration_of(path),
         )
+    held_at = {p.start: p.out for p in pieces if p.kind == "hold"}
     return {
         "render": _artifact_dict(rendered),
+        # Phase 16: every stretch of the output and where it came from.
+        "pieces": retime.manifest(pieces),
         "segments": [
             {
                 "start": s.start,
@@ -1143,7 +1176,8 @@ def _export(record: ProjectRecord) -> dict:
             for s in manifest.segments
         ],
         "inserts": [
-            {"at": i.at, "duration": i.duration, "artifact": _artifact_dict(i.edit.audio)}
+            {"at": i.at, "duration": i.duration, "artifact": _artifact_dict(i.edit.audio),
+             "held": round(held_at.get(round(min(max(i.at, 0.0), record.source.duration) * ffmpeg.frame_rate(record.source.media.path)) / ffmpeg.frame_rate(record.source.media.path), 0.0), 3)}
             for i in manifest.inserts
         ],
     }

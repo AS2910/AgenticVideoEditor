@@ -31,7 +31,7 @@ interface PlanCardProps {
   onStop?: () => void | Promise<unknown>
 }
 
-const KIND: Record<string, string> = { replace: 'Replaces the line', concatenate: 'Added after the line, the picture holds', over: 'Added after the line, over the picture', layer: 'Over the original sound' }
+const KIND: Record<string, string> = { replace: 'Replaces the line', concatenate: 'Added after the line, the picture makes room', over: 'Added after the line, over the picture', layer: 'Over the original sound' }
 const DELIVERIES = ['warmer', 'more excited', 'calmer', 'slower', 'firmer']
 
 /** The two controls a line has in its editor, for a plan item (UX-2). */

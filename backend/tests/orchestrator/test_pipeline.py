@@ -266,3 +266,17 @@ def test_the_candidate_carries_the_takes_own_words(store):
     candidate = run_edit("c1", EditPlan(Selection(0.4, 1.3), "x", "speaker-1"), make_source(),
                          voice, MockLipSyncAdapter(store), ContinuityEngine())
     assert [w.text for w in candidate.words] == ["30%", "off"]
+
+
+def test_a_flexed_fit_lands_on_the_plan_and_the_selection_is_left_as_shot(tmp_path):
+    """Phase 16: the voice's fit notes say the picture flexed; the plan carries the factor."""
+    from app.store.artifacts import ArtifactStore
+
+    store = ArtifactStore(tmp_path)
+    voice = MockVoiceAdapter(store)
+    voice.last_notes = ("the picture at 1.08×",)
+    plan = EditPlan(Selection(1.0, 2.0), "hello there", "v")
+    candidate = run_edit("c1", plan, make_source(), voice, MockLipSyncAdapter(store), ContinuityEngine())
+    assert candidate.plan.flex == pytest.approx(1.08)
+    assert candidate.plan.selection == Selection(1.0, 2.0)
+    assert "the picture at 1.08×" in candidate.fit_notes

@@ -41,9 +41,9 @@ import type { Me } from './api'
 import type {
   Word, Selection, Candidate, Segment, Project, ChatMessage, Question, QuestionOption,
   Fit, Mix, Insert, ProjectSummary, Usage, Statement, Voice, Revision, LongLines,
-  Plan, PlanItem, Autonomy, Reading,
+  Plan, PlanItem, Autonomy, Reading, Piece,
 } from './types'
-import { renderTime, sourceTime } from './timeline/selection'
+import { piecesFromInserts, renderTimeFrom, sourceTimeFrom } from './timeline/selection'
 import styles from './App.module.css'
 
 /** Smooth scrolling and motion are the user's call (UX-6). */
@@ -101,6 +101,8 @@ export default function App() {
   const [progress, setProgress] = useState<{ value: number; step: string } | null>(null)
   const [segments, setSegments] = useState<Segment[]>([])
   const [inserts, setInserts] = useState<Insert[]>([])
+  // Phase 16: the render as pieces — copies, flexed lines, living holds, held frames — for the clocks.
+  const [pieces, setPieces] = useState<Piece[]>([])
   const [download, setDownload] = useState<{ url: string; filename: string } | null>(null)
   const [exporting, setExporting] = useState(false)
   // UX-6: how much of the upload has gone, 0..1; null when not uploading.
@@ -222,6 +224,7 @@ export default function App() {
     setProgress(null)
     setSegments([])
     setInserts([])
+    setPieces([])
     setDownload(null)
     setRendered(null)
     setView('original')
@@ -865,6 +868,7 @@ export default function App() {
       if (result.export) {
         setSegments(result.export.segments)
         setInserts(result.export.inserts ?? [])
+        setPieces(result.export.pieces ?? piecesFromInserts(result.export.inserts ?? [], project?.duration ?? 0))
         const stem = (project?.filename ?? 'video').replace(/\.[^.]+$/, '')
         const url = artifactUrl(projectId, result.export.render.sha256)
         const download = { url, filename: `${stem}-edited.mp4` }
@@ -917,8 +921,8 @@ export default function App() {
     const span = item.candidate?.plan.selection ?? item.selection
     const edited = rendered !== null
     setView(edited ? 'edited' : 'original')
-    const from = Math.max(0, (edited ? renderTime(span.start, inserts) : span.start) - 1.5)
-    const until = (edited ? renderTime(span.end, inserts) : span.end) + (item.mix === 'concatenate' && item.candidate ? item.candidate.audio.duration : 0) + 1.5
+    const from = Math.max(0, (edited ? renderTimeFrom(span.start, pieces) : span.start) - 1.5)
+    const until = (edited ? renderTimeFrom(span.end, pieces) : span.end) + (item.mix === 'concatenate' && item.candidate ? item.candidate.audio.duration : 0) + 1.5
     setSeekRequest((r) => ({ time: from, id: (r?.id ?? 0) + 1, play: true, until }))
     setCurrentTime(from)
     setSeam({ itemId: item.item_id, from, until, now: from })
@@ -983,7 +987,7 @@ export default function App() {
   const seekToStatement = (s: Statement) => {
     setSelection({ start: s.start, end: s.end })
     const edited = view === 'edited' && rendered !== null
-    const time = edited ? renderTime(s.start, inserts) : s.start
+    const time = edited ? renderTimeFrom(s.start, pieces) : s.start
     setSeekRequest((r) => ({ time, id: (r?.id ?? 0) + 1 }))
     setCurrentTime(time)
   }
@@ -1044,6 +1048,7 @@ export default function App() {
       setRendered(null)
       setSegments([])
       setInserts([])
+    setPieces([])
       setView('original')
     }
   }
@@ -1059,6 +1064,7 @@ export default function App() {
       const manifest = await exportProject(id)
       setSegments(manifest.segments)
       setInserts(manifest.inserts ?? [])
+      setPieces(manifest.pieces ?? piecesFromInserts(manifest.inserts ?? [], project?.duration ?? 0))
       const stem = (filename ?? 'video').replace(/\.[^.]+$/, '')
       const url = artifactUrl(id, manifest.render.sha256)
       setDownload({ url, filename: `${stem}-edited.mp4` })
@@ -1189,7 +1195,7 @@ export default function App() {
   const overrun = candidate && asked ? candidate.plan.selection.end - asked.end : 0
   const ranOn = candidate?.plan.mix !== 'concatenate' && overrun > 0.01
 
-  const sourceClock = showEdited ? sourceTime(currentTime, inserts) : currentTime
+  const sourceClock = showEdited ? sourceTimeFrom(currentTime, pieces) : currentTime
   const voiceLine = usage?.lines.find((l) => l.vendor === 'elevenlabs' && l.units > 0)
   const usdPerChar = voiceLine ? voiceLine.usd / voiceLine.units : null
   const playingMix = playingTake
@@ -1211,7 +1217,7 @@ export default function App() {
   }
   // UX-7b: the monitor's timeline and caption. Times follow the version that
   // plays: an insert in the edited render pushes everything after it later.
-  const toRender = (t: number) => (showEdited ? renderTime(t, inserts) : t)
+  const toRender = (t: number) => (showEdited ? renderTimeFrom(t, pieces) : t)
   const blocks: Block[] = [
     ...statements.map((s) => ({ start: toRender(s.start), end: toRender(s.end), tone: speakerSlot(speakers, s.speaker) as Block['tone'] })),
     ...approved.filter((r) => r.mix !== 'remove').map((r) => ({ start: toRender(r.start), end: toRender(r.end), tone: 'changed' as const })),
@@ -1271,7 +1277,7 @@ export default function App() {
               : `Ship ${keptItems.length} of ${readyItems.length}`}
           </button>
         )}
-        <ExportBar segments={segments} inserts={inserts} onExport={() => void runExport()} download={download} busy={exporting} />
+        <ExportBar segments={segments} inserts={inserts} pieces={pieces} onExport={() => void runExport()} download={download} busy={exporting} />
       </header>
 
       <main id="main" className={styles.main} aria-busy={planBusy || undefined}>

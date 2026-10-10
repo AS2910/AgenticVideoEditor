@@ -227,6 +227,7 @@ class ElevenLabsVoiceAdapter:
         timeout: float = DEFAULT_TIMEOUT,
         takes_per_line: int = 1,
         fit_tolerance: float = fit.DEFAULT_TOLERANCE,
+        flex_max: float = 1.0,
     ) -> None:
         self._api_key = api_key
         self._store = store
@@ -243,6 +244,7 @@ class ElevenLabsVoiceAdapter:
         self._held: dict[str, tuple[bytes, tuple[Word, ...]]] = {}
         self._takes = max(1, takes_per_line)
         self._tolerance = fit_tolerance
+        self._flex_max = flex_max
         # What was done to the last line to make it fit, in words.
         self.last_notes: list[str] = []
         # The last take's own word times, at their fitted positions (P-3).
@@ -321,7 +323,7 @@ class ElevenLabsVoiceAdapter:
             raw, _ = ffmpeg.pcm_to_wav(audio, Path(tmp) / "raw.wav", SAMPLE_RATE)
             try:
                 placed, duration, fitted, words = fit.place(
-                    raw, Path(tmp) / "voice.wav", target, plan.fit, plan.mix, self._tolerance, words,
+                    raw, Path(tmp) / "voice.wav", target, plan.fit, plan.mix, self._tolerance, words, flex_max=self._flex_max,
                 )
             except ffmpeg.SpanMismatch:
                 self._held[key] = held

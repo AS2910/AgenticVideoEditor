@@ -7,6 +7,7 @@ from app.continuity.engine import Assessment
 from app.domain.models import (
     Source, EditPlan, EditCandidate, Transcript, ContinuityReport, Selection,
 )
+from app.media import fit
 from app.media.ffmpeg import SpanMismatch
 
 # Progress is reported as (fraction, human-readable step). The fractions are
@@ -108,7 +109,12 @@ def run_edit(
         # No take fitted the selection (or budget ran out before any did).
         raise unfitted or RuntimeError("no take was generated")
 
-    if plan.mix != "concatenate":
+    # Phase 16: the fit may have let the picture flex so the take fits at
+    # natural speech; the plan carries the factor for the renderer.
+    flex = fit.flex_of(fit_notes)
+    if abs(flex - 1.0) > 1e-6:
+        plan = replace(plan, flex=flex)
+    if plan.mix != "concatenate" and plan.flex is None:
         # A line placed at natural speed may run past the selection; the edit
         # then covers the whole line, or its end would be cut off.
         span = plan.selection.end - plan.selection.start

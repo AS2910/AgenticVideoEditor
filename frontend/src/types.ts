@@ -122,6 +122,9 @@ export interface EditPlan {
   fit?: Fit | null
   mix?: Mix
   delivery?: string | null
+  /** Phase 16: the picture's factor over the selection for a replaced line —
+   *  1.08 is the picture 8% slower so the take fits at natural speech; null or 1 is none. */
+  flex?: number | null
 }
 
 /** A real media file held by the backend, addressed by the hash of its bytes. */
@@ -259,10 +262,17 @@ export interface Segment {
 
 /** A line added after a point in the video: the frame there is held while
  *  it plays, so the export is longer than the source. */
-export interface Insert { at: number; duration: number; artifact: MediaArtifact }
+export interface Insert { at: number; duration: number; artifact: MediaArtifact; /** Phase 16: seconds of frozen frame left for this insert (0 when the living hold took it all). */ held?: number }
+
+/** Phase 16: a stretch of the output. Source [start, end] maps to render
+ *  [out_start, out_end]. A "hold" has start === end (one frame held); a
+ *  "living" piece is a pause stretched to make room for an added line; a
+ *  "flex" piece is a replaced line's picture slowed or sped a touch so the
+ *  take fits at natural speech; "copy" is untouched. Pieces tile the render. */
+export interface Piece { start: number; end: number; out_start: number; out_end: number; kind: 'copy' | 'flex' | 'living' | 'hold'; factor: number | null }
 
 /** `render` is the finished MP4, stored like any other artifact. */
-export interface ExportManifest { segments: Segment[]; render: MediaArtifact; inserts?: Insert[] }
+export interface ExportManifest { segments: Segment[]; render: MediaArtifact; inserts?: Insert[]; pieces?: Piece[] }
 
 export interface ChatMessage { role: 'user' | 'assistant'; text: string }
 
