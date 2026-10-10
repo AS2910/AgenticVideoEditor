@@ -357,3 +357,62 @@ def test_a_delivery_becomes_voice_settings():
     # a speed asked for by the fitter combines with a slow delivery, inside the limits
     assert to_request(replace(PLAN, delivery="slower"), None, "m", speed=1.2)["voice_settings"]["speed"] == pytest.approx(1.08)
     assert "voice_settings" not in to_request(replace(PLAN, delivery="in my own words"), None, "m")
+
+
+# --- P-3: word times from the vendor's alignment -------------------------------
+
+import base64  # noqa: E402
+
+from app.adapters.elevenlabs import decode_response, words_from_alignment  # noqa: E402
+
+
+def _alignment(text, step=0.1):
+    """Each character `step` seconds long, back to back, spaces included."""
+    return {
+        "characters": list(text),
+        "character_start_times_seconds": [round(i * step, 4) for i in range(len(text))],
+        "character_end_times_seconds": [round((i + 1) * step, 4) for i in range(len(text))],
+    }
+
+
+def test_characters_fold_into_words_with_their_times():
+    words = words_from_alignment(_alignment("30% off"))
+    assert [(w.text, w.start, w.end) for w in words] == [("30%", 0.0, 0.3), ("off", 0.4, 0.7)]
+    assert words_from_alignment(None) == () and words_from_alignment({}) == ()
+
+
+def test_a_with_timestamps_response_yields_audio_and_words():
+    body = json.dumps({"audio_base64": base64.b64encode(PCM).decode("ascii"),
+                       "alignment": _alignment("30% off")}).encode()
+    audio, words = decode_response(body)
+    assert audio == PCM and [w.text for w in words] == ["30%", "off"]
+    # A bare PCM response (the recording, a stand-in) is the audio, no words.
+    assert decode_response(PCM) == (PCM, ())
+
+
+def test_the_call_goes_to_the_with_timestamps_endpoint(monkeypatch):
+    seen = {}
+
+    def fake_post(url, **kwargs):
+        seen["url"] = url
+        return httpx.Response(200, content=PCM)
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    assert _post("voice-x", {"text": "hi"}, KEY, 1.0)[0] == 200
+    assert seen["url"].endswith("/text-to-speech/voice-x/with-timestamps")
+
+
+@needs_ffmpeg
+def test_the_takes_words_come_out_fitted_on_the_adapter(store):
+    seconds = len(PCM) / 2 / SAMPLE_RATE
+    alignment = {
+        "characters": list("30% off"),
+        "character_start_times_seconds": [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6],
+        "character_end_times_seconds": [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, round(seconds, 3)],
+    }
+    body = json.dumps({"audio_base64": base64.b64encode(PCM).decode("ascii"), "alignment": alignment}).encode()
+    voice = adapter(store, post=FakePost(content=body))
+    voice.synthesize(SOURCE, PLAN, TRANSCRIPT)
+    assert [w.text for w in voice.last_words] == ["30%", "off"]
+    assert voice.last_words[1].start >= voice.last_words[0].end
+    assert voice.last_words[1].end <= 0.9 + 0.05            # inside the fitted take

@@ -21,6 +21,19 @@ The leftovers, as one branch `polish-pass`, one commit each where they touch dif
 
 Exit: tests for each; lint, `tsc -b`, pytest clean; MASTER.md's component list updated.
 
+### As built — Phase P, 2026-10-10
+
+Branch `polish-pass`, merged to main the same day. 525 backend / 246 frontend tests (from 514 / 239).
+
+- **P-1** `Ledger.calls_since(project_id, vendor, at)`; `takes_voiced` on the plan response (ElevenLabs rows since the plan was made — each take is its own row). The receipt's tiles gain "N takes voiced" when any were.
+- **P-2** `READ_SYSTEM`: one plain sentence under thirty words (a second only when needed), leading with what is said once, never said, or where the offer, brand or price lands, times as m:ss; told not to repeat the line count, the speaker count or the file name, which the card already shows.
+- **P-3** ElevenLabs `…/with-timestamps`: `decode_response` takes the JSON (audio + per-character times) or raw PCM (the old doubles and fixture); `words_from_alignment` folds characters into words. `fit.find_gaps(x, rate, words)` only calls a quiet run a gap when it lies between two words or at the edges; `_resize_gaps` returns its `GapEdit`s and `remap_times`/`remap_words` carry the word boundaries through every cut, grow and tempo change; `fit.place` returns `(path, duration, notes, words)`. `EditCandidate.words` (codec reads it back; old candidates load as `()`), `run_edit` copies `voice.last_words`, `candidate.words` on the API in seconds from the take's start. The caption lights a take's words as they are said while it plays in place (`takeCaption`, `ins[data-said]`). The live with-timestamps round-trip was not exercised (no network in tests); a raw-audio response degrades to no words rather than failing.
+- **P-4** `SpendMeter` is a button with `aria-expanded`; the popover (`role="dialog"`, "Spend breakdown") lists vendor lines with call counts, voice characters against their ceiling, and with sign-in the person's spend across projects; Escape closes it with focus back on the meter, a click outside closes it. The `title` is gone; the `role="meter"` track keeps the value. The stylesheet contract test allows the strip composer's input the same way it allows the chat composer's.
+- **P-5** `ReviewPanel`: *Play the seam* toggles to *Stop* (`seekRequest.stop` pauses the monitor; `Player.onPlayingChange` clears the seam when the video stops on its own) with a progress line along the row's foot driven by the monitor's clock; *Hear the take* replaces the bare `<audio>` and plays the take in place through the same `playTake` the transcript uses; rows are `role="listitem"`, `tabIndex=0`, named by line, time, speaker and state; keys ↑ ↓ (and j) move, Space/Enter play or stop the seam, T hears the take, K keeps, H holds, A asks another take, U undoes a shipped line; the legend shows while a row has focus and is hidden at phone width.
+- **P-6** The rail carries a `form` with "Ask Voltage" and the send button labelled by what it does; it is `display: none` on the desktop rail and the strip's main element under 960px (the state word and spacer give way to it). Sending clears the box, shows the panel and sends through `submitComposer`, so a goal, a change to the plan or an answer all work from the strip.
+
+Left: the Phase 16 copy ("the picture holds") is unchanged until the living hold exists; the design canvas is unchanged.
+
 ## Phase 19 · The bench (v1)
 
 Branch `phase-19-bench`. "Every metric computed in CI; a quality gate per rung so the ladder chooses by predicted score."

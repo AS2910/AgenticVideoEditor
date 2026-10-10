@@ -58,6 +58,7 @@
 .railBadge { min-width: 22px; height: 22px; padding: 0 7px; border-radius: 11px; background: var(--accent); color: var(--accent-ink); font-size: var(--fs-12); font-weight: 600; display: flex; align-items: center; justify-content: center; box-shadow: 0 0 10px var(--glow-color); }
 .railBadge[data-tone="rose"] { background: var(--rose); color: var(--rose-ink); box-shadow: none; }
 .railWord { writing-mode: vertical-rl; transform: rotate(180deg); font-size: var(--fs-13); color: var(--muted); white-space: nowrap; line-height: 1; letter-spacing: 0.02em; }
+.railComposer { display: none; }
 .railOpen { display: none; min-height: var(--chip); padding: 0 12px; border-radius: 9px; font-size: var(--fs-14); font-weight: 500; background: var(--btn-bg); color: var(--text); border: 1px solid var(--line); box-shadow: var(--btn-shadow); }
 .brand { margin: 0; display: flex; align-items: center; gap: 10px; font-family: var(--serif); font-size: 18px; font-weight: 600; letter-spacing: -0.01em; }
 .welcome { font-size: var(--fs-16); line-height: 1.6; color: var(--muted); }
@@ -159,6 +160,19 @@
   .railWord { writing-mode: horizontal-tb; transform: none; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
   .railOpen { display: inline-flex; align-items: center; }
   .rail .railShow:last-child { display: none; }
+  /* The strip's composer (the polish pass): the state word gives way to it. */
+  .railWord { display: none; }
+  .rail .spacer { display: none; }
+  .railComposer {
+    display: flex; flex: 1; min-width: 0; align-items: center; gap: 6px; min-height: var(--target); padding: 4px 4px 4px 14px;
+    border-radius: 14px; background: var(--bg-deep); border: 1px solid var(--line); box-shadow: var(--recess);
+  }
+  .railComposer:focus-within { border-color: var(--accent-line); box-shadow: var(--recess), var(--ring); }
+  .railInput { flex: 1; min-width: 0; min-height: 0; padding: 4px 0; background: transparent; color: var(--text); border: none; font-size: 16px; }
+  .railInput::placeholder { color: var(--muted); }
+  .railInput:focus { outline: none; }
+  .railSend { width: 36px; height: 36px; flex: none; border-radius: 50%; border: none; background: var(--btn-primary-bg); color: var(--accent-ink); box-shadow: var(--btn-primary-shadow); display: flex; align-items: center; justify-content: center; }
+  .railSend:disabled { background: var(--raised); color: var(--muted); }
 }
 
 /* Phase 9c: who is signed in, in the header; a blank while we ask. */

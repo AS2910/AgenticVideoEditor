@@ -30,3 +30,16 @@ def test_the_ceiling_refuses_only_once_reached():
 def test_claude_price():
     assert claude_usd("claude-opus-5", 1_000_000, 0) == pytest.approx(5.0)
     assert claude_usd("claude-opus-5", 0, 1_000_000) == pytest.approx(25.0)
+
+
+def test_calls_since_counts_one_vendors_rows_from_a_moment():
+    ledger = Ledger()
+    ledger.record("p1", "elevenlabs", "speech", 7, "characters", 0.001)
+    from datetime import datetime, timezone
+    mark = datetime.now(timezone.utc).isoformat()
+    ledger.record("p1", "elevenlabs", "speech", 7, "characters", 0.001)
+    ledger.record("p1", "elevenlabs", "speech", 7, "characters", 0.001)
+    ledger.record("p1", "anthropic", "plan", 10, "tokens", 0.001)
+    ledger.record("p2", "elevenlabs", "speech", 7, "characters", 0.001)
+    assert ledger.calls_since("p1", "elevenlabs", mark) == 2
+    assert ledger.calls_since("p1", "elevenlabs", "1970-01-01T00:00:00+00:00") == 3

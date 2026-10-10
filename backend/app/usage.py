@@ -89,6 +89,16 @@ class Ledger:
             ).fetchone()
         return float(row["usd"])
 
+    def calls_since(self, project_id: str, vendor: str, at: str) -> int:
+        """How many calls one vendor took since `at` — for ElevenLabs, the
+        takes a plan voiced (every take is charged as its own row)."""
+        with self.db.tx() as c:
+            row = c.execute(
+                "SELECT COUNT(*) AS n FROM usage WHERE project_id = ? AND vendor = ? AND at >= ?",
+                (project_id, vendor, at),
+            ).fetchone()
+        return int(row["n"])
+
     def units(self, project_id: str, vendor: str, unit: str) -> float:
         with self.db.tx() as c:
             row = c.execute(

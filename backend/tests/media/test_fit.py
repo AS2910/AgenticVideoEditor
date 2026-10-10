@@ -79,7 +79,7 @@ def test_a_long_take_loses_pause_before_speech_is_sped_up(tmp_path):
     path, natural = two_words(tmp_path)        # 1.6 s, 0.6 s of which is silence
     target = 1.35                               # uniform tempo would be 1.19×
 
-    out, duration, notes = fit_elastically(path, tmp_path / "fit.wav", target)
+    out, duration, notes, _ = fit_elastically(path, tmp_path / "fit.wav", target)
 
     assert duration == pytest.approx(target, abs=0.02)
     assert any(n.startswith("trimmed") for n in notes)
@@ -91,7 +91,7 @@ def test_a_long_take_loses_pause_before_speech_is_sped_up(tmp_path):
 def test_a_short_take_opens_its_pauses_before_it_is_slowed(tmp_path):
     path, natural = two_words(tmp_path, gap=0.3)   # 1.5 s
     target = 1.65
-    out, duration, notes = fit_elastically(path, tmp_path / "fit.wav", target)
+    out, duration, notes, _ = fit_elastically(path, tmp_path / "fit.wav", target)
     assert duration == pytest.approx(target, abs=0.02)
     assert any(n.startswith("opened") for n in notes)
 
@@ -99,7 +99,7 @@ def test_a_short_take_opens_its_pauses_before_it_is_slowed(tmp_path):
 @needs_ffmpeg
 def test_within_tolerance_nothing_but_the_exact_trim_happens(tmp_path):
     path, natural = two_words(tmp_path)
-    out, duration, notes = fit_elastically(path, tmp_path / "fit.wav", natural * 1.02)
+    out, duration, notes, _ = fit_elastically(path, tmp_path / "fit.wav", natural * 1.02)
     assert duration == pytest.approx(natural * 1.02, abs=0.02) and notes == []
 
 
@@ -114,7 +114,61 @@ def test_far_too_long_still_asks_with_the_trimmed_length(tmp_path):
 @needs_ffmpeg
 def test_place_keeps_the_explicit_fits_as_they_were(tmp_path):
     path, natural = two_words(tmp_path)
-    _, duration, notes = place(path, tmp_path / "s.wav", 2.5, fit="stretch")
+    _, duration, notes, _ = place(path, tmp_path / "s.wav", 2.5, fit="stretch")
     assert duration == pytest.approx(2.5, abs=0.02) and notes == []
-    _, duration, _ = place(path, tmp_path / "c.wav", 0.3, mix="concatenate")
+    _, duration, _, _ = place(path, tmp_path / "c.wav", 0.3, mix="concatenate")
     assert duration == pytest.approx(natural, abs=0.02)
+
+
+# --- P-3: the take's own word times -------------------------------------------
+
+from app.media.fit import GapEdit, remap_times, remap_words  # noqa: E402
+
+
+def test_a_quiet_stretch_inside_a_word_is_not_a_gap(tmp_path):
+    path, _ = two_words(tmp_path)
+    with wave.open(str(path)) as w:
+        x = np.frombuffer(w.readframes(w.getnframes()), dtype="<i2").astype(np.float32) / 32768
+    # The vendor says the first word runs over the pause: that quiet is speech.
+    words = (Word("first", 0.1, 1.0), Word("second", 1.0, 1.5))
+    seconds = [(g.start / RATE, g.end / RATE) for g in find_gaps(x, RATE, words)]
+    assert len(seconds) == 2
+    assert seconds[0] == pytest.approx((0.0, 0.1), abs=0.02)      # the lead-in stays a gap
+    assert seconds[1][0] == pytest.approx(1.5, abs=0.02)          # and the tail
+
+
+def test_times_move_through_cuts_and_grown_gaps_and_a_tempo_change():
+    # 100 samples cut from [1000, 1100); 50 samples grown at 3000; rate 1000.
+    edits = [GapEdit(1000, 1100, 0), GapEdit(3000, 3000, 50)]
+    before, inside, after, late = 0.5, 1.05, 2.0, 3.5
+    assert remap_times([before, inside, after, late], edits, 1000) == [0.5, 1.0, 1.9, 3.45]
+    # A tempo of 1.25× makes everything 0.8 as long.
+    assert remap_times([2.0], edits, 1000, tempo=1.25) == pytest.approx([1.9 / 1.25])
+
+
+def test_words_keep_their_order_and_never_run_backwards():
+    words = (Word("a", 0.9, 1.2), Word("b", 1.3, 2.0))
+    out = remap_words(words, [GapEdit(1000, 1250, 0)], 1000)
+    assert [(w.text, w.start, w.end) for w in out] == [("a", 0.9, 1.0), ("b", 1.05, 1.75)]
+
+
+@needs_ffmpeg
+def test_fitting_returns_the_words_at_their_new_times(tmp_path):
+    path, natural = two_words(tmp_path)        # words at 0.1–0.6 and 1.0–1.5
+    words = (Word("one", 0.1, 0.6), Word("two", 1.0, 1.5))
+    _, duration, notes, moved = fit_elastically(path, tmp_path / "fit.wav", 1.35, words=words)
+    assert duration == pytest.approx(1.35, abs=0.02)
+    # The lead-in gave up a little, the pause between the words most of it.
+    assert 0.0 <= moved[0].start <= 0.1 and moved[0].end - moved[0].start == pytest.approx(0.5, abs=0.02)
+    assert moved[1].start < 1.0 - 0.1 and moved[1].end < 1.5 - 0.1
+    assert moved[0].end <= moved[1].start and moved[1].end <= duration + 0.01
+
+
+@needs_ffmpeg
+def test_place_scales_the_words_for_an_explicit_stretch(tmp_path):
+    path, natural = two_words(tmp_path)        # 1.6 s
+    words = (Word("one", 0.1, 0.6), Word("two", 1.0, 1.5))
+    _, _, _, stretched = place(path, tmp_path / "s.wav", 0.8, fit="stretch", words=words)
+    assert stretched[1].start == pytest.approx(0.5, abs=0.01)
+    _, _, _, held = place(path, tmp_path / "c.wav", 0.8, mix="concatenate", words=words)
+    assert held == words

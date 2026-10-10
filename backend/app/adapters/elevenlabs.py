@@ -11,6 +11,7 @@ refused by eleven_v3, and only `text` is billed — the context is free.
 """
 from __future__ import annotations
 
+import base64
 import json
 import math
 import re
@@ -22,12 +23,15 @@ import httpx
 
 from app.adapters.base import VendorError
 from app.budget import VoiceBudget
-from app.domain.models import EditPlan, MediaArtifact, Source, Transcript
+from app.domain.models import Word, EditPlan, MediaArtifact, Source, Transcript
 from app.errors import NonRetryableError
 from app.media import ffmpeg, fit
 from app.store.artifacts import ArtifactStore
 
 ENDPOINT = "https://api.elevenlabs.io/v1/text-to-speech/{voice_id}"
+# P-3: the same call, answered as JSON with the audio in base64 and a time for
+# every character, from which the take's own word times are read.
+TIMESTAMPS_ENDPOINT = ENDPOINT + "/with-timestamps"
 VOICES_ENDPOINT = "https://api.elevenlabs.io/v2/voices"
 # ElevenLabs voice ids: 20 alphanumerics. Anything else (e.g. the UI's legacy
 # "speaker-1") means "the configured default voice".
@@ -140,7 +144,7 @@ def to_request(plan: EditPlan, transcript: Transcript | None, model: str, speed:
 def _post(voice_id: str, body: dict, api_key: str, timeout: float) -> tuple[int, bytes, str]:
     try:
         response = httpx.post(
-            ENDPOINT.format(voice_id=voice_id),
+            TIMESTAMPS_ENDPOINT.format(voice_id=voice_id),
             params={"output_format": OUTPUT_FORMAT},
             headers={"xi-api-key": api_key},
             json=body,
@@ -152,6 +156,45 @@ def _post(voice_id: str, body: dict, api_key: str, timeout: float) -> tuple[int,
         raise VoiceError(f"Could not reach ElevenLabs ({type(exc).__name__}).") from None
     ok = response.status_code == 200
     return response.status_code, response.content if ok else b"", "" if ok else response.text
+
+
+def words_from_alignment(alignment: dict | None) -> tuple[Word, ...]:
+    """The take's words with their times, folded from the vendor's
+    per-character alignment: a word is a maximal run of non-space characters,
+    starting when its first character does and ending with its last."""
+    if not alignment:
+        return ()
+    chars = alignment.get("characters") or []
+    starts = alignment.get("character_start_times_seconds") or []
+    ends = alignment.get("character_end_times_seconds") or []
+    words: list[Word] = []
+    text, start, end = "", None, None
+    for ch, a, b in zip(chars, starts, ends):
+        if ch.isspace():
+            if text:
+                words.append(Word(text, round(start, 4), round(end, 4)))
+            text, start, end = "", None, None
+            continue
+        text += ch
+        start = a if start is None else start
+        end = b
+    if text:
+        words.append(Word(text, round(start, 4), round(end, 4)))
+    return tuple(words)
+
+
+def decode_response(content: bytes) -> tuple[bytes, tuple[Word, ...]]:
+    """The audio and words in a 200 response: the with-timestamps JSON, or raw
+    PCM when the response is the audio itself (a recording, a stand-in)."""
+    if content[:1] == b"{":
+        try:
+            payload = json.loads(content)
+        except ValueError:
+            return content, ()
+        if isinstance(payload, dict) and "audio_base64" in payload:
+            audio = base64.b64decode(payload["audio_base64"])
+            return audio, words_from_alignment(payload.get("alignment") or payload.get("normalized_alignment"))
+    return content, ()
 
 
 def _raise_for(status: int, text: str) -> None:
@@ -197,11 +240,13 @@ class ElevenLabsVoiceAdapter:
         # A paid take that did not fit its selection, kept so that when the
         # user answers how to place it, that same take is used — the question
         # costs nothing, and they hear the line they were asked about.
-        self._held: dict[str, bytes] = {}
+        self._held: dict[str, tuple[bytes, tuple[Word, ...]]] = {}
         self._takes = max(1, takes_per_line)
         self._tolerance = fit_tolerance
         # What was done to the last line to make it fit, in words.
         self.last_notes: list[str] = []
+        # The last take's own word times, at their fitted positions (P-3).
+        self.last_words: tuple[Word, ...] = ()
 
     def cost_of(self, plan: EditPlan) -> int:
         return billed_characters(plan.new_text, self._model)
@@ -221,27 +266,27 @@ class ElevenLabsVoiceAdapter:
         wanted = plan.voice_profile_id
         return wanted if _VOICE_ID.fullmatch(wanted) else self._voice_id
 
-    def _take(self, project_id: str, voice_id: str, body: dict, plan: EditPlan) -> bytes:
+    def _take(self, project_id: str, voice_id: str, body: dict, plan: EditPlan) -> tuple[bytes, tuple[Word, ...]]:
         # Charged per attempt, before the call: a retry is real spend.
         self._budget.charge(project_id, self.cost_of(plan))
-        status, audio, text = self._post(voice_id, body, self._api_key, self._timeout)
+        status, content, text = self._post(voice_id, body, self._api_key, self._timeout)
         if status != 200:
             _raise_for(status, text.replace(self._api_key, "***"))
-        return audio
+        return decode_response(content)
 
     def _choose(self, project_id: str, voice_id: str, body: dict, plan: EditPlan,
-                target: float, notes: list[str]) -> bytes:
+                target: float, notes: list[str]) -> tuple[bytes, tuple[Word, ...]]:
         """Takes by duration (Phase 14): the first take is kept when it is
         within tolerance of the slot; otherwise more takes are voiced and the
         nearest kept, and when even that is too far for a tempo change the
         model's own speed control is tried once."""
         takes = [self._take(project_id, voice_id, body, plan)]
-        ratio = lambda pcm: (len(pcm) / 2 / SAMPLE_RATE) / target   # noqa: E731
+        ratio = lambda take: (len(take[0]) / 2 / SAMPLE_RATE) / target   # noqa: E731
         if abs(ratio(takes[0]) - 1) <= self._tolerance:
             return takes[0]
         for _ in range(self._takes - 1):
             takes.append(self._take(project_id, voice_id, body, plan))
-        best = min(takes, key=lambda pcm: abs(ratio(pcm) - 1))
+        best = min(takes, key=lambda take: abs(ratio(take) - 1))
         if len(takes) > 1:
             notes.append(f"nearest of {len(takes)} takes")
         r = ratio(best)
@@ -264,23 +309,25 @@ class ElevenLabsVoiceAdapter:
         key = f"{source.project_id}|{voice_id}|{json.dumps(body, sort_keys=True)}"
         target = plan.selection.end - plan.selection.start
         notes: list[str] = []
-        audio = self._held.pop(key, None)
-        if audio is None:
+        held = self._held.pop(key, None)
+        if held is None:
             if plan.fit is None and plan.mix != "concatenate":
-                audio = self._choose(source.project_id, voice_id, body, plan, target, notes)
+                held = self._choose(source.project_id, voice_id, body, plan, target, notes)
             else:
-                audio = self._take(source.project_id, voice_id, body, plan)
+                held = self._take(source.project_id, voice_id, body, plan)
+        audio, words = held
 
         with tempfile.TemporaryDirectory() as tmp:
             raw, _ = ffmpeg.pcm_to_wav(audio, Path(tmp) / "raw.wav", SAMPLE_RATE)
             try:
-                placed, duration, fitted = fit.place(
-                    raw, Path(tmp) / "voice.wav", target, plan.fit, plan.mix, self._tolerance,
+                placed, duration, fitted, words = fit.place(
+                    raw, Path(tmp) / "voice.wav", target, plan.fit, plan.mix, self._tolerance, words,
                 )
             except ffmpeg.SpanMismatch:
-                self._held[key] = audio
+                self._held[key] = held
                 raise
             self.last_notes = notes + fitted
+            self.last_words = words
             return self._store.put_file(
                 source.project_id, placed, kind="audio", container="wav", duration=duration,
             )

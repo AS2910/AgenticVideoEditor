@@ -189,6 +189,8 @@ def _candidate_dict(candidate: EditCandidate) -> dict:
         "frames": _artifact_dict(candidate.frames),
         "continuity": _continuity_dict(candidate.continuity),
         "fit_notes": list(candidate.fit_notes),
+        # P-3: the take's own words at their times, relative to the take.
+        "words": [{"text": w.text, "start": w.start, "end": w.end} for w in candidate.words],
     }
 
 
@@ -1225,6 +1227,8 @@ def _plan_dict(plan: Plan | None) -> dict | None:
         "questions_left": max(0, MAX_QUESTIONS - len(plan.answers)) if plan.question else 0,
         "voice": plan.voice,
         "spend_usd": round(ledger.spent_usd_since(plan.project_id, plan.created_at), 4) if plan.created_at else 0.0,
+        # P-1: how many takes the plan voiced — the receipt shows what the ledger knows.
+        "takes_voiced": ledger.calls_since(plan.project_id, VoiceBudget.VENDOR, plan.created_at) if plan.created_at else 0,
         "log": list(plan.log),
         "items": [_item_dict(plan.project_id, i) for i in plan.items],
     }

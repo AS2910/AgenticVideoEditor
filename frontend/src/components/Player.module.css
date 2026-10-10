@@ -26,6 +26,9 @@
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; box-shadow: var(--sh-1);
 }
 .caption ins { color: var(--accent-hi); background: var(--accent-tint); border-radius: 4px; padding: 0 4px; text-decoration: none; box-shadow: inset 0 0 0 1px var(--accent-line-soft); }
+/* A take's words light up as they are said; the ones still to come wait, dimmer. */
+.caption ins[data-said] { color: var(--accent-hi); }
+.caption ins:not([data-said]):has(~ ins[data-said]), .caption ins[data-said] ~ ins:not([data-said]) { color: var(--muted); background: transparent; box-shadow: inset 0 0 0 1px var(--line); }
 
 .transport { display: flex; flex-direction: column; gap: 8px; padding: 0 4px; }
 .controls { display: flex; align-items: center; gap: 12px; }

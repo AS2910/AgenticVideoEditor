@@ -17,12 +17,13 @@ from __future__ import annotations
 
 import re
 import wave
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
+from typing import Sequence
 
 import numpy as np
 
-from app.domain.models import Transcript
+from app.domain.models import Transcript, Word
 from app.media import ffmpeg
 from app.media.ffmpeg import MAX_TEMPO, MIN_TEMPO, SpanMismatch
 
@@ -104,8 +105,36 @@ def _write(path: str | Path, x: np.ndarray, rate: int) -> None:
         w.writeframes((np.clip(x, -1, 1) * 32767).astype("<i2").tobytes())
 
 
-def find_gaps(x: np.ndarray, rate: int) -> list[Gap]:
-    """The quiet runs in a take, lead-in and tail included."""
+def find_gaps(x: np.ndarray, rate: int, words: Sequence[Word] = ()) -> list[Gap]:
+    """The quiet runs in a take, lead-in and tail included.
+
+    With the take's own word times (P-3), a gap is only ever *between* two
+    words or at the edges: a quiet stretch inside a word — a breathy
+    consonant, a held stop — is speech and is never trimmed."""
+    gaps = _quiet_runs(x, rate)
+    if not words:
+        return gaps
+    n = len(x)
+    bounds = sorted((int(w.start * rate), int(w.end * rate)) for w in words)
+    between = []
+    cursor = 0
+    for a, b in bounds:
+        if a > cursor:
+            between.append((cursor, a))
+        cursor = max(cursor, b)
+    if cursor < n:
+        between.append((cursor, n))
+    min_gap = int(rate * MIN_GAP_MS / 1000)
+    clipped: list[Gap] = []
+    for g in gaps:
+        for a, b in between:
+            lo, hi = max(g.start, a), min(g.end, b)
+            if hi - lo >= min_gap:
+                clipped.append(Gap(lo, hi))
+    return clipped
+
+
+def _quiet_runs(x: np.ndarray, rate: int) -> list[Gap]:
     frame = max(1, int(rate * FRAME_MS / 1000))
     count = len(x) // frame
     if count == 0:
@@ -127,12 +156,24 @@ def find_gaps(x: np.ndarray, rate: int) -> list[Gap]:
     return gaps
 
 
-def _resize_gaps(x: np.ndarray, rate: int, gaps: list[Gap], delta: int) -> tuple[np.ndarray, int]:
+@dataclass(frozen=True)
+class GapEdit:
+    """A stretch of the original take, in samples, that became `new_len`
+    samples long: a cut (new_len 0) or a point (start == end) that grew."""
+    start: int
+    end: int
+    new_len: int
+
+
+def _resize_gaps(
+    x: np.ndarray, rate: int, gaps: list[Gap], delta: int,
+) -> tuple[np.ndarray, int, list[GapEdit]]:
     """Take `delta` samples out of the gaps (delta < 0) or add them in
     (delta > 0), spread in proportion to each gap's size, within limits.
-    Returns the new audio and how much was actually moved."""
+    Returns the new audio, how much was actually moved, and the edits made
+    (in original sample positions) so times can be remapped."""
     if not gaps or delta == 0:
-        return x, 0
+        return x, 0, []
     n = len(x)
     keep_gap = int(rate * KEEP_GAP_MS / 1000)
     keep_edge = int(rate * KEEP_EDGE_MS / 1000)
@@ -146,36 +187,66 @@ def _resize_gaps(x: np.ndarray, rate: int, gaps: list[Gap], delta: int) -> tuple
             room.append(int(size * MAX_GROW))
     total = sum(room)
     if total == 0:
-        return x, 0
+        return x, 0, []
     move = min(abs(delta), total)
     pieces = []
+    edits: list[GapEdit] = []
     cursor = 0
     moved = 0
     for g, r in zip(gaps, room):
         share = int(round(move * r / total))
         pieces.append(x[cursor:g.start])
         gap = x[g.start:g.end]
+        mid = len(gap) // 2
         if delta < 0:
             cut = min(share, r)
             # Take from the middle of the gap, so the edges stay as they were.
-            mid = len(gap) // 2
             gap = np.concatenate([gap[: mid - cut // 2], gap[mid + (cut - cut // 2):]])
+            if cut:
+                edits.append(GapEdit(g.start + mid - cut // 2, g.start + mid + (cut - cut // 2), 0))
             moved += cut
         else:
             grow = min(share, r)
-            mid = len(gap) // 2
             fill = np.zeros(grow, dtype=np.float32)
             gap = np.concatenate([gap[:mid], fill, gap[mid:]])
+            if grow:
+                edits.append(GapEdit(g.start + mid, g.start + mid, grow))
             moved += grow
         pieces.append(gap)
         cursor = g.end
     pieces.append(x[cursor:])
-    return np.concatenate(pieces), moved if delta > 0 else -moved
+    return np.concatenate(pieces), (moved if delta > 0 else -moved), edits
+
+
+def remap_times(times: Sequence[float], edits: Sequence[GapEdit], rate: int, tempo: float = 1.0) -> list[float]:
+    """Where moments of the original take (seconds) land after the gap edits
+    and a tempo change. A moment after a cut moves earlier by the cut; one
+    inside a cut collapses onto it; one after a grown gap moves later. The
+    tempo change then scales everything: at `tempo` the audio is 1/tempo as
+    long, so every time is divided by it."""
+    out = []
+    for t in times:
+        pos = t * rate
+        shift = 0.0
+        for e in sorted(edits, key=lambda e: e.start):
+            if pos >= e.end:
+                shift += e.new_len - (e.end - e.start)
+            elif pos > e.start:        # inside a cut: it is now the cut point
+                shift += e.start - pos
+        out.append(round((pos + shift) / rate / tempo, 4))
+    return out
+
+
+def remap_words(words: Sequence[Word], edits: Sequence[GapEdit], rate: int, tempo: float = 1.0) -> tuple[Word, ...]:
+    starts = remap_times([w.start for w in words], edits, rate, tempo)
+    ends = remap_times([w.end for w in words], edits, rate, tempo)
+    return tuple(replace(w, start=a, end=max(a, b)) for w, a, b in zip(words, starts, ends))
 
 
 def fit_elastically(
     source: str | Path, dest: str | Path, target: float, tolerance: float = DEFAULT_TOLERANCE,
-) -> tuple[Path, float, list[str]]:
+    words: Sequence[Word] = (),
+) -> tuple[Path, float, list[str], tuple[Word, ...]]:
     """Fit a take to `target` seconds: pauses first, speech last.
 
     Within `tolerance` of the target nothing but the final exact trim happens.
@@ -183,15 +254,19 @@ def fit_elastically(
     only the remainder is a tempo change, inside the usual MIN/MAX_TEMPO.
     Raises SpanMismatch, with the pause-adjusted length, when even that is
     not enough — the same question as before, asked less often.
+
+    `words` are the take's own word times (P-3); they keep the pauses honest
+    and come back remapped to the fitted audio as the fourth value.
     """
     x, rate = _read(source)
     natural = len(x) / rate
     notes: list[str] = []
+    edits: list[GapEdit] = []
     dest = Path(dest)
     if abs(natural / target - 1) > tolerance:
-        gaps = find_gaps(x, rate)
+        gaps = find_gaps(x, rate, words)
         wanted = int(round((target - natural) * rate))
-        x, moved = _resize_gaps(x, rate, gaps, wanted)
+        x, moved, edits = _resize_gaps(x, rate, gaps, wanted)
         if moved < 0:
             notes.append(f"trimmed {-moved * 1000 // rate} ms of pauses")
         elif moved > 0:
@@ -208,15 +283,20 @@ def fit_elastically(
         with_gaps.unlink(missing_ok=True)
     if abs(tempo - 1) > tolerance:
         notes.append(f"speech at {max(tempo, MIN_TEMPO):.2f}× speed")
-    return path, duration, notes
+    return path, duration, notes, remap_words(words, edits, rate, max(tempo, MIN_TEMPO))
 
 
 def place(
     source: str | Path, dest: str | Path, target: float,
     fit: str | None = None, mix: str = "replace", tolerance: float = DEFAULT_TOLERANCE,
-) -> tuple[Path, float, list[str]]:
-    """`ffmpeg.place`, with the automatic case fitted elastically."""
+    words: Sequence[Word] = (),
+) -> tuple[Path, float, list[str], tuple[Word, ...]]:
+    """`ffmpeg.place`, with the automatic case fitted elastically. The words
+    come back at their new times (a tempo change scales them; a line placed
+    at natural speed or held keeps them; "stretch" scales by the ratio)."""
     if fit is None and mix != "concatenate":
-        return fit_elastically(source, dest, target, tolerance)
+        return fit_elastically(source, dest, target, tolerance, words)
+    natural = ffmpeg.duration_of(source)
     path, duration = ffmpeg.place(source, dest, target, fit, mix)
-    return path, duration, []
+    scale = natural / target if fit == "stretch" and mix != "concatenate" and natural > 0 else 1.0
+    return path, duration, [], remap_words(words, [], 1, scale)

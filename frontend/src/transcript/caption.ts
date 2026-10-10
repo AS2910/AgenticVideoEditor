@@ -34,3 +34,10 @@ export function captionAt(
   if (!s.text) return [{ kind: 'ins', text: shown.text }]
   return trackedChanges(s, shown, words).filter((r) => r.kind !== 'del')
 }
+
+/** A take playing in place, captioned from its own word times (the polish
+ *  pass): every word of the take, each marked `said` once the take has
+ *  reached it. `elapsed` is how far into the take the clock is. */
+export function takeCaption(words: Word[], elapsed: number): { text: string; said: boolean }[] {
+  return words.map((w) => ({ text: w.text, said: elapsed >= w.start }))
+}

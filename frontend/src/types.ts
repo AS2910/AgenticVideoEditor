@@ -70,6 +70,8 @@ export interface Plan {
   voice?: string | null
   /** What this plan has cost so far, estimated. */
   spend_usd: number
+  /** Voice calls made for this plan so far (the polish pass): the receipt's "takes voiced". */
+  takes_voiced?: number
   log: PlanLogEntry[]
   items: PlanItem[]
   /** Under "draft": the job already voicing the plan. */
@@ -139,6 +141,8 @@ export interface Candidate {
   continuity: ContinuityReport
   /** What was done to make the take fit its slot, in words (Phase 14). */
   fit_notes?: string[]
+  /** The take's words with their times, relative to the take's start (Phase 14's word timestamps). */
+  words?: Word[]
 }
 
 /** Recorded when the uploader confirms rights; null until they do. */
