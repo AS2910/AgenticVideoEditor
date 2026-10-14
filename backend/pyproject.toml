@@ -18,6 +18,8 @@ dev = ["pytest>=8.0"]
 # stems (the voice is laid over the original mix) and no measured identity.
 room = ["demucs>=4.0.1", "torch>=2.2", "torchaudio>=2.2"]           # stem separation (15c)
 measure = ["torch>=2.2", "torchaudio>=2.2", "transformers>=4.40"]    # SIM-o and UTMOS (15d)
+# Phase 17: faces (where there is a mouth to move) and measured lip-sync (LSE-C/D).
+mouth = ["opencv-python-headless>=4.9", "torch>=2.2", "torchaudio>=2.2"]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]

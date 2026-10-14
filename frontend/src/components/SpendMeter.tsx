@@ -5,7 +5,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { cn } from '@/lib/utils'
 
 const VENDORS: Record<string, string> = {
-  openai: 'Transcription', elevenlabs: 'Voice', anthropic: 'Reading requests',
+  openai: 'Transcription', elevenlabs: 'Voice', anthropic: 'Reading requests', sync: 'Mouth',
 }
 
 /** The project's spend against its cap, as a small meter (UX-3). The meter is

@@ -57,6 +57,9 @@ DEFAULT_ELEVENLABS_USD_PER_1K = 0.30
 # clip's clone is rougher, which the measured match then says).
 DEFAULT_CLONE_MIN_SECONDS = 10.0
 DEFAULT_VOICE_ROUTE = "auto"    # Phase 15b: "tts" | "changer" | "auto"
+# Phase 17: sync.so's model for moving the mouth. lipsync-2 is $0.06 a second and
+# moves the mouth subtly; sync-3 is $0.16 and moves it widely (the spike, 2026-10-14).
+DEFAULT_LIPSYNC_MODEL = "lipsync-2"
 
 _TRUTHY = {"1", "true", "yes", "on"}
 
@@ -92,6 +95,10 @@ class Settings:
     # clone — plain text-to-speech, the Voice Changer, or the first with the
     # second as the rung after a weak identity match.
     clone: bool = True
+    # Phase 17: sync.so moves the mouth at export where a face is on screen.
+    sync_api_key: str | None = None
+    lipsync: bool = True
+    lipsync_model: str = DEFAULT_LIPSYNC_MODEL
     # Phase 15c: keep the original's music and room under an edited line, by
     # separating the voice from the bed (needs the optional `room` extra).
     stems: bool = True
@@ -119,6 +126,10 @@ class Settings:
     @property
     def has_openai(self) -> bool:
         return bool(self.openai_api_key)
+
+    @property
+    def has_sync(self) -> bool:
+        return bool(self.sync_api_key)
 
     @property
     def has_elevenlabs(self) -> bool:
@@ -172,6 +183,9 @@ def load_settings() -> Settings:
         max_living=max(1.0, _amount("AVE_MAX_LIVING", DEFAULT_MAX_LIVING)),
         interpolator=(os.environ.get("AVE_INTERPOLATOR") or DEFAULT_INTERPOLATOR).strip().lower(),
         stems=os.environ.get("AVE_STEMS", "1").strip().lower() not in {"0", "false", "no", "off"},
+        sync_api_key=os.environ.get("SYNC_API_KEY") or None,
+        lipsync=os.environ.get("AVE_LIPSYNC", "1").strip().lower() not in {"0", "false", "no", "off"},
+        lipsync_model=_lipsync_model(),
         clone=os.environ.get("AVE_CLONE", "1").strip().lower() not in {"0", "false", "no", "off"},
         clone_min_seconds=_amount("AVE_CLONE_MIN_SECONDS", DEFAULT_CLONE_MIN_SECONDS),
         voice_route=_voice_route(),
@@ -185,6 +199,13 @@ def load_settings() -> Settings:
         chaos_force=os.environ.get("AVE_CHAOS_FORCE", "").strip().lower() in _TRUTHY,
         user_budget_usd=_amount("AVE_USER_BUDGET_USD", DEFAULT_USER_BUDGET_USD),
     )
+
+
+def _lipsync_model() -> str:
+    model = (os.environ.get("AVE_LIPSYNC_MODEL") or DEFAULT_LIPSYNC_MODEL).strip().lower()
+    if model not in ("lipsync-2", "lipsync-2-pro", "sync-3"):
+        raise ValueError(f"AVE_LIPSYNC_MODEL must be 'lipsync-2', 'lipsync-2-pro' or 'sync-3', got {model!r}")
+    return model
 
 
 def _voice_route() -> str:

@@ -22,6 +22,8 @@ os.environ["OPENAI_API_KEY"] = ""
 # adapter-selection logic rather than whatever the developer's shell set.
 os.environ["ELEVENLABS_API_KEY"] = ""
 os.environ["ANTHROPIC_API_KEY"] = ""
+# And the lip-sync vendor (Phase 17): no test may ever spend on a real mouth.
+os.environ["SYNC_API_KEY"] = ""
 os.environ["AVE_DRY_RUN"] = ""
 # The measure extra (WavLM, UTMOS) stays off: no model downloads in the suite;
 # its tests inject fakes. tests/continuity/test_similarity_live.py opts in.

@@ -136,3 +136,46 @@ def test_stems_can_be_switched_off(client, sample_video, monkeypatch):
     monkeypatch.setattr(main, "settings", replace(main.settings, stems=False))
     assert main._stems(type("R", (), {"source": None})(), type("M", (), {"segments": ()})()) is None
     assert client.get("/health").json()["room"] == "off"
+
+
+# ── the mouth (Phase 17): moved at export, only where there is a face, and metered ──
+
+class FakeMouth:
+    def __init__(self):
+        self.sent = []
+
+    def estimate(self, model, seconds):
+        return round(0.06 * seconds, 4)
+
+    def move_mouth(self, clip, audio, dest, *, model, options=None):
+        from tests.render.test_mouth import solid
+        self.sent.append((model, ffmpeg.duration_of(clip)))
+        solid(dest, "red", ffmpeg.duration_of(clip))
+        return dest, {"status": "COMPLETED"}
+
+
+def test_an_export_moves_the_mouth_where_there_is_a_face_and_meters_it(client, sample_video, monkeypatch):
+    from app.media import faces
+    fake = FakeMouth()
+    monkeypatch.setattr(main, "mouth_client", fake)
+    monkeypatch.setattr(faces, "stretches", lambda video, a, b, cuts=(), **k: [faces.Stretch(a, min(b, a + 0.5), 1)])
+    assert upload(client, sample_video).status_code == 200
+    candidate = await_job(client, start_preview(client)["job_id"])["result"]
+    assert client.post("/projects/p1/edits", json={"candidate_id": candidate["candidate_id"]}).status_code == 200
+
+    out = client.post("/projects/p1/export").json()
+    assert out["mouth"]["model"] == "lipsync-2" and len(out["mouth"]["moved"]) == 1
+    assert out["mouth"]["seconds"] == pytest.approx(0.5, abs=0.05) and out["mouth"]["usd"] > 0
+    assert len(fake.sent) == 1
+    lines = {(l.vendor, l.what) for l in main.ledger.lines("p1")}
+    assert ("sync", "mouth (lipsync-2)") in lines                       # on the project's meter
+
+    again = client.post("/projects/p1/export").json()                    # the same take: nothing more to pay
+    assert len(fake.sent) == 1 and again["mouth"]["usd"] == 0 and again["mouth"]["moved"][0]["cached"]
+
+
+def test_without_a_lip_sync_key_the_export_is_exactly_as_before(client, sample_video):
+    assert main.mouth_client is None
+    assert upload(client, sample_video).status_code == 200
+    assert client.post("/projects/p1/export").json()["mouth"] is None
+    assert client.get("/health").json()["lipsync"] == "mock"

@@ -93,3 +93,30 @@ describe('ExportBar inserts', () => {
     expect(screen.getByTestId('inserts')).toHaveTextContent('1 line flexed the picture by up to 8%.')
   })
 })
+
+describe('ExportBar — the mouth (Phase 17)', () => {
+  const report = (over = {}) => ({
+    model: 'lipsync-2', seconds: 1.26, usd: 0.08, notes: [],
+    moved: [{ edit_id: 'e1', start: 36.9, end: 38.16, usd: 0.08, cached: false }], ...over,
+  })
+
+  it('says where the mouth was moved and what it cost', () => {
+    render(<ExportBar segments={SEGMENTS} onExport={() => {}} mouth={report()} />)
+    expect(screen.getByTestId('mouth')).toHaveTextContent('Mouth moved for 1.3 s · $0.08.')
+  })
+
+  it('says a repeat export cost nothing', () => {
+    render(<ExportBar segments={SEGMENTS} onExport={() => {}} mouth={report({ usd: 0, moved: [{ edit_id: 'e1', start: 1, end: 2, usd: 0, cached: true }] })} />)
+    expect(screen.getByTestId('mouth')).toHaveTextContent('from before, no charge')
+  })
+
+  it('says what was left as it was, and why', () => {
+    render(<ExportBar segments={SEGMENTS} onExport={() => {}} mouth={report({ moved: [], seconds: 0, usd: 0, notes: ['No mouth at 36.9 s: it would pass the project\'s spending limit.'] })} />)
+    expect(screen.getByTestId('mouth')).toHaveTextContent('spending limit')
+  })
+
+  it('shows nothing when no mouth was involved', () => {
+    render(<ExportBar segments={SEGMENTS} onExport={() => {}} mouth={null} />)
+    expect(screen.queryByTestId('mouth')).not.toBeInTheDocument()
+  })
+})

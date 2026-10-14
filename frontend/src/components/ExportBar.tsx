@@ -1,4 +1,4 @@
-import type { Insert, Piece, Segment } from '../types'
+import type { Insert, MouthReport, Piece, Segment } from '../types'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 
@@ -11,6 +11,8 @@ interface ExportBarProps {
   inserts?: Insert[]
   /** Phase 16: the render as pieces — how the picture made room, and what flexed. */
   pieces?: Piece[]
+  /** Phase 17: where the mouth was moved to match the new words, and what was left alone. */
+  mouth?: MouthReport | null
   /** A render is running: one button, disabled, saying so (UX-6). */
   busy?: boolean
 }
@@ -20,7 +22,7 @@ const secs = (t: number) => `${Math.floor(t / 60)}:${(t % 60).toFixed(1).padStar
 /** The header's export: one button that says where things stand — Export,
  *  Exporting…, then Download with Export again beside it — and a strip of
  *  where the edits fall, described in words for a screen reader. */
-export function ExportBar({ segments, onExport, download, inserts = [], pieces = [], busy }: ExportBarProps) {
+export function ExportBar({ segments, onExport, download, inserts = [], pieces = [], mouth, busy }: ExportBarProps) {
   const length = (p: Piece) => p.out_end - p.out_start
   const room = pieces.filter((p) => p.kind === 'living' || p.kind === 'hold').reduce((t, p) => t + length(p), 0)
   const held = pieces.filter((p) => p.kind === 'hold').reduce((t, p) => t + length(p), 0)
@@ -55,6 +57,14 @@ export function ExportBar({ segments, onExport, download, inserts = [], pieces =
           {flexed.length > 0 && (
             <>{inserts.length > 0 ? ' ' : ''}{flexed.length} {flexed.length === 1 ? 'line' : 'lines'} flexed the picture by up to {flexPct}%.</>
           )}
+        </div>
+      )}
+      {mouth && (mouth.moved.length > 0 || mouth.notes.length > 0) && (
+        <div className="max-w-[240px] text-xs leading-snug text-muted-foreground max-[960px]:max-w-none" data-testid="mouth">
+          {mouth.moved.length > 0 && (
+            <>Mouth moved for {mouth.seconds.toFixed(1)} s{mouth.usd > 0 ? ` · $${mouth.usd.toFixed(2)}` : ' · from before, no charge'}.</>
+          )}
+          {mouth.notes.map((n, i) => <span key={i}>{mouth.moved.length > 0 || i > 0 ? ' ' : ''}{n}</span>)}
         </div>
       )}
       {busy ? (

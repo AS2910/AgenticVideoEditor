@@ -46,7 +46,7 @@ import type { Me } from './api'
 import type {
   Word, Selection, Candidate, Segment, Project, ChatMessage, Question, QuestionOption,
   Fit, Mix, Insert, ProjectSummary, Usage, Statement, Voice, Revision, LongLines,
-  Plan, PlanItem, Autonomy, Reading, Piece,
+  Plan, PlanItem, Autonomy, Reading, Piece, MouthReport,
 } from './types'
 import { piecesFromInserts, renderTimeFrom, sourceTimeFrom } from './timeline/selection'
 
@@ -107,6 +107,8 @@ export default function App() {
   const [inserts, setInserts] = useState<Insert[]>([])
   // Phase 16: the render as pieces — copies, flexed lines, living holds, held frames — for the clocks.
   const [pieces, setPieces] = useState<Piece[]>([])
+  // Phase 17: where the last export moved the mouth.
+  const [mouth, setMouth] = useState<MouthReport | null>(null)
   const [download, setDownload] = useState<{ url: string; filename: string } | null>(null)
   const [exporting, setExporting] = useState(false)
   // UX-6: how much of the upload has gone, 0..1; null when not uploading.
@@ -229,6 +231,7 @@ export default function App() {
     setSegments([])
     setInserts([])
     setPieces([])
+    setMouth(null)
     setDownload(null)
     setRendered(null)
     setView('original')
@@ -873,6 +876,7 @@ export default function App() {
         setSegments(result.export.segments)
         setInserts(result.export.inserts ?? [])
         setPieces(result.export.pieces ?? piecesFromInserts(result.export.inserts ?? [], project?.duration ?? 0))
+        setMouth(result.export.mouth ?? null)
         const stem = (project?.filename ?? 'video').replace(/\.[^.]+$/, '')
         const url = artifactUrl(projectId, result.export.render.sha256)
         const download = { url, filename: `${stem}-edited.mp4` }
@@ -1053,6 +1057,7 @@ export default function App() {
       setSegments([])
       setInserts([])
     setPieces([])
+      setMouth(null)
       setView('original')
     }
   }
@@ -1069,6 +1074,7 @@ export default function App() {
       setSegments(manifest.segments)
       setInserts(manifest.inserts ?? [])
       setPieces(manifest.pieces ?? piecesFromInserts(manifest.inserts ?? [], project?.duration ?? 0))
+      setMouth(manifest.mouth ?? null)
       const stem = (filename ?? 'video').replace(/\.[^.]+$/, '')
       const url = artifactUrl(id, manifest.render.sha256)
       setDownload({ url, filename: `${stem}-edited.mp4` })
@@ -1285,7 +1291,7 @@ export default function App() {
               : `Ship ${keptItems.length} of ${readyItems.length}`}
           </Button>
         )}
-        <ExportBar segments={segments} inserts={inserts} pieces={pieces} onExport={() => void runExport()} download={download} busy={exporting} />
+        <ExportBar segments={segments} inserts={inserts} pieces={pieces} mouth={mouth} onExport={() => void runExport()} download={download} busy={exporting} />
       </header>
 
       <main id="main" className="flex min-h-0 flex-col gap-4 overflow-y-auto px-6 pt-4 pb-8 max-[960px]:overflow-visible max-[960px]:px-4 max-[960px]:pb-6 [&>*]:shrink-0" aria-busy={planBusy || undefined}>

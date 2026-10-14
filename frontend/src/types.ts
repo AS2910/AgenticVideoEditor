@@ -271,8 +271,18 @@ export interface Insert { at: number; duration: number; artifact: MediaArtifact;
  *  take fits at natural speech; "copy" is untouched. Pieces tile the render. */
 export interface Piece { start: number; end: number; out_start: number; out_end: number; kind: 'copy' | 'flex' | 'living' | 'hold'; factor: number | null }
 
+/** Phase 17: where the export moved the mouth to match the new words, what it
+ *  cost, and what was left as it was (and why). */
+export interface MouthReport {
+  model: string
+  seconds: number
+  usd: number
+  moved: { edit_id: string; start: number; end: number; usd: number; cached: boolean }[]
+  notes: string[]
+}
+
 /** `render` is the finished MP4, stored like any other artifact. */
-export interface ExportManifest { segments: Segment[]; render: MediaArtifact; inserts?: Insert[]; pieces?: Piece[] }
+export interface ExportManifest { segments: Segment[]; render: MediaArtifact; inserts?: Insert[]; pieces?: Piece[]; mouth?: MouthReport | null }
 
 export interface ChatMessage { role: 'user' | 'assistant'; text: string }
 

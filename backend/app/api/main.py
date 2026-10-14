@@ -24,12 +24,13 @@ from app.media.fit import speaking_rate, syllable_budget, syllables
 from app.config import load_settings
 from app.media import frames as frames_mod, motion, shots
 from app.media import stems as stems_module
+from app.render import mouth as mouth_module
 from app.media import ffmpeg, ingest
 from app.adapters.base import VendorError
 from app.adapters.mock import MockLipSyncAdapter
 from app.adapters.openai_whisper import TranscriptionError
 from app.adapters.selection import (
-    select_continuity, select_interpreter, select_planner, select_transcriber, select_voice,
+    select_continuity, select_interpreter, select_mouth, select_planner, select_transcriber, select_voice,
 )
 from app.errors import NonRetryableError
 from app import chaos as chaos_module
@@ -75,6 +76,8 @@ chaos = chaos_module.from_settings(settings.chaos, settings.auth_mode, settings.
 transcriber, transcriber_label = select_transcriber(settings, chaos)
 voice, voice_label = select_voice(settings, artifacts, budget, chaos)
 lipsync = MockLipSyncAdapter(artifacts)
+# Phase 17: the real mouth is made at export (not per preview), where a face is on screen.
+mouth_client, mouth_label = select_mouth(settings)
 continuity, continuity_label = select_continuity(voice.identity, artifacts)
 # Phase 15a: each speaker's own voice, made once and reused (never under dry-run).
 clones = CloneService(repo, artifacts, voice, enabled=settings.clone and not settings.dry_run,
@@ -101,7 +104,7 @@ def health() -> dict:
         "cloning": "on" if clones.available else "off",
         # Phase 15c: music and room kept under an edited line (needs the `room` extra).
         "room": "on" if settings.stems and stems_module.available() else "off",
-        "lipsync": "mock",
+        "lipsync": mouth_label,
         "continuity": continuity_label,
         "intent": interpreter_label,
         "planner": planner_label,
@@ -1183,6 +1186,45 @@ def _stems(record: ProjectRecord, manifest):
         return stems_module.separate(wav, artifacts.root / record.source.project_id / "stems")
 
 
+def _mouth(record: ProjectRecord, manifest, patched: Path) -> mouth_module.MouthResult | None:
+    """Phase 17: where an approved replacement has a face on screen, the mouth
+    is moved to match the new words. None when lip-sync is off or nothing was
+    edited; never raises into the export (a vendor failure leaves the picture
+    as it was and says so in the result)."""
+    if mouth_client is None or not any(
+        s.kind == "edited" and s.edit is not None and s.edit.plan.mix == "replace" for s in manifest.segments
+    ):
+        return None
+    project_id = record.source.project_id
+
+    def afford(usd: float) -> bool:
+        try:
+            _ensure_spend(project_id)
+        except SpendCeilingReached:
+            return False
+        return ledger.spent_usd(project_id) + usd <= ledger.ceiling_usd
+
+    renderer = mouth_module.MouthRenderer(
+        mouth_client, artifacts.root / project_id / "mouth", model=settings.lipsync_model, afford=afford,
+        record=lambda usd, seconds, model: ledger.record(project_id, "sync", f"mouth ({model})", seconds, "seconds", usd),
+    )
+    cuts = shots.cuts(record.source.media.path, mouth_module.CUT_THRESHOLD)
+    return renderer.patch(record.source, renderer.apply(record.source, manifest.segments, cuts), patched)
+
+
+def _mouth_dict(result: mouth_module.MouthResult | None) -> dict | None:
+    if result is None:
+        return None
+    return {
+        "model": settings.lipsync_model,
+        "seconds": round(result.seconds, 2),
+        "usd": round(result.usd, 4),
+        "moved": [{"edit_id": m.edit_id, "start": m.start, "end": m.end, "usd": round(m.usd, 4), "cached": m.cached}
+                  for m in result.moved],
+        "notes": list(result.notes),
+    }
+
+
 def _export(record: ProjectRecord) -> dict:
     project_id = record.source.project_id
     manifest = render(record.source, repo.list_edits(project_id))
@@ -1191,8 +1233,13 @@ def _export(record: ProjectRecord) -> dict:
     # the audio re-encoded, so even a 3-minute source renders in seconds; a
     # flexed or living piece re-encodes the picture.
     with tempfile.TemporaryDirectory() as tmp:
+        moved = _mouth(record, manifest, Path(tmp) / "mouth.mp4")
+        picture = record.source
+        if moved is not None and moved.video is not None:
+            # The source's own picture with the new mouths laid in, soundtrack untouched.
+            picture = replace(record.source, media=replace(record.source.media, path=str(moved.video)))
         path = compose(
-            record.source, manifest.segments, Path(tmp) / "export.mp4",
+            picture, manifest.segments, Path(tmp) / "export.mp4",
             inserts=manifest.inserts, pieces=pieces, interpolator=settings.interpolator,
             stems=_stems(record, manifest),
         )
@@ -1203,6 +1250,8 @@ def _export(record: ProjectRecord) -> dict:
     held_at = {p.start: p.out for p in pieces if p.kind == "hold"}
     return {
         "render": _artifact_dict(rendered),
+        # Phase 17: where the mouth was moved, what it cost, and what was left alone and why.
+        "mouth": _mouth_dict(moved),
         # Phase 16: every stretch of the output and where it came from.
         "pieces": retime.manifest(pieces),
         "segments": [

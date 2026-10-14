@@ -48,6 +48,15 @@ def select_voice(settings: Settings, store: ArtifactStore, budget: VoiceBudget, 
     return MockVoiceAdapter(store), "mock"
 
 
+def select_mouth(settings: Settings):
+    """The lip-sync client when there is a key and it is switched on, else None:
+    the export then leaves the picture exactly as it is. Dry-run forces None."""
+    if settings.dry_run or not settings.has_sync or not settings.lipsync:
+        return None, "mock"
+    from app.adapters.sync_so import SyncSoClient
+    return SyncSoClient(settings.sync_api_key), f"sync.so:{settings.lipsync_model} (at export)"
+
+
 def select_continuity(voice_identity: str, store: ArtifactStore):
     """Measure continuity whenever the voice is real.
 
