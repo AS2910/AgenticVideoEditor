@@ -14,6 +14,10 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0"]
+# Phase 15: local models, optional. Without them the app runs as before: no
+# stems (the voice is laid over the original mix) and no measured identity.
+room = ["demucs>=4.0.1", "torch>=2.2", "torchaudio>=2.2"]           # stem separation (15c)
+measure = ["torch>=2.2", "torchaudio>=2.2", "transformers>=4.40"]    # SIM-o and UTMOS (15d)
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
