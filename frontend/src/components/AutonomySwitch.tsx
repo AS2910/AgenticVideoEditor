@@ -1,5 +1,6 @@
 import type { Autonomy } from '../types'
-import styles from './AutonomySwitch.module.css'
+import { Button } from '@/components/ui/button'
+import { cn } from '@/lib/utils'
 
 const MODES: { value: Autonomy; label: string }[] = [
   { value: 'ask', label: 'Check with me' },
@@ -10,16 +11,21 @@ const MODES: { value: Autonomy; label: string }[] = [
  *  plan waits for you to say go. */
 export function AutonomySwitch({ value, onChange }: { value: Autonomy; onChange: (v: Autonomy) => void }) {
   return (
-    <div className={styles.switch} role="group" aria-label="How much Voltage does on its own">
+    <div className="flex gap-0.5 rounded-lg bg-muted p-0.5" role="group" aria-label="How much Voltage does on its own">
       {MODES.map((m) => (
-        <button
+        <Button
           key={m.value}
-          className={value === m.value ? styles.on : styles.off}
+          variant="ghost"
+          size="sm"
+          className={cn(
+            'text-muted-foreground',
+            value === m.value && 'bg-background text-foreground shadow-xs hover:bg-background dark:bg-card dark:hover:bg-card',
+          )}
           aria-pressed={value === m.value}
           onClick={() => onChange(m.value)}
         >
           {m.label}
-        </button>
+        </Button>
       ))}
     </div>
   )

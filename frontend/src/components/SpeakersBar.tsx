@@ -2,7 +2,7 @@ import { useState } from 'react'
 import type { Speaker, Voice } from '../types'
 import { speakerSlot } from '../transcript/speakers'
 import { Avatar } from './Avatar'
-import styles from './SpeakersBar.module.css'
+import { Button } from '@/components/ui/button'
 
 interface SpeakersBarProps {
   speakers: Speaker[]
@@ -27,18 +27,18 @@ export function SpeakersBar({
   if (speakers.length === 0) {
     if (!hasSpeech) return null
     return (
-      <div className={styles.bar}>
-        <span className={styles.caption}>Who speaks each line isn't known yet.</span>
-        <button className={styles.detect} onClick={onDetect} disabled={detecting}>
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 px-3 text-sm">
+        <span className="text-muted-foreground">Who speaks each line isn't known yet.</span>
+        <Button variant="outline" size="sm" onClick={onDetect} disabled={detecting}>
           {detecting ? 'Detecting…' : 'Detect speakers'}
-        </button>
+        </Button>
       </div>
     )
   }
 
   return (
-    <div className={styles.bar} role="group" aria-label="Speakers">
-      <span className={styles.heading}>Cast</span>
+    <div className="flex flex-wrap items-center gap-x-4 gap-y-2 px-3 text-sm" role="group" aria-label="Speakers">
+      <span className="font-semibold">Cast</span>
       {speakers.map((s) => {
         const draft = drafts[s.label] ?? s.name
         const commit = () => {
@@ -47,10 +47,10 @@ export function SpeakersBar({
           setDrafts(({ [s.label]: _, ...rest }) => rest)
         }
         return (
-          <div key={s.label} className={styles.speaker}>
+          <div key={s.label} className="flex items-center gap-2 rounded-full border bg-card py-0.5 pr-1.5 pl-1">
             <Avatar name={s.name} slot={speakerSlot(speakers, s.label)} size={20} />
             <input
-              className={styles.name}
+              className="h-7 min-w-[11ch] rounded-md border border-transparent bg-transparent px-1.5 text-sm font-medium outline-none [field-sizing:content] hover:border-input focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 pointer-coarse:h-11"
               value={draft}
               aria-label={`Name for speaker ${s.label}`}
               onChange={(e) => setDrafts((d) => ({ ...d, [s.label]: e.target.value }))}
@@ -58,7 +58,7 @@ export function SpeakersBar({
               onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur() }}
             />
             <select
-              className={styles.voice}
+              className="h-7 max-w-40 rounded-md border border-input bg-transparent px-1.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 pointer-coarse:h-11 dark:bg-input/30 dark:[&>option]:bg-popover"
               aria-label={`Voice for ${s.name}`}
               value={s.voice_id ?? CHAT_VOICE}
               onChange={(e) => onVoice(s.label, e.target.value === CHAT_VOICE ? null : e.target.value)}

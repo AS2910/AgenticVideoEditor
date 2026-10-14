@@ -1,5 +1,4 @@
 import type { Voice } from '../types'
-import styles from './VoicePicker.module.css'
 
 interface VoicePickerProps {
   voices: Voice[]
@@ -18,10 +17,10 @@ export function VoicePicker({ voices, value, onChange }: VoicePickerProps) {
   if (voices.length === 0) return null
   const current = voices.find((v) => v.voice_id === value)
   return (
-    <label className={styles.picker}>
-      <span className={styles.caption}>Default voice</span>
+    <label className="flex flex-wrap items-center gap-2 text-sm">
+      <span className="text-muted-foreground">Default voice</span>
       <select
-        className={styles.select}
+        className="h-8 max-w-52 rounded-md border border-input bg-transparent px-2 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 pointer-coarse:h-11 dark:bg-input/30 dark:[&>option]:bg-popover"
         value={value}
         onChange={(e) => onChange(e.target.value)}
         aria-describedby={current?.description ? 'voice-about' : undefined}
@@ -30,7 +29,7 @@ export function VoicePicker({ voices, value, onChange }: VoicePickerProps) {
           <option key={v.voice_id} value={v.voice_id}>{label(v)}</option>
         ))}
       </select>
-      {current?.description && <span id="voice-about" className={styles.about}>{current.description}</span>}
+      {current?.description && <span id="voice-about" className="basis-full text-xs text-muted-foreground">{current.description}</span>}
     </label>
   )
 }

@@ -1,8 +1,0 @@
-.avatar {
-  display: inline-flex; align-items: center; justify-content: center; flex: none;
-  border-radius: 50%; font-weight: 700; color: var(--bg); background: var(--muted); box-shadow: var(--dot-shadow);
-}
-.avatar[data-slot="a"] { background: var(--speaker-a); }
-.avatar[data-slot="b"] { background: var(--speaker-b); }
-.avatar[data-slot="c"] { background: var(--speaker-c); }
-.avatar[data-slot="d"] { background: var(--speaker-d); }

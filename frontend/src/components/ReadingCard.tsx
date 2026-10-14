@@ -2,7 +2,12 @@ import { useRef, useState } from 'react'
 import type { Project, Reading, Speaker } from '../types'
 import { speakerSlot } from '../transcript/speakers'
 import { Avatar } from './Avatar'
-import styles from './ReadingCard.module.css'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+
+// Small text-link and pill buttons, shared by the rows below.
+const LINK = 'h-auto px-1 py-0 text-xs text-primary underline-offset-4 hover:underline pointer-coarse:h-11'
+const CHIP = 'rounded-full'
 
 const EXAMPLES = [
   "Change the offer wherever it's said",
@@ -68,22 +73,22 @@ export function ReadingCard({ project, reading, speakers, onName, onPlace, onExa
     setRenaming(null)
   }
   return (
-    <div className={styles.card} data-testid="reading" role="status" aria-busy={reading === null || undefined}>
-      <p className={styles.opening}>
+    <div className="flex flex-col gap-3" data-testid="reading" role="status" aria-busy={reading === null || undefined}>
+      <p className="m-0 text-base leading-relaxed">
         {silent ? <>I've looked at <strong>{project.filename}</strong>.</> : <>I've read all {lines} {lines === 1 ? 'line' : 'lines'} of <strong>{project.filename}</strong>.</>}{' '}
-        {reading === null ? <span className={styles.dim}>Taking it in…</span> : opening}
+        {reading === null ? <span className="text-muted-foreground">Taking it in…</span> : opening}
       </p>
       {!silent && speakers.length > 0 && (
-        <div className={styles.cast} data-testid="cast">
+        <div className="flex flex-wrap items-center gap-x-3.5 gap-y-2 text-sm" data-testid="cast">
           {speakers.map((s) => {
             const g = guess(s.label)
             const guessed = unnamed(s.name, s.label) && g
             return (
-              <div key={s.label} className={styles.member}>
+              <div key={s.label} className="flex items-center gap-2">
                 <Avatar name={shown(s.label)} slot={speakerSlot(speakers, s.label)} size={22} />
                 {renaming === s.label ? (
-                  <input
-                    className={styles.rename}
+                  <Input
+                    className="h-8 w-36 text-sm md:text-sm"
                     aria-label={`Name for speaker ${s.label}`}
                     value={draft}
                     autoFocus
@@ -96,17 +101,18 @@ export function ReadingCard({ project, reading, speakers, onName, onPlace, onExa
                   />
                 ) : (
                   <>
-                    <span className={styles.memberName}>
+                    <span className="font-medium">
                       {guessed ? 'the ' : ''}{shown(s.label)}
-                      {guessed && <span className={styles.guess}> · my guess{g.why ? `: ${g.why}` : ''}</span>}
+                      {guessed && <span className="text-xs font-normal text-muted-foreground"> · my guess{g.why ? `: ${g.why}` : ''}</span>}
                     </span>
                     {onName && (
-                      <button
-                        className={styles.link}
+                      <Button
+                        variant="link"
+                        className={LINK}
                         onClick={() => { setDraft(guessed ? g.role : unnamed(s.name, s.label) ? '' : s.name); setRenaming(s.label) }}
                       >
                         Rename
-                      </button>
+                      </Button>
                     )}
                   </>
                 )}
@@ -114,24 +120,24 @@ export function ReadingCard({ project, reading, speakers, onName, onPlace, onExa
             )
           })}
           {unconfirmed.length > 0 && onName && (
-            <button className={styles.confirm} onClick={() => unconfirmed.forEach((s) => onName(s.label, guess(s.label)!.role))}>
+            <Button variant="outline" size="sm" className={`${CHIP} ml-auto`} onClick={() => unconfirmed.forEach((s) => onName(s.label, guess(s.label)!.role))}>
               Looks right
-            </button>
+            </Button>
           )}
         </div>
       )}
       {silent && sight && (
-        <div className={styles.noticed} data-testid="noticed">
-          <span className={styles.label}>I noticed</span>
-          <ul className={styles.noticedList}>
-            {noticed.map((d) => <li key={d} className={styles.noticedItem}>{d}</li>)}
+        <div className="flex flex-col gap-2" data-testid="noticed">
+          <span className="whitespace-nowrap text-xs text-muted-foreground">I noticed</span>
+          <ul className="m-0 flex list-none flex-wrap gap-x-2 gap-y-1.5 p-0">
+            {noticed.map((d) => <li key={d} className="whitespace-nowrap rounded-full bg-secondary px-2.5 py-1 text-xs text-secondary-foreground">{d}</li>)}
           </ul>
           {(sight.place_guess || sight.place_confirmed) && (
-            <div className={styles.place} role="group" aria-label="Where this is">
+            <div className="flex flex-wrap items-center gap-x-2.5 gap-y-2 text-sm" role="group" aria-label="Where this is">
               {placing ? (
                 <>
-                  <input
-                    className={styles.rename}
+                  <Input
+                    className="h-8 w-36 text-sm md:text-sm"
                     aria-label="Where is this?"
                     placeholder="e.g. Morjim, Goa"
                     value={placeDraft}
@@ -142,34 +148,34 @@ export function ReadingCard({ project, reading, speakers, onName, onPlace, onExa
                       if (e.key === 'Escape') setPlacing(false)
                     }}
                   />
-                  <button type="button" className={styles.confirm} disabled={!placeDraft.trim()} onClick={() => { onPlace?.(placeDraft.trim()); setPlacing(false) }}>Use this</button>
-                  <button type="button" className={styles.link} onClick={() => setPlacing(false)}>Cancel</button>
+                  <Button type="button" variant="outline" size="sm" className={CHIP} disabled={!placeDraft.trim()} onClick={() => { onPlace?.(placeDraft.trim()); setPlacing(false) }}>Use this</Button>
+                  <Button type="button" variant="link" className={LINK} onClick={() => setPlacing(false)}>Cancel</Button>
                 </>
               ) : sight.place_confirmed ? (
                 <>
-                  <span>{sight.place_confirmed}<span className={styles.guess}> · you confirmed</span></span>
-                  {onPlace && <button type="button" className={styles.link} onClick={() => { setPlaceDraft(sight.place_confirmed ?? ''); setPlacing(true) }}>Change</button>}
+                  <span>{sight.place_confirmed}<span className="text-xs font-normal text-muted-foreground"> · you confirmed</span></span>
+                  {onPlace && <Button type="button" variant="link" className={LINK} onClick={() => { setPlaceDraft(sight.place_confirmed ?? ''); setPlacing(true) }}>Change</Button>}
                 </>
               ) : (
                 <>
-                  <span>{sight.place_guess}<span className={styles.guess}> · my guess{sight.confidence ? `, ${sight.confidence} confidence` : ''}</span></span>
-                  {onPlace && <button type="button" className={styles.confirm} onClick={() => onPlace(sight.place_guess)}>Looks right</button>}
-                  {onPlace && <button type="button" className={styles.link} onClick={() => { setPlaceDraft(''); setPlacing(true) }}>Somewhere else…</button>}
+                  <span>{sight.place_guess}<span className="text-xs font-normal text-muted-foreground"> · my guess{sight.confidence ? `, ${sight.confidence} confidence` : ''}</span></span>
+                  {onPlace && <Button type="button" variant="outline" size="sm" className={CHIP} onClick={() => onPlace(sight.place_guess)}>Looks right</Button>}
+                  {onPlace && <Button type="button" variant="link" className={LINK} onClick={() => { setPlaceDraft(''); setPlacing(true) }}>Somewhere else…</Button>}
                 </>
               )}
             </div>
           )}
         </div>
       )}
-      <p className={styles.lead}>
+      <p className="m-0 text-sm leading-normal text-muted-foreground">
         {silent
           ? 'Tell me what it should say: words in quotes to use them as they are, a brief for me to write it, or ask me to look at it and help. Or place a voice-over yourself on the left.'
           : "Tell me what this video should say and I'll plan it across every line it touches, in the right person's voice, and show you each one before anything is final. Or click any line to change it yourself."}
       </p>
-      <div className={styles.examples}>
-        <span className={styles.label}>Or try</span>
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="whitespace-nowrap text-xs text-muted-foreground">Or try</span>
         {(silent ? SILENT_EXAMPLES : EXAMPLES).map((e) => (
-          <button key={e} className={styles.example} onClick={() => onExample(e)}>{e}</button>
+          <Button key={e} variant="outline" size="sm" className={`${CHIP} h-auto min-h-8 py-1 text-left whitespace-normal`} onClick={() => onExample(e)}>{e}</Button>
         ))}
       </div>
     </div>

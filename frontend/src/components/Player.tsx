@@ -2,7 +2,23 @@ import { useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import type { Word } from '../types'
 import { rulerMarks } from '../timeline/ruler'
-import styles from './Player.module.css'
+import { Pause, Play } from 'lucide-react'
+import { Button } from '@/components/ui/button'
+import { cn } from '@/lib/utils'
+
+/** The monitor (UX-7b): the picture at 16:9 across the column, the line being
+ *  said captioned over it, the transport under it, and the timeline: the
+ *  lines as blocks by speaker, the changes marked, the words as ticks, a
+ *  playhead and a ruler. */
+
+const TONES: Record<Block['tone'], string> = {
+  a: 'border-spk-a bg-spk-a/25',
+  b: 'border-spk-b bg-spk-b/25',
+  c: 'border-spk-c bg-spk-c/25',
+  d: 'border-spk-d bg-spk-d/25',
+  x: 'border-muted-foreground bg-muted-foreground/25',
+  changed: 'z-10 border-changed bg-changed-soft',
+}
 
 /** A span on the monitor's timeline: who speaks it, or that it changed. */
 export interface Block { start: number; end: number; tone: 'a' | 'b' | 'c' | 'd' | 'x' | 'changed' }
@@ -123,11 +139,15 @@ export function Player({
   const pct = (t: number) => `${length > 0 ? Math.min(100, Math.max(0, (t / length) * 100)) : 0}%`
   const head = length > 0 ? Math.min(100, (currentTime / length) * 100) : 0
   return (
-    <section className={styles.player} aria-label="Monitor">
-      <div className={styles.stage}>
+    <section className="flex flex-col gap-3 rounded-lg border bg-card p-2.5 shadow-xs" aria-label="Monitor">
+      {/* Neutral black surround so the picture reads true; the column's full
+          width, held to the viewport so the script stays in reach. */}
+      <div className="relative aspect-video max-h-[56dvh] w-full overflow-hidden rounded-lg bg-monitor">
         <video
           ref={videoRef}
-          className={styles.video}
+          // Pinned to the stage rather than sized by percentage: `height: 100%`
+          // does not resolve against an aspect-ratio box.
+          className="absolute inset-0 size-full bg-monitor object-contain"
           src={src}
           muted={muted}
           playsInline
@@ -149,41 +169,46 @@ export function Player({
         {/* The line at the playhead, as the picture shows it, once the picture
             moves. The transcript carries the same words, so this is not read
             out as it changes. */}
-        {caption && (playing || currentTime > 0) && <div className={styles.caption} data-testid="caption" aria-hidden="true">{caption}</div>}
+        {caption && (playing || currentTime > 0) && <div
+          className={cn(
+            'absolute bottom-2.5 left-1/2 z-10 max-w-[92%] -translate-x-1/2 truncate rounded-md border bg-background/90 px-3 py-1.5 text-center text-sm whitespace-nowrap text-foreground shadow-sm sm:bottom-4 sm:max-w-[78%] sm:text-base',
+            // An added word is marked; a take's words light up as they are said, the ones still to come wait, dimmer.
+            '[&_ins]:rounded-sm [&_ins]:bg-changed-soft [&_ins]:px-1 [&_ins]:text-changed [&_ins]:no-underline',
+            '[&_ins:not([data-said]):has(~ins[data-said])]:bg-transparent [&_ins:not([data-said]):has(~ins[data-said])]:text-muted-foreground [&_ins[data-said]~ins:not([data-said])]:bg-transparent [&_ins[data-said]~ins:not([data-said])]:text-muted-foreground',
+          )}
+          data-testid="caption"
+          aria-hidden="true"
+        >{caption}</div>}
       </div>
-      <div className={styles.transport}>
-        <div className={styles.controls}>
-          <button className={styles.play} onClick={toggle} aria-label={playing ? 'Pause' : 'Play'}>
-            {playing ? (
-              <svg width="12" height="14" viewBox="0 0 10 12" aria-hidden="true"><path d="M1 1h3v10H1zM6 1h3v10H6z" fill="currentColor" /></svg>
-            ) : (
-              <svg width="12" height="14" viewBox="0 0 10 12" aria-hidden="true"><path d="M1 1l8 5-8 5z" fill="currentColor" /></svg>
-            )}
-          </button>
-          <span className={styles.timecode} data-testid="timecode">
-            {timecode(currentTime)} <span className={styles.of}>/ {timecode(length)}</span>
+      <div className="flex flex-col gap-2 px-1">
+        <div className="flex flex-wrap items-center gap-3">
+          <Button variant="outline" size="icon" className="rounded-full" onClick={toggle} aria-label={playing ? 'Pause' : 'Play'}>
+            {playing ? <Pause fill="currentColor" aria-hidden="true" /> : <Play fill="currentColor" aria-hidden="true" />}
+          </Button>
+          <span className="tnum text-sm whitespace-nowrap" data-testid="timecode">
+            {timecode(currentTime)} <span className="text-muted-foreground">/ {timecode(length)}</span>
           </span>
           {children}
         </div>
         {/* The timeline: the lines as blocks, the changes lit, the words as
             ticks, the playhead, and the real range input laid invisibly over
             it all so it stays a slider. */}
-        <div className={styles.track} ref={barRef}>
+        <div className="relative h-10 overflow-hidden rounded-md bg-muted" ref={barRef}>
           {blocks.filter((b) => b.end > 0 && b.start < length).map((b, i) => (
             <span
               key={i}
-              className={styles.block}
+              className={cn('pointer-events-none absolute top-2.5 h-5 rounded-sm border-l-2', TONES[b.tone])}
               data-tone={b.tone}
               data-testid="block"
               style={{ left: pct(b.start), width: `${Math.max(0.4, ((Math.min(b.end, length) - Math.max(0, b.start)) / Math.max(length, 0.001)) * 100)}%` }}
             />
           ))}
           {words.filter((w) => w.start >= 0 && w.start <= length).map((w, i) => (
-            <span key={i} className={styles.tick} data-testid="tick" style={{ left: pct(w.start) }} />
+            <span key={i} className="pointer-events-none absolute bottom-1 h-1.5 w-px bg-muted-foreground/60" data-testid="tick" style={{ left: pct(w.start) }} />
           ))}
           {placing && length > 0 && (
             <div
-              className={styles.placing}
+              className="absolute top-1.5 z-30 h-7 cursor-grab touch-none rounded-md border border-changed bg-changed-soft shadow-sm outline-none before:absolute before:inset-x-0 before:-inset-y-3.5 before:content-[''] focus-visible:ring-[3px] focus-visible:ring-ring/50 active:cursor-grabbing"
               data-testid="placing"
               role="slider"
               aria-label="Where the take starts"
@@ -201,9 +226,10 @@ export function Player({
               }}
             />
           )}
-          <span className={styles.head} data-testid="head" style={{ left: `${head}%` }} />
+          <span className="pointer-events-none absolute inset-y-0 z-20 -ml-px w-0.5 bg-foreground" data-testid="head" style={{ left: `${head}%` }} />
           <input
-            className={styles.scrubber}
+            // Invisible over the track, but a keyboard user sees it focused.
+            className="absolute inset-0 z-20 m-0 size-full cursor-pointer opacity-0 focus-visible:opacity-100 focus-visible:ring-[3px] focus-visible:ring-ring/50"
             type="range"
             min={0}
             max={length}
@@ -214,9 +240,13 @@ export function Player({
             aria-valuetext={`${timecode(currentTime)} of ${timecode(length)}`}
           />
         </div>
-        <div className={styles.ruler} aria-hidden="true" data-testid="ruler">
+        <div className="relative h-4 text-xs whitespace-nowrap text-muted-foreground" aria-hidden="true" data-testid="ruler">
           {rulerMarks(length).map((m, i, all) => (
-            <span key={i} className={styles.rulerMark} data-end={i === all.length - 1 || undefined} style={{ left: pct(m.at) }}>{m.label}</span>
+            <span
+              key={i}
+              className={cn('absolute top-0 -translate-x-1/2', i === 0 && 'translate-x-0', i === all.length - 1 && '-translate-x-full')}
+              data-end={i === all.length - 1 || undefined}
+              style={{ left: pct(m.at) }}>{m.label}</span>
           ))}
         </div>
       </div>

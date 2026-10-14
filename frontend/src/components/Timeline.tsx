@@ -2,7 +2,8 @@ import { memo, useCallback, useEffect, useRef, useState } from 'react'
 import type { MouseEvent, PointerEvent } from 'react'
 import type { Word, Selection } from '../types'
 import { snapToWords, timeFromX } from '../timeline/selection'
-import styles from './Timeline.module.css'
+import { Button } from '@/components/ui/button'
+import { cn } from '@/lib/utils'
 
 interface TimelineProps {
   words: Word[]
@@ -27,9 +28,12 @@ const Words = memo(function Words({ words, duration, selection, onClickWord }: {
       {words.map((w, i) => (
         <button
           key={`${w.text}-${w.start}`}
-          className={styles.word}
           // Alternate words sit on two rows, so a label can run past its
           // word's own (often very short) span without covering the next.
+          className={cn(
+            'absolute h-6.5 min-w-6 overflow-hidden rounded-r-sm border-l border-muted-foreground bg-card px-1 text-left text-xs leading-[26px] text-ellipsis whitespace-nowrap text-foreground outline-none hover:z-10 hover:bg-accent focus-visible:z-10 focus-visible:ring-[3px] focus-visible:ring-ring/50 pointer-coarse:h-11 pointer-coarse:leading-[44px]',
+            i % 2 === 0 ? 'top-1.5 pointer-coarse:top-1' : 'top-8 pointer-coarse:top-[52px]',
+          )}
           data-lane={i % 2}
           aria-pressed={selection ? w.start < selection.end && selection.start < w.end : undefined}
           style={{ left: pct(w.start, duration), width: pct(w.end - w.start, duration) }}
@@ -119,21 +123,22 @@ export function Timeline({ words, duration, selection, currentTime, onSelect }: 
   }, [selection, onSelect])
 
   return (
-    <div className={styles.timeline}>
-      <div className={styles.zoom} role="group" aria-label="Timeline zoom">
-        <button onClick={() => zoomBy(1 / STEP)} aria-label="Zoom out">−</button>
-        <button onClick={() => zoomBy(STEP)} aria-label="Zoom in">+</button>
-        <button onClick={() => setZoom(null)} aria-pressed={zoom === null}>Fit</button>
+    <div className="relative">
+      <div className="mb-1.5 flex justify-end gap-1" role="group" aria-label="Timeline zoom">
+        <Button variant="outline" size="sm" onClick={() => zoomBy(1 / STEP)} aria-label="Zoom out">−</Button>
+        <Button variant="outline" size="sm" onClick={() => zoomBy(STEP)} aria-label="Zoom in">+</Button>
+        <Button variant={zoom === null ? 'secondary' : 'outline'} size="sm" onClick={() => setZoom(null)} aria-pressed={zoom === null}>Fit</Button>
       </div>
-      <div ref={scrollRef} className={styles.scroller} data-testid="timeline-scroller">
+      <div ref={scrollRef} className="overflow-x-auto overflow-y-hidden pb-1" data-testid="timeline-scroller">
         <div
           ref={trackRef}
-          className={styles.track}
+          data-testid="timeline-track"
+          className="relative h-16 cursor-col-resize touch-none rounded-lg bg-muted select-none pointer-coarse:h-25"
           style={zoom === null ? undefined : { width: `${duration * zoom}px` }}
           onPointerDown={startDrag}
         >
           {words.length === 0 && (
-            <div className={styles.empty}>No speech found in this video — there are no words to edit.</div>
+            <div className="pointer-events-none absolute inset-0 grid place-items-center text-sm text-muted-foreground">No speech found in this video — there are no words to edit.</div>
           )}
 
           <Words words={words} duration={duration} selection={selection} onClickWord={clickWord} />
@@ -141,7 +146,7 @@ export function Timeline({ words, duration, selection, currentTime, onSelect }: 
           {selection && (
             <div
               data-testid="selection-region"
-              className={styles.selection}
+              className="pointer-events-none absolute top-0 z-20 h-full border-x-2 border-changed bg-changed-soft/70"
               style={{
                 left: pct(selection.start, duration),
                 width: pct(selection.end - selection.start, duration),
@@ -151,15 +156,15 @@ export function Timeline({ words, duration, selection, currentTime, onSelect }: 
 
           <div
             data-testid="playhead"
-            className={styles.playhead}
+            className="pointer-events-none absolute -top-0.75 z-30 h-[calc(100%+6px)] w-0.5 bg-foreground"
             style={{ left: pct(currentTime, duration) }}
           />
         </div>
       </div>
       {words.length > 0 && (
-        <div className={styles.hint}>Tap or click a word, shift-click to extend, or drag across words.</div>
+        <div className="mt-1.5 text-sm text-muted-foreground">Tap or click a word, shift-click to extend, or drag across words.</div>
       )}
-      <span className="srOnly" role="status">{selection ? `Selected ${selection.start.toFixed(2)} to ${selection.end.toFixed(2)} seconds` : ''}</span>
+      <span className="sr-only" role="status">{selection ? `Selected ${selection.start.toFixed(2)} to ${selection.end.toFixed(2)} seconds` : ''}</span>
     </div>
   )
 }

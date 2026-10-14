@@ -1,5 +1,6 @@
 import type { Insert, Piece, Segment } from '../types'
-import styles from './ExportBar.module.css'
+import { Button } from '@/components/ui/button'
+import { cn } from '@/lib/utils'
 
 interface ExportBarProps {
   segments: Segment[]
@@ -31,22 +32,22 @@ export function ExportBar({ segments, onExport, download, inserts = [], pieces =
     ? 'No edited stretches'
     : `${edited.length} edited ${edited.length === 1 ? 'stretch' : 'stretches'}, between ${secs(edited[0].start)} and ${secs(edited[edited.length - 1].end)}`
   return (
-    <div className={styles.bar}>
+    <div className="flex items-center gap-2.5 max-[960px]:flex-[1_1_100%] max-[960px]:flex-wrap">
       {segments.length > 0 && (
-        <div className={styles.strip} role="img" aria-label={stripLabel}>
+        <div className="flex h-1.5 w-30 overflow-hidden rounded-full bg-muted" role="img" aria-label={stripLabel}>
           {segments.map((s, i) => (
             <div
               key={i}
               data-testid="segment"
               data-kind={s.kind}
-              className={s.kind === 'edited' ? styles.edited : styles.original}
+              className={cn(s.kind === 'edited' ? 'bg-ok' : 'bg-muted-foreground/25')}
               style={{ width: `${((s.end - s.start) / total) * 100}%` }}
             />
           ))}
         </div>
       )}
       {(inserts.length > 0 || flexed.length > 0) && (
-        <div className={styles.inserts} data-testid="inserts">
+        <div className="max-w-[220px] text-xs leading-snug text-muted-foreground max-[960px]:max-w-none" data-testid="inserts">
           {inserts.length > 0 && (
             <>+{inserts.length} added {inserts.length === 1 ? 'line' : 'lines'}; the picture makes room for{' '}
             {(pieces.length ? room : inserts.reduce((t, i) => t + i.duration, 0)).toFixed(2)} s{held > 0.005 ? `, ${held.toFixed(2)} s of it held` : ''}.</>
@@ -57,14 +58,14 @@ export function ExportBar({ segments, onExport, download, inserts = [], pieces =
         </div>
       )}
       {busy ? (
-        <button className={styles.export} disabled aria-busy="true">Exporting…</button>
+        <Button variant="outline" size="sm" disabled aria-busy="true">Exporting…</Button>
       ) : download ? (
         <>
-          <a className={styles.download} href={download.url} download={download.filename}>Download MP4</a>
-          <button className={styles.again} onClick={onExport}>Export again</button>
+          <Button asChild size="sm"><a href={download.url} download={download.filename}>Download MP4</a></Button>
+          <Button variant="ghost" size="sm" className="text-muted-foreground" onClick={onExport}>Export again</Button>
         </>
       ) : (
-        <button className={styles.export} onClick={onExport}>Export MP4</button>
+        <Button variant="outline" size="sm" onClick={onExport}>Export MP4</Button>
       )}
     </div>
   )

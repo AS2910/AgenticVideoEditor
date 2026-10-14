@@ -203,7 +203,7 @@ describe('LineDoc: editing starts from where the line stands', () => {
     expect(screen.getByRole('textbox', { name: /new wording/i })).toHaveValue('Start a Bhaji Cam session now.')
     expect(screen.getByRole('combobox', { name: 'Voice' })).toHaveValue('EXAVITQu4vr4xnSDxMaL')
     expect(screen.getByRole('combobox', { name: /runs long/i })).toHaveValue('shorten')
-    expect(screen.getByRole('button', { name: 'Warmer' })).toHaveClass(/pillOn/)
+    expect(screen.getByRole('button', { name: 'Warmer' })).toHaveAttribute('aria-pressed', 'true')
     expect(screen.getByRole('button', { name: 'Hear it' })).toBeEnabled()   // it differs from the line as it stands
   })
 

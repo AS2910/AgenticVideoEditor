@@ -3,104 +3,69 @@
 > **LOGIC:** When building a specific page, first check `design-system/voltage/pages/[page-name].md`.
 > If that file exists, its rules **override** this Master file. If not, follow the rules below.
 
-**Project:** Voltage (AgenticVideoEditor) · **Written:** 2026-10-04, by hand from `frontend/src/styles/theme.css` and the UX plan of 2026-10-03. Not generated: the ui-ux-pro-max `--design-system` result for this product (Swiss minimalism, Inter, recording red) was checked and set aside — Voltage's room is already built and shipped.
+**Project:** Voltage (AgenticVideoEditor) · **Rewritten:** 2026-10-14 (UX-8), replacing the "Ink and teal" room of UX-7. Source of truth in code: `frontend/src/styles/globals.css`, `frontend/components.json`, `frontend/src/components/ui/`.
 
 ## The room
 
-Ink and teal (UX-7a): a deep blue-black ground, teal for anything Voltage touched or wants heard, coral for "needs you", soft green for kept, blue and mauve for the speakers. *Until 2026-10-06 the room was warm-dark with an amber accent.* Fraunces for the one heading per screen and the brand word, Instrument Sans for everything else. No light mode. The picture never stops; the line is the unit; the user's next action is the panel's last element.
+Stock **shadcn/ui** (new-york style, **zinc** base) on Tailwind v4, **light and dark**. Flat surfaces, 1px borders, `shadow-xs`/`shadow-sm` at most, an 8px base radius. No gradients, glows, frosted bars, serif type or breathing orb. Voltage's presence beside its words is a small bolt icon (`Presence`), a spinner while it works. The picture never stops; the line is the unit; the user's next action is the panel's last element.
 
-## Color tokens (use the variables, never raw hex in components)
+Theme: follows the system, with a Light / Dark / System menu in the header (`ThemeToggle`, `lib/theme.ts`). The choice is saved in `localStorage` (`voltage-theme`, always in try/catch); an inline script in `index.html` sets `.dark` before first paint.
 
-*UX-7a (2026-10-06): the Ink and teal room, from the UX-7 mocks. Amber is retired; the older names (`--amber`, `--speaker-a..d`, `--accent-bright`, `--shadow`) are aliases of the tokens below so older components keep working.*
+## Tokens (use the Tailwind utilities they generate, never a raw colour)
 
-| Role | Token | Hex |
-|---|---|---|
-| Background / deep (inputs, tracks) | `--bg` / `--bg-deep` | `#0E141C` / `#0A0F15` |
-| Surface / low (the foot of a gradient) | `--surface` / `--surface-low` | `#151E28` / `#121A23` |
-| Raised / raised under the pointer | `--raised` / `--raised-2` | `#1D2834` / `#243140` |
-| Line / soft (dividers inside a surface) / strong (under the pointer) | `--line` / `--line-soft` / `--line-strong` | `#283645` / `#1F2B38` / `#34465A` |
-| Text / muted / faint | `--text` / `--muted` / `--faint` | `#EDF2F6` / `#9BABBC` / `#6E7D8E` |
-| Accent: changed words, ready, links, focus, the orb | `--accent` | `#3FC8B4` |
-| Accent highlight (an inserted word, the orb's lit side) / low | `--accent-hi` / `--accent-lo` | `#B4F2E6` / `#0C6C62` |
-| Accent fill (a primary button) / its lit top / ink on it | `--accent-fill` / `--accent-fill-hi` / `--accent-ink` | `#17A997` / `#34C9B5` / `#04110F` |
-| Accent tint / line / soft line | `--accent-tint` / `--accent-line` / `--accent-line-soft` | teal 13% / 42% / 25% |
-| Needs you | `--rose`, `--rose-tint`, `--rose-line` | `#F08A6E` |
-| Kept / ok | `--ok`, `--ok-tint` | `#86C98F` |
-| Speakers A / B (C / D) | `--spk-a` / `--spk-b` (`--speaker-c` / `--speaker-d`) | `#7FB8F0` / `#C9A2E8` (`#E9C46A` / `#F2A6A6`) |
-| Scrim | `--scrim` | ink 66% |
-| Radii | `--radius`, `--radius-lg`, `--radius-xl` | 10px, 16px, 20px |
+All colours are OKLCH variables in `globals.css`, defined for `:root` and `.dark`, exposed to Tailwind with `@theme inline`. `theme.test.ts` fails on a raw colour, a gradient, a blur, a missing token or a missing dark value.
 
-Contrast: `--text` on `--bg` ≈ 15:1; `--muted` on `--surface` ≈ 6.7:1; `--faint` on `--surface` ≈ 3.6:1 — faint is for glyphs, dividers and a label beside larger text, never alone. `--accent` on `--bg` ≈ 9:1; `--accent-ink` on `--accent-fill` ≈ 7.5:1.
-
-### Depth (UX-7a)
-
-Depth is allowed and specified, and every piece of it is a token, so a component never spells a shadow or a gradient of its own:
-
-| Thing | Tokens |
+| Role | Utilities |
 |---|---|
-| Hairline top highlight on anything raised | `--hl` |
-| Shadow steps: a button, a card, a sheet | `--sh-1` / `--sh-2` / `--sh-3` |
-| A card or panel: `--shadow` (`--hl` + `--sh-2`); a small card inside a panel: `--card-shadow`, `--card-bg` | `--card-bg` is raised → surface |
-| A question card | `--card-q-bg`, `--card-q-shadow` (teal-tinted) |
-| A panel's or hero card's ground | `--surface-bg` (surface → surface-low), `--panel-shadow` |
-| A sheet | `--sheet-bg`, `--sheet-shadow` (22px radius) |
-| An input or a track: recessed | `--recess` (`--recess-deep` for the timeline); focus adds `--ring` and `--accent-line` |
-| A raised button | `--btn-bg`, `--btn-bg-hover`, `--btn-shadow`; it presses 1px (`button:active`, global) |
-| A primary button | `--btn-primary-bg` (lit from above), `--btn-primary-shadow`, `--btn-primary-shadow-hover` (a glow) |
-| A segmented control | the track is `--bg-deep` + `--recess`; the chosen segment `--seg-on-bg` + `--btn-shadow` |
-| A fill (progress, spend, played) | `--fill-bg` (accent-lo → accent), `--fill-shadow` |
-| The bar | `--bar-bg` (frosted: `backdrop-filter: blur(14px)`), `--bar-shadow` |
-| The orb | `--orb-highlight`, `--glow-soft`, `--glow-strong`, `--glow-color`; it breathes on a 4.5 s cycle (`swell`), faster while working |
-| A speaker dot | `--dot-shadow` |
-| Inserted words | `--accent-hi` on `--accent-tint` with an inset `--accent-line-soft` ring; struck words keep `--muted` with a `--rose` strike |
+| Page, text | `bg-background` `text-foreground` |
+| Cards, panels, popovers | `bg-card` `bg-popover` (+ `-foreground`) |
+| Primary action (near-black in light, near-white in dark) | `bg-primary` `text-primary-foreground` |
+| Quiet fills, hover, selected | `bg-secondary` `bg-muted` `bg-accent` |
+| Secondary text | `text-muted-foreground` (≥ 4.5:1 on background and card in both modes) |
+| Borders, inputs, focus | `border-border` `border-input` `ring-ring` |
+| Errors | `text-destructive` |
+| **Changed**: words Voltage wrote, a take that is ready, links to it | `text-changed` `bg-changed-soft` |
+| **Kept / ok** | `text-ok` `bg-ok-soft` |
+| **Needs you** | `text-needs` `bg-needs-soft` |
+| Speakers A–D | `text-spk-a..d` (and `bg-spk-a..d`, usually at low opacity) |
+| The picture's surround | `bg-monitor` |
+| Radii | `rounded-sm/md/lg/xl` = 4 / 6 / 8 / 12px off `--radius: 0.5rem`; nothing larger than `rounded-xl` |
+
+Colour never carries meaning alone: every state has a word (Kept, Ready to hear, Needs you) beside its colour.
 
 ## Typography
 
-- Headings and the brand word: `--serif` = Fraunces (one `h1` per screen, 28–36px, weight 500–600; `h2` for panel and card titles, styled small if need be but a real heading).
-- UI and body: `--ui` = Instrument Sans. Scale: **12** label floor (always `nowrap`), **13** small label, **14** compact body (log entries, hints, row meta), **16** body and inputs (the `body` base), 20, 28, 36. A full sentence is never under 14px. Nothing under 12px, including avatar initials and `kbd`.
-- Line-height 1.5 for body, 1.2 for headings. Tabular numerals for times and money.
-- Verdicts and states are sentences first, numbers behind them.
+**Inter** (variable, self-hosted through `@fontsource-variable/inter`; no external font request). One family. Headings are `font-semibold tracking-tight` and one `h1` per screen. Scale: `text-xs` 12 is the floor (labels, `kbd`, never a sentence), `text-sm` 14 for compact UI, `text-base` 16 for body and inputs. Line-height 1.5. Times and money use `.tnum`. Verdicts and states are sentences first, numbers behind them.
 
-*Decided 2026-10-04 (UX-6 audit): the base was 14px and most controls had drifted to 12–13; the revamp moves the base to 16.*
+## Spacing, layout, targets
 
-## Spacing and layout
+4px grid via Tailwind. Player left, Voltage panel right at desktop; stacked below 960px with a 16px gutter and no horizontal scroll; Voltage tucks away into a 64px rail (a strip with its own composer on a phone). Full-height screens use `dvh`, never `vh`.
 
-8px grid: 4 / 8 / 12 / 16 / 24 / 32. Panel padding 16–24px. **Targets:** every button, link, chip and input is at least 44×44 CSS px to the pointer (the visual can be smaller inside a padded hit area); chips and pills at least 36px tall; at least 8px between adjacent targets; segmented controls 36px with a 2px gap. Rows 44px tall minimum. The player left, the panel right at desktop; stacked at phone width with a 16px gutter and no horizontal scroll. Breakpoints: 420 (phone), 768, 1024, 1440.
+**Targets:** the shadcn controls are 36px with a mouse and grow to **44px on coarse pointers** (`pointer-coarse:`); any custom clickable element adds `pointer-coarse:min-h-11`. At least 8px between adjacent targets.
 
 ## Motion
 
-150–250ms for state changes, 300ms for a row opening; `prefers-reduced-motion` turns every transition to 0ms and stops the orb's breathing. At most one or two moving things per view. Exits faster than entrances.
+`tw-animate-css` enter/exit (150–250ms); `prefers-reduced-motion` zeroes every transition and animation (`globals.css`). At most one or two moving things per view; exits faster than entrances.
 
-## Interaction rules
+## Interaction rules (unchanged by UX-8)
 
-- Every control is reachable from the keyboard with a visible amber focus ring (`--accent`, 2px, `outline` or `box-shadow`; never `outline: none` without it); rows have grips, but dragging is never the only way (Move up / Move down, typed times, nudge buttons), and a grip that promises a drag also opens the place control on Enter.
-- Every state change the user waits for is spoken: one `role="status"` region per panel for progress and the agent's narration, `role="log"` on the chat, `role="alert"` for failures, `role="progressbar"` with values on bars, `aria-busy` on the region doing the work. Disabled controls read as inert (`opacity: .5`), never as a secondary button.
-- Sheets are real modals (`<dialog>`, focus in, Tab trapped, Escape closes, focus returns). Every screen has an `h1`, a `<main>` and a skip link.
-- Icons are inline SVG, 16/20px, 1.5px stroke, never emoji; a meaningful icon has a text alternative; an icon beside visible text is `aria-hidden`.
-- Loading: the orb "working" state plus a sentence about what is happening; reserve the space of what is coming (skeleton rows, frame slots) so nothing jumps; `aria-busy` on the region.
-- Errors appear where they belong — in the row, or as the agent's reply in the thread — in one sentence with one action; the red strip under the player is only for the engine.
-- Compact labels (chips, counts) do not wrap: `white-space: nowrap`, `min-width: 0`, with the full text reachable. Nothing lives only in a `title` tooltip.
-- `--faint` is for glyphs and dividers and for a label *beside* larger text; never for a sentence, a time, a cost or a struck word (those are `--muted`).
+- Everything is reachable from the keyboard with a visible focus ring (`focus-visible:ring-[3px] focus-visible:ring-ring/50`); `outline-none` only beside a ring. Dragging is never the only way (Move up / Move down, typed times, nudge keys).
+- Every wait is spoken: one `role="status"` region per panel, `role="log"` on the chat, `role="alert"` for failures, `role="progressbar"` with values, `aria-busy` on the region doing the work. Disabled controls read as inert, never as a secondary button.
+- Sheets are real modals (shadcn `Dialog`/Radix: focus in, Tab trapped, Escape closes, focus returns). Every screen has an `h1`, a `<main>` and a skip link.
+- Icons are `lucide-react` SVG, never emoji; a meaningful icon has a text alternative; beside visible text it is `aria-hidden`.
+- Loading reserves the space of what is coming (`Skeleton`, frame slots) and says in a sentence what is happening.
+- Errors appear where they belong, in one sentence with one action.
+- Compact labels do not wrap (`whitespace-nowrap`, `min-w-0`); nothing lives only in a tooltip.
 - Chat: the user's bubble right, Voltage's left; the thread scrolls, the composer stays; the user's next action is always the last element.
 
 ## Components in use
 
-`LineDoc` rows (states: Planned, Voicing…, Ready to hear, Needs you, Kept, Removed, Moved, Couldn't voice it), the line editor (words, Delivery chips, Voice, Sound meets picture, If it runs long, cost, Hear it), `QuestionCard` (a sentence in quotes + option chips + the agent's guess first), `PlanCard`, `Player` as the monitor (UX-7b: the 16:9 stage with the caption at the playhead, the timeline of speaker blocks, changed spans, word ticks, playhead and ruler, the Move block), `ReadingCard` (UX-7c: Voltage's first message — what it read or saw, the cast with role guesses to confirm or rename, the place to confirm, example chips that seed the composer; the goal stage is gone), the panel header with its state word and Hide (`\`), the 64 px rail when Voltage is tucked away (orb, count badge — coral for a question — the state word written vertically), `ProjectList` as cards under a drop zone on *Your videos* (UX-7f: frame at 16:9 with the duration, name, state pill, last change, a quiet Delete), the review rows in the script and the ship sheet as the receipt (UX-7d; the polish pass of 2026-10-10 gave every review row *Play the seam* that says Stop while its seam plays with a 2px progress line along the row's foot, *Hear the take*, focus with ↑ ↓ Space T K H A U and a `kbd` legend that shows while a row has focus, and the receipt a *takes voiced* tile), `ConsentSheet`, `SpendMeter` (a button since the polish pass: its breakdown — vendor lines, voice characters, the person's spend across projects — is a popover under it, `role="dialog"`, Escape or a click outside closes it and focus returns), the strip's composer on a phone while Voltage is tucked away (input + send; sending brings the panel back). The caption lights a take's words as they are said while the take plays in place (`ins[data-said]`). Phase 16 (2026-10-10): the picture never "holds" in the copy — an added line "makes room" (the pause after it stretches, or loops); the Export bar says how much room and whether any of it was held; a flexed line's receipt row says "picture at 1.08×".
+shadcn: `Button` `Input` `Textarea` `Badge` `Card` `Dialog` `Popover` `DropdownMenu` `Progress` `Skeleton` `Switch` `Select` `Tooltip` `Separator` `Label` `ScrollArea` `Toggle` `ToggleGroup` (in `components/ui/`; generated by the shadcn CLI, then fixed where the CLI is wrong: the `cn` import path, `Progress` forwarding `value` so `aria-valuenow` is set, the coarse-pointer sizes).
 
-## UX-7 (2026-10-05): the room changes — applied in UX-7a, 2026-10-06
+Voltage's own, built on them: `LineDoc` (the transcript row and its in-place editor; `EditorControls`, `editorStyles`), `PlanCard`, `ReadingCard`, `QuestionCard`, `CandidateCard`, `PlaceEditor`, `ReviewPanel`, `Player` (monitor, caption, timeline), `Timeline`, `ChatPanel`, `ActivityLog`, `SpeakersBar`, `VoicePicker`, `AutonomySwitch`, `SpendMeter` (popover), `ExportBar`, `ConsentSheet`, `ShipSheet`, `LoadScreen`, `ProjectList`, `SignIn`, `Avatar`, `Presence`, `ThemeToggle`.
 
-Signed off from the mocks in `docs/superpowers/mocks/2026-10-05-voltage-ux7/` (plan: `docs/superpowers/plans/2026-10-05-ux7-the-workspace.md`). These are the tokens the table above now carries (`frontend/src/styles/theme.css`); `voltage.css` in the mocks folder was the source.
+Native `<select>` is kept for Voice and "If it runs long", and segmented controls are `aria-pressed` buttons, so roles stay what the tests and assistive tech already expect; they are styled to match.
 
-| Role | Token | Hex |
-|---|---|---|
-| Background / deep (inputs, tracks) | `--bg` / `--bg-deep` | `#0E141C` / `#0A0F15` |
-| Surface / raised / raised-2 | `--surface` / `--raised` / `--raised-2` | `#151E28` / `#1D2834` / `#243140` |
-| Line / soft line | `--line` / `--line-soft` | `#283645` / `#1F2B38` |
-| Text / muted / faint | `--text` / `--muted` / `--faint` | `#EDF2F6` / `#9BABBC` / `#6E7D8E` |
-| Accent: changed words, ready, focus, the orb | `--accent` / `--accent-fill` / `--accent-ink` | `#3FC8B4` / `#17A997` / `#04110F` |
-| Accent highlight / low / glow | `--accent-hi` / `--accent-lo` / `--glow` | `#B4F2E6` / `#0C6C62` / teal 42% |
-| Needs you | `--rose` | `#F08A6E` |
-| Kept / ok | `--ok` | `#86C98F` |
-| Speakers A / B | `--spk-a` / `--spk-b` | `#7FB8F0` / `#C9A2E8` |
+## Adding a component
 
-Amber is retired. Depth is allowed and specified: a hairline top highlight (`--hl`) on raised surfaces, three shadow steps (`--sh-1..3`), recessed inputs, raised buttons that press 1px, a frosted bar, the orb breathing on a 4.5 s cycle (off under `prefers-reduced-motion`). Fonts, sizes, targets, motion timings and interaction rules above stand. Alternatives B (light, indigo) and C (slate, coral) are on the mocks' Palettes board and are one token block to switch.
+`cd frontend && npx shadcn@latest add <name>`, then check the generated file's `cn` import (it should be `@/lib/utils`) and add `pointer-coarse:` sizes if it is a control. Never spell a colour; add a token to `globals.css` (both `:root` and `.dark`, plus `@theme inline`) if a new meaning is needed.
