@@ -1,7 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
 import type { ReactNode, RefObject } from 'react'
 import type { ChatMessage } from '../types'
-import styles from './ChatPanel.module.css'
+import { ArrowUp } from 'lucide-react'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { cn } from '@/lib/utils'
 
 interface ChatPanelProps {
   messages: ChatMessage[]
@@ -58,27 +61,34 @@ export function ChatPanel({
 
   const hidden = showAll ? 0 : Math.max(0, messages.length - RECENT)
   return (
-    <div className={styles.panel}>
+    <div className="flex min-h-0 flex-1 flex-col">
       {header}
-      <div ref={list} className={styles.messages} role="log" aria-live="polite" aria-relevant="additions" aria-label="The conversation">
+      <div ref={list} className="flex min-h-0 flex-1 flex-col gap-3.5 overflow-y-auto px-5 py-4" role="log" aria-live="polite" aria-relevant="additions" aria-label="The conversation">
         {hidden > 0 && (
-          <button className={styles.earlier} onClick={() => setShowAll(true)}>
+          <Button variant="link" size="sm" className="self-center text-muted-foreground underline" onClick={() => setShowAll(true)}>
             Show {hidden} earlier {hidden === 1 ? 'message' : 'messages'}
-          </button>
+          </Button>
         )}
         {messages.slice(hidden).map((m, i) => (
-          <div key={hidden + i} className={m.role === 'user' ? styles.message : styles.reply}>
-            <span className="srOnly">{m.role === 'user' ? 'You: ' : 'Voltage: '}</span>
+          <div
+            key={hidden + i}
+            className={cn(
+              'text-base leading-relaxed',
+              m.role === 'user'
+                ? 'max-w-[86%] self-end rounded-lg bg-secondary px-3.5 py-2.5 text-secondary-foreground'
+                : 'max-w-[92%] self-start text-foreground',
+            )}
+          >
+            <span className="sr-only">{m.role === 'user' ? 'You: ' : 'Voltage: '}</span>
             <span>{m.text}</span>
           </div>
         ))}
         {children}
       </div>
-      <div className={styles.foot}>
-        <div className={styles.composer}>
-          <input
+      <div className="flex flex-none flex-col gap-2 border-t bg-background px-5 pt-3 pb-4">
+        <div className="flex items-center gap-2">
+          <Input
             ref={inputRef}
-            className={styles.input}
             type="text"
             aria-label="Describe a change"
             placeholder={placeholder}
@@ -86,18 +96,16 @@ export function ChatPanel({
             onChange={(e) => setPrompt(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Enter') submit() }}
           />
-          <button className={styles.send} onClick={submit} disabled={disabled} aria-label={sendLabel} title={sendLabel}>
-            <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
-              <path d="M8 13V3M3.5 7.5L8 3l4.5 4.5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-          </button>
+          <Button size="icon" className="rounded-full" onClick={submit} disabled={disabled} aria-label={sendLabel} title={sendLabel}>
+            <ArrowUp aria-hidden="true" />
+          </Button>
         </div>
-        <div className={styles.under}>
+        <div className="flex min-h-5 flex-wrap items-center gap-x-4 gap-y-1.5">
           {toolbar}
           {!canSubmit ? (
-            <span className={styles.hint}>Pick a line in the transcript, or words on the timeline, then describe the change.</span>
+            <span className="text-sm text-muted-foreground">Pick a line in the transcript, or words on the timeline, then describe the change.</span>
           ) : hint ? (
-            <span className={styles.hint}>{hint}</span>
+            <span className="text-sm text-muted-foreground">{hint}</span>
           ) : null}
         </div>
       </div>

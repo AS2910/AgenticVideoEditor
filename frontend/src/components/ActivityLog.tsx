@@ -1,6 +1,5 @@
 import type { Plan } from '../types'
-import { Orb } from './Orb'
-import styles from './ActivityLog.module.css'
+import { Presence } from './Presence'
 
 /** Seconds since the plan was made, as m:ss. */
 const since = (iso: string, from: string) => {
@@ -12,18 +11,18 @@ const since = (iso: string, from: string) => {
 export function ActivityLog({ plan }: { plan: Plan }) {
   if (plan.log.length === 0) return null
   return (
-    <div className={styles.log} data-testid="activity">
-      <div className={styles.head}>
-        <Orb size={20} idle />
-        <h2 className={styles.title}>What I did</h2>
-        <span className={styles.spacer} />
-        {plan.spend_usd > 0 && <span className={styles.cost}>${plan.spend_usd.toFixed(2)} for this plan</span>}
+    <div className="flex flex-col gap-2 rounded-lg border bg-card p-4 text-card-foreground shadow-xs" data-testid="activity">
+      <div className="flex items-center gap-2">
+        <Presence size={16} />
+        <h2 className="m-0 text-sm font-semibold">What I did</h2>
+        <span className="flex-1" />
+        {plan.spend_usd > 0 && <span className="tnum whitespace-nowrap text-xs text-muted-foreground">${plan.spend_usd.toFixed(2)} for this plan</span>}
       </div>
       {plan.log.map((e, i) => (
-        <div key={i} className={styles.entry}>
-          <span className={styles.at}>{since(e.at, plan.created_at)}</span>
-          <span className={styles.text}>{e.text}</span>
-          <span className={styles.detail}>{e.detail}</span>
+        <div key={i} className="flex gap-3 text-sm text-muted-foreground">
+          <span className="tnum w-11 flex-none">{since(e.at, plan.created_at)}</span>
+          <span className="flex-1 text-foreground">{e.text}</span>
+          <span className="min-w-0 max-w-[40%] overflow-hidden text-ellipsis whitespace-nowrap">{e.detail}</span>
         </div>
       ))}
     </div>

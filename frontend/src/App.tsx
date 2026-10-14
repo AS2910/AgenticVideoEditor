@@ -25,7 +25,12 @@ import type { SeamPlaying } from './components/ReviewPanel'
 import { ActivityLog } from './components/ActivityLog'
 import { ReadingCard } from './components/ReadingCard'
 import { AutonomySwitch } from './components/AutonomySwitch'
-import { Orb } from './components/Orb'
+import { Presence } from './components/Presence'
+import { ThemeToggle } from './components/ThemeToggle'
+import { Button } from '@/components/ui/button'
+import { Skeleton } from '@/components/ui/skeleton'
+import { cn } from '@/lib/utils'
+import { ArrowUp, ChevronLeft, ChevronRight, CircleCheck, Loader2 } from 'lucide-react'
 import { VoicePicker } from './components/VoicePicker'
 import { SpeakersBar } from './components/SpeakersBar'
 import { clock } from './transcript/format'
@@ -44,7 +49,6 @@ import type {
   Plan, PlanItem, Autonomy, Reading, Piece,
 } from './types'
 import { piecesFromInserts, renderTimeFrom, sourceTimeFrom } from './timeline/selection'
-import styles from './App.module.css'
 
 /** Smooth scrolling and motion are the user's call (UX-6). */
 const prefersReducedMotion = () =>
@@ -1111,8 +1115,8 @@ export default function App() {
 
   if (me === null) {
     return (
-      <div className={styles.blank} role="status" aria-busy="true">
-        <Orb size={26} working />
+      <div className="flex min-h-dvh items-center justify-center gap-3 bg-background text-muted-foreground" role="status" aria-busy="true">
+        <Presence size={20} working />
         <span>Opening…</span>
       </div>
     )
@@ -1242,45 +1246,49 @@ export default function App() {
     : captionRuns?.map((r, k) => <Fragment key={k}>{k > 0 && ' '}{r.kind === 'ins' ? <ins>{r.text}</ins> : r.text}</Fragment>)
 
   return (
-    <div className={styles.app} data-panel={panelHidden ? 'hidden' : undefined}>
+    <div
+      className="grid h-dvh grid-cols-[minmax(0,1fr)_minmax(380px,38%)] grid-rows-[auto_minmax(0,1fr)] bg-background data-[panel=hidden]:grid-cols-[minmax(0,1fr)_64px] max-[960px]:h-auto max-[960px]:grid-cols-1 max-[960px]:grid-rows-[auto_auto_auto] max-[960px]:data-[panel=hidden]:grid-cols-1"
+      data-panel={panelHidden ? 'hidden' : undefined}
+    >
       <a className="skip" href="#main">Skip to the transcript</a>
-      <header className={styles.header}>
-        <button className={styles.back} onClick={leave}>← Projects</button>
-        <h1 className={styles.brand}><Orb size={14} />Voltage</h1>
-        <span className={styles.slash} aria-hidden="true">/</span>
-        <span className={styles.filename} title={project.filename}>{project.filename}</span>
-        <span className={styles.meta}>
+      <header className="relative z-10 col-span-full flex min-h-14 items-center gap-3 border-b bg-background px-5 max-[960px]:flex-wrap max-[960px]:gap-x-2.5 max-[960px]:gap-y-2 max-[960px]:px-4 max-[960px]:py-2">
+        <Button variant="outline" size="sm" onClick={leave}>← Projects</Button>
+        <h1 className="m-0 flex items-center gap-2 text-base font-semibold tracking-tight"><Presence size={16} />Voltage</h1>
+        <span className="text-border" aria-hidden="true">/</span>
+        <span className="min-w-0 truncate text-sm font-medium max-[960px]:max-w-[40vw]" title={project.filename}>{project.filename}</span>
+        <span className="tnum whitespace-nowrap text-sm text-muted-foreground max-[960px]:hidden">
           {project.duration.toFixed(1)} s{speakers.length > 0 && `, ${speakers.length} ${speakers.length === 1 ? 'speaker' : 'speakers'}`}
         </span>
-        <span className={styles.spacer} />
+        <span className="flex-1 max-[960px]:hidden" />
         <SpendMeter usage={usage} />
+        <ThemeToggle />
         {me.user && (
-          <span className={styles.who} data-testid="who">
-            {me.user.picture ? <img className={styles.face} src={me.user.picture} alt="" referrerPolicy="no-referrer" /> : null}
-            <span className={styles.whoName}>{me.user.name ?? me.user.email ?? 'You'}</span>
-            <button className={styles.signOut} onClick={() => void signOut()}>Sign out</button>
+          <span className="flex items-center gap-2 whitespace-nowrap text-sm text-muted-foreground" data-testid="who">
+            {me.user.picture ? <img className="size-6 rounded-full" src={me.user.picture} alt="" referrerPolicy="no-referrer" /> : null}
+            <span className="max-w-36 truncate max-[960px]:hidden">{me.user.name ?? me.user.email ?? 'You'}</span>
+            <Button variant="ghost" size="sm" onClick={() => void signOut()}>Sign out</Button>
           </span>
         )}
         {reviewable && (
-          <button className={styles.reviewButton} aria-pressed={review} onClick={() => setReview((r) => !r)}>
+          <Button variant="outline" size="sm" aria-pressed={review} className="aria-pressed:bg-accent" onClick={() => setReview((r) => !r)}>
             {review ? 'Back to the script' : readyCount > 0 ? `Review · ${readyCount} ready` : 'Review'}
-          </button>
+          </Button>
         )}
         {reviewable && (
-          <button
-            className={styles.ship}
+          <Button
+            size="sm"
             onClick={() => void approveAll(keptItems.map((i) => i.item_id))}
             disabled={busy || keptItems.length === 0}
           >
             {keptItems.length === 0 ? 'Ship'
               : keptItems.length === readyItems.length ? `Ship ${keptItems.length} ${keptItems.length === 1 ? 'change' : 'changes'}`
               : `Ship ${keptItems.length} of ${readyItems.length}`}
-          </button>
+          </Button>
         )}
         <ExportBar segments={segments} inserts={inserts} pieces={pieces} onExport={() => void runExport()} download={download} busy={exporting} />
       </header>
 
-      <main id="main" className={styles.main} aria-busy={planBusy || undefined}>
+      <main id="main" className="flex min-h-0 flex-col gap-4 overflow-y-auto px-6 pt-4 pb-8 max-[960px]:overflow-visible max-[960px]:px-4 max-[960px]:pb-6 [&>*]:shrink-0" aria-busy={planBusy || undefined}>
         <Player
           src={showEdited ? rendered.url : artifactUrl(project.project_id, project.media.sha256)}
           duration={showEdited ? rendered.duration : project.duration}
@@ -1296,23 +1304,25 @@ export default function App() {
           placing={placing}
           onPlace={(start) => setPlacing((p) => (p ? { ...p, start } : p))}
         >
-          <button className={precise ? styles.preciseOn : styles.precise} aria-pressed={precise} onClick={() => setPrecise((p) => !p)}>Precise</button>
+          <Button variant={precise ? 'secondary' : 'ghost'} size="sm" aria-pressed={precise} onClick={() => setPrecise((p) => !p)}>Precise</Button>
           {rendered && (
-            <div className={styles.versions} role="group" aria-label="Version">
+            <div className="inline-flex gap-0.5 rounded-md bg-muted p-0.5" role="group" aria-label="Version">
               {(['edited', 'original'] as const).map((v) => (
-                <button
+                <Button
                   key={v}
-                  className={view === v ? styles.versionOn : styles.version}
+                  variant="ghost"
+                  size="sm"
+                  className={view === v ? 'bg-background shadow-xs hover:bg-background' : 'text-muted-foreground'}
                   aria-pressed={view === v}
                   onClick={() => { setView(v); setCurrentTime(0) }}
                 >
                   {v === 'edited' ? 'Edited' : 'Original'}
-                </button>
+                </Button>
               ))}
             </div>
           )}
         </Player>
-        {error && <div className={styles.error} role="alert">{error}</div>}
+        {error && <div className="rounded-md border border-needs/40 bg-needs-soft px-3 py-2 text-sm text-needs" role="alert">{error}</div>}
         {precise && (
           <Timeline
             key={project.project_id}
@@ -1386,18 +1396,21 @@ export default function App() {
       </main>
 
       {panelHidden ? (
-        <aside className={styles.rail} aria-label="Voltage, tucked away" data-testid="rail">
-          <button className={styles.railShow} onClick={showPanel} aria-label={`Show Voltage. ${stateWord[0].toUpperCase()}${stateWord.slice(1)}`}>
-            <Orb size={26} working={busy} idle={!busy && !plan} />
-          </button>
+        <aside className="flex min-h-0 flex-col items-center gap-3.5 border-l bg-card py-3.5 max-[960px]:sticky max-[960px]:bottom-0 max-[960px]:z-10 max-[960px]:flex-row max-[960px]:gap-2.5 max-[960px]:border-t max-[960px]:border-l-0 max-[960px]:px-4 max-[960px]:py-2" aria-label="Voltage, tucked away" data-testid="rail">
+          <Button variant="ghost" size="icon" onClick={showPanel} aria-label={`Show Voltage. ${stateWord[0].toUpperCase()}${stateWord.slice(1)}`}>
+            <Presence size={18} working={busy} />
+          </Button>
           {(needsYou.length > 0 || readyLines.length > 0) && (
-            <span className={styles.railBadge} data-tone={needsYou.length > 0 ? 'rose' : undefined} aria-hidden="true">{needsYou.length > 0 ? needsYou.length : readyLines.length}</span>
+            <span
+              className={cn('flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-xs font-semibold text-background', needsYou.length > 0 ? 'bg-needs' : 'bg-changed')}
+              aria-hidden="true"
+            >{needsYou.length > 0 ? needsYou.length : readyLines.length}</span>
           )}
-          <span className={styles.railWord} aria-hidden="true">{stateWord}</span>
-          <span className={styles.spacer} />
+          <span className="rotate-180 whitespace-nowrap text-sm leading-none text-muted-foreground [writing-mode:vertical-rl] max-[960px]:hidden" aria-hidden="true">{stateWord}</span>
+          <span className="flex-1 max-[960px]:hidden" />
           {/* On a phone the strip carries the composer too (the polish pass): sending brings Voltage back so the reply is seen. */}
           <form
-            className={styles.railComposer}
+            className="hidden min-w-0 flex-1 items-center gap-1.5 rounded-lg border bg-background py-1 pr-1 pl-3 focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/50 max-[960px]:flex"
             onSubmit={(e) => {
               e.preventDefault()
               const text = railText.trim()
@@ -1408,26 +1421,24 @@ export default function App() {
             }}
           >
             <input
-              className={styles.railInput}
+              className="min-h-9 min-w-0 flex-1 bg-transparent text-base outline-none placeholder:text-muted-foreground pointer-coarse:min-h-11"
               type="text"
               aria-label="Ask Voltage"
               placeholder={placeholder}
               value={railText}
               onChange={(e) => setRailText(e.target.value)}
             />
-            <button type="submit" className={styles.railSend} aria-label={sendLabel} title={sendLabel} disabled={railText.trim() === ''}>
-              <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
-                <path d="M8 13V3M3.5 7.5L8 3l4.5 4.5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
-            </button>
+            <Button type="submit" size="icon" className="rounded-full" aria-label={sendLabel} title={sendLabel} disabled={railText.trim() === ''}>
+              <ArrowUp aria-hidden="true" />
+            </Button>
           </form>
-          <button className={styles.railOpen} onClick={showPanel}>Open</button>
-          <button className={styles.railShow} onClick={showPanel} aria-label="Show Voltage">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="m15 6-6 6 6 6" /></svg>
-          </button>
+          <Button variant="outline" size="sm" className="hidden max-[960px]:inline-flex" onClick={showPanel}>Open</Button>
+          <Button variant="ghost" size="icon" className="max-[960px]:hidden" onClick={showPanel} aria-label="Show Voltage">
+            <ChevronLeft aria-hidden="true" />
+          </Button>
         </aside>
       ) : (
-      <aside ref={panelRef} className={styles.panel} aria-label="Voltage" aria-busy={busy || undefined}>
+      <aside ref={panelRef} className="flex min-h-0 flex-col border-l bg-card max-[960px]:min-h-[60dvh] max-[960px]:border-t max-[960px]:border-l-0" aria-label="Voltage" aria-busy={busy || undefined}>
         <ChatPanel
           messages={messages}
           canSubmit
@@ -1442,16 +1453,16 @@ export default function App() {
             : 'For the whole video: a goal, or a change to the plan. To change one line, click it.'}
           toolbar={<VoicePicker voices={voices} value={voiceId} onChange={setVoiceId} />}
           header={
-            <div className={styles.panelHead}>
-              <Orb size={26} working={busy} idle={!busy && !plan} />
-              <h2 className={styles.panelTitle}>Voltage</h2>
-              <span className={styles.panelNote} role="status">{stateWord}</span>
-              <span className={styles.spacer} />
+            <div className="flex flex-none items-center gap-2.5 border-b px-5 py-3">
+              <Presence size={16} working={busy} />
+              <h2 className="m-0 text-sm font-semibold tracking-tight">Voltage</h2>
+              <span className="text-sm text-muted-foreground" role="status">{stateWord}</span>
+              <span className="flex-1" />
               <AutonomySwitch value={autonomy} onChange={(v) => void rememberAutonomy(v)} />
-              <button className={styles.hide} onClick={() => setPanelHidden(true)} aria-label="Hide Voltage. Press backslash to show it again">
-                Hide <kbd aria-hidden="true">\</kbd>
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="m9 6 6 6-6 6" /></svg>
-              </button>
+              <Button variant="ghost" size="sm" onClick={() => setPanelHidden(true)} aria-label="Hide Voltage. Press backslash to show it again">
+                Hide <kbd className="pointer-events-none inline-flex h-5 min-w-5 items-center justify-center rounded border bg-muted px-1 font-sans text-xs text-muted-foreground" aria-hidden="true">\</kbd>
+                <ChevronRight aria-hidden="true" />
+              </Button>
             </div>
           }
         >
@@ -1466,71 +1477,68 @@ export default function App() {
             />
           )}
           {planning && !plan && (
-            <div className={styles.skeleton} aria-hidden="true" data-testid="skeleton">
-              <span /><span /><span />
+            <div className="flex flex-col gap-2.5 rounded-lg border p-4" aria-hidden="true" data-testid="skeleton">
+              <Skeleton className="h-3.5 w-full" /><Skeleton className="h-3.5 w-[85%]" /><Skeleton className="h-3.5 w-3/5" />
             </div>
           )}
           {(planning || clarifying) && (
-            <div className={styles.thinking} data-testid="thinking">
+            <div className="flex flex-col gap-2.5 text-sm leading-normal" data-testid="thinking">
               {(plan?.findings ?? []).map((f, i) => (
-                <div key={i} className={styles.thought} style={{ animationDelay: `${i * 220}ms` }}>
-                  <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
-                    <circle cx="8" cy="8" r="7.25" fill="none" stroke="var(--accent)" strokeWidth="1.5" />
-                    <path d="M5 8.2l2 2 4-4.4" fill="none" stroke="var(--accent)" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
-                  </svg>
+                <div key={i} className="flex items-start gap-2.5 animate-in fade-in slide-in-from-bottom-1 duration-200 fill-mode-both" style={{ animationDelay: `${i * 220}ms` }}>
+                  <CircleCheck className="mt-0.5 size-4 shrink-0 text-changed" aria-hidden="true" />
                   <span>{f}</span>
                 </div>
               ))}
               {planning && (
-                <div className={`${styles.thought} ${styles.thoughtLive}`} data-testid="planning" role="status">
-                  <span className={styles.spinner} aria-hidden="true" />
-                  <span>{plan?.question ? 'Planning with your answer…' : 'Reading every line, and who says it…'}<span className={styles.caret} aria-hidden="true" /></span>
+                <div className="flex items-start gap-2.5 text-muted-foreground" data-testid="planning" role="status">
+                  <Loader2 className="mt-0.5 size-4 shrink-0 animate-spin" aria-hidden="true" />
+                  <span>{plan?.question ? 'Planning with your answer…' : 'Reading every line, and who says it…'}<span className="ml-0.5 inline-block h-3.5 w-0.5 translate-y-0.5 animate-pulse bg-changed" aria-hidden="true" /></span>
                 </div>
               )}
             </div>
           )}
           {clarifying && plan?.question && !planning && (
-            <div className={styles.question} data-testid="clarify">
-              <div className={styles.questionText}>One thing before I plan. <strong>{plan.question.text}</strong></div>
-              <div className={styles.questionOptions}>
+            <div className="flex flex-col gap-3 rounded-lg border bg-background p-4 shadow-xs" data-testid="clarify">
+              <div className="text-base leading-relaxed">One thing before I plan. <strong>{plan.question.text}</strong></div>
+              <div className="flex flex-wrap gap-2">
                 {plan.question.options.map((o) => (
-                  <button key={o} className={o === plan.question?.guess ? styles.optionOn : styles.option} onClick={() => void clarify(o)}>{o}</button>
+                  <Button key={o} variant={o === plan.question?.guess ? 'default' : 'outline'} size="sm" className="rounded-full" onClick={() => void clarify(o)}>{o}</Button>
                 ))}
               </div>
-              <div className={styles.questionNote} role="status">
+              <div className="text-sm leading-normal text-muted-foreground" role="status">
                 {(plan.questions_left ?? 0) > 0 && (project.statements?.length ?? 0) === 0 ? `Question ${(plan.answers?.length ?? 0) + 1} of up to 3. ` : ''}
                 {plan.question.guess ? `My guess is ${plan.question.guess}. ` : ''}Pick one, or just say "go" and I'll use that.
               </div>
               {(project.statements?.length ?? 0) === 0 && (plan.questions_left ?? 0) > 1 && (
-                <div className={styles.questionOptions}>
-                  <button className={styles.option} onClick={() => void clarify(undefined, true)}>Go with your guesses</button>
+                <div className="flex flex-wrap gap-2">
+                  <Button variant="outline" size="sm" className="rounded-full" onClick={() => void clarify(undefined, true)}>Go with your guesses</Button>
                 </div>
               )}
             </div>
           )}
           {editingLine && !planBusy && (
-            <div className={styles.welcome}>
+            <div className="text-base leading-relaxed text-muted-foreground">
               You're on {clock(editingLine.start)}. I'll stay out of the way while you write; ask for wording and I'll offer a couple of tighter lines.
             </div>
           )}
           {plan && editingLine && plan.status === 'done' && !showPlanWhileEditing && (
-            <button className={styles.earlier} onClick={() => setShowPlanWhileEditing(true)}>
+            <Button variant="outline" className="h-auto justify-start py-2.5 text-left font-normal text-muted-foreground" onClick={() => setShowPlanWhileEditing(true)}>
               Earlier: {plan.items.filter((i) => i.status === 'approved').length} changes shipped · Show
-            </button>
+            </Button>
           )}
           {plan && (review || plan.status === 'done') && !(editingLine && plan.status === 'done' && !showPlanWhileEditing) && (
             <ActivityLog plan={plan} />
           )}
           {(needsYou.length > 0 || readyLines.length > 0) && !generating && (
-            <div className={styles.nextAction} data-testid="line-action">
-              <span className={styles.nextText}>
+            <div className="flex items-center gap-3 rounded-lg border bg-background p-3 shadow-xs" data-testid="line-action">
+              <span className="flex-1 text-sm">
                 {needsYou.length > 0
                   ? `${needsYou.length === 1 ? 'One line needs' : `${needsYou.length} lines need`} you, at ${timeOf(needsYou[0][0])}.`
                   : `${readyLines.length === 1 ? 'One line is' : `${readyLines.length} lines are`} ready to hear.`}
               </span>
-              <button className={styles.nextButton} onClick={() => atLine((needsYou[0] ?? readyLines[0])[0])}>
+              <Button size="sm" onClick={() => atLine((needsYou[0] ?? readyLines[0])[0])}>
                 {needsYou.length > 0 ? 'Go to it' : readyLines.length === 1 ? 'Go to it' : 'Go to the first'}
-              </button>
+              </Button>
             </div>
           )}
           {plan && !clarifying && !(editingLine && plan.status === 'done' && !showPlanWhileEditing) && (
@@ -1554,26 +1562,26 @@ export default function App() {
             />
           )}
           {planBusy && (
-            <div className={styles.generating} data-testid="plan-progress" role="status">
-              <div className={styles.progressRow}>
-                <div className={styles.progressTrack} role="progressbar" aria-label="Voicing the plan" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round((planProgress?.value ?? 0) * 100)}>
-                  <div className={styles.progressFill} style={{ transform: `scaleX(${Math.min(1, Math.max(0, planProgress?.value ?? 0))})` }} />
+            <div className="flex flex-col gap-1.5 text-sm text-muted-foreground" data-testid="plan-progress" role="status">
+              <div className="flex items-center gap-2.5">
+                <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-muted" role="progressbar" aria-label="Voicing the plan" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round((planProgress?.value ?? 0) * 100)}>
+                  <div className="h-full w-full origin-left bg-primary transition-transform duration-300" style={{ transform: `scaleX(${Math.min(1, Math.max(0, planProgress?.value ?? 0))})` }} />
                 </div>
-                <span className={styles.progressNote}>about {secondsLeft} s left</span>
+                <span className="tnum whitespace-nowrap text-sm text-muted-foreground">about {secondsLeft} s left</span>
               </div>
             </div>
           )}
 
           {generating && (
-            <div className={styles.generating} data-testid="generating">
-              <div className={styles.generatingStep} role="status">
-                <span className={styles.spinner} aria-hidden="true" />
+            <div className="flex flex-col gap-1.5 text-sm text-muted-foreground" data-testid="generating">
+              <div className="flex items-center gap-2 text-foreground" role="status">
+                <Loader2 className="size-3.5 shrink-0 animate-spin text-muted-foreground" aria-hidden="true" />
                 {progress?.step ?? 'Queued'}
               </div>
-              <div className={styles.progressTrack} role="progressbar" aria-label="Making the take" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round((progress?.value ?? 0) * 100)}>
+              <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-muted" role="progressbar" aria-label="Making the take" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round((progress?.value ?? 0) * 100)}>
                 <div
                   data-testid="progress-bar"
-                  className={styles.progressFill}
+                  className="h-full w-full origin-left bg-primary transition-transform duration-300"
                   style={{ transform: `scaleX(${Math.min(1, Math.max(0, progress?.value ?? 0))})` }}
                 />
               </div>
@@ -1583,9 +1591,9 @@ export default function App() {
           {candidate && (
             <>
               {ranOn && longLines === 'pause' && (
-                <div className={styles.remembered}>
+                <div className="text-sm leading-normal text-muted-foreground">
                   Longer lines run into the pause after them in this project.{' '}
-                  <button onClick={() => void rememberLongLines('ask')}>Ask me each time instead</button>
+                  <Button variant="link" size="sm" className="h-auto p-0" onClick={() => void rememberLongLines('ask')}>Ask me each time instead</Button>
                 </div>
               )}
               <CandidateCard

@@ -11,7 +11,14 @@ import { verdict } from '../transcript/verdict'
 import { parseTime, timecode } from '../transcript/time'
 import { Avatar } from './Avatar'
 import { PlaceEditor } from './PlaceEditor'
-import styles from './LineDoc.module.css'
+import { GripVertical, Loader2, Play } from 'lucide-react'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Textarea } from '@/components/ui/textarea'
+import { cn } from '@/lib/utils'
+import { Chip, ControlRow, LinkButton } from './EditorControls'
+import { editorClass, riseClass, selectClass } from './editorStyles'
 
 import { addKeyOf, keyOf } from '../transcript/keys'
 import type { LineKey } from '../transcript/keys'
@@ -99,9 +106,46 @@ const overlaps = (a: { start: number; end: number }, b: { start: number; end: nu
 const STATUS: Record<string, string> = {
   reading: 'Reading', planned: 'Planned', working: 'Voicing…', ready: 'Ready to hear', 'needs-you': 'Needs you', failed: "Couldn't voice it",
 }
+/** A row's state is a quiet badge, tinted only where it means something: changed, needs you, kept. */
 const TONE: Record<string, string> = {
-  reading: 'amber', planned: 'muted', working: 'muted', ready: 'amber', 'needs-you': 'rose', failed: 'rose', kept: 'ok', removed: 'muted',
+  reading: 'bg-changed-soft text-changed', planned: 'bg-secondary text-muted-foreground', working: 'bg-secondary text-muted-foreground',
+  ready: 'bg-changed-soft text-changed', 'needs-you': 'bg-needs-soft text-needs', failed: 'bg-needs-soft text-needs',
+  kept: 'bg-ok-soft text-ok', removed: 'bg-secondary text-muted-foreground',
 }
+const INS = 'rounded-sm bg-changed-soft px-1 text-changed no-underline'
+const DEL = 'text-muted-foreground line-through decoration-needs decoration-[1.5px]'
+const hint = 'text-sm text-muted-foreground'
+const faint = 'text-sm text-muted-foreground'
+const actionBtn = 'whitespace-nowrap'
+const rowClass = [
+  'group/row relative grid min-h-11 grid-cols-[24px_44px_24px_minmax(0,1fr)_auto] items-start gap-x-3 rounded-lg border-l-2 border-transparent py-2 pl-1.5 pr-2.5 outline-none transition-colors',
+  'max-[960px]:grid-cols-[24px_44px_24px_minmax(0,1fr)] max-[960px]:gap-y-1.5',
+  'focus-visible:bg-muted/50 focus-visible:ring-[3px] focus-visible:ring-ring/50',
+  'data-[selected=true]:border-l-primary data-[selected=true]:bg-muted/50',
+  'data-[state=reading]:bg-changed-soft data-[state=ready]:border-l-changed data-[state=needs-you]:border-l-needs data-[state=failed]:border-l-needs',
+  'data-[state=kept]:border-l-ok data-[state=moved]:border-l-ok data-[state=removed]:border-l-border data-[state=adding]:bg-muted/50',
+  'data-[dragging]:opacity-50',
+].join(' ')
+const timeClass = 'tnum -my-2.5 flex min-h-11 items-center rounded-md text-left text-sm text-muted-foreground outline-none hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50 group-data-[current=true]/row:font-semibold group-data-[current=true]/row:text-foreground'
+const gripClass = [
+  'relative -my-2.5 inline-flex h-11 w-6 cursor-grab touch-none select-none items-center justify-center rounded-md border border-transparent p-0 text-muted-foreground opacity-60 outline-none transition-opacity',
+  'before:absolute before:inset-y-0 before:-inset-x-2.5 hover:bg-accent hover:text-foreground focus-visible:opacity-100 focus-visible:ring-[3px] focus-visible:ring-ring/50 active:cursor-grabbing',
+  'group-hover/row:opacity-100 group-focus-within/row:opacity-100 max-[960px]:opacity-100',
+].join(' ')
+const lineClass = 'block min-h-0 w-full cursor-pointer rounded-sm p-0 text-left text-base leading-normal text-foreground outline-none hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50'
+const sideClass = 'flex min-h-[22px] flex-col items-end gap-1.5 empty:hidden max-[960px]:col-start-4 max-[960px]:flex-row max-[960px]:flex-wrap max-[960px]:items-center max-[960px]:justify-start'
+const metaClass = 'text-sm text-muted-foreground'
+const unfold = 'grid grid-rows-[1fr] empty:hidden *:min-h-0 ' + riseClass
+const kbd = 'mx-px inline-block min-w-[18px] rounded-sm border border-b-2 bg-muted px-1 text-center text-xs text-muted-foreground'
+const actionsClass = [
+  'absolute right-2.5 top-1.5 z-10 flex flex-wrap justify-end gap-1 rounded-lg border bg-popover p-1 shadow-md transition-opacity',
+  '[clip-path:inset(0_0_0_100%)] opacity-0 group-hover/row:opacity-100 group-hover/row:[clip-path:inset(0)] group-focus-within/row:opacity-100 group-focus-within/row:[clip-path:inset(0)] group-data-[actions-open]/row:opacity-100 group-data-[actions-open]/row:[clip-path:inset(0)]',
+  // No hover: the actions live under the line, opened by the "…" button.
+  '[@media(hover:none)]:static [@media(hover:none)]:hidden [@media(hover:none)]:justify-start [@media(hover:none)]:border-0 [@media(hover:none)]:bg-transparent [@media(hover:none)]:p-0 [@media(hover:none)]:shadow-none [@media(hover:none)]:opacity-100 [@media(hover:none)]:[clip-path:none] group-data-[actions-open]/row:[@media(hover:none)]:flex',
+].join(' ')
+const StatusBadge = ({ status, children, role }: { status: string; children: ReactNode; role?: 'status' }) => (
+  <Badge variant="secondary" className={cn('px-2.5', TONE[status])} role={role}>{children}</Badge>
+)
 const DELIVERIES = ['warmer', 'more excited', 'calmer', 'slower', 'firmer']
 const LONG_OPTIONS: { value: LongLines; label: string }[] = [
   { value: 'pause', label: 'Let Voltage fit it' },
@@ -114,13 +158,8 @@ const MIX_NOTE: Record<string, string | null> = {
 }
 const voiceLabel = (v: Voice) => (v.gender ? `${v.name} (${v.gender})` : v.name)
 
-const Spinner = () => (
-  <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" className={styles.spin}>
-    <circle cx="8" cy="8" r="7.25" fill="none" stroke="var(--line)" strokeWidth="1.5" />
-    <path d="M8 0.75a7.25 7.25 0 0 1 7.25 7.25" fill="none" stroke="var(--accent)" strokeWidth="1.5" strokeLinecap="round" />
-  </svg>
-)
-const PlayIcon = () => <svg width="10" height="12" viewBox="0 0 10 12" aria-hidden="true"><path d="M1 1l8 5-8 5z" fill="currentColor" /></svg>
+const Spinner = () => <Loader2 size={16} aria-hidden="true" className="shrink-0 animate-spin text-changed" />
+const PlayIcon = () => <Play size={14} aria-hidden="true" fill="currentColor" />
 
 /** The transcript as the working surface: every line carries its own state,
  *  actions, editor and takes. Nothing about a line happens anywhere else. */
@@ -193,10 +232,10 @@ export function LineDoc({
     // UX-5: nothing to read, so the first thing is where the voice-over goes.
     if (duration) {
       return (
-        <section className={styles.doc} aria-label="Transcript">
-          <div className={styles.heading}>
-            <h2 className={styles.title}>Voice-over</h2>
-            <span className={styles.hint}>No one speaks in this clip. Place a line where you want it, and say what it should say.</span>
+        <section className="flex flex-col gap-0.5" aria-label="Transcript">
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-2 px-2.5 pb-2 pt-1">
+            <h2 className="m-0 text-base font-semibold">Voice-over</h2>
+            <span className={hint}>No one speaks in this clip. Place a line where you want it, and say what it should say.</span>
           </div>
           <PlaceEditor
             duration={duration} voices={voices} usdPerChar={usdPerChar} longLines={longLines} disabled={disabled}
@@ -206,7 +245,7 @@ export function LineDoc({
         </section>
       )
     }
-    return <p className={styles.empty}>No lines to show. This video has no transcribed speech.</p>
+    return <p className="m-0 py-6 text-muted-foreground">No lines to show. This video has no transcribed speech.</p>
   }
 
   const name = (label?: string | null) => {
@@ -338,10 +377,9 @@ export function LineDoc({
     const preview = mode === 'edit' && draft.trim() && draft.trim() !== base
       ? diffWords(base, draft.trim()) : null
     return (
-      <div className={styles.editor} data-testid="editor">
-        <textarea
+      <div className={editorClass} data-testid="editor">
+        <Textarea
           ref={box}
-          className={styles.box}
           value={draft}
           rows={2}
           aria-label={mode === 'edit' ? 'New wording' : 'Words for the new line'}
@@ -353,87 +391,81 @@ export function LineDoc({
           }}
         />
         {preview && (
-          <div className={styles.changing}>
+          <div className="text-sm leading-normal text-muted-foreground">
             You'd be changing:{' '}
             {preview.map((run, k) => (
               <Fragment key={k}>{k > 0 && ' '}
-                {run.kind === 'same' ? <span>{run.text}</span> : run.kind === 'del' ? <del className={styles.del}>{run.text}</del> : <ins className={styles.ins}>{run.text}</ins>}
+                {run.kind === 'same' ? <span>{run.text}</span> : run.kind === 'del' ? <del className={DEL}>{run.text}</del> : <ins className={INS}>{run.text}</ins>}
               </Fragment>
             ))}
           </div>
         )}
-        <div className={styles.control}>
-          <span className={styles.controlLabel}>Delivery</span>
-          <button type="button" className={delivery === null && ownWords === null ? styles.pillOn : styles.pill} aria-pressed={delivery === null && ownWords === null} onClick={() => { setDelivery(null); setOwnWords(null) }}>As spoken</button>
+        <ControlRow label="Delivery">
+          <Chip on={delivery === null && ownWords === null} onClick={() => { setDelivery(null); setOwnWords(null) }}>As spoken</Chip>
           {DELIVERIES.map((d) => (
-            <button key={d} type="button" className={delivery === d ? styles.pillOn : styles.pill} aria-pressed={delivery === d} onClick={() => { setDelivery(d); setOwnWords(null) }}>
+            <Chip key={d} on={delivery === d} onClick={() => { setDelivery(d); setOwnWords(null) }}>
               {d.charAt(0).toUpperCase() + d.slice(1)}
-            </button>
+            </Chip>
           ))}
           {ownWords === null
-            ? <button type="button" className={styles.link} onClick={() => { setOwnWords(''); setDelivery(null) }}>in your words…</button>
-            : <input className={styles.ownWords} aria-label="Delivery, in your words" placeholder="e.g. like a secret" value={ownWords} onChange={(e) => setOwnWords(e.target.value)} />}
-        </div>
+            ? <LinkButton onClick={() => { setOwnWords(''); setDelivery(null) }}>in your words…</LinkButton>
+            : <Input className="w-48" aria-label="Delivery, in your words" placeholder="e.g. like a secret" value={ownWords} onChange={(e) => setOwnWords(e.target.value)} />}
+        </ControlRow>
         {voices.length > 0 && (
-          <div className={styles.control}>
-            <span className={styles.controlLabel}>Voice</span>
-            <select aria-label="Voice" value={voiceId} onChange={(e) => setVoiceId(e.target.value)}>
+          <ControlRow label="Voice">
+            <select className={selectClass} aria-label="Voice" value={voiceId} onChange={(e) => setVoiceId(e.target.value)}>
               <option value="">Default voice</option>
               {voices.map((v) => <option key={v.voice_id} value={v.voice_id}>{voiceLabel(v)}</option>)}
             </select>
-          </div>
+          </ControlRow>
         )}
         {mode === 'add' && (
-          <div className={styles.control}>
-            <span className={styles.controlLabel}>Starts at</span>
-            <input className={styles.ownWords} aria-label="Starts at" aria-invalid={badAt || undefined} aria-describedby="starts-at-help" placeholder={`after this line (${timecode(s.end)})`} value={at} onChange={(e) => setAt(e.target.value)} />
-            <span id="starts-at-help" className={badAt ? styles.invalid : styles.faint} role={badAt ? 'alert' : undefined}>{badAt ? 'A time like 0:04.96, or leave it empty to follow this line.' : 'Leave it empty to follow this line; or any time, like 0:04.96'}</span>
-          </div>
+          <ControlRow label="Starts at">
+            <Input className="w-56" aria-label="Starts at" aria-invalid={badAt || undefined} aria-describedby="starts-at-help" placeholder={`after this line (${timecode(s.end)})`} value={at} onChange={(e) => setAt(e.target.value)} />
+            <span id="starts-at-help" className={badAt ? 'text-destructive' : undefined} role={badAt ? 'alert' : undefined}>{badAt ? 'A time like 0:04.96, or leave it empty to follow this line.' : 'Leave it empty to follow this line; or any time, like 0:04.96'}</span>
+          </ControlRow>
         )}
         {mode === 'add' && (
-          <div className={styles.control} role="group" aria-label="Sound meets picture">
-            <span className={styles.controlLabel}>Sound meets picture</span>
-            <button type="button" className={mix === 'over' ? styles.pillOn : styles.pill} aria-pressed={mix === 'over'} onClick={() => setMix('over')}>Over the picture</button>
-            <button type="button" className={mix === 'concatenate' ? styles.pillOn : styles.pill} aria-pressed={mix === 'concatenate'} onClick={() => setMix('concatenate')}>Hold the picture</button>
-            <span className={styles.faint}>{mix === 'over' ? 'The picture keeps moving under the line.' : 'The picture waits while the line plays.'}</span>
-          </div>
+          <ControlRow label="Sound meets picture" role="group" aria-label="Sound meets picture">
+            <Chip on={mix === 'over'} onClick={() => setMix('over')}>Over the picture</Chip>
+            <Chip on={mix === 'concatenate'} onClick={() => setMix('concatenate')}>Hold the picture</Chip>
+            <span>{mix === 'over' ? 'The picture keeps moving under the line.' : 'The picture waits while the line plays.'}</span>
+          </ControlRow>
         )}
-        <div className={styles.control}>
-          <span className={styles.controlLabel}>If it runs long</span>
-          <select aria-label="If it runs long" value={onLong} onChange={(e) => chooseLong(e.target.value as LongLines)}>
+        <ControlRow label="If it runs long">
+          <select className={selectClass} aria-label="If it runs long" value={onLong} onChange={(e) => chooseLong(e.target.value as LongLines)}>
             {LONG_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
           </select>
-        </div>
-        <div className={styles.editorFoot}>
-          <span className={styles.faint}>≈ {chars} characters{cost} · ready in about 10 s</span>
-          <span className={styles.spacer} />
+        </ControlRow>
+        <div className="flex flex-wrap items-center gap-2 border-t pt-3">
+          <span className={cn(faint, 'tnum')}>≈ {chars} characters{cost} · ready in about 10 s</span>
+          <span className="flex-1" />
           {onReword && mode === 'edit' && (
-            <button type="button" className={styles.link} disabled={asking} onClick={() => void ask(s)}>
+            <LinkButton disabled={asking} onClick={() => void ask(s)}>
               {asking ? 'Asking Voltage…' : 'Ask Voltage for wording'}
-            </button>
+            </LinkButton>
           )}
-          <button type="button" className={styles.secondary} onClick={close}>Cancel</button>
-          <button
+          <Button type="button" variant="outline" onClick={close}>Cancel</Button>
+          <Button
             type="button"
-            className={styles.primary}
             aria-label="Hear it"
             disabled={disabled || !draft.trim() || badAt || (mode === 'edit' && draft.trim() === base)}
             onClick={() => hear(s)}
           >
             Hear it
-          </button>
+          </Button>
         </div>
         {offers.length > 0 && (
-          <div className={styles.offers} data-testid="offers">
-            <span className={styles.faint}>Tighter wordings that fit the gap as it is</span>
-            {offers.map((o) => <button key={o} type="button" className={styles.offer} onClick={() => { setDraft(o); setOffers([]) }}>{o}</button>)}
+          <div className="flex flex-col gap-1.5 border-t pt-3" data-testid="offers">
+            <span className={faint}>Tighter wordings that fit the gap as it is</span>
+            {offers.map((o) => <Button key={o} type="button" variant="outline" className="h-auto justify-start whitespace-normal py-2 text-left" onClick={() => { setDraft(o); setOffers([]) }}>{o}</Button>)}
           </div>
         )}
         {(() => {
           const r = readouts.find((x) => overlaps(x.selection, s))
           return r && r.tags.length > 0 ? (
-            <div className={styles.readout} data-testid="readout">
-              <span>Last take fit by:</span>{r.tags.map((t) => <span key={t} className={styles.fitTag}>{t}</span>)}
+            <div className="flex flex-wrap items-center gap-2 border-t pt-3 text-sm text-muted-foreground" data-testid="readout">
+              <span>Last take fit by:</span>{r.tags.map((t) => <Badge key={t} variant="secondary" className="bg-ok-soft px-2.5 text-ok">{t}</Badge>)}
             </div>
           ) : null
         })()}
@@ -446,26 +478,26 @@ export function LineDoc({
     const open = placing?.id === id
     const current = open ? placing!.start : start
     return (
-      <div className={styles.place} data-testid="place">
+      <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground" data-testid="place">
         {!open ? (
           <>
-            <span className={styles.faint}>Starts at {timecode(start)}</span>
-            {onPlacing && <button type="button" className={styles.link} onClick={() => { onPlacing({ id, start, duration }); setPlaceText(timecode(start)) }}>Move</button>}
+            <span className="tnum">Starts at {timecode(start)}</span>
+            {onPlacing && <LinkButton onClick={() => { onPlacing({ id, start, duration }); setPlaceText(timecode(start)) }}>Move</LinkButton>}
           </>
         ) : (
           <>
-            <span className={styles.faint}>Drag it on the bar above, or type a time:</span>
-            <input
-              className={styles.ownWords}
+            <span>Drag it on the bar above, or type a time:</span>
+            <Input
+              className="tnum w-32"
               aria-label="Starts at"
               value={placeText}
               onChange={(e) => { setPlaceText(e.target.value); const t = parseTime(e.target.value); if (t !== null) onPlacing?.({ id, start: t, duration }) }}
               onKeyDown={(e) => { if (e.key === 'Enter') { apply(current); onPlacing?.(null) } if (e.key === 'Escape') onPlacing?.(null) }}
             />
-            <button type="button" className={styles.secondary} aria-label="Nudge earlier" onClick={() => { const t = Math.round(Math.max(0, current - 0.1) * 100) / 100; onPlacing?.({ id, start: t, duration }); setPlaceText(timecode(t)) }}>◀</button>
-            <button type="button" className={styles.secondary} aria-label="Nudge later" onClick={() => { const t = Math.round((current + 0.1) * 100) / 100; onPlacing?.({ id, start: t, duration }); setPlaceText(timecode(t)) }}>▶</button>
-            <button type="button" className={styles.primary} onClick={() => { apply(current); onPlacing?.(null) }} disabled={disabled}>Put it here</button>
-            <button type="button" className={styles.ghost} onClick={() => onPlacing?.(null)}>Cancel</button>
+            <Button type="button" variant="outline" size="sm" aria-label="Nudge earlier" onClick={() => { const t = Math.round(Math.max(0, current - 0.1) * 100) / 100; onPlacing?.({ id, start: t, duration }); setPlaceText(timecode(t)) }}>◀</Button>
+            <Button type="button" variant="outline" size="sm" aria-label="Nudge later" onClick={() => { const t = Math.round((current + 0.1) * 100) / 100; onPlacing?.({ id, start: t, duration }); setPlaceText(timecode(t)) }}>▶</Button>
+            <Button type="button" size="sm" onClick={() => { apply(current); onPlacing?.(null) }} disabled={disabled}>Put it here</Button>
+            <Button type="button" variant="ghost" size="sm" onClick={() => onPlacing?.(null)}>Cancel</Button>
           </>
         )}
       </div>
@@ -477,19 +509,31 @@ export function LineDoc({
     const voice = voices.find((x) => x.voice_id === c.plan.voice_profile_id)?.name
     const held = state.request?.mix === 'over' && c.plan.mix === 'concatenate'
     return (
-      <div key={c.candidate_id} className={styles.take} data-testid="take" data-chosen={total > 1 && n === total ? 'true' : undefined}>
-        <div className={styles.takeHead}>
-          <button className={styles.play} aria-label={`Play take ${n} in the video`} aria-pressed={playing === c.candidate_id} onClick={() => onPlayTake(c)}><PlayIcon /></button>
-          <span className={styles.takeLabel}>Take {n}{voice ? ` · ${voice}'s voice` : ''}</span>
-          <span className={styles.spacer} />
-          {v.score !== null && <span className={styles.score}>{v.score.toFixed(2)}</span>}
+      <div
+        key={c.candidate_id}
+        className={cn('flex flex-col gap-2 rounded-lg border bg-card p-3 text-card-foreground shadow-xs', riseClass, total > 1 && n === total && 'border-l-2 border-l-primary')}
+        data-testid="take"
+        data-chosen={total > 1 && n === total ? 'true' : undefined}
+      >
+        <div className="flex items-center gap-2.5">
+          <Button
+            variant={playing === c.candidate_id ? 'default' : 'outline'}
+            size="icon-sm"
+            className="rounded-full"
+            aria-label={`Play take ${n} in the video`}
+            aria-pressed={playing === c.candidate_id}
+            onClick={() => onPlayTake(c)}
+          ><PlayIcon /></Button>
+          <span className="min-w-0 text-sm font-medium">Take {n}{voice ? ` · ${voice}'s voice` : ''}</span>
+          <span className="flex-1" />
+          {v.score !== null && <span className="tnum text-sm text-muted-foreground">{v.score.toFixed(2)}</span>}
         </div>
-        <div className={styles.verdict}>{v.text}{held ? ' Held the picture: no room to play over it.' : ''}</div>
+        <div className="text-sm leading-normal">{v.text}{held ? ' Held the picture: no room to play over it.' : ''}</div>
         {onMove && placeControl(c.candidate_id, c.plan.selection.start, c.audio.duration, (t) => onMove(key, c, t))}
         {total === 1 && (
-          <div className={styles.takeButtons}>
-            <button className={styles.primary} onClick={() => void run(`keep-${c.candidate_id}`, () => onKeep(key, c))} disabled={disabled || pending !== null} aria-busy={pending === `keep-${c.candidate_id}` || undefined}>{pending === `keep-${c.candidate_id}` ? 'Keeping…' : 'Keep'}</button>
-            <button className={styles.secondary} onClick={() => void run(`another-${key}`, () => onAnother(key))} disabled={disabled || pending !== null} aria-busy={pending === `another-${key}` || undefined}>{pending === `another-${key}` ? 'Asking…' : 'Another take'}</button>
+          <div className="flex flex-wrap gap-2">
+            <Button onClick={() => void run(`keep-${c.candidate_id}`, () => onKeep(key, c))} disabled={disabled || pending !== null} aria-busy={pending === `keep-${c.candidate_id}` || undefined}>{pending === `keep-${c.candidate_id}` ? 'Keeping…' : 'Keep'}</Button>
+            <Button variant="outline" onClick={() => void run(`another-${key}`, () => onAnother(key))} disabled={disabled || pending !== null} aria-busy={pending === `another-${key}` || undefined}>{pending === `another-${key}` ? 'Asking…' : 'Another take'}</Button>
           </div>
         )}
       </div>
@@ -500,29 +544,29 @@ export function LineDoc({
     const state = lines[key]
     if (!state) return null
     if (state.status === 'working') {
-      return <div className={styles.working} data-testid="line-working" role="status"><Spinner /><span>{state.progress ?? 'Voicing the line…'}</span></div>
+      return <div className={cn('flex items-center gap-2 text-sm text-muted-foreground', riseClass)} data-testid="line-working" role="status"><Spinner /><span>{state.progress ?? 'Voicing the line…'}</span></div>
     }
     if (state.status === 'failed') {
       return (
-        <div className={styles.failed} data-testid="line-error" role="alert">
-          <span className={styles.spacer}>{state.error ?? "Couldn't voice it."}</span>
-          {state.request && <button className={styles.secondary} onClick={() => onHear(key, state.request!)} disabled={disabled}>Try again</button>}
-          <button className={styles.ghost} onClick={() => onDismiss(key)}>Dismiss</button>
+        <div className={cn('flex flex-wrap items-center gap-2.5 rounded-lg border border-needs/40 bg-needs-soft p-2.5 text-sm text-foreground', riseClass)} data-testid="line-error" role="alert">
+          <span className="min-w-0 flex-1">{state.error ?? "Couldn't voice it."}</span>
+          {state.request && <Button variant="outline" size="sm" onClick={() => onHear(key, state.request!)} disabled={disabled}>Try again</Button>}
+          <Button variant="ghost" size="sm" onClick={() => onDismiss(key)}>Dismiss</Button>
         </div>
       )
     }
     if (state.status === 'needs-you' && state.question) {
       const q = state.question
       return (
-        <div className={styles.needs} data-testid="line-needs-you" role="status">
+        <div className={cn('flex flex-col gap-2 rounded-lg border border-needs/40 bg-needs-soft p-3 text-sm leading-normal text-foreground', riseClass)} data-testid="line-needs-you" role="status">
           <div>{q.question}</div>
-          <div className={styles.options}>
+          <div className="flex flex-wrap gap-2">
             {q.options.map((o, k) => (
-              <button key={k} className={k === 0 ? styles.primary : styles.secondary} onClick={() => void run(`answer-${key}`, () => onAnswer(key, o))} disabled={disabled || pending !== null} aria-busy={pending === `answer-${key}` || undefined}>
-                {o.label}{o.warning && <span className={styles.warning}> {o.warning}</span>}
-              </button>
+              <Button key={k} variant={k === 0 ? 'default' : 'outline'} onClick={() => void run(`answer-${key}`, () => onAnswer(key, o))} disabled={disabled || pending !== null} aria-busy={pending === `answer-${key}` || undefined}>
+                {o.label}{o.warning && <span className="font-normal opacity-80"> {o.warning}</span>}
+              </Button>
             ))}
-            <button className={styles.ghost} onClick={() => { onDismiss(key); open(index, 'edit') }}>Change the words instead</button>
+            <Button variant="ghost" onClick={() => { onDismiss(key); open(index, 'edit') }}>Change the words instead</Button>
           </div>
         </div>
       )
@@ -530,19 +574,19 @@ export function LineDoc({
     const takes = state.takes.slice(-2)
     const total = state.takes.length
     return (
-      <div className={styles.takes}>
-        <div className={takes.length > 1 ? styles.twoTakes : undefined}>
+      <div className="flex flex-col gap-2">
+        <div className={takes.length > 1 ? 'flex gap-2 *:min-w-0 *:flex-1 max-sm:flex-col' : undefined}>
           {takes.map((c, i) => takeCard(key, c, s, total - takes.length + i + 1, total, state))}
         </div>
         {takes.length > 1 && (
-          <div className={styles.takeButtons}>
+          <div className="flex flex-wrap gap-2">
             {takes.map((c, i) => (
-              <button key={c.candidate_id} className={i === takes.length - 1 ? styles.primary : styles.secondary} onClick={() => void run(`keep-${c.candidate_id}`, () => onKeep(key, c))} disabled={disabled || pending !== null} aria-busy={pending === `keep-${c.candidate_id}` || undefined}>
+              <Button key={c.candidate_id} variant={i === takes.length - 1 ? 'default' : 'outline'} onClick={() => void run(`keep-${c.candidate_id}`, () => onKeep(key, c))} disabled={disabled || pending !== null} aria-busy={pending === `keep-${c.candidate_id}` || undefined}>
                 {pending === `keep-${c.candidate_id}` ? 'Keeping…' : `Keep take ${total - takes.length + i + 1}`}
-              </button>
+              </Button>
             ))}
-            <button className={styles.secondary} onClick={() => void run(`another-${key}`, () => onAnother(key))} disabled={disabled || pending !== null}>{pending === `another-${key}` ? 'Asking…' : 'Another take'}</button>
-            <button className={styles.ghost} onClick={() => { onDismiss(key); open(index, 'edit') }}>Neither — change the words</button>
+            <Button variant="outline" onClick={() => void run(`another-${key}`, () => onAnother(key))} disabled={disabled || pending !== null}>{pending === `another-${key}` ? 'Asking…' : 'Another take'}</Button>
+            <Button variant="ghost" onClick={() => { onDismiss(key); open(index, 'edit') }}>Neither — change the words</Button>
           </div>
         )}
       </div>
@@ -604,8 +648,8 @@ export function LineDoc({
     return target ? rows.indexOf(target) : rows.length
   }
   const dropMarker = () => drag && (
-    <div className={styles.dropLine} data-testid="drop-line" role="presentation">
-      <span>Starts at {timecode(drag.to)}</span>
+    <div className="relative mx-2.5 h-0 border-t-2 border-primary" data-testid="drop-line" role="presentation">
+      <span className="tnum absolute -top-3 right-0 rounded-full bg-primary px-2 py-0.5 text-xs font-semibold text-primary-foreground">Starts at {timecode(drag.to)}</span>
     </div>
   )
 
@@ -623,7 +667,7 @@ export function LineDoc({
     return (
       <button
         type="button"
-        className={styles.grip}
+        className={gripClass}
         aria-label={`Move the line at ${clock(start)}: drag it, or press Enter to type a time`}
         onPointerDown={(e) => startDrag(e, key, text, start, duration, apply)}
         onClick={() => { if (dragged.current) { dragged.current = false; return } onPlacing({ id, start, duration }); setPlaceText(timecode(start)) }}
@@ -632,9 +676,7 @@ export function LineDoc({
           if (e.key === 'Escape' && placing?.id === id) { e.preventDefault(); onPlacing(null) }
         }}
       >
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-          <circle cx="9" cy="6" r="1.8" /><circle cx="15" cy="6" r="1.8" /><circle cx="9" cy="12" r="1.8" /><circle cx="15" cy="12" r="1.8" /><circle cx="9" cy="18" r="1.8" /><circle cx="15" cy="18" r="1.8" />
-        </svg>
+        <GripVertical size={16} aria-hidden="true" />
       </button>
     )
   }
@@ -660,7 +702,7 @@ export function LineDoc({
         {drag && dropIndexFor(drag.to) === order && dropMarker()}
         <div
           id={key}
-          className={styles.row}
+          className={rowClass}
           data-state="moved"
           data-row-key={key}
           data-row-end={rev.end}
@@ -669,23 +711,23 @@ export function LineDoc({
           role="listitem"
           aria-label={`Moved line at ${clock(rev.start)}${label ? `, ${label}` : ''}`}
         >
-          <span className={styles.gripCell}>
+          <span className="flex items-start">
             {rev.edit_id && onMoveKept && gripButton(key, `edit-${rev.edit_id}`, s.text, rev.start, Math.max(0.05, rev.end - rev.start), (t) => onMoveKept(rev.edit_id!, t))}
           </span>
-          <button className={styles.time} onClick={() => onSeek({ ...s, start: rev.start, end: rev.end })} aria-label={`Go to ${clock(rev.start)}`}>{clock(rev.start)}</button>
-          <span className={styles.who}>{label && <Avatar name={label} slot={speakerSlot(speakers, s.speaker)} />}</span>
-          <div className={styles.body}>
-            <div className={styles.lineWrap}>
-              <span className={styles.line}>{s.text}</span>
-              <div className={styles.meta}>
+          <button className={timeClass} onClick={() => onSeek({ ...s, start: rev.start, end: rev.end })} aria-label={`Go to ${clock(rev.start)}`}>{clock(rev.start)}</button>
+          <span className="flex justify-center pt-px">{label && <Avatar name={label} slot={speakerSlot(speakers, s.speaker)} />}</span>
+          <div className="min-w-0">
+            <div className="flex flex-col gap-1.5">
+              <span className="block text-base leading-normal">{s.text}</span>
+              <div className={metaClass}>
                 Moved from {clock(from.start)}, as spoken, over the sound here.
-                {rev.edit_id && <> <button className={styles.undo} onClick={() => onUndo(rev.edit_id!)}>Undo</button></>}
+                {rev.edit_id && <> <LinkButton onClick={() => onUndo(rev.edit_id!)}>Undo</LinkButton></>}
               </div>
               {rev.edit_id && onMoveKept && placeControl(`edit-${rev.edit_id}`, rev.start, Math.max(0.05, rev.end - rev.start), (t) => onMoveKept(rev.edit_id!, t))}
             </div>
           </div>
-          <span className={styles.side}>
-            <span className={styles.chip} data-tone="ok">Moved</span>
+          <span className={sideClass}>
+            <StatusBadge status="kept">Moved</StatusBadge>
           </span>
         </div>
       </Fragment>
@@ -726,7 +768,7 @@ export function LineDoc({
         {drag && dropIndexFor(drag.to) === order && dropMarker()}
         <div
           id={`line-${i}`}
-          className={styles.row}
+          className={rowClass}
           data-current={current}
           data-selected={selected}
           data-state={status ?? undefined}
@@ -741,28 +783,28 @@ export function LineDoc({
           onFocus={(e) => { if (e.target === e.currentTarget) setFocusedRow(i) }}
           onBlur={(e) => { if (e.target === e.currentTarget) setFocusedRow((f) => (f === i ? null : f)) }}
         >
-          <span className={styles.gripCell}>
+          <span className="flex items-start">
             {mover && !isEditing && !isAdding && gripButton(key, mover.id, s.text, mover.start, mover.duration, mover.apply)}
           </span>
-          <button className={styles.time} onClick={() => onSeek(s)} aria-label={`Go to ${clock(s.start)}`}>{clock(s.start)}</button>
-          <span className={styles.who}>{newSpeaker && label && <Avatar name={label} slot={speakerSlot(speakers, s.speaker)} />}</span>
-          <div className={styles.body}>
-            {isEditing ? <div className={styles.reveal}>{editor(s, 'edit')}</div> : (
-              <div className={styles.lineWrap}>
-                <button className={styles.line} onClick={() => open(i, 'edit')} title="Change the words" data-testid={shown ? 'revision' : undefined}>
-                  {s.placed && !shown && !removed ? <span className={styles.placedLabel}>Voice-over, {timecode(s.start)}–{timecode(s.end)}</span>
-                    : removed ? <del className={styles.del}>{s.text}</del>
+          <button className={timeClass} onClick={() => onSeek(s)} aria-label={`Go to ${clock(s.start)}`}>{clock(s.start)}</button>
+          <span className="flex justify-center pt-px">{newSpeaker && label && <Avatar name={label} slot={speakerSlot(speakers, s.speaker)} />}</span>
+          <div className="min-w-0">
+            {isEditing ? <div className={unfold}>{editor(s, 'edit')}</div> : (
+              <div className="flex flex-col gap-1.5">
+                <button className={lineClass} onClick={() => open(i, 'edit')} title="Change the words" data-testid={shown ? 'revision' : undefined}>
+                  {s.placed && !shown && !removed ? <span className="italic text-muted-foreground">Voice-over, {timecode(s.start)}–{timecode(s.end)}</span>
+                    : removed ? <del className={DEL}>{s.text}</del>
                     : shown ? trackedChanges(s, shown, words).map((run, k) => (
                       <Fragment key={k}>{k > 0 && ' '}
-                        {run.kind === 'same' ? <span>{run.text}</span> : run.kind === 'del' ? <del className={styles.del}>{run.text}</del> : <ins className={styles.ins}>{run.text}</ins>}
+                        {run.kind === 'same' ? <span>{run.text}</span> : run.kind === 'del' ? <del className={DEL}>{run.text}</del> : <ins className={INS}>{run.text}</ins>}
                       </Fragment>
                     )) : s.text}
                 </button>
                 {(revision || removed) && (
-                  <div className={styles.meta}>
+                  <div className={metaClass}>
                     {movedTo ? `Moved to ${timecode(movedTo.start)}; the room's own sound stays here.`
                       : removed ? "Removed. The gap is closed with the room's own sound; the picture is untouched." : `Kept${shown && MIX_NOTE[shown.mix] ? ` · ${MIX_NOTE[shown.mix]}` : ''}.`}
-                    {revision?.edit_id && <> <button className={styles.undo} onClick={() => onUndo(revision.edit_id!)}>Undo</button></>}
+                    {revision?.edit_id && <> <LinkButton onClick={() => onUndo(revision.edit_id!)}>Undo</LinkButton></>}
                   </div>
                 )}
                 {revision && !removed && revision.edit_id && onMoveKept && (
@@ -772,74 +814,74 @@ export function LineDoc({
                   placeControl(`shift-${key}`, s.start, Math.max(0.05, s.end - s.start), (t) => onShift(s, t))
                 )}
                 {pending && !revision && pending.text && MIX_NOTE[pending.mix ?? 'replace'] && (
-                  <div className={styles.meta}>Added · {MIX_NOTE[pending.mix ?? 'replace']}</div>
+                  <div className={metaClass}>Added · {MIX_NOTE[pending.mix ?? 'replace']}</div>
                 )}
-                {!isEditing && <div className={styles.reveal}>{lineBlock(key, s, i)}</div>}
+                {!isEditing && <div className={unfold}>{lineBlock(key, s, i)}</div>}
               </div>
             )}
           </div>
-          <span className={styles.side}>
-            {status && STATUS[status] && <span className={styles.chip} data-tone={TONE[status]} role="status">{STATUS[status]}</span>}
-            {status === 'kept' && <span className={styles.chip} data-tone="ok">Kept</span>}
-            {status === 'removed' && <span className={styles.chip} data-tone="muted">{movedTo ? 'Moved away' : 'Removed'}</span>}
+          <span className={sideClass}>
+            {status && STATUS[status] && <StatusBadge status={status} role="status">{STATUS[status]}</StatusBadge>}
+            {status === 'kept' && <StatusBadge status="kept">Kept</StatusBadge>}
+            {status === 'removed' && <StatusBadge status="removed">{movedTo ? 'Moved away' : 'Removed'}</StatusBadge>}
             {!isEditing && !isAdding && (
-              <span className={styles.sideRow}>
-                <button
-                  type="button"
-                  className={styles.more}
-                  aria-label={`Actions for ${clock(s.start)}`}
-                  aria-expanded={actionsOpen === i}
-                  onClick={() => setActionsOpen((o) => (o === i ? null : i))}
-                >…</button>
-              </span>
+              <Button
+                type="button"
+                variant="outline"
+                size="icon"
+                className="hidden text-lg tracking-wide text-muted-foreground aria-expanded:bg-accent aria-expanded:text-foreground [@media(hover:none)]:inline-flex"
+                aria-label={`Actions for ${clock(s.start)}`}
+                aria-expanded={actionsOpen === i}
+                onClick={() => setActionsOpen((o) => (o === i ? null : i))}
+              >…</Button>
             )}
             {!isEditing && !isAdding && (
-              <span className={styles.actions} role="group" aria-label={`Actions for ${clock(s.start)}`}>
-                <button className={styles.action} onClick={() => { setActionsOpen(null); open(i, 'edit') }}>Change the words</button>
-                <button className={styles.action} onClick={() => { setActionsOpen(null); open(i, 'edit', true) }}>Change the delivery</button>
-                <button className={styles.action} onClick={() => { setActionsOpen(null); open(i, 'add') }}>Add a line after</button>
-                {!removed && <button className={styles.action} onClick={() => { setActionsOpen(null); onRemove(s) }}>Remove</button>}
-                {mover && up !== null && <button className={styles.action} onClick={() => { setActionsOpen(null); mover.apply(up) }}>Move up</button>}
-                {mover && down !== null && <button className={styles.action} onClick={() => { setActionsOpen(null); mover.apply(down) }}>Move down</button>}
+              <span className={actionsClass} role="group" aria-label={`Actions for ${clock(s.start)}`}>
+                <Button variant="outline" size="sm" className={actionBtn} onClick={() => { setActionsOpen(null); open(i, 'edit') }}>Change the words</Button>
+                <Button variant="outline" size="sm" className={actionBtn} onClick={() => { setActionsOpen(null); open(i, 'edit', true) }}>Change the delivery</Button>
+                <Button variant="outline" size="sm" className={actionBtn} onClick={() => { setActionsOpen(null); open(i, 'add') }}>Add a line after</Button>
+                {!removed && <Button variant="outline" size="sm" className={actionBtn} onClick={() => { setActionsOpen(null); onRemove(s) }}>Remove</Button>}
+                {mover && up !== null && <Button variant="outline" size="sm" className={actionBtn} onClick={() => { setActionsOpen(null); mover.apply(up) }}>Move up</Button>}
+                {mover && down !== null && <Button variant="outline" size="sm" className={actionBtn} onClick={() => { setActionsOpen(null); mover.apply(down) }}>Move down</Button>}
                 {mover && onPlacing && (
-                  <button className={styles.action} onClick={() => { onPlacing({ id: mover.id, start: mover.start, duration: mover.duration }); setPlaceText(timecode(mover.start)) }}>Shift to a time…</button>
+                  <Button variant="outline" size="sm" className={actionBtn} onClick={() => { onPlacing({ id: mover.id, start: mover.start, duration: mover.duration }); setPlaceText(timecode(mover.start)) }}>Shift to a time…</Button>
                 )}
-                <button className={styles.action} onClick={() => onSeek(s)}>Play original</button>
-                </span>
-                )}
-                </span>
+                <Button variant="outline" size="sm" className={actionBtn} onClick={() => onSeek(s)}>Play original</Button>
+              </span>
+            )}
+          </span>
         </div>
         {isAdding && (
-          <div className={styles.row} data-state="adding" role="listitem" aria-label={`New line after ${clock(s.start)}`}>
-            <span className={styles.gripCell} />
-            <span className={styles.time} />
-            <span className={styles.who} />
-            <div className={styles.body}><div className={styles.reveal}>{editor(s, 'add')}</div></div>
+          <div className={rowClass} data-state="adding" role="listitem" aria-label={`New line after ${clock(s.start)}`}>
+            <span />
+            <span />
+            <span />
+            <div className="min-w-0"><div className={unfold}>{editor(s, 'add')}</div></div>
           </div>
         )}
         {added && !isAdding && (
-          <div className={styles.row} data-state={added.status} role="listitem" aria-label={`New line after ${clock(s.start)}`}>
-            <span className={styles.gripCell} />
-            <span className={styles.time}>{clock(s.end)}</span>
-            <span className={styles.who} />
-            <div className={styles.body}>
-              <div className={styles.meta}>New line after {clock(s.start)}{added.request ? ` · ${added.request.mix === 'over' ? 'plays over the picture' : 'the picture makes room'}` : ''}</div>
+          <div className={rowClass} data-state={added.status} role="listitem" aria-label={`New line after ${clock(s.start)}`}>
+            <span />
+            <span className="tnum text-sm text-muted-foreground">{clock(s.end)}</span>
+            <span />
+            <div className="min-w-0">
+              <div className={metaClass}>New line after {clock(s.start)}{added.request ? ` · ${added.request.mix === 'over' ? 'plays over the picture' : 'the picture makes room'}` : ''}</div>
               {lineBlock(addKey, s, i)}
             </div>
-            <span className={styles.side}>{STATUS[added.status] && <span className={styles.chip} data-tone={TONE[added.status]} role="status">{STATUS[added.status]}</span>}</span>
+            <span className={sideClass}>{STATUS[added.status] && <StatusBadge status={added.status} role="status">{STATUS[added.status]}</StatusBadge>}</span>
           </div>
         )}
         {!isAdding && !added && i === statements.length - 1 && !(s.placed && placingAnother) && (
-          <div className={styles.addRow} role="listitem">
-            <button className={styles.add} onClick={() => (s.placed && duration ? setPlacingAnother(true) : open(i, 'add'))}><span aria-hidden="true">+</span> {s.placed ? 'Add another voice-over' : 'Add a line here'}</button>
+          <div className="px-2.5 py-1 pl-[110px] max-[960px]:pl-2.5" role="listitem">
+            <Button variant="outline" className="border-dashed text-muted-foreground shadow-none" onClick={() => (s.placed && duration ? setPlacingAnother(true) : open(i, 'add'))}><span aria-hidden="true">+</span> {s.placed ? 'Add another voice-over' : 'Add a line here'}</Button>
           </div>
         )}
         {s.placed && placingAnother && duration && i === statements.length - 1 && (
-          <div className={styles.row} data-state="adding" role="listitem" aria-label="New voice-over">
-            <span className={styles.gripCell} />
-            <span className={styles.time} />
-            <span className={styles.who} />
-            <div className={styles.body}>
+          <div className={rowClass} data-state="adding" role="listitem" aria-label="New voice-over">
+            <span />
+            <span />
+            <span />
+            <div className="min-w-0">
               <PlaceEditor
                 duration={duration} voices={voices} usdPerChar={usdPerChar} longLines={longLines} disabled={disabled}
                 placing={placing} onPlacing={onPlacing} initialStart={Math.min(duration - 1, s.end + 0.3)}
@@ -854,27 +896,27 @@ export function LineDoc({
   }
 
   return (
-    <section className={styles.doc} aria-label="Transcript">
-      <div className={styles.heading}>
-        <h2 className={styles.title}>Transcript</h2>
+    <section className="flex flex-col gap-0.5" aria-label="Transcript">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2 px-2.5 pb-2 pt-1">
+        <h2 className="m-0 text-base font-semibold">Transcript</h2>
         {filter && (
-          <div className={styles.seg} role="group" aria-label="Show">
-            <button className={filter.on ? styles.segOn : styles.segOff} aria-pressed={filter.on} onClick={() => filter.onChange(true)}>Changes · {filter.count}</button>
-            <button className={filter.on ? styles.segOff : styles.segOn} aria-pressed={!filter.on} onClick={() => filter.onChange(false)}>The whole script</button>
+          <div className="inline-flex gap-0.5 rounded-lg border bg-muted p-0.5" role="group" aria-label="Show">
+            <Button variant="ghost" size="sm" className={cn('whitespace-nowrap', filter.on && 'bg-background shadow-xs hover:bg-background dark:hover:bg-background')} aria-pressed={filter.on} onClick={() => filter.onChange(true)}>Changes · {filter.count}</Button>
+            <Button variant="ghost" size="sm" className={cn('whitespace-nowrap', !filter.on && 'bg-background shadow-xs hover:bg-background dark:hover:bg-background')} aria-pressed={!filter.on} onClick={() => filter.onChange(false)}>The whole script</Button>
           </div>
         )}
-        <span className={styles.hint}>
+        <span className={hint}>
           {review ? 'Keep what sounds right; hold the rest as drafts. The Ship button in the bar counts what you keep.'
             : editing ? (editing.mode === 'edit' ? `Editing ${clock(statements[editing.index].start)}. Enter to hear it, Esc to cancel.` : `Adding a line after ${clock(statements[editing.index].start)}. Esc to cancel.`)
             : pendingLines.some((p) => p.status === 'reading') ? "Voltage is reading. The line it's on is lit."
-            : focusedRow !== null ? <span className={styles.keys} data-testid="keys"><kbd>↑</kbd><kbd>↓</kbd> move · <kbd>Enter</kbd> change the words · <kbd>Space</kbd> play · <kbd>A</kbd> add after · <kbd>S</kbd> shift (or drag ⋮⋮) · <kbd>K</kbd> keep · <kbd>U</kbd> undo · <kbd>/</kbd> ask Voltage</span>
+            : focusedRow !== null ? <span className="whitespace-nowrap max-[960px]:hidden" data-testid="keys"><kbd className={kbd}>↑</kbd><kbd className={kbd}>↓</kbd> move · <kbd className={kbd}>Enter</kbd> change the words · <kbd className={kbd}>Space</kbd> play · <kbd className={kbd}>A</kbd> add after · <kbd className={kbd}>S</kbd> shift (or drag ⋮⋮) · <kbd className={kbd}>K</kbd> keep · <kbd className={kbd}>U</kbd> undo · <kbd className={kbd}>/</kbd> ask Voltage</span>
             : armedRow !== null ? <span role="status">Press Backspace again to remove the line at {clock(statements[armedRow].start)}.</span>
             : 'Each line carries its own state. Tap or hover a line, or press ↑ ↓ to move between them.'}
         </span>
       </div>
 
       {review ?? (
-      <div role="list" className={styles.doc} ref={list} onFocusCapture={() => setFocusTick((t) => t + 1)} onBlurCapture={() => setFocusTick((t) => t + 1)} data-focus-tick={focusTick}>
+      <div role="list" className="flex flex-col gap-0.5" ref={list} onFocusCapture={() => setFocusTick((t) => t + 1)} onBlurCapture={() => setFocusTick((t) => t + 1)} data-focus-tick={focusTick}>
         {rows.map((entry, order) => (entry.kind === 'moved' ? movedRow(entry, order) : lineRow(entry.s, entry.i, order)))}
         {drag && dropIndexFor(drag.to) === rows.length && dropMarker()}
       </div>

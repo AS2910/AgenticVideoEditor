@@ -80,7 +80,7 @@ describe('Timeline', () => {
     const { container } = render(
       <Timeline words={WORDS} duration={2.3} selection={null} currentTime={0} onSelect={onSelect} />,
     )
-    const track = container.querySelector('[class*="track"]') as HTMLElement
+    const track = container.querySelector('[data-testid="timeline-track"]') as HTMLElement
     // 230px wide track from x=0, so 1px = 0.01 s
     track.getBoundingClientRect = () =>
       ({ left: 0, width: 230, top: 0, height: 56, right: 230, bottom: 56 }) as DOMRect
@@ -95,7 +95,7 @@ describe('Timeline', () => {
     const { container } = render(
       <Timeline words={WORDS} duration={2.3} selection={null} currentTime={0} onSelect={onSelect} />,
     )
-    const track = container.querySelector('[class*="track"]') as HTMLElement
+    const track = container.querySelector('[data-testid="timeline-track"]') as HTMLElement
     fireEvent.pointerDown(track, { button: 0, clientX: 50 })
     fireEvent.pointerMove(window, { clientX: 51 })
     fireEvent.pointerUp(window, { clientX: 51 })
@@ -115,7 +115,7 @@ describe('Timeline zoom (Phase 10)', () => {
     const { container } = render(
       <Timeline words={LONG} duration={48.9} selection={null} currentTime={0} onSelect={() => {}} />,
     )
-    const track = () => container.querySelector('[class*="track"]') as HTMLElement
+    const track = () => container.querySelector('[data-testid="timeline-track"]') as HTMLElement
     expect(track().style.width).toBe(`${48.9 * 110}px`)
     await userEvent.click(screen.getByRole('button', { name: 'Fit' }))
     expect(track().style.width).toBe('')
@@ -125,7 +125,7 @@ describe('Timeline zoom (Phase 10)', () => {
     const { container } = render(
       <Timeline words={WORDS} duration={2.3} selection={null} currentTime={0} onSelect={() => {}} />,
     )
-    expect((container.querySelector('[class*="track"]') as HTMLElement).style.width).toBe('')
+    expect((container.querySelector('[data-testid="timeline-track"]') as HTMLElement).style.width).toBe('')
     expect(screen.getByRole('button', { name: 'Fit' })).toHaveAttribute('aria-pressed', 'true')
   })
 
@@ -134,7 +134,7 @@ describe('Timeline zoom (Phase 10)', () => {
       <Timeline words={LONG} duration={48.9} selection={null} currentTime={0} onSelect={() => {}} />,
     )
     await userEvent.click(screen.getByRole('button', { name: 'Zoom in' }))
-    expect((container.querySelector('[class*="track"]') as HTMLElement).style.width)
+    expect((container.querySelector('[data-testid="timeline-track"]') as HTMLElement).style.width)
       .toBe(`${48.9 * 165}px`)
   })
 })

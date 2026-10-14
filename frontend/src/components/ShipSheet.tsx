@@ -2,9 +2,10 @@ import { Fragment, useRef, useState } from 'react'
 import type { PlanItem } from '../types'
 import { diffWords } from '../transcript/changes'
 import { clock } from '../transcript/format'
-import { Orb } from './Orb'
-import { useModal } from './useModal'
-import styles from './ShipSheet.module.css'
+import { Button } from '@/components/ui/button'
+import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
+import { Presence } from './Presence'
+import { useReturnFocus } from './useReturnFocus'
 
 export interface Shipped {
   /** The lines that went into this render. */
@@ -35,11 +36,13 @@ const after = (item: PlanItem) =>
 
 /** The receipt (UX-7d, from the ship sheet of UX-3): what is in the file as
  *  stat tiles and as the lines themselves, what was held, the stand-in voice
- *  said plainly, then Download, Copy link, Make a variant. */
+ *  said plainly, then Download, Copy link, Make a variant. A shadcn Dialog:
+ *  focus lands on the title, Tab stays inside, Escape closes, and focus goes
+ *  back to whatever opened it. */
 export function ShipSheet({ shipped, onVariant, onUndo, onClose, busy }: ShipSheetProps) {
   const [copied, setCopied] = useState<boolean | 'failed'>(false)
-  const sheet = useRef<HTMLDivElement>(null)
-  useModal(sheet, onClose)
+  const title = useRef<HTMLHeadingElement>(null)
+  useReturnFocus()
   const changed = shipped.items.filter((i) => i.mix === 'replace').length
   const added = shipped.items.filter((i) => i.mix !== 'replace' && i.mix !== 'remove').length
   const removed = shipped.items.filter((i) => i.mix === 'remove').length + shipped.removed
@@ -65,57 +68,64 @@ export function ShipSheet({ shipped, onVariant, onUndo, onClose, busy }: ShipShe
     { n: `$${shipped.spendUsd.toFixed(2)}`, label: 'for this plan' },
   ]
   return (
-    <div className={styles.overlay} role="dialog" aria-modal="true" aria-labelledby="ship-title">
-      <div ref={sheet} className={styles.sheet} data-testid="ship-sheet">
-        <div className={styles.head}>
-          <Orb size={28} />
+    <Dialog open onOpenChange={(open) => { if (!open) onClose() }}>
+      <DialogContent
+        showCloseButton={false}
+        aria-describedby={undefined}
+        data-testid="ship-sheet"
+        className="max-h-[calc(100dvh-2rem)] gap-4 overflow-y-auto sm:max-w-2xl"
+        onOpenAutoFocus={(e) => { e.preventDefault(); title.current?.focus() }}
+        onInteractOutside={(e) => e.preventDefault()}
+      >
+        <div className="flex items-start gap-3">
+          <Presence size={24} className="mt-1" />
           <div>
-            <h2 id="ship-title" className={styles.title}>It's shipped.</h2>
-            <p className={styles.lead}>{length}</p>
+            <DialogTitle ref={title} tabIndex={-1} className="text-2xl tracking-tight outline-none">It's shipped.</DialogTitle>
+            <p className="m-0 mt-1 text-base text-muted-foreground">{length}</p>
           </div>
         </div>
-        <dl className={styles.tiles} aria-label="What is in the file, counted">
+        <dl className="m-0 grid grid-cols-[repeat(auto-fit,minmax(110px,1fr))] gap-4 rounded-lg border border-border bg-muted p-4" aria-label="What is in the file, counted">
           {tiles.map((t) => (
-            <div key={t.label} className={styles.tile}><dd className={styles.tileN}>{t.n}</dd><dt className={styles.tileLabel}>{t.label}</dt></div>
+            <div key={t.label} className="flex flex-col gap-0.5"><dd className="tnum m-0 text-2xl font-semibold tracking-tight">{t.n}</dd><dt className="text-xs text-muted-foreground">{t.label}</dt></div>
           ))}
         </dl>
-        <div className={styles.lines}>
-          <h3 className={styles.sub}>What's in the file</h3>
-          <ul className={styles.list} tabIndex={shipped.items.length > 4 ? 0 : undefined} aria-label="What was said">
+        <div className="flex flex-col gap-1">
+          <h3 className="m-0 mb-1 text-base font-semibold tracking-tight">What's in the file</h3>
+          <ul className="m-0 flex max-h-[30dvh] list-none flex-col overflow-y-auto p-0 outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50" tabIndex={shipped.items.length > 4 ? 0 : undefined} aria-label="What was said">
             {shipped.items.map((i) => (
-              <li key={i.item_id} className={styles.line}>
-                <span className={styles.when}>{clock(i.selection.start)}</span>
-                <span className={styles.words}>
-                  <span className="srOnly">{i.mix === 'replace' ? 'Said ' : i.mix === 'remove' ? 'Removed ' : 'Added '}</span>
-                  {i.mix === 'remove' ? <span className={styles.quiet}>Removed. The room's own quiet fills the gap.</span>
+              <li key={i.item_id} className="grid grid-cols-[44px_minmax(0,1fr)_auto] items-center gap-3 border-t border-border py-2.5 text-sm leading-normal first:border-t-0">
+                <span className="tnum text-xs text-muted-foreground">{clock(i.selection.start)}</span>
+                <span className="min-w-0">
+                  <span className="sr-only">{i.mix === 'replace' ? 'Said ' : i.mix === 'remove' ? 'Removed ' : 'Added '}</span>
+                  {i.mix === 'remove' ? <span className="text-muted-foreground">Removed. The room's own quiet fills the gap.</span>
                     : diffWords(i.old_text, after(i)).filter((r) => r.kind !== 'del').map((run, k) => (
-                      <Fragment key={k}>{k > 0 && ' '}{run.kind === 'ins' ? <ins className={styles.ins}>{run.text}</ins> : run.text}</Fragment>
+                      <Fragment key={k}>{k > 0 && ' '}{run.kind === 'ins' ? <ins className="rounded-sm bg-changed-soft px-1 text-changed no-underline">{run.text}</ins> : run.text}</Fragment>
                     ))}
-                  {i.note && <span className={styles.quiet}> {i.note}{/[.!?]$/.test(i.note) ? '' : '.'}</span>}
-                  {i.candidate?.plan.flex != null && Math.abs(i.candidate.plan.flex - 1) > 0.005 && <span className={styles.quiet}> picture at {i.candidate.plan.flex.toFixed(2)}×</span>}
+                  {i.note && <span className="text-muted-foreground"> {i.note}{/[.!?]$/.test(i.note) ? '' : '.'}</span>}
+                  {i.candidate?.plan.flex != null && Math.abs(i.candidate.plan.flex - 1) > 0.005 && <span className="text-muted-foreground"> picture at {i.candidate.plan.flex.toFixed(2)}×</span>}
                 </span>
-                {onUndo && i.edit_id && <button className={styles.undo} onClick={() => onUndo(i)} disabled={busy}>Undo</button>}
+                {onUndo && i.edit_id && <Button variant="ghost" size="sm" className="text-muted-foreground" onClick={() => onUndo(i)} disabled={busy}>Undo</Button>}
               </li>
             ))}
             {shipped.held > 0 && (
-              <li className={styles.line}>
-                <span className={styles.when} aria-hidden="true" />
-                <span className={`${styles.words} ${styles.quiet}`}>{shipped.held === 1 ? 'One change held as a draft; that line is in as shot.' : `${shipped.held} changes held as drafts; those lines are in as shot.`}</span>
+              <li className="grid grid-cols-[44px_minmax(0,1fr)_auto] items-center gap-3 border-t border-border py-2.5 text-sm leading-normal first:border-t-0">
+                <span aria-hidden="true" />
+                <span className="min-w-0 text-muted-foreground">{shipped.held === 1 ? 'One change held as a draft; that line is in as shot.' : `${shipped.held} changes held as drafts; those lines are in as shot.`}</span>
               </li>
             )}
           </ul>
         </div>
-        <p className={styles.fine}>The new words are in a stand-in voice, and the mouth still moves to the old ones.</p>
-        <div className={styles.actions}>
-          <a className={styles.primary} href={shipped.download.url} download={shipped.download.filename}>Download MP4</a>
-          <button className={styles.secondary} onClick={() => void copy()}>{copied === true ? 'Link copied' : 'Copy link'}</button>
-          <span className="srOnly" role="status">{copied === true ? 'Link copied' : copied === 'failed' ? 'Could not copy the link; use Download instead.' : ''}</span>
-          <button className={styles.secondary} onClick={onVariant} disabled={busy}>{busy ? 'Making a variant…' : 'Make a variant'}</button>
-          <span className={styles.spacer} />
-          <button className={styles.link} onClick={onClose}>Back to the transcript</button>
+        <p className="m-0 text-sm text-muted-foreground">The new words are in a stand-in voice, and the mouth still moves to the old ones.</p>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button asChild><a href={shipped.download.url} download={shipped.download.filename}>Download MP4</a></Button>
+          <Button variant="outline" onClick={() => void copy()}>{copied === true ? 'Link copied' : 'Copy link'}</Button>
+          <span className="sr-only" role="status">{copied === true ? 'Link copied' : copied === 'failed' ? 'Could not copy the link; use Download instead.' : ''}</span>
+          <Button variant="outline" onClick={onVariant} disabled={busy}>{busy ? 'Making a variant…' : 'Make a variant'}</Button>
+          <span className="flex-1" />
+          <Button variant="ghost" className="text-muted-foreground" onClick={onClose}>Back to the transcript</Button>
         </div>
-        <p className={styles.fine}>A variant is this clip again with the plan as a draft, for another offer or another wording; nothing is voiced until you say so.</p>
-      </div>
-    </div>
+        <p className="m-0 text-sm text-muted-foreground">A variant is this clip again with the plan as a draft, for another offer or another wording; nothing is voiced until you say so.</p>
+      </DialogContent>
+    </Dialog>
   )
 }
