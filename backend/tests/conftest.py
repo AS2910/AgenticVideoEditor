@@ -28,6 +28,8 @@ os.environ["AVE_DRY_RUN"] = ""
 # The measure extra (WavLM, UTMOS) stays off: no model downloads in the suite;
 # its tests inject fakes. tests/continuity/test_similarity_live.py opts in.
 os.environ["AVE_MEASURE"] = "0"
+# The SyncNet lip-sync measure (Phase 17d) likewise never loads its model in the suite.
+os.environ["AVE_MOUTH_MEASURE"] = "0"
 
 
 @pytest.fixture(scope="session", autouse=True)
