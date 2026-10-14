@@ -130,6 +130,8 @@ class ContinuityReport:
     # Which of the four scores were measured from the media. The rest are
     # either None or simulated by the mock engine.
     measured: tuple[str, ...] = ()
+    # Mean opinion score of the take, 1-5 (Phase 15d); None when not measured.
+    naturalness: float | None = None
 
 
 @dataclass(frozen=True)

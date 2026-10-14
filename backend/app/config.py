@@ -52,6 +52,12 @@ DEFAULT_INTERPOLATOR = "minterpolate"
 # 0.30 per 1k characters is roughly Creator-plan overage.
 DEFAULT_ELEVENLABS_USD_PER_1K = 0.30
 
+# Phase 15a: a clone needs this much of the speaker's own speech (ElevenLabs
+# asks for about a minute for its best result; it accepts less, and a short
+# clip's clone is rougher, which the measured match then says).
+DEFAULT_CLONE_MIN_SECONDS = 10.0
+DEFAULT_VOICE_ROUTE = "auto"    # Phase 15b: "tts" | "changer" | "auto"
+
 _TRUTHY = {"1", "true", "yes", "on"}
 
 
@@ -81,6 +87,16 @@ class Settings:
     max_flex: float = DEFAULT_MAX_FLEX
     max_living: float = DEFAULT_MAX_LIVING
     interpolator: str = DEFAULT_INTERPOLATOR
+    # Phase 15: clone each speaker's voice (on by default whenever the vendor
+    # is real); how much of their speech it takes; and how a take reaches the
+    # clone — plain text-to-speech, the Voice Changer, or the first with the
+    # second as the rung after a weak identity match.
+    clone: bool = True
+    # Phase 15c: keep the original's music and room under an edited line, by
+    # separating the voice from the bed (needs the optional `room` extra).
+    stems: bool = True
+    clone_min_seconds: float = DEFAULT_CLONE_MIN_SECONDS
+    voice_route: str = DEFAULT_VOICE_ROUTE
     # Phase 9c: "off" keeps the single local owner; "google" requires sign-in.
     auth_mode: str = "off"
     google_client_id: str | None = None
@@ -155,6 +171,10 @@ def load_settings() -> Settings:
         max_flex=max(1.0, _amount("AVE_MAX_FLEX", DEFAULT_MAX_FLEX)),
         max_living=max(1.0, _amount("AVE_MAX_LIVING", DEFAULT_MAX_LIVING)),
         interpolator=(os.environ.get("AVE_INTERPOLATOR") or DEFAULT_INTERPOLATOR).strip().lower(),
+        stems=os.environ.get("AVE_STEMS", "1").strip().lower() not in {"0", "false", "no", "off"},
+        clone=os.environ.get("AVE_CLONE", "1").strip().lower() not in {"0", "false", "no", "off"},
+        clone_min_seconds=_amount("AVE_CLONE_MIN_SECONDS", DEFAULT_CLONE_MIN_SECONDS),
+        voice_route=_voice_route(),
         auth_mode=_auth_mode(),
         google_client_id=os.environ.get("GOOGLE_CLIENT_ID") or None,
         google_client_secret=os.environ.get("GOOGLE_CLIENT_SECRET") or None,
@@ -165,6 +185,13 @@ def load_settings() -> Settings:
         chaos_force=os.environ.get("AVE_CHAOS_FORCE", "").strip().lower() in _TRUTHY,
         user_budget_usd=_amount("AVE_USER_BUDGET_USD", DEFAULT_USER_BUDGET_USD),
     )
+
+
+def _voice_route() -> str:
+    route = (os.environ.get("AVE_VOICE_ROUTE") or DEFAULT_VOICE_ROUTE).strip().lower()
+    if route not in ("tts", "changer", "auto"):
+        raise ValueError(f"AVE_VOICE_ROUTE must be 'tts', 'changer' or 'auto', got {route!r}")
+    return route
 
 
 def _auth_mode() -> str:

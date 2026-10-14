@@ -80,3 +80,27 @@ def test_a_word_whisper_gave_no_length_is_not_a_run():
     from app.media.reference import speech_runs
     words = Transcript(words=(Word("Done", 14.52, 14.52), Word("hello", 20.0, 20.4)))
     assert speech_runs(words, None) == [(20.0, 20.4)]
+
+
+# --- per speaker (Phase 15a) -------------------------------------------------
+
+TWO_VOICES = Transcript(words=tuple(
+    Word(f"w{i}", i / 3, i / 3 + 0.3, "A" if i < 6 else "B") for i in range(9)
+))
+
+
+def test_a_speakers_reference_holds_only_their_own_words():
+    from app.media.reference import speech_runs, speech_seconds
+    a = speech_runs(TWO_VOICES, None, "A")
+    b = speech_runs(TWO_VOICES, None, "B")
+    assert a and b
+    assert max(end for _, end in a) <= 2.0 <= min(start for start, _ in b)
+    assert speech_seconds(TWO_VOICES, "A") > speech_seconds(TWO_VOICES, "B") > 0
+    # Everyone together also bridges the join between the two voices.
+    assert speech_seconds(TWO_VOICES, None) >= speech_seconds(TWO_VOICES, "A") + speech_seconds(TWO_VOICES, "B")
+
+
+def test_a_clone_reference_is_none_when_the_speaker_says_too_little(loud_middle, store):
+    assert extract_reference_audio(loud_middle, TWO_VOICES, store, speaker="B", min_seconds=5.0) is None
+    ref = extract_reference_audio(loud_middle, TWO_VOICES, store, speaker="A", min_seconds=1.0)
+    assert ref is not None and ref.duration >= 1.0

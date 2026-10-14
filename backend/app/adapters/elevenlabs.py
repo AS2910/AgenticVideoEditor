@@ -1,8 +1,10 @@
-"""Real speech via ElevenLabs text-to-speech, in a stock voice (Phase 4a).
+"""Real speech via ElevenLabs text-to-speech (Phase 4a, 15a).
 
-The free tier refuses voice cloning, so this speaks the new line in a premade
-voice rather than the speaker's own — `identity = "stock"` makes the pipeline
-say so on the candidate. Phase 4b swaps `voice_id` for a clone.
+A line is spoken in a premade voice unless the speaker has a clone (15a): an
+instant clone made once from their own speech and reused by every later edit.
+`identity_for(plan)` says which, per take, so the pipeline labels a stock voice
+and only a stock voice — the speaker's own is never passed off as stock, nor
+the reverse.
 
 Facts this relies on were measured against the live API on 2026-09-23 (see the
 Phase 4a plan's spike results): `pcm_24000` is allowed on the free tier, the
@@ -29,6 +31,16 @@ from app.media import ffmpeg, fit
 from app.store.artifacts import ArtifactStore
 
 ENDPOINT = "https://api.elevenlabs.io/v1/text-to-speech/{voice_id}"
+# 15a: an instant voice clone is made from one WAV of the speaker and deleted
+# with the project (withdrawing consent leaves nothing of them at the vendor).
+# 15b: the Voice Changer re-voices a finished take into the clone, keeping the
+# take's own timing and delivery. Billed by the second of audio (about 1,000
+# credits a minute), against the same budget the characters are.
+STS_ENDPOINT = "https://api.elevenlabs.io/v1/speech-to-speech/{voice_id}"
+STS_MODEL = "eleven_multilingual_sts_v2"
+STS_CHARS_PER_SECOND = 17
+ADD_VOICE_ENDPOINT = "https://api.elevenlabs.io/v1/voices/add"
+VOICE_ENDPOINT = "https://api.elevenlabs.io/v1/voices/{voice_id}"
 # P-3: the same call, answered as JSON with the audio in base64 and a time for
 # every character, from which the take's own word times are read.
 TIMESTAMPS_ENDPOINT = ENDPOINT + "/with-timestamps"
@@ -58,6 +70,12 @@ _COST_MULTIPLIER = {
 
 # (status, body bytes, body text)
 PostFn = Callable[[str, dict, str, float], tuple[int, bytes, str]]
+# (api key, name, wav bytes, timeout) -> (status, new voice id, body text)
+AddVoiceFn = Callable[[str, str, bytes, float], tuple[int, str, str]]
+# (api key, voice id, wav bytes, timeout) -> (status, pcm bytes, body text)
+ConvertFn = Callable[[str, str, bytes, float], tuple[int, bytes, str]]
+# (api key, voice id, timeout) -> (status, body text)
+DeleteVoiceFn = Callable[[str, str, float], tuple[int, str]]
 
 
 class VoiceError(VendorError):
@@ -197,10 +215,22 @@ def decode_response(content: bytes) -> tuple[bytes, tuple[Word, ...]]:
     return content, ()
 
 
+_MISSING_PERMISSION = re.compile(r"missing the permission (\w+)")
+
+
 def _raise_for(status: int, text: str) -> None:
     if status == 429 or status >= 500:
         raise VoiceError(f"ElevenLabs is unavailable right now ({status}).")
     lowered = text.lower()
+    # A key made with limited access answers 401 and names what it lacks.
+    missing = _MISSING_PERMISSION.search(text)
+    if missing:
+        raise VoiceConfigError(
+            f"The ElevenLabs key is missing the {missing.group(1)} permission. "
+            "Allow it on the key (ElevenLabs → Developers → API keys)."
+        )
+    if "voice_limit" in lowered or "maximum amount of custom voices" in lowered:
+        raise VoiceConfigError("This ElevenLabs plan has no voice slot left for another clone.")
     if "quota" in lowered:
         raise VoiceConfigError("The ElevenLabs quota for this month is used up.")
     if status in (401, 403):
@@ -211,8 +241,56 @@ def _raise_for(status: int, text: str) -> None:
     raise VoiceConfigError(f"ElevenLabs refused the request ({status}): {detail}")
 
 
+def _add_voice(api_key: str, name: str, wav: bytes, timeout: float) -> tuple[int, str, str]:
+    try:
+        response = httpx.post(
+            ADD_VOICE_ENDPOINT,
+            headers={"xi-api-key": api_key},
+            data={"name": name, "remove_background_noise": "true",
+                  "description": "Made by Voltage from the speaker's own speech, with consent."},
+            files={"files": ("reference.wav", wav, "audio/wav")},
+            timeout=timeout,
+        )
+    except httpx.HTTPError as exc:
+        raise VoiceError(f"Could not reach ElevenLabs ({type(exc).__name__}).") from None
+    if response.status_code != 200:
+        return response.status_code, "", response.text
+    try:
+        return 200, str(response.json()["voice_id"]), ""
+    except (ValueError, KeyError):
+        return 502, "", "ElevenLabs answered without a voice id."
+
+
+def _convert(api_key: str, voice_id: str, wav: bytes, timeout: float) -> tuple[int, bytes, str]:
+    try:
+        response = httpx.post(
+            STS_ENDPOINT.format(voice_id=voice_id),
+            params={"output_format": OUTPUT_FORMAT},
+            headers={"xi-api-key": api_key},
+            data={"model_id": STS_MODEL, "remove_background_noise": "true"},
+            files={"audio": ("take.wav", wav, "audio/wav")},
+            timeout=timeout,
+        )
+    except httpx.HTTPError as exc:
+        raise VoiceError(f"Could not reach ElevenLabs ({type(exc).__name__}).") from None
+    ok = response.status_code == 200
+    return response.status_code, response.content if ok else b"", "" if ok else response.text
+
+
+def _delete_voice(api_key: str, voice_id: str, timeout: float) -> tuple[int, str]:
+    try:
+        response = httpx.delete(
+            VOICE_ENDPOINT.format(voice_id=voice_id), headers={"xi-api-key": api_key}, timeout=timeout,
+        )
+    except httpx.HTTPError as exc:
+        raise VoiceError(f"Could not reach ElevenLabs ({type(exc).__name__}).") from None
+    return response.status_code, response.text
+
+
 class ElevenLabsVoiceAdapter:
+    # What a take is by default; `identity_for` says what *this* take is.
     identity = "stock"
+    can_clone = True
 
     def __init__(
         self,
@@ -224,6 +302,9 @@ class ElevenLabsVoiceAdapter:
         voice_id: str,
         post: PostFn = _post,
         get_voices: Callable[[str, float], list[dict]] = _get_voices,
+        add_voice: AddVoiceFn = _add_voice,
+        delete_voice: DeleteVoiceFn = _delete_voice,
+        convert: ConvertFn = _convert,
         timeout: float = DEFAULT_TIMEOUT,
         takes_per_line: int = 1,
         fit_tolerance: float = fit.DEFAULT_TOLERANCE,
@@ -236,6 +317,12 @@ class ElevenLabsVoiceAdapter:
         self._voice_id = voice_id
         self._post = post
         self._get_voices = get_voices
+        self._add_voice = add_voice
+        self._delete_voice = delete_voice
+        self._convert = convert
+        # Voice ids known to be a speaker's own clone, so a take in one is
+        # labelled "clone" (set by whoever resolves the voice, before synthesis).
+        self._clones: set[str] = set()
         self._voices: list[dict] | None = None
         self._timeout = timeout
         # A paid take that did not fit its selection, kept so that when the
@@ -267,6 +354,64 @@ class ElevenLabsVoiceAdapter:
         """The voice an edit asked for, or the configured default."""
         wanted = plan.voice_profile_id
         return wanted if _VOICE_ID.fullmatch(wanted) else self._voice_id
+
+    # ── clones (15a) ──
+
+    def register_clone(self, voice_id: str) -> None:
+        self._clones.add(voice_id)
+
+    def identity_for(self, plan: EditPlan) -> str:
+        """"clone" when this take is spoken in a speaker's own cloned voice."""
+        return "clone" if self.voice_for(plan) in self._clones else "stock"
+
+    def create_clone(self, name: str, reference: Path) -> str:
+        """An instant voice clone from `reference` (a WAV of the speaker). One
+        call, no characters billed; a plan with no free voice slot or a key
+        without the voices_write permission says so in a plain sentence."""
+        status, voice_id, text = self._add_voice(self._api_key, name, Path(reference).read_bytes(), self._timeout)
+        if status != 200:
+            _raise_for(status, text.replace(self._api_key, "***"))
+        self._clones.add(voice_id)
+        return voice_id
+
+    def revoice(self, source: Source, plan: EditPlan, audio: MediaArtifact) -> MediaArtifact | None:
+        """The Voice Changer (15b): pass a finished take through the speaker's
+        clone, so it keeps its timing and delivery but takes the clone's timbre.
+        None when this take is not in a clone (nothing to convert to). Charged
+        by the second before the call and refunded if nothing came back."""
+        voice_id = self.voice_for(plan)
+        if voice_id not in self._clones:
+            return None
+        cost = math.ceil(audio.duration * STS_CHARS_PER_SECOND)
+        self._budget.charge(source.project_id, cost)
+        try:
+            status, content, text = self._convert(
+                self._api_key, voice_id, Path(audio.path).read_bytes(), self._timeout,
+            )
+        except VoiceError:
+            self._budget.refund(source.project_id, cost)
+            raise
+        if status != 200:
+            self._budget.refund(source.project_id, cost)
+            _raise_for(status, text.replace(self._api_key, "***"))
+        with tempfile.TemporaryDirectory() as tmp:
+            raw, _ = ffmpeg.pcm_to_wav(content, Path(tmp) / "changed.wav", SAMPLE_RATE)
+            # The same length as the take it came from, so it drops into the same slot.
+            exact = Path(tmp) / "exact.wav"
+            ffmpeg._run(ffmpeg.FFMPEG, [
+                "-y", "-loglevel", "error", *ffmpeg._BITEXACT_IN, "-i", str(raw),
+                "-af", "apad", "-t", f"{audio.duration:.3f}", "-c:a", "pcm_s16le", *ffmpeg._BITEXACT_OUT, str(exact),
+            ])
+            return self._store.put_file(
+                source.project_id, exact, kind="audio", container="wav", duration=ffmpeg.duration_of(exact),
+            )
+
+    def delete_clone(self, voice_id: str) -> None:
+        """Remove a clone from the vendor. Already gone (404) counts as done."""
+        status, text = self._delete_voice(self._api_key, voice_id, self._timeout)
+        if status not in (200, 404):
+            _raise_for(status, text.replace(self._api_key, "***"))
+        self._clones.discard(voice_id)
 
     def _take(self, project_id: str, voice_id: str, body: dict, plan: EditPlan) -> tuple[bytes, tuple[Word, ...]]:
         # Charged per attempt, before the call, so concurrent jobs can never

@@ -1,8 +1,9 @@
 from dataclasses import replace
 from typing import Callable
 
-from app.adapters.base import VoiceAdapter, LipSyncAdapter
+from app.adapters.base import LipSyncAdapter, VendorError, VoiceAdapter
 from app.budget import BudgetExceeded
+from app.errors import NonRetryableError
 from app.continuity.engine import Assessment
 from app.domain.models import (
     Source, EditPlan, EditCandidate, Transcript, ContinuityReport, Selection,
@@ -15,8 +16,17 @@ from app.media.ffmpeg import SpanMismatch
 ReportFn = Callable[[float, str], None]
 
 # Shown on every candidate spoken in a premade voice, so a stock voice is never
-# passed off as the speaker's.
+# passed off as the speaker's. (Phase 15a: when the line says why it is stock —
+# too little speech to clone — that sentence stands in its place.)
 STOCK_VOICE_WARNING = "Stock voice — this is not the speaker's voice yet."
+
+
+def identity_of(voice: VoiceAdapter, plan: EditPlan) -> str:
+    """Whose voice this take is: "mock", "stock" or "clone". An adapter that
+    can clone says so per take (the speaker has a clone or does not); one that
+    cannot has one identity throughout."""
+    per_take = getattr(voice, "identity_for", None)
+    return per_take(plan) if per_take else getattr(voice, "identity", "mock")
 
 
 def _noop(_progress: float, _step: str) -> None:
@@ -32,6 +42,35 @@ def _score(report: ContinuityReport) -> float:
     return min(values)
 
 
+def _revoiced(voice, continuity, source, transcript, plan, assessed: Assessment,
+              identity: str, route: str, notes: list[str]) -> Assessment:
+    """The Voice Changer rung (Phase 15b): a take in the speaker's clone is
+    passed through it again when the measured match is weak (route "auto"), or
+    always (route "changer"). The converted take is kept only if it does not
+    score worse; a vendor failure keeps the take as it was, and says so."""
+    if route == "tts" or identity != "clone" or not hasattr(voice, "revoice"):
+        return assessed
+    floor = getattr(getattr(continuity, "thresholds", None), "voice_match", 0.75)
+    match = assessed.report.voice_match
+    if route == "auto" and (match is None or match >= floor):
+        return assessed
+    try:
+        converted = voice.revoice(source, plan, assessed.audio)
+    except BudgetExceeded:
+        notes.append("The voice budget ran out before the Voice Changer could improve the match.")
+        return assessed
+    except (VendorError, NonRetryableError):
+        notes.append("The Voice Changer was unavailable, so the first take stands.")
+        return assessed
+    if converted is None:
+        return assessed
+    again = continuity.assess(source, transcript, plan, converted)
+    if route == "changer" or _score(again.report) >= _score(assessed.report):
+        notes.append("Passed through the Voice Changer for a closer match to the speaker.")
+        return again
+    return assessed
+
+
 def run_edit(
     candidate_id: str,
     plan: EditPlan,
@@ -42,6 +81,8 @@ def run_edit(
     report: ReportFn = _noop,
     transcript: Transcript | None = None,
     max_regenerations: int = 0,
+    voice_notes: tuple[str, ...] = (),
+    route: str = "tts",
 ) -> EditCandidate:
     """Run one dialogue edit through generation + continuity checking.
 
@@ -59,7 +100,8 @@ def run_edit(
     previewed, which re-running this function could not guarantee once the
     adapters are real (and non-deterministic) vendors.
     """
-    regenerations = max_regenerations if getattr(voice, "identity", "mock") != "mock" else 0
+    identity = identity_of(voice, plan)
+    regenerations = max_regenerations if identity != "mock" else 0
     takes = 1 + regenerations
     best: Assessment | None = None
     made = 0
@@ -98,6 +140,7 @@ def run_edit(
 
         report(base + span / 2, "Checking continuity")
         assessed = continuity.assess(source, transcript, plan, audio)
+        assessed = _revoiced(voice, continuity, source, transcript, plan, assessed, identity, route, notes)
         if best is None or _score(assessed.report) > _score(best.report):
             best = assessed
             fit_notes = tuple(getattr(voice, "last_notes", ()))
@@ -130,7 +173,8 @@ def run_edit(
     if made > 1:
         warnings.append(f"Regenerated {made - 1}× to improve continuity.")
     warnings.extend(notes)
-    if getattr(voice, "identity", "mock") == "stock":
+    warnings.extend(voice_notes)
+    if identity == "stock" and not voice_notes:
         # A label, not a failure: `passed` is left alone so the edit can still
         # be approved and exported.
         warnings.append(STOCK_VOICE_WARNING)

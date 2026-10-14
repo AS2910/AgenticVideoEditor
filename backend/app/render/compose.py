@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import tempfile
 import wave
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Sequence
 import math
@@ -29,13 +30,15 @@ import math
 import numpy as np
 
 from app.domain.models import Source
-from app.media import ffmpeg
+from app.media import ffmpeg, room as roommod
+from app.media.stems import Stems
 from app.render import retime
 from app.render.renderer import RenderInsert, RenderSegment
 
 OUT_RATE = 48000
 CROSSFADE = 0.02     # seconds per seam
 AUDIO_BITRATE = "192k"
+SILENT_BED_DB = -60.0  # an accompaniment quieter than this is no bed at all
 # Codecs that play in every browser inside MP4. Anything else is re-encoded.
 _COPYABLE_VIDEO = {"h264"}
 
@@ -70,8 +73,49 @@ def _write(path: Path, x: np.ndarray) -> None:
         w.writeframes(pcm.tobytes())
 
 
-def splice(base: np.ndarray, segments: Sequence[RenderSegment]) -> np.ndarray:
-    """Replace each edited span of `base` with its edit's audio, crossfaded."""
+@dataclass(frozen=True)
+class Room:
+    """What 15c knows about the original: the bed under the voice and the
+    voice's own room, ready to put on a new take."""
+    accompaniment: np.ndarray            # (samples, channels), the length of the source audio
+    profile: roommod.RoomProfile
+    context: np.ndarray                  # the speaker's separated vocals
+
+    @classmethod
+    def prepare(cls, stems: Stems | None, channels: int, samples: int) -> Room | None:
+        """None — so the render stays exactly as without stems — when there are
+        no stems, no audible bed, or too little speech to hear the room."""
+        if stems is None:
+            return None
+        try:
+            bed = _exact(decode(stems.accompaniment, channels=channels), samples, channels)
+            vocals = _exact(decode(stems.vocals, channels=channels), samples, channels)
+        except Exception:  # noqa: BLE001 - a bad stem file just means no room matching
+            return None
+        rms = float(np.sqrt(np.mean(bed.astype(np.float64) ** 2))) if bed.size else 0.0
+        if rms < 10 ** (SILENT_BED_DB / 20):
+            return None
+        profile = roommod.estimate_reverb(vocals, OUT_RATE)
+        if profile is None:
+            return None
+        return cls(bed, profile, vocals.mean(axis=1))
+
+    def take(self, audio: np.ndarray) -> np.ndarray:
+        """A generated take in the speaker's room and spectrum."""
+        wet = roommod.match_room(audio, self.profile, OUT_RATE)
+        return roommod.spectral_match(wet, self.context, OUT_RATE).astype(np.float32)
+
+
+def splice(
+    base: np.ndarray, segments: Sequence[RenderSegment], room: Room | None = None,
+) -> np.ndarray:
+    """Replace each edited span of `base` with its edit's audio, crossfaded.
+
+    With a `room`, a replaced span becomes the room-matched take over the
+    original's accompaniment: the voice part of the original (what is left of
+    `base` once the bed is taken away) fades out, the take fades in, and the
+    bed plays throughout. At the span's edges that is exactly `base`, so the
+    seams are as before and nothing outside a span is touched."""
     out = base.copy()
     channels = base.shape[1]
     cache: dict[str, np.ndarray] = {}
@@ -94,6 +138,8 @@ def splice(base: np.ndarray, segments: Sequence[RenderSegment]) -> np.ndarray:
         if len(piece) < length:
             piece = np.pad(piece, ((0, length - len(piece)), (0, 0)))
 
+        if room is not None and edit.plan.mix != "layer":
+            piece = room.take(piece)
         fade = min(round(CROSSFADE * OUT_RATE), length // 2)
         new = np.ones(length, dtype=np.float32)
         if fade:
@@ -105,7 +151,11 @@ def splice(base: np.ndarray, segments: Sequence[RenderSegment]) -> np.ndarray:
             out[i0:i1] = base[i0:i1] + piece * new[:, None]
         else:
             old = np.sqrt(np.maximum(0.0, 1.0 - new ** 2))  # equal power
-            out[i0:i1] = base[i0:i1] * old[:, None] + piece * new[:, None]
+            if room is not None:
+                bed = room.accompaniment[i0:i1]
+                out[i0:i1] = bed + (base[i0:i1] - bed) * old[:, None] + piece * new[:, None]
+            else:
+                out[i0:i1] = base[i0:i1] * old[:, None] + piece * new[:, None]
     return out
 
 
@@ -333,11 +383,18 @@ def compose(
     inserts: Sequence[RenderInsert] = (),
     pieces: Sequence[retime.Piece] | None = None,
     interpolator: str = "minterpolate",
+    stems: Stems | None = None,
 ) -> Path:
     """Write the edited video to `dest` (MP4, H.264 + AAC).
 
     With `pieces` (Phase 16) the picture and sound are assembled from them;
-    with only `inserts` every added line is a plain hold, as before."""
+    with only `inserts` every added line is a plain hold, as before.
+
+    With `stems` (Phase 15c: `media.stems.separate` of the source's audio) each
+    replaced span keeps the original's accompaniment under a take matched to
+    the speaker's room. Flexed, living and held lines are as before. Without
+    stems, with a silent bed, or with too little speech to hear the room, the
+    audio is exactly what it is without this argument."""
     if use_generated_frames:
         raise NotImplementedError("Compositing generated frames arrives with real lip-sync (Phase 5).")
     dest = Path(dest)
@@ -356,7 +413,9 @@ def compose(
         video_map = ["-map", "0:v:0", *reencode]
     # Flexed spans take their audio from their piece, not the splice.
     flexed = {p.edit.edit_id for p in (pieces or ()) if p.kind == "flex" and p.edit is not None}
-    spliced = splice(decode(source.media.path), [s for s in segments if not (s.edit and s.edit.edit_id in flexed)])
+    original = decode(source.media.path)
+    room = Room.prepare(stems, original.shape[1], len(original))
+    spliced = splice(original, [s for s in segments if not (s.edit and s.edit.edit_id in flexed)], room)
     with tempfile.TemporaryDirectory() as tmp:
         audio = Path(tmp) / "audio.wav"
         _write(audio, assemble(spliced, pieces) if not plain else spliced)

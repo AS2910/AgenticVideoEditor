@@ -23,6 +23,9 @@ os.environ["OPENAI_API_KEY"] = ""
 os.environ["ELEVENLABS_API_KEY"] = ""
 os.environ["ANTHROPIC_API_KEY"] = ""
 os.environ["AVE_DRY_RUN"] = ""
+# The measure extra (WavLM, UTMOS) stays off: no model downloads in the suite;
+# its tests inject fakes. tests/continuity/test_similarity_live.py opts in.
+os.environ["AVE_MEASURE"] = "0"
 
 
 @pytest.fixture(scope="session", autouse=True)

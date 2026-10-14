@@ -1,8 +1,9 @@
-"""Clean reference audio of the speaker, for voice cloning (Phase 4b).
+"""Clean reference audio of the speaker, for voice cloning (Phase 4b, 15a).
 
-Built now so 4b is an adapter change only. The reference is every transcribed
-word *outside* the selection, joined: the words being replaced are exactly the
-ones a clone must not learn from, and silence between words is dead weight.
+The reference is every transcribed word of one speaker, joined (silence between
+words is dead weight). A clone outlives any one edit, so it is made from all of
+that speaker's speech; `exclude` still leaves a span out for callers that want
+the words around an edit only (the continuity measures do).
 """
 from __future__ import annotations
 
@@ -27,10 +28,15 @@ _JOIN_GAP = 0.25
 _MIN_RUN = 0.05
 
 
-def speech_runs(transcript: Transcript, exclude: Selection | None) -> list[tuple[float, float]]:
-    """Spans of speech to cut, never crossing into `exclude`."""
+def speech_runs(
+    transcript: Transcript, exclude: Selection | None, speaker: str | None = None,
+) -> list[tuple[float, float]]:
+    """Spans of speech to cut, never crossing into `exclude`; with `speaker`,
+    only that speaker's words (another voice never goes into their reference)."""
     runs: list[tuple[float, float]] = []
     for word in transcript.words:
+        if speaker is not None and word.speaker != speaker:
+            continue
         if exclude and word.end > exclude.start and word.start < exclude.end:
             continue  # overlaps the selection
         if runs and word.start - runs[-1][1] <= _JOIN_GAP and not (
@@ -42,16 +48,22 @@ def speech_runs(transcript: Transcript, exclude: Selection | None) -> list[tuple
     return [(start, end) for start, end in runs if end - start >= _MIN_RUN]
 
 
+def speech_seconds(transcript: Transcript, speaker: str | None = None) -> float:
+    """How much of `speaker`'s speech there is to learn a voice from."""
+    return sum(end - start for start, end in speech_runs(transcript, None, speaker))
+
+
 def extract_reference_audio(
     source: Source,
     transcript: Transcript,
     store: ArtifactStore,
     *,
     exclude: Selection | None = None,
+    speaker: str | None = None,
     min_seconds: float = MIN_REFERENCE_SECONDS,
 ) -> MediaArtifact | None:
     """Store the speaker's speech outside `exclude` as one WAV, or None if too short."""
-    runs = speech_runs(transcript, exclude)
+    runs = speech_runs(transcript, exclude, speaker)
     if sum(end - start for start, end in runs) < min_seconds:
         return None
 
