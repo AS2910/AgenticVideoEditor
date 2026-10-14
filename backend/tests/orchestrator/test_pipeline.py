@@ -84,6 +84,41 @@ def test_a_mock_voice_is_not_labelled(store):
     assert STOCK_VOICE_WARNING not in candidate.continuity.warnings
 
 
+# --- Phase 15a: identity is per take; a clone is not labelled stock ---------
+
+class CloningVoice(RecordingVoice):
+    """A voice that knows which take is a speaker's clone."""
+
+    def __init__(self, store, clones=()):
+        super().__init__(store, "stock")
+        self.clones = set(clones)
+
+    def identity_for(self, plan):
+        return "clone" if plan.voice_profile_id in self.clones else "stock"
+
+
+def test_a_take_in_the_speakers_clone_carries_no_stock_warning(store):
+    voice = CloningVoice(store, clones={"speaker-1"})
+    candidate = run_with(store, voice)
+    assert STOCK_VOICE_WARNING not in candidate.continuity.warnings
+
+
+def test_a_stock_take_from_a_voice_that_can_clone_is_still_labelled(store):
+    candidate = run_with(store, CloningVoice(store, clones={"someone-else"}))
+    assert STOCK_VOICE_WARNING in candidate.continuity.warnings
+
+
+def test_why_a_take_is_stock_replaces_the_generic_warning(store):
+    plan = EditPlan(Selection(0.4, 1.3), "30% off", "speaker-1")
+    why = "Stock voice: only 2.9 s of Speaker B's voice, 10 s needed to clone it."
+    candidate = run_edit(
+        "c1", plan, SOURCE, CloningVoice(store), MockLipSyncAdapter(store), ContinuityEngine(),
+        voice_notes=(why,),
+    )
+    assert why in candidate.continuity.warnings
+    assert STOCK_VOICE_WARNING not in candidate.continuity.warnings
+
+
 def test_the_transcript_reaches_the_voice_for_context(store):
     transcript = Transcript(words=(Word("Get", 0.0, 0.4),))
     voice = RecordingVoice(store, "mock")
@@ -280,3 +315,94 @@ def test_a_flexed_fit_lands_on_the_plan_and_the_selection_is_left_as_shot(tmp_pa
     assert candidate.plan.flex == pytest.approx(1.08)
     assert candidate.plan.selection == Selection(1.0, 2.0)
     assert "the picture at 1.08×" in candidate.fit_notes
+
+
+# --- Phase 15b: the Voice Changer rung ---------------------------------------
+
+from dataclasses import replace as _replace  # noqa: E402
+from types import SimpleNamespace  # noqa: E402
+
+from app.adapters.base import VendorError  # noqa: E402
+
+
+class ChangerVoice(CloningVoice):
+    """A clone-capable voice whose Voice Changer is scripted."""
+
+    def __init__(self, store, converted=None, fail=None, clones=("speaker-1",)):
+        super().__init__(store, clones=clones)
+        self.converted, self.fail, self.calls = converted, fail, 0
+
+    def revoice(self, source, plan, audio):
+        self.calls += 1
+        if self.fail:
+            raise self.fail
+        return _replace(audio, sha256="c" * 64) if self.converted is not None else None
+
+
+class MatchEngine:
+    """Scores identity by which audio it is given: the converted take (sha 'c…') or the original."""
+    thresholds = SimpleNamespace(voice_match=0.75)
+
+    def __init__(self, original, converted):
+        self.original, self.converted = original, converted
+
+    def assess(self, source, transcript, plan, audio):
+        match = self.converted if audio.sha256.startswith("c") else self.original
+        return Assessment(ContinuityReport(
+            match, 0.9, 0.9, None, match is None or match >= 0.75, (),
+            measured=("voice_match",) if match is not None else (),
+        ), audio)
+
+
+def run_route(store, voice, engine, route):
+    plan = EditPlan(Selection(0.4, 1.3), "30% off", "speaker-1")
+    return run_edit("c1", plan, SOURCE, voice, MockLipSyncAdapter(store), engine, route=route)
+
+
+def test_a_weak_match_is_passed_through_the_changer_and_the_better_take_kept(store):
+    voice = ChangerVoice(store, converted=True)
+    candidate = run_route(store, voice, MatchEngine(0.5, 0.9), "auto")
+    assert voice.calls == 1
+    assert candidate.audio.sha256.startswith("c")
+    assert candidate.continuity.voice_match == 0.9 and candidate.continuity.passed
+    assert any("Voice Changer" in w for w in candidate.continuity.warnings)
+
+
+def test_a_strong_or_unmeasured_match_is_left_alone(store):
+    for original in (0.9, None):
+        voice = ChangerVoice(store, converted=True)
+        run_route(store, voice, MatchEngine(original, 0.99), "auto")
+        assert voice.calls == 0
+
+
+def test_a_conversion_that_scores_worse_is_not_kept(store):
+    voice = ChangerVoice(store, converted=True)
+    candidate = run_route(store, voice, MatchEngine(0.6, 0.4), "auto")
+    assert voice.calls == 1 and not candidate.audio.sha256.startswith("c")
+
+
+def test_the_changer_route_always_converts_a_clone_take(store):
+    voice = ChangerVoice(store, converted=True)
+    candidate = run_route(store, voice, MatchEngine(0.95, 0.9), "changer")
+    assert voice.calls == 1 and candidate.audio.sha256.startswith("c")
+
+
+def test_plain_tts_never_calls_the_changer_and_neither_does_a_stock_take(store):
+    voice = ChangerVoice(store, converted=True)
+    run_route(store, voice, MatchEngine(0.1, 0.9), "tts")
+    stock = ChangerVoice(store, converted=True, clones=())
+    run_route(store, stock, MatchEngine(0.1, 0.9), "auto")
+    assert voice.calls == 0 and stock.calls == 0
+
+
+def test_a_changer_outage_keeps_the_first_take_and_says_so(store):
+    voice = ChangerVoice(store, converted=True, fail=VendorError("down"))
+    candidate = run_route(store, voice, MatchEngine(0.5, 0.9), "auto")
+    assert not candidate.audio.sha256.startswith("c")
+    assert any("Voice Changer was unavailable" in w for w in candidate.continuity.warnings)
+
+
+def test_a_spent_budget_keeps_the_first_take_and_says_so(store):
+    voice = ChangerVoice(store, converted=True, fail=BudgetExceeded(17, 3))
+    candidate = run_route(store, voice, MatchEngine(0.5, 0.9), "auto")
+    assert any("budget ran out" in w for w in candidate.continuity.warnings)

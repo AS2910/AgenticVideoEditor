@@ -40,6 +40,8 @@ class Speaker:
     label: str                  # the diarization label, "A", "B", …
     name: str
     voice_id: str | None = None
+    # 15a: the speaker's own cloned voice at the vendor, once made.
+    clone_voice_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -146,9 +148,33 @@ class ProjectRepository:
         labels = sorted({w.speaker for w in record.transcript.words if w.speaker is not None})
         return [
             Speaker(label, saved.get(label, {}).get("name") or f"Speaker {label}",
-                    saved.get(label, {}).get("voice_id"))
+                    saved.get(label, {}).get("voice_id"), saved.get(label, {}).get("clone_voice_id"))
             for label in labels
         ]
+
+    # A clip with no diarization has one voice; its clone is kept under this key.
+    WHOLE_CLIP = "_"
+
+    def clones(self, project_id: str) -> dict[str, str]:
+        """Every clone made for this project, by speaker label (or WHOLE_CLIP)."""
+        with self.db.tx() as c:
+            row = c.execute("SELECT speakers FROM projects WHERE id = ?", (project_id,)).fetchone()
+        saved = json.loads((row["speakers"] if row else None) or "{}")
+        return {k: v["clone_voice_id"] for k, v in saved.items() if v.get("clone_voice_id")}
+
+    def set_clone(self, project_id: str, key: str, voice_id: str | None) -> None:
+        """Remember (or, with None, forget) the clone made for one speaker."""
+        with self.db.tx() as c:
+            row = c.execute("SELECT speakers FROM projects WHERE id = ?", (project_id,)).fetchone()
+            if row is None:
+                raise KeyError(project_id)
+            saved = json.loads(row["speakers"] or "{}")
+            entry = saved.setdefault(key, {})
+            if voice_id is None:
+                entry.pop("clone_voice_id", None)
+            else:
+                entry["clone_voice_id"] = voice_id
+            c.execute("UPDATE projects SET speakers = ? WHERE id = ?", (json.dumps(saved), project_id))
 
     def set_speaker(
         self, project_id: str, label: str, *, name: str | None = None,

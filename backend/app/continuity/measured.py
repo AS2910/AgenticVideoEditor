@@ -12,19 +12,22 @@ What is measured, and why only this:
 - **Audio integration** is the speech level (after auto-correction) and clarity
   (speech level above the clip's quietest part). A short clip has no true
   silence to read a room floor from, so clarity is what catches a noisy edit.
-- Voice identity and lip-sync stay None until Phases 4b and 5.
+- **Voice match** (SIM-o) and **naturalness** (UTMOS) come from open models
+  (Phase 15d, extra `measure`); without them they stay None and block nothing.
+- Lip-sync stays None until Phase 17.
 """
 from __future__ import annotations
 
 import math
 import tempfile
 import wave
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
 
-from app.continuity import signals
+from app.continuity import signals, similarity
 from app.continuity.engine import Assessment
 from app.domain.models import (
     ContinuityReport, EditPlan, MediaArtifact, Selection, Source, Transcript, Word,
@@ -47,11 +50,17 @@ SEMITONES_PER_POINT = 20.0
 LEVEL_DB_PER_POINT = 15.0
 CLARITY_DB_PER_POINT = 30.0
 
+# The speaker's own speech used as the identity reference: a wider window than
+# the pitch context, because a speaker embedding settles on more speech.
+VOICE_WINDOW = 30.0
+
 
 @dataclass(frozen=True)
 class MeasuredThresholds:
     prosody: float = 0.8
     audio_integration: float = 0.8
+    voice_match: float = 0.75   # SIM-o; a same-speaker take scores ~0.85+, a stranger ~0.5
+    naturalness: float = 3.0    # MOS, 1-5; below 3 is audibly synthetic
 
 
 def _clamp(x: float) -> float:
@@ -165,13 +174,28 @@ def _concat(path: str, spans: list[tuple[float, float]], rate: int = signals.RAT
 
 
 class MeasuredContinuityEngine:
-    """Scores prosody and audio integration from the audio itself."""
+    """Scores prosody, audio integration, voice match and naturalness from the audio itself.
 
-    measures = ("prosody", "audio_integration")
+    `match(reference, candidate)` and `mos(candidate)` default to the models of
+    `similarity` when the `measure` extra is usable, and to nothing when not;
+    tests inject fakes. `measures` lists only what is live.
+    """
 
-    def __init__(self, store: ArtifactStore, thresholds: MeasuredThresholds | None = None) -> None:
+    def __init__(
+        self, store: ArtifactStore, thresholds: MeasuredThresholds | None = None, *,
+        match: Callable[[Path, Path], float | None] | None = None,
+        mos: Callable[[Path], float | None] | None = None,
+    ) -> None:
         self._store = store
         self.thresholds = thresholds or MeasuredThresholds()
+        live = similarity.available()
+        self._match = match or (similarity.speaker_similarity if live else None)
+        self._mos = mos or (similarity.naturalness if live else None)
+        self.measures = (
+            "prosody", "audio_integration",
+            *(("voice_match",) if self._match else ()),
+            *(("naturalness",) if self._mos else ()),
+        )
 
     def assess(
         self, source: Source, transcript: Transcript | None, plan: EditPlan,
@@ -224,9 +248,10 @@ class MeasuredContinuityEngine:
             )
 
         # ── measure what is left ──
+        natural = self._mos(Path(fixed.path)) if self._mos else None
         if context is None:
             warnings.append("Not enough surrounding speech to check continuity.")
-            return Assessment(self._report(None, None, warnings), fixed)
+            return Assessment(self._report(None, None, warnings, naturalness=natural), fixed)
 
         final = signals.load(fixed.path)
         final_f0, context_f0 = signals.median_f0(final), signals.median_f0(context)
@@ -247,18 +272,51 @@ class MeasuredContinuityEngine:
         scores = [s for s in (level, clear) if s is not None]
         integration = min(scores) if scores else None
 
-        return Assessment(self._report(prosody, integration, warnings), fixed)
+        voice = self._voice_match(source, transcript, plan, Path(fixed.path))
+        return Assessment(
+            self._report(prosody, integration, warnings, voice_match=voice, naturalness=natural),
+            fixed,
+        )
+
+    def _voice_match(
+        self, source: Source, transcript: Transcript, plan: EditPlan, take: Path,
+    ) -> float | None:
+        """SIM-o of the take against the speaker's own speech outside the selection."""
+        if self._match is None:
+            return None
+        spans = context_spans(transcript, plan.selection, window=VOICE_WINDOW)
+        reference = _concat(source.media.path, spans)
+        if reference is None:
+            return None
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "reference.wav"
+            _write_wav(path, reference, signals.RATE)
+            return self._match(path, take)
 
     def _report(
         self, prosody: float | None, integration: float | None, warnings: list[str],
+        *, voice_match: float | None = None, naturalness: float | None = None,
     ) -> ContinuityReport:
-        checks = {"prosody": prosody, "audio_integration": integration}
+        if voice_match is not None and voice_match < self.thresholds.voice_match:
+            warnings.append(
+                "Sounds less like the speaker than it should "
+                f"(match {voice_match:.2f}, wants {self.thresholds.voice_match:.2f})."
+            )
+        if naturalness is not None and naturalness < self.thresholds.naturalness:
+            warnings.append(
+                "Sounds less natural than it should "
+                f"(naturalness {naturalness:.1f}, wants {self.thresholds.naturalness:.1f})."
+            )
+        checks = {
+            "voice_match": voice_match, "prosody": prosody,
+            "audio_integration": integration, "naturalness": naturalness,
+        }
         passed = all(
             value >= getattr(self.thresholds, key)
             for key, value in checks.items() if value is not None
         )
         return ContinuityReport(
-            voice_match=None, prosody=prosody, audio_integration=integration, lip_sync=None,
-            passed=passed, warnings=tuple(warnings),
+            voice_match=voice_match, prosody=prosody, audio_integration=integration, lip_sync=None,
+            passed=passed, warnings=tuple(warnings), naturalness=naturalness,
             measured=tuple(key for key, value in checks.items() if value is not None),
         )

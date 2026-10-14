@@ -23,6 +23,7 @@ from app.domain.transcript import (
 from app.media.fit import speaking_rate, syllable_budget, syllables
 from app.config import load_settings
 from app.media import frames as frames_mod, motion, shots
+from app.media import stems as stems_module
 from app.media import ffmpeg, ingest
 from app.adapters.base import VendorError
 from app.adapters.mock import MockLipSyncAdapter
@@ -37,6 +38,7 @@ from app.orchestrator.intent import Turn, edit_context
 from app.orchestrator.planner import ItemView, Line, Proposal, Question, Revision, MAX_QUESTIONS, Frame, Sight
 from app.orchestrator.questions import fit_question, mix_question
 from app.media.ffmpeg import SpanMismatch
+from app.orchestrator.clones import CloneService, VoiceChoice
 from app.orchestrator.pipeline import run_edit
 from app.store.db import Database
 from app.usage import Ledger, SpendCeilingReached, WHISPER_USD_PER_MINUTE, claude_usd
@@ -74,6 +76,9 @@ transcriber, transcriber_label = select_transcriber(settings, chaos)
 voice, voice_label = select_voice(settings, artifacts, budget, chaos)
 lipsync = MockLipSyncAdapter(artifacts)
 continuity, continuity_label = select_continuity(voice.identity, artifacts)
+# Phase 15a: each speaker's own voice, made once and reused (never under dry-run).
+clones = CloneService(repo, artifacts, voice, enabled=settings.clone and not settings.dry_run,
+                      min_seconds=settings.clone_min_seconds)
 interpreter, interpreter_label = select_interpreter(settings, chaos)
 planner, planner_label = select_planner(settings, chaos)
 jobs = JobStore()
@@ -91,6 +96,11 @@ def health() -> dict:
     return {
         "transcription": transcriber_label,
         "voice": voice_label,
+        # Phase 15a: whether a speaker's own voice will be cloned (the key's
+        # permissions are checked by `python -m app.tools.check_elevenlabs`).
+        "cloning": "on" if clones.available else "off",
+        # Phase 15c: music and room kept under an edited line (needs the `room` extra).
+        "room": "on" if settings.stems and stems_module.available() else "off",
         "lipsync": "mock",
         "continuity": continuity_label,
         "intent": interpreter_label,
@@ -153,6 +163,7 @@ class ApproveRequest(BaseModel):
 def _continuity_dict(report: ContinuityReport) -> dict:
     return {
         "voice_match": report.voice_match,
+        "naturalness": report.naturalness,
         "prosody": report.prosody,
         "audio_integration": report.audio_integration,
         "lip_sync": report.lip_sync,
@@ -705,6 +716,13 @@ def delete_project(project_id: str, owner: str = Depends(current_owner)) -> None
     """Delete the project and all of its media. This is also how consent is
     withdrawn (design spec §2): nothing of the speaker is kept."""
     _owned(project_id, owner)
+    # A clone of the speaker's voice goes with the project (Phase 15a). If the
+    # vendor cannot be reached the project is still deleted here; the failure
+    # is logged by name so the clone can be removed by hand.
+    left = clones.purge(project_id)
+    if left:
+        logging.getLogger("ave").warning(
+            "project %s deleted, but these voice clone(s) are still at ElevenLabs: %s", project_id, ", ".join(left))
     repo.delete(project_id)
     shutil.rmtree(artifacts.root / project_id, ignore_errors=True)
 
@@ -831,11 +849,12 @@ def preview_edit(
         if mix is None:
             return _asked(mix_question(intent.new_text, context))
 
-        voice_id = _voice_for(project_id, record, selection, req.voice_profile_id)
+        choice = _voice_for(project_id, record, selection, req.voice_profile_id)
+        voice_id = choice.voice_id
         try:
             candidate = _generate(
                 project_id, record, candidate_id, selection, intent.new_text, voice_id,
-                req.fit, mix, req.on_long, report, delivery=req.delivery,
+                req.fit, mix, req.on_long, report, delivery=req.delivery, voice_notes=choice.notes,
             )
         except SpanMismatch as exc:
             if req.fit is not None:
@@ -863,13 +882,13 @@ def _meter(project_id: str, what: str):
 
 
 def _voice_for(project_id: str, record: ProjectRecord, selection: Selection, requested: str,
-               speaker: str | None = None) -> str:
-    """A line in one speaker's words is spoken in that speaker's voice, if
-    one is set; otherwise in the voice asked for. `speaker` names who says it
-    when that is not the selection's speaker (an added line)."""
+               speaker: str | None = None) -> VoiceChoice:
+    """The voice a line is spoken in (Phase 15a): the one picked for that
+    speaker on purpose, else their own clone — made now if it is the first —
+    else the voice asked for, with the reason it is not their own. `speaker`
+    names who says it when that is not the selection's speaker (an added line)."""
     speaker = speaker or speaker_of(record.transcript, selection)
-    voices = {s.label: s.voice_id for s in repo.speakers(project_id)}
-    return voices.get(speaker) or requested
+    return clones.resolve(project_id, record.source, record.transcript, speaker, requested)
 
 
 # An added line can play over the picture only if the pause after its line
@@ -880,7 +899,7 @@ MIN_OVER_ROOM = 0.3
 def _generate(
     project_id: str, record: ProjectRecord, candidate_id: str, selection: Selection,
     text: str, voice_id: str, fit: str | None, mix: str, on_long: str | None, report,
-    delivery: str | None = None,
+    delivery: str | None = None, voice_notes: tuple[str, ...] = (),
 ) -> EditCandidate:
     """One line through generation and continuity, placed by the project's
     long-line policy, saved as a candidate. Raises SpanMismatch when the line
@@ -896,14 +915,14 @@ def _generate(
             window = Selection(selection.end, min(record.source.duration, selection.end + room))
             try:
                 candidate = _generate(project_id, record, candidate_id, window, text, voice_id,
-                                      None, "layer", "ask", report, delivery)
+                                      None, "layer", "ask", report, delivery, voice_notes)
             except SpanMismatch:
                 candidate = None
             if candidate is not None:
                 return candidate
             report(0.1, "No room to play over the picture; holding it instead")
         return _generate(project_id, record, candidate_id, selection, text, voice_id,
-                         fit, "concatenate", on_long, report, delivery)
+                         fit, "concatenate", on_long, report, delivery, voice_notes)
     plan = EditPlan(selection, text, voice_id, fit=fit, mix=mix, delivery=delivery)
     cost = voice.cost_of(plan)
     if not budget.can_afford(project_id, cost):
@@ -914,6 +933,7 @@ def _generate(
             candidate_id, plan, record.source, voice, lipsync, continuity, report,
             transcript=record.transcript,
             max_regenerations=settings.max_regenerations,
+            voice_notes=voice_notes, route=settings.voice_route,
         )
 
     try:
@@ -1150,6 +1170,19 @@ def _pieces(record: ProjectRecord, manifest) -> list[retime.Piece]:
     return retime.tile(source.duration, [*flexed, *living], ffmpeg.frame_rate(source.media.path))
 
 
+def _stems(record: ProjectRecord, manifest):
+    """The original's voice apart from its music and room (Phase 15c), so an
+    edited line can sit over the bed that was always there. Only when something
+    is edited, only when the optional model is installed, and kept per source."""
+    if not settings.stems or not stems_module.available():
+        return None
+    if not any(s.kind == "edited" for s in manifest.segments):
+        return None
+    with tempfile.TemporaryDirectory() as tmp:
+        wav, _ = ffmpeg.extract_audio(record.source.media.path, Path(tmp) / "source.wav", sample_rate=44100)
+        return stems_module.separate(wav, artifacts.root / record.source.project_id / "stems")
+
+
 def _export(record: ProjectRecord) -> dict:
     project_id = record.source.project_id
     manifest = render(record.source, repo.list_edits(project_id))
@@ -1161,6 +1194,7 @@ def _export(record: ProjectRecord) -> dict:
         path = compose(
             record.source, manifest.segments, Path(tmp) / "export.mp4",
             inserts=manifest.inserts, pieces=pieces, interpolator=settings.interpolator,
+            stems=_stems(record, manifest),
         )
         rendered = artifacts.put_file(
             project_id, path, kind="video", container="mp4",
@@ -1734,13 +1768,14 @@ def _run_plan(project_id: str, record: ProjectRecord, plan_id: str, item_ids: li
             step(0.05, "Synthesizing the new line")
             try:
                 _ensure_spend(project_id)
-                voice_id = _voice_for(project_id, record, item.selection,
-                                      plan.voice or getattr(voice, "default_voice", "speaker-1"),
-                                      speaker=item.speaker)
+                choice = _voice_for(project_id, record, item.selection,
+                                    plan.voice or getattr(voice, "default_voice", "speaker-1"),
+                                    speaker=item.speaker)
+                voice_id = choice.voice_id
                 candidate_id = repo.next_candidate_id(project_id)
                 candidate = with_retries(lambda: _generate(
                     project_id, record, candidate_id, item.selection, item.new_text, voice_id,
-                    item.fit, item.mix, None, step, delivery=item.delivery,
+                    item.fit, item.mix, None, step, delivery=item.delivery, voice_notes=choice.notes,
                 ))
             except SpanMismatch as exc:
                 question = _agent_fix(project_id, record, item, exc, step)

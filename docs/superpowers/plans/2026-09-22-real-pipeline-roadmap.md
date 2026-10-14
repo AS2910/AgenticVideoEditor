@@ -135,7 +135,7 @@ Grouped into three milestones. Each milestone is independently useful — you ca
     - **Calibrated** against a labelled set from the sample ad (`tests/continuity/test_calibration.py`): good = the speaker's own line (0.98) and the real ElevenLabs take (0.98); bad = ±6 semitones (0.73 / 0.67) and noise-drowned (integration 0.61). All separate at 0.8.
     - **Exit met:** 269 backend + 60 frontend tests. Live: Sarah → prosody 0.88, integration 1.00, passes; a deep male voice (George) → "Pitch is −8.7 semitones off", regenerated 2×, correctly fails.
     - Limits: the labelled set is one clip and synthetic bad cases — a start, not the spec §9 corpus. Measured only when the voice is real; offline/dry-run stays on the mock engine.
-  - [ ] **6b** *(after 4b / 5 — see Backlog)* — voice identity and lip-sync accuracy
+  - [~] **6b** — voice identity (SIM-o) and naturalness (UTMOS) **built 2026-10-14 (Phase 15d)**; lip-sync accuracy still waits for Phase 5
   - **voice identity** — speaker-embedding cosine similarity, generated vs. original (ECAPA-TDNN / resemblyzer)
   - **prosody & energy** — F0 contour, energy, and speaking-rate delta against neighboring speech
   - **audio integration** — LUFS/peak/noise-floor match to adjacent audio + micro-crossfades at seams (auto-applied per spec)
@@ -210,7 +210,7 @@ Grouped into three milestones. Each milestone is independently useful — you ca
 
 Parked 2026-09-23. Each is blocked on vendor access, not on code; nothing in the codebase is waiting half-built for them. Pick one up by writing its phase plan, as for every other phase.
 
-- [ ] **Phase 4b · Speaker's own voice** — *unblocked by:* an ElevenLabs plan with instant voice cloning (the current key is free tier: `can_use_instant_voice_cloning: false`).
+- [~] **Phase 4b · Speaker's own voice** — **built 2026-10-14 as Phase 15a** (`2026-10-14-phase-15-voice-and-room.md`); the live check waits for an ElevenLabs key that can read and write voices (the Creator-plan key made on 2026-10-14 is restricted: `python -m app.tools.check_elevenlabs`). Original blocker: the free tier refused cloning.
   - Clone from `app/media/reference.py`'s `extract_reference_audio` (built in 4a); pin its minimum length against the vendor (placeholder 10 s; ElevenLabs asks for ~1 min)
   - The adapter reports `identity = "clone"`, which drops the stock-voice warning; voice-clone type is open decision 3
   - **Exit:** the edited span is genuinely the speaker's voice saying the new words.

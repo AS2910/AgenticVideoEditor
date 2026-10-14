@@ -43,6 +43,12 @@ AVE_ELEVENLABS_USD_PER_1K=0.30            # rate for ElevenLabs cost estimates (
 AVE_TAKES_PER_LINE=3                      # takes voiced when the first misses its slot; the nearest is kept
 AVE_FIT_TOLERANCE=0.05                    # how far off the slot counts as a miss
 AVE_DRY_RUN=1                             # never call a paid vendor
+# the speaker's own voice (Phase 15; needs an ElevenLabs plan with instant cloning)
+AVE_CLONE=1                               # 0 = never clone, speak every line in a stock voice
+AVE_CLONE_MIN_SECONDS=10                  # a speaker needs this much of their own speech to be cloned
+AVE_VOICE_ROUTE=auto                      # tts | changer | auto: the Voice Changer rung after a weak identity match
+AVE_STEMS=1                               # keep the music and room under an edited line (needs the room extra)
+AVE_MEASURE=1                             # 0 = skip the SIM-o / UTMOS measures (needs the measure extra)
 # sign-in (Phase 9c); off by default, everything is one local owner
 AVE_AUTH=google                           # turn the door on
 GOOGLE_CLIENT_ID=…                        # an OAuth web client in Google Cloud Console
@@ -74,6 +80,10 @@ Two terminals. The backend must be up first — the front end proxies to it.
 cd backend
 python3.11 -m venv .venv              # first time only; 3.11+ is required
 .venv/bin/pip install -e '.[dev]'     # first time only
+# Phase 15, optional (torch + models, ~2 GB; the app runs without them):
+#   .venv/bin/pip install -e '.[room,measure]'   # stem separation (Demucs); SIM-o and UTMOS
+# Check what your ElevenLabs key can do before relying on it:
+#   .venv/bin/python -m app.tools.check_elevenlabs
 .venv/bin/uvicorn app.api.main:app --reload
 ```
 
