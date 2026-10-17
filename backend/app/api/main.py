@@ -35,7 +35,7 @@ from app.errors import NonRetryableError
 from app import chaos as chaos_module
 from app.budget import VoiceBudget, BudgetExceeded
 from app.orchestrator.intent import Turn, edit_context
-from app.orchestrator.planner import ItemView, Line, Proposal, Question, Revision, MAX_QUESTIONS, Frame, Sight
+from app.orchestrator.planner import ItemView, Line, Proposal, Question, Revision, MAX_QUESTIONS, Frame, Sight, VoiceAsk
 from app.orchestrator.questions import fit_question, mix_question
 from app.media.ffmpeg import SpanMismatch
 from app.orchestrator.clones import CloneService, VoiceChoice
@@ -81,6 +81,9 @@ clones = CloneService(repo, artifacts, voice, enabled=settings.clone and not set
                       min_seconds=settings.clone_min_seconds)
 interpreter, interpreter_label = select_interpreter(settings, chaos)
 planner, planner_label = select_planner(settings, chaos)
+# The planner reads the voice catalogue when a goal asks for a kind of voice.
+if hasattr(planner, "catalogue"):
+    planner.catalogue = voice.voices
 jobs = JobStore()
 runner = JobRunner(jobs)
 # Phase 9c: who signs people in. None while AVE_AUTH=off.
@@ -1300,6 +1303,8 @@ def _plan_dict(plan: Plan | None) -> dict | None:
         "answers": [list(a) for a in plan.answers],
         "questions_left": max(0, MAX_QUESTIONS - len(plan.answers)) if plan.question else 0,
         "voice": plan.voice,
+        "voice_asked": plan.voice_asked,
+        "voice_note": plan.voice_note,
         "spend_usd": round(ledger.spent_usd_since(plan.project_id, plan.created_at), 4) if plan.created_at else 0.0,
         # P-1: how many takes the plan voiced — the receipt shows what the ledger knows.
         "takes_voiced": ledger.calls_since(plan.project_id, VoiceBudget.VENDOR, plan.created_at) if plan.created_at else 0,
@@ -1413,16 +1418,50 @@ def _new_plan(project_id: str, record: ProjectRecord, goal: str, mode: str | Non
         raise HTTPException(status_code=502, detail=str(exc)) from exc
     except VendorError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
+    asked = _voice_ask(proposal.voice)
     plan = Plan(
         plan_id=repo.next_plan_id(project_id), project_id=project_id, goal=goal,
         summary=proposal.summary, items=(), mode=mode, status="proposed", created_at=_now(),
-        voice=voice_id,
+        voice=asked.voice_id if asked and asked.voice_id else voice_id,
+        voice_asked=bool(asked and asked.voice_id), voice_note=asked.note if asked else None,
     )
     repo.save_plan(plan)
     repo.append_log(project_id, plan.plan_id,
                     "Looked at the picture and read your goal" if silent else f"Read your goal and all {len(lines)} lines",
                     "Claude" if planner_label.startswith("anthropic") else "")
+    if asked:
+        repo.append_log(project_id, plan.plan_id, _voice_log(asked))
+        proposal = replace(proposal, summary=f"{proposal.summary} {asked.note}".strip())
     return _take_proposal(project_id, record, plan.plan_id, proposal, mode)
+
+
+def _voice_name(voice_id: str | None) -> str | None:
+    if not voice_id:
+        return None
+    return next((v["name"] for v in _catalogue() if v["voice_id"] == voice_id), None)
+
+
+def _catalogue() -> list[dict]:
+    try:
+        return list(voice.voices())
+    except VendorError:
+        return []
+
+
+def _voice_ask(ask: VoiceAsk | None) -> VoiceAsk | None:
+    """The planner's voice choice, checked against the catalogue: an id it
+    made up counts as nothing fitting, and the note says so."""
+    if ask is None:
+        return None
+    if ask.voice_id and _voice_name(ask.voice_id) is None:
+        return VoiceAsk(ask.wanted, None, f"No voice on the list fits \"{ask.wanted}\", so I kept the default voice.")
+    return ask
+
+
+def _voice_log(ask: VoiceAsk) -> str:
+    name = _voice_name(ask.voice_id)
+    return (f"Chose {name}'s voice for \"{ask.wanted}\"" if name
+            else f"No voice fits \"{ask.wanted}\"; kept the default")
 
 
 def _take_proposal(project_id: str, record: ProjectRecord, plan_id: str, proposal: Proposal, mode: str) -> dict:
@@ -1618,13 +1657,53 @@ def revise_plan(
         return _new_plan(project_id, record, instruction, plan.mode)
     repo.append_log(project_id, plan_id, f"You said: {instruction}")
     touched = _apply_revision(project_id, record, plan, revision)
-    repo.add_message(project_id, "assistant", revision.summary)
-    repo.append_log(project_id, plan_id, revision.summary if touched else "Nothing in the plan changed")
+    summary = revision.summary
+    asked = _voice_ask(revision.voice)
+    if asked:
+        touched += _set_plan_voice(project_id, plan_id, asked)
+        summary = f"{summary} {asked.note}".strip()
+    repo.add_message(project_id, "assistant", summary)
+    repo.append_log(project_id, plan_id, summary if touched else "Nothing in the plan changed")
     updated = repo.get_plan(project_id, plan_id)
-    updated = repo.update_plan(project_id, plan_id, summary=revision.summary,
+    updated = repo.update_plan(project_id, plan_id, summary=summary,
                                estimate=_estimate(project_id, updated.items),
                                status=_status_after_edit(updated))
     return _plan_dict(updated)
+
+
+def _set_plan_voice(project_id: str, plan_id: str, asked: VoiceAsk) -> int:
+    """The plan's voice from an ask: the lines not yet voiced speak in it.
+    Returns 1 when the plan changed."""
+    if not asked.voice_id:
+        repo.update_plan(project_id, plan_id, voice_note=asked.note)
+        repo.append_log(project_id, plan_id, _voice_log(asked))
+        return 0
+    repo.update_plan(project_id, plan_id, voice=asked.voice_id, voice_asked=True, voice_note=asked.note)
+    repo.append_log(project_id, plan_id, _voice_log(asked))
+    return 1
+
+
+class PlanVoiceRequest(BaseModel):
+    voice_profile_id: str
+
+
+@app.put("/projects/{project_id}/plans/{plan_id}/voice")
+def set_plan_voice(
+    project_id: str, plan_id: str, req: PlanVoiceRequest, owner: str = Depends(current_owner),
+) -> dict:
+    """Pick the voice the plan speaks in. Lines not yet voiced use it; a line
+    already voiced keeps its take until it is redone."""
+    _owned(project_id, owner)
+    plan = _plan_or_404(project_id, plan_id)
+    if plan.status in ("running", "stopping"):
+        raise HTTPException(status_code=409, detail="Stop the plan first, or wait for it to finish.")
+    name = _voice_name(req.voice_profile_id)
+    if name is None:
+        raise HTTPException(status_code=422, detail="That voice is not in the list.")
+    repo.update_plan(project_id, plan_id, voice=req.voice_profile_id, voice_asked=True,
+                     voice_note=f"You picked {name}'s voice.")
+    repo.append_log(project_id, plan_id, f"You picked {name}'s voice for the lines not yet voiced")
+    return _plan_dict(repo.get_plan(project_id, plan_id))
 
 
 def _line_index(statements, selection: Selection) -> int:
@@ -1768,9 +1847,12 @@ def _run_plan(project_id: str, record: ProjectRecord, plan_id: str, item_ids: li
             step(0.05, "Synthesizing the new line")
             try:
                 _ensure_spend(project_id)
-                choice = _voice_for(project_id, record, item.selection,
-                                    plan.voice or getattr(voice, "default_voice", "speaker-1"),
-                                    speaker=item.speaker)
+                # A voice the goal asked for speaks every line of the plan; else
+                # the speaker's own (picked, or cloned), else the chat's default.
+                choice = (VoiceChoice(plan.voice) if plan.voice_asked and plan.voice
+                          else _voice_for(project_id, record, item.selection,
+                                          plan.voice or getattr(voice, "default_voice", "speaker-1"),
+                                          speaker=item.speaker))
                 voice_id = choice.voice_id
                 candidate_id = repo.next_candidate_id(project_id)
                 candidate = with_retries(lambda: _generate(

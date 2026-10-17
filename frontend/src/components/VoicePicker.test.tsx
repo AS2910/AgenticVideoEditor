@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { VoicePicker } from './VoicePicker'
 
@@ -21,4 +21,16 @@ describe('VoicePicker', () => {
     const { container } = render(<VoicePicker voices={[]} value="" onChange={() => {}} />)
     expect(container).toBeEmptyDOMElement()
   })
+})
+
+it('groups the voices by accent once there is more than one (15e)', () => {
+  const voices = [
+    { voice_id: 'nPczCjzI2devNBz1zQrb', name: 'Brian', description: '', gender: 'male', accent: 'american', age: null },
+    { voice_id: 'kL06KYMvPY56NluIQ72m', name: 'Varsha', description: 'Warm and Clear', gender: 'female', accent: 'indian', age: 'middle_aged' },
+    { voice_id: 'vYENaCJHl4vFKNDYPr8y', name: 'Riya Rao', description: '', gender: 'female', accent: 'indian', age: null },
+  ]
+  render(<VoicePicker voices={voices} value="kL06KYMvPY56NluIQ72m" onChange={() => {}} />)
+  const groups = screen.getAllByRole('group')
+  expect(groups.map((g) => g.getAttribute('label'))).toEqual(['American', 'Indian'])
+  expect(within(groups[1]).getAllByRole('option').map((o) => o.textContent)).toEqual(['Varsha (female, indian)', 'Riya Rao (female, indian)'])
 })

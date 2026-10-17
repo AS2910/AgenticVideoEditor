@@ -274,6 +274,10 @@ export const readProject = (id: string, again = false) =>
 export const revisePlan = (id: string, planId: string, instruction: string) =>
   post<Plan>(`/projects/${id}/plans/${planId}/revise`, { instruction })
 
+/** 15e: the voice the plan speaks in; lines not yet voiced use it. */
+export const setPlanVoice = (id: string, planId: string, voiceId: string) =>
+  put<Plan>(`/projects/${id}/plans/${planId}/voice`, { voice_profile_id: voiceId })
+
 /** Stops a running plan after the line it is on. */
 export const stopPlan = (id: string, planId: string) => post<Plan>(`/projects/${id}/plans/${planId}/stop`)
 

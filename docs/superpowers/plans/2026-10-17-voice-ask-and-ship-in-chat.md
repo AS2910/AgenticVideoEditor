@@ -1,0 +1,33 @@
+# 15e · A voice you ask for, and shipping from the chat
+
+**Date:** 2026-10-17 · **Branch:** `voice-ask-and-ship-in-chat` · **Status:** built, see "As built".
+
+Two things the user hit on the Goa clip (p6) the same morning:
+
+1. *"Can you describe the place in an Indian voice"* was planned and voiced in Sarah's American voice. Two gaps stacked: the planner only ever wrote words and asked questions — the voice came from the picker under the composer, and nothing mapped a described voice to a voice id; and the catalogue was ElevenLabs' 21 stock voices, 16 American, 4 British, 1 Australian — nothing Indian to choose even for a smarter planner.
+2. *"Why does the final button go to the top?"* Once lines were voiced, the next action — Ship — lived in the header bar (UX-7d put it beside Review), against the rule agreed since: the user's next action is the panel's last element. Typed words like "ship it" went to the plan reviser, which had nothing to change.
+
+## What was built
+
+### A. The catalogue holds library voices (backend, ElevenLabs)
+- `adapters/elevenlabs.py`: `_get_voices` now lists every voice the account can speak in (v2 `/voices`, no `voice_type` filter) and keeps those `in_catalogue`: ElevenLabs' own (`premade`) and voices added from the library (`professional`, `high_quality`); a clone Voltage made (`cloned`, `voltage-…`) is never listed. `to_voice` carries `category`. Premade first, then the library's.
+- `_search_library(accent, language, use_case)` → `GET /v1/shared-voices` (most-used first, with `public_owner_id`); `_add_from_library(owner_id, voice_id, name)` → `POST /v1/voices/add/{owner}/{voice}`. Adapter methods `library()` and `add_from_library()` (the latter drops the cached list).
+- `python -m app.tools.add_voices <accent> [--add] [--max N] [--name word …] [--use-case narrative_story]`: searches the library for English voices with that accent, picks a balanced set of women and men (skipping "dark / suspenseful / intense" descriptions) or the ones named, and adds them. Adding takes a voice slot (30 on Creator) and bills nothing.
+- **Done live:** `add_voices indian --name varsha --name "riya rao" --name "viraj - smooth" --name jeevan --add` put **Varsha** (warm, clear), **Riya Rao** (confident, clear), **Viraj** (smooth, gentle) and **Jeevan** (expressive, confident) in the account. The running backend lists 25 voices; the picker groups them by accent.
+
+### B. A voice the goal asks for is honoured (backend + front end)
+- `orchestrator/planner.py`: `VoiceAsk(wanted, voice_id, note)` on `Proposal.voice` and `Revision.voice`.
+- `adapters/claude_planner.py`: the planner has a `catalogue` (set to `voice.voices` at wiring; a callable or a list; a failure to list just leaves the voice unasked). `render_voices` puts the catalogue in every plan and revise request ("Voices that can speak a line (id · name · who · how they sound)"). A rule in `SYSTEM` (so `SILENT_SYSTEM` too) and `REVISE_SYSTEM`: only when the goal asks for a kind of voice — an accent, gender, age, character — pick the closest from the list; `wanted` in their words, `voice_id`, and `note`, one plain sentence naming the voice and why, or saying plainly that nothing fits. `_VoiceAsk` schema; `to_voice_ask` fills a missing note.
+- `api/main.py`: `_voice_ask` checks the id against the catalogue (an id the model made up counts as nothing fitting, and the note says so). `_new_plan` sets `Plan.voice`, `voice_asked=True`, `voice_note`, appends the note to the summary (so the chat line says it plainly) and logs "Chose Varsha's voice for "an Indian voice"" / "No voice fits …; kept the default". The run loop: **an asked voice speaks every line of the plan**, ahead of a speaker's picked voice or clone (`VoiceChoice(plan.voice)`); otherwise precedence is unchanged. `revise_plan` applies `Revision.voice` the same way (`_set_plan_voice`), for the lines not yet voiced. New `PUT /projects/{id}/plans/{plan_id}/voice {voice_profile_id}` (422 for a voice not in the list, 409 while running): "You picked Varsha's voice." `_plan_dict` exposes `voice_asked`, `voice_note`.
+- `domain/plan.py`: `Plan.voice_asked`, `Plan.voice_note` (decoded with defaults, so old plans load).
+- Front end: `Plan.voice_asked / voice_note`, `Voice.category`; `api.setPlanVoice`; `VoicePicker` groups options by accent (`byAccent`, `<optgroup>`) once there is more than one; `PlanCard` shows a **Voice** row when the goal asked for one or the planner had something to say — the name, "female, indian", the note, and **Change** (a select grouped by accent, Escape cancels; disabled while running; a line already voiced keeps its take until redone).
+
+### C. Shipping from the chat (front end)
+- `components/ShipCard.tsx` is the panel's **last element** once lines are voiced (`data-testid="next-action"`): "One line is ready to ship. It sounds right." / "Keeping 1, holding 1 as a draft." / "1 of 2 sound right. Play each seam before you ship." — **Play the seams** (toggles the review in the script; "Back to the script" when on) and **Ship N changes** (disabled with nothing kept). "Or just say "ship it"."
+- `App.tsx`: `SHIP = /^(ship( it| them| all| the rest)?|done|looks good|lgtm|finish( it)?|publish( it)?|export( it)?)[.!]?$/i` in the composer, when a plan exists and no words are selected: the lines kept ship ("Shipping the change." in the thread, then the receipt); with every line held, running, nothing voiced yet or everything shipped, Voltage says so in a sentence instead. The header keeps **Review · N ready**; its Ship button is gone (one place for the action). The plan card's old "ready to hear and ship · Review and ship" footer is gone too — the ship card is that footer.
+
+## As built
+- Backend: 664 → 674 tests (`tests/adapters/test_claude_planner.py` ×4, `test_elevenlabs.py` ×2, `tests/api/test_endpoints.py` ×4: the ask becomes the plan's voice and is said in the chat; a made-up id counts as nothing fitting; picked by hand + revised; the asked voice speaks ahead of a speaker's picked voice).
+- Front end: 264 → 270 tests (`ShipCard.test.tsx`, VoicePicker accent groups, PlanCard voice row ×2, App "ships from the chat").
+- Not done: the planner is not told which voice is the picker's default, so a "nothing fits" note says "the default voice" rather than naming it; the chat's own default-voice picker and the plan's voice are two controls for two scopes (new lines vs this plan) and could fold into one later; `add_voices` is a CLI, not a screen.
+- Live check still to do by the user: a fresh plan on p6 with "in an Indian voice" (the backend on :8000 has reloaded with this code and lists the four voices).

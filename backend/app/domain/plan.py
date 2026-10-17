@@ -59,6 +59,11 @@ class Plan:
     answers: tuple[tuple[str, str], ...] = ()
     # UX-5: the voice a placed line is spoken in (the chat's default voice).
     voice: str | None = None
+    # The goal asked for a kind of voice and `voice` is the answer: it then
+    # speaks every line not yet voiced, ahead of a speaker's clone.
+    voice_asked: bool = False
+    # One plain sentence on the voice: which was chosen and why, or why none fit.
+    voice_note: str | None = None
 
     def item(self, item_id: str) -> PlanItem | None:
         return next((i for i in self.items if i.item_id == item_id), None)
@@ -94,4 +99,5 @@ def plan_from_dict(d: dict) -> Plan:
         log=tuple(d.get("log", ())), estimate=d.get("estimate", {}),
         findings=tuple(d.get("findings", ())), question=d.get("question"),
         answers=tuple((str(q), str(a)) for q, a in d.get("answers", ())), voice=d.get("voice"),
+        voice_asked=bool(d.get("voice_asked", False)), voice_note=d.get("voice_note"),
     )

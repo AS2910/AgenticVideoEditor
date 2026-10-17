@@ -1,4 +1,5 @@
 import type { Voice } from '../types'
+import { byAccent } from '../lib/voices'
 
 interface VoicePickerProps {
   voices: Voice[]
@@ -25,9 +26,13 @@ export function VoicePicker({ voices, value, onChange }: VoicePickerProps) {
         onChange={(e) => onChange(e.target.value)}
         aria-describedby={current?.description ? 'voice-about' : undefined}
       >
-        {voices.map((v) => (
-          <option key={v.voice_id} value={v.voice_id}>{label(v)}</option>
-        ))}
+        {byAccent(voices).length > 1
+          ? byAccent(voices).map(([accent, group]) => (
+            <optgroup key={accent} label={accent}>
+              {group.map((v) => <option key={v.voice_id} value={v.voice_id}>{label(v)}</option>)}
+            </optgroup>
+          ))
+          : voices.map((v) => <option key={v.voice_id} value={v.voice_id}>{label(v)}</option>)}
       </select>
       {current?.description && <span id="voice-about" className="basis-full text-xs text-muted-foreground">{current.description}</span>}
     </label>

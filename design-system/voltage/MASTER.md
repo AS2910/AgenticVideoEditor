@@ -60,7 +60,8 @@ Colour never carries meaning alone: every state has a word (Kept, Ready to hear,
 - Loading reserves the space of what is coming (`Skeleton`, frame slots) and says in a sentence what is happening.
 - Errors appear where they belong, in one sentence with one action.
 - Compact labels do not wrap (`whitespace-nowrap`, `min-w-0`); nothing lives only in a tooltip.
-- Chat: the user's bubble right, Voltage's left; the thread scrolls, the composer stays; the user's next action is always the last element.
+- Chat: the user's bubble right, Voltage's left; the thread scrolls, the composer stays; the user's next action is always the last element. Once lines are voiced that action is the **ship card** (`ShipCard`: what is ready, Play the seams, Ship N) — never a button in the header; saying "ship it" in the composer does the same. One action lives in one place: the header keeps only Review.
+- Voices: the picker groups voices by accent (`byAccent`, `<optgroup>`) once there is more than one; a plan that asked for a kind of voice shows a **Voice** row on the plan card (name · "female, indian" · the planner's one-sentence note · Change). A voice that could not be matched is said plainly in words ("No Indian voice is on the list yet, so I kept the default voice."), never silently defaulted.
 
 ## Components in use
 

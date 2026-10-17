@@ -80,6 +80,16 @@ class Question:
 
 
 @dataclass(frozen=True)
+class VoiceAsk:
+    """The goal asked for a kind of voice ("an Indian voice", "a woman"): what
+    was asked, the catalogue voice that fits it best (None when nothing
+    does), and one plain sentence to the user saying which, or why not."""
+    wanted: str
+    voice_id: str | None
+    note: str
+
+
+@dataclass(frozen=True)
 class Proposal:
     summary: str
     edits: tuple[Change, ...]
@@ -87,6 +97,8 @@ class Proposal:
     # What the planner noticed while reading, in the order it noticed it.
     findings: tuple[str, ...] = ()
     question: Question | None = None
+    # The voice the goal asked for, when it asked for one.
+    voice: VoiceAsk | None = None
 
 
 @dataclass(frozen=True)
@@ -140,6 +152,8 @@ class Revision:
     changes: tuple[ItemChange, ...] = ()
     additions: tuple[Change, ...] = ()
     new_goal: bool = False
+    # "use an Indian voice": a voice for the lines not yet voiced.
+    voice: VoiceAsk | None = None
 
 
 class Planner(Protocol):

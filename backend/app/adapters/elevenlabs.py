@@ -40,6 +40,10 @@ STS_ENDPOINT = "https://api.elevenlabs.io/v1/speech-to-speech/{voice_id}"
 STS_MODEL = "eleven_multilingual_sts_v2"
 STS_CHARS_PER_SECOND = 17
 ADD_VOICE_ENDPOINT = "https://api.elevenlabs.io/v1/voices/add"
+# The voice library (shared voices): searched by accent, added to the account
+# by its owner's id and the voice's id, under a name of our choosing.
+LIBRARY_ENDPOINT = "https://api.elevenlabs.io/v1/shared-voices"
+ADD_LIBRARY_ENDPOINT = "https://api.elevenlabs.io/v1/voices/add/{owner_id}/{voice_id}"
 VOICE_ENDPOINT = "https://api.elevenlabs.io/v1/voices/{voice_id}"
 # P-3: the same call, answered as JSON with the audio in base64 and a time for
 # every character, from which the take's own word times are read.
@@ -96,20 +100,79 @@ def to_voice(raw: dict) -> dict:
         "gender": labels.get("gender"),
         "accent": labels.get("accent"),
         "age": labels.get("age"),
+        # "premade" (ElevenLabs' own), "professional"/"high_quality" (from the
+        # library), "cloned" (a speaker's own, made by Voltage; never listed).
+        "category": raw.get("category"),
     }
 
 
+def in_catalogue(raw: dict) -> bool:
+    """Which of the account's voices a user may pick: ElevenLabs' own and the
+    ones added from the library — never a clone Voltage made of a speaker."""
+    return raw.get("category") != "cloned" and not str(raw.get("name", "")).startswith("voltage-")
+
+
 def _get_voices(api_key: str, timeout: float) -> list[dict]:
+    """Every voice the account can speak in that a user may pick: the premade
+    ones and those added from the library (15e), clones left out."""
     try:
         response = httpx.get(
-            VOICES_ENDPOINT, params={"voice_type": "default", "page_size": 100},
+            VOICES_ENDPOINT, params={"page_size": 100},
             headers={"xi-api-key": api_key}, timeout=timeout,
         )
     except httpx.HTTPError:
         raise VoiceError("Could not reach ElevenLabs to list voices.") from None
     if response.status_code != 200:
         _raise_for(response.status_code, response.text.replace(api_key, "***"))
-    return [to_voice(v) for v in response.json().get("voices", [])]
+    voices = [to_voice(v) for v in response.json().get("voices", []) if in_catalogue(v)]
+    # ElevenLabs' own first, then the library's, each in the order they came.
+    return sorted(voices, key=lambda v: 0 if v.get("category") == "premade" else 1)
+
+
+def _search_library(api_key: str, accent: str, timeout: float, *, language: str = "en",
+                    page_size: int = 30, use_case: str | None = None) -> list[dict]:
+    """Voices in the library with this accent, most-used first. Each comes
+    with `public_owner_id`, needed to add it."""
+    params: dict = {"accent": accent, "language": language, "page_size": page_size, "sort": "cloned_by_count"}
+    if use_case:
+        params["use_cases"] = use_case
+    try:
+        response = httpx.get(
+            LIBRARY_ENDPOINT, params=params,
+            headers={"xi-api-key": api_key}, timeout=timeout,
+        )
+    except httpx.HTTPError:
+        raise VoiceError("Could not reach ElevenLabs to search the voice library.") from None
+    if response.status_code != 200:
+        _raise_for(response.status_code, response.text.replace(api_key, "***"))
+    out = []
+    for v in response.json().get("voices", []):
+        out.append({
+            "voice_id": v["voice_id"], "public_owner_id": v["public_owner_id"], "name": v["name"],
+            "gender": v.get("gender"), "accent": v.get("accent"), "age": v.get("age"),
+            "description": (v.get("description") or "").strip(), "category": v.get("category"),
+            "use_case": v.get("use_case"), "uses": int(v.get("cloned_by_count") or 0),
+            "free": bool(v.get("free_users_allowed", True)),
+        })
+    return out
+
+
+def _add_from_library(api_key: str, owner_id: str, voice_id: str, name: str, timeout: float) -> tuple[int, str, str]:
+    """Add a library voice to the account under `name`. Answers (status,
+    voice_id, error text); the voice keeps its id."""
+    try:
+        response = httpx.post(
+            ADD_LIBRARY_ENDPOINT.format(owner_id=owner_id, voice_id=voice_id),
+            headers={"xi-api-key": api_key}, json={"new_name": name}, timeout=timeout,
+        )
+    except httpx.HTTPError as exc:
+        raise VoiceError(f"Could not reach ElevenLabs ({type(exc).__name__}).") from None
+    if response.status_code != 200:
+        return response.status_code, "", response.text
+    try:
+        return 200, str(response.json().get("voice_id") or voice_id), ""
+    except ValueError:
+        return 200, voice_id, ""
 
 
 def billed_characters(text: str, model: str) -> int:
@@ -305,6 +368,8 @@ class ElevenLabsVoiceAdapter:
         add_voice: AddVoiceFn = _add_voice,
         delete_voice: DeleteVoiceFn = _delete_voice,
         convert: ConvertFn = _convert,
+        search_library: Callable[..., list[dict]] = _search_library,
+        add_from_library: Callable[..., tuple[int, str, str]] = _add_from_library,
         timeout: float = DEFAULT_TIMEOUT,
         takes_per_line: int = 1,
         fit_tolerance: float = fit.DEFAULT_TOLERANCE,
@@ -320,6 +385,8 @@ class ElevenLabsVoiceAdapter:
         self._add_voice = add_voice
         self._delete_voice = delete_voice
         self._convert = convert
+        self._search_library = search_library
+        self._add_from_library = add_from_library
         # Voice ids known to be a speaker's own clone, so a take in one is
         # labelled "clone" (set by whoever resolves the voice, before synthesis).
         self._clones: set[str] = set()
@@ -345,10 +412,26 @@ class ElevenLabsVoiceAdapter:
         return self._voice_id
 
     def voices(self) -> list[dict]:
-        """The premade voices, fetched once. Listing is free."""
+        """The voices a user may pick — ElevenLabs' own and those added from
+        the library — fetched once. Listing is free."""
         if self._voices is None:
             self._voices = self._get_voices(self._api_key, self._timeout)
         return self._voices
+
+    # ── the voice library (15e) ──
+
+    def library(self, accent: str, *, language: str = "en") -> list[dict]:
+        """Library voices with this accent, most-used first. Free to search."""
+        return self._search_library(self._api_key, accent, self._timeout, language=language)
+
+    def add_from_library(self, owner_id: str, voice_id: str, name: str) -> str:
+        """Add a library voice to the account (it takes a voice slot; no
+        characters billed) and put it in the catalogue."""
+        status, added, text = self._add_from_library(self._api_key, owner_id, voice_id, name, self._timeout)
+        if status != 200:
+            _raise_for(status, text.replace(self._api_key, "***"))
+        self._voices = None
+        return added
 
     def voice_for(self, plan: EditPlan) -> str:
         """The voice an edit asked for, or the configured default."""

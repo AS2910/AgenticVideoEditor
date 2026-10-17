@@ -2224,3 +2224,71 @@ def test_a_plan_without_edits_exports_copies_only(client, project):
     export = client.post("/projects/p1/export").json()
     assert [p["kind"] for p in export["pieces"]] == ["copy"]
     assert export["inserts"] == []
+
+
+# ── 15e: a voice the goal asks for ────────────────────────────────────────────
+
+class PlansWithVoice(Plans):
+    """A planner whose proposal asks for a voice."""
+
+    def __init__(self, voice_id, note="Mock's voice, as you asked.", wanted="an Indian voice"):
+        super().__init__([(1, "Get 30% off today only.", "replace", "Offer")])
+        from app.orchestrator.planner import VoiceAsk
+        from dataclasses import replace
+        self.proposal = replace(self.proposal, voice=VoiceAsk(wanted, voice_id, note))
+
+    def revise(self, instruction, items, lines, goal, meter=None):
+        from app.orchestrator.planner import Revision
+        return Revision(summary="Switched the voice.", voice=self.proposal.voice)
+
+
+def test_a_voice_the_goal_asks_for_becomes_the_plans_voice_and_is_said_in_the_chat(client, project, monkeypatch):
+    import app.api.main as main
+    monkeypatch.setattr(main, "planner", PlansWithVoice("mock"))
+    plan = make_plan(client, goal="say it in an Indian voice", voice_profile_id="speaker-1")
+    assert (plan["voice"], plan["voice_asked"], plan["voice_note"]) == ("mock", True, "Mock's voice, as you asked.")
+    assert plan["summary"] == "Here's my plan. Mock's voice, as you asked."
+    assert any(e["text"] == 'Chose Test tone\'s voice for "an Indian voice"' for e in plan["log"])
+    messages = client.get("/projects/p1").json()["messages"]
+    assert messages[-1] == {"role": "assistant", "text": "Here's my plan. Mock's voice, as you asked."}
+
+
+def test_a_voice_id_the_planner_made_up_counts_as_nothing_fitting(client, project, monkeypatch):
+    import app.api.main as main
+    monkeypatch.setattr(main, "planner", PlansWithVoice("NotAVoiceIdAtAll00000", wanted="a child's voice"))
+    plan = make_plan(client, goal="say it in a child's voice")
+    assert plan["voice"] is None and plan["voice_asked"] is False
+    assert plan["voice_note"] == 'No voice on the list fits "a child\'s voice", so I kept the default voice.'
+    assert any(e["text"] == 'No voice fits "a child\'s voice"; kept the default' for e in plan["log"])
+
+
+def test_the_plans_voice_can_be_picked_by_hand_and_a_revision_can_ask_for_one(client, project, monkeypatch):
+    import app.api.main as main
+    monkeypatch.setattr(main, "planner", Plans([(1, "Get 30% off today only.", "replace", "Offer")]))
+    plan = make_plan(client)
+    assert plan["voice_asked"] is False
+
+    resp = client.put("/projects/p1/plans/plan1/voice", json={"voice_profile_id": "nobody-has-this-voice"})
+    assert resp.status_code == 422
+    resp = client.put("/projects/p1/plans/plan1/voice", json={"voice_profile_id": "mock"})
+    assert resp.status_code == 200, resp.text
+    plan = resp.json()
+    assert (plan["voice"], plan["voice_asked"], plan["voice_note"]) == ("mock", True, "You picked Test tone's voice.")
+    assert any("You picked Test tone's voice" in e["text"] for e in plan["log"])
+
+    monkeypatch.setattr(main, "planner", PlansWithVoice("mock", note="Mock again."))
+    plan = client.post("/projects/p1/plans/plan1/revise", json={"instruction": "use an Indian voice"}).json()
+    assert plan["summary"] == "Switched the voice. Mock again." and plan["voice_note"] == "Mock again."
+    messages = client.get("/projects/p1").json()["messages"]
+    assert messages[-1]["text"] == "Switched the voice. Mock again."
+
+
+def test_an_asked_voice_speaks_every_line_ahead_of_the_speakers_own(client, project, monkeypatch):
+    import app.api.main as main
+    monkeypatch.setattr(main, "planner", PlansWithVoice("mock"))
+    client.post("/projects/p1/speakers/detect")
+    client.put("/projects/p1/speakers/A", json={"voice_id": "picked-for-A-on-purpose"})
+    plan = make_plan(client, goal="say it in an Indian voice")
+    run_plan(client, plan["plan_id"])
+    plan = client.get("/projects/p1/plans/plan1").json()
+    assert plan["items"][0]["candidate"]["plan"]["voice_profile_id"] == "mock"

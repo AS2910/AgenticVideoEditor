@@ -232,3 +232,61 @@ def test_a_confirmed_place_is_stated_and_a_guess_is_hedged():
     confirmed = Sight(opening="x", place_guess="somewhere", confidence="low", place_confirmed="Morjim, Goa")
     text = render_plan_request("Introduce it", [], [], sight=confirmed, duration=7.5)
     assert "- Place: Morjim, Goa (confirmed by the user — use this name)" in text
+
+
+# ── 15e: a voice the goal asks for ────────────────────────────────────────────
+
+VOICES = [
+    {"voice_id": "kL06KYMvPY56NluIQ72m", "name": "Varsha", "description": "Warm and Clear",
+     "gender": "female", "accent": "indian", "age": "middle_aged"},
+    {"voice_id": "EXAVITQu4vr4xnSDxMaL", "name": "Sarah", "description": "Mature, Reassuring",
+     "gender": "female", "accent": "american", "age": None},
+]
+
+
+def test_the_catalogue_is_listed_in_the_request_when_there_is_one():
+    text = render_plan_request("Say it in an Indian voice", LINES, [], voices=VOICES)
+    assert "Voices that can speak a line" in text
+    assert "- kL06KYMvPY56NluIQ72m · Varsha · female, indian, middle aged · Warm and Clear" in text
+    assert "- EXAVITQu4vr4xnSDxMaL · Sarah · female, american · Mature, Reassuring" in text
+    assert "Voices" not in render_plan_request("Say Bhaji Cam", LINES, [])
+
+
+def test_the_planner_reads_its_catalogue_from_a_callable_and_survives_one_that_fails():
+    from app.adapters.claude_planner import _VoiceAsk
+    reading = _PlanReading(summary="Done.", findings=[], question=None, edits=[], suggestions=[],
+                           voice=_VoiceAsk(wanted="an Indian voice", voice_id="kL06KYMvPY56NluIQ72m",
+                                           note="Varsha's voice: Indian, warm and clear."))
+    reader, messages = planner(SimpleNamespace(stop_reason="end_turn", parsed_output=reading, usage=None))
+    reader.catalogue = lambda: VOICES
+    got = reader.plan("Say it in an Indian voice", LINES)
+    assert "Varsha" in messages.calls[0]["messages"][0]["content"]
+    assert (got.voice.wanted, got.voice.voice_id, got.voice.note) == (
+        "an Indian voice", "kL06KYMvPY56NluIQ72m", "Varsha's voice: Indian, warm and clear.")
+
+    def broken():
+        raise RuntimeError("no network")
+    reader.catalogue = broken
+    reader.plan("Say it", LINES)
+    assert "Voices" not in messages.calls[1]["messages"][0]["content"]
+
+
+def test_a_voice_ask_with_nothing_fitting_keeps_a_plain_note_and_an_empty_ask_is_nothing():
+    from app.adapters.claude_planner import _VoiceAsk, to_voice_ask
+    none = to_voice_ask(_VoiceAsk(wanted="a child's voice", voice_id=None, note=""))
+    assert none.voice_id is None
+    assert none.note == 'No voice on the list fits "a child\'s voice", so I kept the default.'
+    assert to_voice_ask(None) is None
+    assert to_voice_ask(_VoiceAsk(wanted="  ", voice_id="x", note="y")) is None
+
+
+def test_a_revision_may_ask_for_a_voice_too():
+    from app.adapters.claude_planner import _Revision, _VoiceAsk, render_revise_request
+    from app.orchestrator.planner import ItemView
+    items = [ItemView("i1", 2, "Start a live Bajicam session.", "Start a live Bhaji Cam session.", "replace", None, True, "planned", "Customer")]
+    assert render_revise_request("use an Indian voice", items, LINES, "Say Bhaji Cam", voices=VOICES).startswith("Voices that can speak a line")
+    revision = _Revision(summary="Switched the voice.", changes=[], additions=[],
+                         voice=_VoiceAsk(wanted="an Indian voice", voice_id="kL06KYMvPY56NluIQ72m", note="Varsha's voice, as you asked."))
+    reader, _ = planner(SimpleNamespace(stop_reason="end_turn", parsed_output=revision, usage=None))
+    got = reader.revise("use an Indian voice", items, LINES, "Say Bhaji Cam")
+    assert got.voice.voice_id == "kL06KYMvPY56NluIQ72m" and got.changes == ()

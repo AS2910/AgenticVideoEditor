@@ -33,7 +33,7 @@ const plan = (over: Partial<Plan> = {}): Plan => ({
 })
 
 const handlers = () => ({
-  onToggle: vi.fn(), onReword: vi.fn(), onInclude: vi.fn(), onRun: vi.fn(), onAnswer: vi.fn(), onRedo: vi.fn(), onApproveAll: vi.fn(),
+  onToggle: vi.fn(), onReword: vi.fn(), onInclude: vi.fn(), onRun: vi.fn(), onAnswer: vi.fn(), onRedo: vi.fn(),
 })
 
 describe('PlanCard, proposed', () => {
@@ -80,9 +80,8 @@ describe('PlanCard, proposed', () => {
       new_text: 'These are everyday ones.', reason: 'Reads oddly in a sale ad' })
     render(<PlanCard plan={plan({ status: 'done', items: [item({ status: 'ready', candidate: CANDIDATE }), noticed] })} speakers={SPEAKERS} voices={VOICES} projectId="p1" {...h} />)
     const box = screen.getByTestId('suggestion')
-    // A pending suggestion never comes after the action.
     const wrap = screen.getByTestId('plan').parentElement as HTMLElement
-    expect(Array.from(wrap.children).map((c) => c.getAttribute('data-testid'))).toEqual(['plan', 'suggestion', 'next-action'])
+    expect(Array.from(wrap.children).map((c) => c.getAttribute('data-testid'))).toEqual(['plan', 'suggestion'])
     expect(box).toHaveTextContent('Noticed: at 0:23 Shopkeeper says “These are regular ones.”, reads oddly in a sale ad. Change it to “These are everyday ones.”?')
     await userEvent.click(within(box).getByRole('button', { name: 'Add to plan' }))
     expect(h.onInclude).toHaveBeenCalledWith(expect.objectContaining({ item_id: 'i2' }), true)
@@ -102,11 +101,8 @@ describe('PlanCard, running', () => {
     expect(screen.getByText('0.96')).toBeInTheDocument()
     expect(screen.getByLabelText('Play take')).toHaveAttribute('src', `/api/projects/p1/artifacts/${'a'.repeat(64)}`)
     expect(screen.getByText('Starting…')).toBeInTheDocument()
-    // What you do next is the last thing in the panel.
-    const wrap = screen.getByTestId('plan').parentElement as HTMLElement
-    expect(wrap.lastElementChild).toHaveAttribute('data-testid', 'next-action')
-    await userEvent.click(screen.getByRole('button', { name: 'Review and ship' }))
-    expect(h.onApproveAll).toHaveBeenCalled()
+    // What you do next (review, ship) is the panel's own last card now (ShipCard), not the plan's.
+    expect(screen.queryByTestId('next-action')).toBeNull()
   })
 
   it('narrates what is happening to a line while it is voiced', () => {
@@ -200,5 +196,35 @@ describe('estimateText', () => {
     expect(estimateText({ items: 3, voice_characters: 110, usd: 0.033, seconds: 36 })).toBe('≈ 110 voice characters · about $0.03 · ready in about 36 s')
     expect(estimateText({ items: 6, voice_characters: 400, usd: 0.12, seconds: 72 })).toBe('≈ 400 voice characters · about $0.12 · ready in about 1 minute')
     expect(estimateText({ items: 1, voice_characters: 0, usd: 0, seconds: 12 })).toBe('no paid voice · ready in about 12 s')
+  })
+})
+
+
+describe('the plan\'s voice (15e)', () => {
+  const VOICES2 = [
+    ...VOICES,
+    { voice_id: 'kL06KYMvPY56NluIQ72m', name: 'Varsha', description: 'Warm and Clear', gender: 'female', accent: 'indian', age: 'middle_aged' },
+  ]
+
+  it('names the voice the goal asked for, with the planner\'s note, and lets you change it', async () => {
+    const h = handlers()
+    const onVoice = vi.fn()
+    render(<PlanCard plan={plan({ voice: 'kL06KYMvPY56NluIQ72m', voice_asked: true, voice_note: "Varsha's voice: Indian, warm and clear." })} speakers={SPEAKERS} voices={VOICES2} projectId="p1" {...h} onVoice={onVoice} />)
+    const row = screen.getByTestId('plan-voice')
+    expect(within(row).getByText('Varsha')).toBeInTheDocument()
+    expect(within(row).getByText('female, indian')).toBeInTheDocument()
+    expect(within(row).getByText("Varsha's voice: Indian, warm and clear.")).toBeInTheDocument()
+    await userEvent.click(within(row).getByRole('button', { name: 'Change' }))
+    await userEvent.selectOptions(within(row).getByRole('combobox', { name: "The plan's voice" }), 'nPczCjzI2devNBz1zQrb')
+    expect(onVoice).toHaveBeenCalledWith('nPczCjzI2devNBz1zQrb')
+  })
+
+  it('says plainly when nothing fit, and shows no voice row when the goal said nothing about it', () => {
+    const { unmount } = render(<PlanCard plan={plan({ voice: null, voice_asked: false, voice_note: 'No Indian voice is on the list yet, so I kept the default voice.' })} speakers={SPEAKERS} voices={VOICES2} projectId="p1" {...handlers()} />)
+    expect(within(screen.getByTestId('plan-voice')).getByText('the default')).toBeInTheDocument()
+    expect(within(screen.getByTestId('plan-voice')).getByText('No Indian voice is on the list yet, so I kept the default voice.')).toBeInTheDocument()
+    unmount()
+    render(<PlanCard plan={plan()} speakers={SPEAKERS} voices={VOICES2} projectId="p1" {...handlers()} />)
+    expect(screen.queryByTestId('plan-voice')).toBeNull()
   })
 })

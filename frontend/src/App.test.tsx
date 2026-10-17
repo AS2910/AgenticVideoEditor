@@ -846,6 +846,34 @@ describe('App the agent (Phase 13)', () => {
     expect(screen.getByTestId('activity')).toHaveTextContent('Rendered the edited video')
   })
 
+  it('ships from the chat: the card is the panel\'s last element, and "ship it" in the composer ships (15e)', async () => {
+    const calls = agent()
+    const user = userEvent.setup()
+    render(<App />)
+    await reachGoal(user)
+    await user.type(screen.getByRole('textbox', { name: /describe a change/i }), 'make it 30% off')
+    await user.click(screen.getByRole('button', { name: /^plan it$/i }))
+    await screen.findByText('I read 1 line. One change does it.')
+    await user.click(screen.getByRole('button', { name: 'Go ahead' }))
+    await waitFor(() => expect(screen.getByText('Ready to hear')).toBeInTheDocument())
+
+    // The ship card closes the panel; the header has only Review.
+    const card = screen.getByRole('group', { name: 'Ready to ship' })
+    expect(card).toHaveTextContent('One line is ready to ship. It sounds right.')
+    const log = screen.getByRole('log', { name: 'The conversation' })
+    expect(log.lastElementChild).toBe(card)
+    expect(screen.getAllByRole('button', { name: 'Ship 1 change' })).toHaveLength(1)
+    expect(within(card).getByRole('button', { name: 'Ship 1 change' })).toBeInTheDocument()
+
+    // Said in the composer, it ships.
+    await user.type(screen.getByRole('textbox', { name: /describe a change/i }), 'ship it')
+    await user.keyboard('{Enter}')
+    expect(await screen.findByText('Shipping the change.')).toBeInTheDocument()
+    await waitFor(() => expect(calls.some((c) => c.url.endsWith('/plans/plan1/approve'))).toBe(true))
+    expect(await screen.findByTestId('ship-sheet')).toBeInTheDocument()
+    expect(calls.some((c) => c.url.endsWith('/revise'))).toBe(false)
+  })
+
   it('ships the lines kept and holds the rest; a shipped line can be undone; a variant starts from the plan (UX-3)', async () => {
     const two = { ...PLAN_ITEM, item_id: 'i2', selection: { start: 1.5, end: 2.0 }, new_text: 'Thirty off.', mix: 'over' }
     const done = { ...PLAN, status: 'done', items: [{ ...PLAN_ITEM, status: 'ready', candidate: BRIAN_TAKE }, { ...two, status: 'ready', candidate: BRIAN_TAKE }] }
