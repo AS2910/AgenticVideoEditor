@@ -80,6 +80,9 @@ class EditPlan:
     # take (expressive models take audio tags in the text); None = the default.
     voice_settings: dict | None = None
     model: str | None = None
+    # 20c: how far the picture over this take may flex to fit it (1.0 = as
+    # shot); None = the project's setting.
+    flex_max: float | None = None
 
 
 @dataclass(frozen=True)

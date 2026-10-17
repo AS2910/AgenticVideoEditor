@@ -2364,7 +2364,7 @@ def test_under_check_with_me_the_turn_ends_with_a_question_and_go_resumes_it(cli
     resp = client.post("/projects/p1/turns", json={"text": "make it 30% off"})
     job = await_job(client, resp.json()["job_id"])
     result = job["result"]
-    assert result["question"]["text"] == "Voice “Get 30% off today only.” with Test tone's voice, about $0.00?"
+    assert result["question"]["text"] == "Voice “Get 30% off today only.” in Test tone's voice, about $0.00?"
     assert result["plan"]["status"] == "clarifying" and result["plan"]["question"]["options"] == ["Go ahead", "Not yet"]
     assert result["plan"]["items"] == []
     # A second turn while the first is still open is refused; "go" resumes with the same thread.

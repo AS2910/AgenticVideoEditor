@@ -773,7 +773,8 @@ class ElevenLabsVoiceAdapter:
             raw, _ = ffmpeg.pcm_to_wav(audio, Path(tmp) / "raw.wav", SAMPLE_RATE)
             try:
                 placed, duration, fitted, words = fit.place(
-                    raw, Path(tmp) / "voice.wav", target, plan.fit, plan.mix, self._tolerance, words, flex_max=self._flex_max,
+                    raw, Path(tmp) / "voice.wav", target, plan.fit, plan.mix, self._tolerance, words,
+                    flex_max=self._flex_max if plan.flex_max is None else max(1.0, plan.flex_max),
                 )
             except ffmpeg.SpanMismatch:
                 self._held[key] = held

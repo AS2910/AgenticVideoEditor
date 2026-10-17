@@ -213,6 +213,7 @@ def _candidate_dict(candidate: EditCandidate) -> dict:
             "flex": candidate.plan.flex,
             "voice_settings": candidate.plan.voice_settings,
             "model": candidate.plan.model,
+            "flex_max": candidate.plan.flex_max,
         },
         "audio": _artifact_dict(candidate.audio),
         "frames": _artifact_dict(candidate.frames),
@@ -920,7 +921,7 @@ def _generate(
     project_id: str, record: ProjectRecord, candidate_id: str, selection: Selection,
     text: str, voice_id: str, fit: str | None, mix: str, on_long: str | None, report,
     delivery: str | None = None, voice_notes: tuple[str, ...] = (),
-    voice_settings: dict | None = None, model: str | None = None,
+    voice_settings: dict | None = None, model: str | None = None, flex_max: float | None = None,
 ) -> EditCandidate:
     """One line through generation and continuity, placed by the project's
     long-line policy, saved as a candidate. Raises SpanMismatch when the line
@@ -936,16 +937,16 @@ def _generate(
             window = Selection(selection.end, min(record.source.duration, selection.end + room))
             try:
                 candidate = _generate(project_id, record, candidate_id, window, text, voice_id,
-                                      None, "layer", "ask", report, delivery, voice_notes, voice_settings, model)
+                                      None, "layer", "ask", report, delivery, voice_notes, voice_settings, model, flex_max)
             except SpanMismatch:
                 candidate = None
             if candidate is not None:
                 return candidate
             report(0.1, "No room to play over the picture; holding it instead")
         return _generate(project_id, record, candidate_id, selection, text, voice_id,
-                         fit, "concatenate", on_long, report, delivery, voice_notes, voice_settings, model)
+                         fit, "concatenate", on_long, report, delivery, voice_notes, voice_settings, model, flex_max)
     plan = EditPlan(selection, text, voice_id, fit=fit, mix=mix, delivery=delivery,
-                    voice_settings=voice_settings or None, model=model or None)
+                    voice_settings=voice_settings or None, model=model or None, flex_max=flex_max)
     cost = voice.cost_of(plan)
     if not budget.can_afford(project_id, cost):
         raise BudgetExceeded(cost, budget.remaining(project_id))
@@ -2071,26 +2072,20 @@ def remove_line(project_id: str, req: RemoveRequest, owner: str = Depends(curren
     record = _owned(project_id, owner)
     if not any(w.end > req.start and w.start < req.end for w in record.transcript.words):
         raise HTTPException(status_code=422, detail="Nothing is said there to remove.")
-    selection = snap_to_word_boundaries(record.transcript, Selection(req.start, req.end))
-    length = selection.end - selection.start
-    from app.continuity import signals
-    from app.continuity.measured import _write_wav
-    with tempfile.TemporaryDirectory() as tmp:
-        path = Path(tmp) / "room.wav"
-        _write_wav(path, _room_tone(record, length), signals.RATE)
-        audio = artifacts.put_file(project_id, path, kind="audio", container="wav", duration=length)
-    candidate_id = repo.next_candidate_id(project_id)
-    candidate = EditCandidate(
-        candidate_id=candidate_id,
-        plan=EditPlan(selection, "", "none", mix="remove"),
-        audio=audio, frames=record.source.media,
-        continuity=ContinuityReport(None, None, None, None, True, (), ()),
-    )
-    repo.save_candidate(project_id, candidate)
+    out = _remove_words(project_id, record, Selection(req.start, req.end))
+    repo.add_message(project_id, "user", f"Removed the line at {_clock(out['selection']['start'])}")
+    return out
+
+
+def _remove_words(project_id: str, record: ProjectRecord, span: Selection) -> dict:
+    """The words in `span` taken out, the room's sound left in their place;
+    approved at once (nothing is voiced). The agent's `remove_line` and the
+    UX-1 route share it."""
+    selection = snap_to_word_boundaries(record.transcript, span)
+    candidate = _room_tone_candidate(project_id, record, selection)
     edit_id = _approve_candidate(project_id, candidate, overridden=False)
-    repo.add_message(project_id, "user", f"Removed the line at {_clock(selection.start)}")
     return {
-        "edit_id": edit_id, "candidate_id": candidate_id,
+        "edit_id": edit_id, "candidate_id": candidate.candidate_id,
         "selection": {"start": selection.start, "end": selection.end}, "mix": "remove",
     }
 
@@ -2132,9 +2127,17 @@ def shift_line(project_id: str, req: ShiftRequest, owner: str = Depends(current_
     record = _owned(project_id, owner)
     if not any(w.end > req.start and w.start < req.end for w in record.transcript.words):
         raise HTTPException(status_code=422, detail="Nothing is said there to move.")
-    source = snap_to_word_boundaries(record.transcript, Selection(req.start, req.end))
+    out = _shift_words(project_id, record, Selection(req.start, req.end), req.to)
+    repo.add_message(project_id, "user", f"Moved the line at {_clock(out['from']['start'])} to {_clock(out['selection']['start'])}")
+    return out
+
+
+def _shift_words(project_id: str, record: ProjectRecord, span: Selection, to: float) -> dict:
+    """A line of the original speech moved to `to`, as spoken: two edits,
+    the room's sound where it was and the words placed over the picture."""
+    source = snap_to_word_boundaries(record.transcript, span)
     duration = record.source.duration
-    to = round(min(max(0.0, req.to), duration), 3)
+    to = round(min(max(0.0, to), duration), 3)
     length = source.end - source.start
     words = " ".join(w.text for w in record.transcript.words if w.end > source.start and w.start < source.end)
     with tempfile.TemporaryDirectory() as tmp:
@@ -2152,7 +2155,6 @@ def shift_line(project_id: str, req: ShiftRequest, owner: str = Depends(current_
     removed_id = _approve_candidate(project_id, removed, overridden=False)
     placed_id = _approve_candidate(project_id, placed, overridden=False, partner=removed_id)
     repo.relink_edit(project_id, removed_id, placed_id)
-    repo.add_message(project_id, "user", f"Moved the line at {_clock(source.start)} to {_clock(to)}")
     return {
         "edit_id": placed_id, "removed_edit_id": removed_id, "candidate": _candidate_dict(placed),
         "from": {"start": source.start, "end": source.end},
@@ -2300,6 +2302,7 @@ def _workbench() -> Workbench:
         add_from_library=getattr(voice, "add_from_library", None),
         delete_voice=getattr(voice, "delete_voice", None),
         slots=getattr(voice, "slots", lambda: None), put_audio=put_audio,
+        speakers=repo.speakers, voice_for=_voice_for, remove_words=_remove_words, shift_words=_shift_words, move_take=_moved,
     )
 
 

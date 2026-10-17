@@ -53,6 +53,12 @@ class Workbench:
     delete_voice: Callable[[str], None] | None = None
     slots: Callable[[], tuple[int, int] | None] = lambda: None       # (used, limit) or unknown
     put_audio: Callable[[str, bytes, str, float], Any] | None = None  # project_id, bytes, container, duration -> artifact
+    # 20c: speech clips. None = this setup cannot.
+    speakers: Callable[[str], Sequence[Any]] = lambda project_id: []            # -> [Speaker(label, name, voice_id, clone_voice_id)]
+    voice_for: Callable[..., Any] | None = None       # (project_id, record, selection, requested, speaker) -> VoiceChoice
+    remove_words: Callable[[str, Any, Selection], dict] | None = None           # -> {edit_id, candidate_id, selection}
+    shift_words: Callable[[str, Any, Selection, float], dict] | None = None     # -> {edit_id, removed_edit_id, candidate, from, selection}
+    move_take: Callable[..., Any] | None = None       # (project_id, record, candidate, start, mix) -> candidate
 
 
 @dataclass
@@ -136,10 +142,16 @@ def _read_transcript(wb: Workbench, turn: Turn, args: dict) -> ToolResult:
         return ToolResult(f"No one speaks in this clip. It is {turn.record.source.duration:.1f} s of picture and sound.",
                           step="Listened — no one speaks")
     out = ["Transcript (line. [start–end s] speaker: words  (syllables now, up to N fit in the slot)):"]
+    labels = {s.name: s.label for s in wb.speakers(turn.project_id)}
     for ln in lines:
         who = f" {ln.speaker}:" if ln.speaker else ""
         fits = f"  ({ln.syllables} syl now, up to {ln.budget} fit)" if ln.syllables is not None and ln.budget is not None else ""
         out.append(f"{ln.index}. [{ln.start:.1f}–{ln.end:.1f}]{who} {ln.text}{fits}")
+    spk = [s for s in wb.speakers(turn.project_id)]
+    if spk:
+        out.append("Speakers: " + "; ".join(f"{s.name} ({s.label})" + (" — own voice made" if s.clone_voice_id else "") for s in spk)
+                   + ". A replacement in a speaker's line speaks in their own voice when voice_id is empty.")
+    del labels
     return ToolResult("\n".join(out), step=f"Read all {len(lines)} {'line' if len(lines) == 1 else 'lines'}")
 
 
@@ -320,9 +332,11 @@ def _synthesize_take(wb: Workbench, turn: Turn, args: dict) -> ToolResult:
     text = (args.get("text") or "").strip().strip('"').strip("“”")
     if not text:
         return ToolResult("There are no words to voice.")
-    voice_id = (args.get("voice_id") or "").strip() or wb.default_voice()
-    if voice_id != wb.default_voice() and not any(v["voice_id"] == voice_id for v in wb.voices()):
-        return ToolResult(f"{voice_id} is not a voice in the catalogue. Use list_voices and pick one of its ids.")
+    voice_id = (args.get("voice_id") or "").strip()
+    own = voice_id in ("", "own")          # the speaker's own voice when the line has a speaker, else the default
+    if not own and voice_id != wb.default_voice() and not any(v["voice_id"] == voice_id for v in wb.voices()):
+        return ToolResult(f"{voice_id} is not a voice in the catalogue. Use list_voices and pick one of its ids, "
+                          "or leave it empty for the speaker's own voice.")
     duration = turn.record.source.duration
     record = turn.record
     lines = list(wb.lines(record))
@@ -365,10 +379,26 @@ def _synthesize_take(wb: Workbench, turn: Turn, args: dict) -> ToolResult:
     refusal = turn.budget.refuses(spent, usd)
     if refusal:
         return ToolResult(refusal)
-    name = _voice_name(wb, voice_id)
+    who = _speaker_name(wb, turn, speaker) if speaker else None
+    if own:
+        whose = f"{who}'s own voice" if who and wb.voice_for is not None else f"{_voice_name(wb, wb.default_voice())}'s voice"
+    else:
+        whose = f"{_voice_name(wb, voice_id)}'s voice"
     if turn.autonomy == "ask" and not turn.spend_approved:
-        raise WaitingForUser(f"Voice “{text}” with {name}'s voice, about ${usd:.2f}?")
+        raise WaitingForUser(f"Voice “{text}” in {whose}, about ${usd:.2f}?")
     wb.ensure_spend(turn.project_id)
+    voice_notes: tuple[str, ...] = ()
+    if own:
+        voice_id = wb.default_voice()
+        if who and wb.voice_for is not None:
+            # Picked for them on purpose, else their clone (made now from their own speech), else the default.
+            choice = wb.voice_for(turn.project_id, record, selection, wb.default_voice(), speaker)
+            voice_id, voice_notes = choice.voice_id, tuple(choice.notes)
+            whose = f"{who}'s own voice" if choice.cloned else f"{_voice_name(wb, voice_id)}'s voice"
+    name = whose[:-len("'s voice")] if whose.endswith("'s voice") else whose
+    fit = {"natural": "start", "stretch": "stretch"}.get(args.get("fit") or "fit")
+    picture = args.get("picture") or "default"
+    flex_max = 1.0 if picture == "as shot" or (picture == "default" and old_text == "") else None
 
     direction = (args.get("direction") or "").strip() or None
     delivery = delivery_of(direction)
@@ -392,8 +422,8 @@ def _synthesize_take(wb: Workbench, turn: Turn, args: dict) -> ToolResult:
     candidate_id = wb.repo.next_candidate_id(turn.project_id)
     try:
         candidate = wb.generate(turn.project_id, record, candidate_id, selection, text, voice_id,
-                                None, mix, None, step, delivery=delivery, voice_notes=(),
-                                voice_settings=settings, model=model)
+                                fit, mix, None, step, delivery=delivery, voice_notes=voice_notes,
+                                voice_settings=settings, model=model, flex_max=flex_max)
     except Exception as exc:  # noqa: BLE001 — the model hears why and decides; nothing crashes the turn
         reason = str(exc) or type(exc).__name__
         wb.repo.update_item(turn.project_id, turn.plan_id, item.item_id, status="failed", error=reason, progress=None)
@@ -415,7 +445,9 @@ def _synthesize_take(wb: Workbench, turn: Turn, args: dict) -> ToolResult:
              else f"at {took.start:.2f}–{took.end:.2f} s ({took.end - took.start:.2f} s slot)")
     how_said = f" Spoken with {model or 'the default model'}" + (
         f", {', '.join(f'{k} {v:g}' for k, v in settings.items())}" if settings else "") + "."
-    text_out = (f"Take {candidate.candidate_id} on {item.item_id}, {name}'s voice, {where}. It {verdict}.{notes}{wps}{how_said} "
+    if voice_notes:
+        how_said += " " + " ".join(voice_notes)
+    text_out = (f"Take {candidate.candidate_id} on {item.item_id}, {whose}, {where}. It {verdict}.{notes}{wps}{how_said} "
                 f"Cost ${cost:.2f}.{' The item moved to the new span.' if moved else ''} "
                 f"The user can hear it now; voice it again (same item_id) to try another direction or wording, "
                 f"or with a new start and end to move it.")
@@ -557,6 +589,98 @@ def _delete_voice(wb: Workbench, turn: Turn, args: dict) -> ToolResult:
     return ToolResult(f"“{mine['name']}” is deleted.{_slots_line(wb)}", step=f"Deleted the voice “{mine['name']}”")
 
 
+def _speaker_name(wb: Workbench, turn: Turn, label: str | None) -> str | None:
+    if not label:
+        return None
+    return next((s.name for s in wb.speakers(turn.project_id) if s.label == label), label)
+
+
+def _speaker_label(wb: Workbench, turn: Turn, wanted: str) -> Any:
+    wanted = (wanted or "").strip().lower()
+    return next((s for s in wb.speakers(turn.project_id) if wanted in (s.label.lower(), s.name.lower())), None)
+
+
+def _line_at(wb: Workbench, turn: Turn, line_no: Any):
+    try:
+        n = int(line_no)
+    except (TypeError, ValueError):
+        return None
+    return next((ln for ln in wb.lines(turn.record) if ln.index == n), None)
+
+
+def _clone_speaker(wb: Workbench, turn: Turn, args: dict) -> ToolResult:
+    if wb.voice_for is None:
+        return ToolResult("Voices cannot be cloned in this setup.")
+    spk = _speaker_label(wb, turn, args.get("speaker") or "")
+    if spk is None:
+        names = ", ".join(f"{s.name} ({s.label})" for s in wb.speakers(turn.project_id)) or "none"
+        return ToolResult(f"There is no speaker called {args.get('speaker')!r}. The speakers are: {names}.")
+    if spk.clone_voice_id:
+        return ToolResult(f"{spk.name}'s own voice is already made ({spk.clone_voice_id}); a replacement in their line uses it when voice_id is empty.")
+    if turn.autonomy == "ask" and not turn.commit_approved:
+        raise WaitingForUser(f"Clone {spk.name}'s voice from their own speech in this clip? It stays with this project and goes when the project does.",
+                             ("Clone it", "Not yet"), "Clone it")
+    turn.report(turn.progress, f"Cloning {spk.name}'s voice")
+    record = turn.record
+    choice = wb.voice_for(turn.project_id, record, Selection(0.0, record.source.duration), wb.default_voice(), spk.label)
+    if choice.cloned:
+        return ToolResult(f"{spk.name}'s own voice is made ({choice.voice_id}). A replacement in their line speaks in it when voice_id is empty.",
+                          step=f"Cloned {spk.name}'s voice from their own speech")
+    why = " ".join(choice.notes) or "The vendor did not make one."
+    return ToolResult(f"{spk.name}'s voice could not be cloned. {why}", step=f"Could not clone {spk.name}'s voice")
+
+
+def _remove_line(wb: Workbench, turn: Turn, args: dict) -> ToolResult:
+    if wb.remove_words is None:
+        return ToolResult("Lines cannot be removed in this setup.")
+    line = _line_at(wb, turn, args.get("line"))
+    if line is None:
+        return ToolResult(f"There is no line {args.get('line')}.")
+    if turn.autonomy == "ask" and not turn.commit_approved:
+        raise WaitingForUser(f"Remove line {line.index} (“{line.text}”)? The room's own sound stays in its place.", ("Remove it", "Not yet"), "Remove it")
+    out = wb.remove_words(turn.project_id, turn.record, Selection(line.start, line.end))
+    sel = out["selection"]
+    return ToolResult(f"Line {line.index} is removed ({sel['start']:.2f}–{sel['end']:.2f} s; edit {out['edit_id']}). It is part of the video already; "
+                      "the user can undo it from the review.", step=f"Removed line {line.index} (“{line.text[:40]}”)")
+
+
+def _shift_line(wb: Workbench, turn: Turn, args: dict) -> ToolResult:
+    if wb.shift_words is None:
+        return ToolResult("Lines cannot be moved in this setup.")
+    line = _line_at(wb, turn, args.get("line"))
+    if line is None:
+        return ToolResult(f"There is no line {args.get('line')}.")
+    to = float(args.get("to") or 0.0)
+    if turn.autonomy == "ask" and not turn.commit_approved:
+        raise WaitingForUser(f"Move line {line.index} (“{line.text}”) to {to:.2f} s, as spoken?", ("Move it", "Not yet"), "Move it")
+    out = wb.shift_words(turn.project_id, turn.record, Selection(line.start, line.end), to)
+    sel = out["selection"]
+    return ToolResult(f"Line {line.index} now plays from {sel['start']:.2f} s (edit {out['edit_id']}); the room's sound is where it was. "
+                      "It is part of the video already; the user can undo it from the review.",
+                      step=f"Moved line {line.index} to {sel['start']:.2f} s")
+
+
+def _move_item(wb: Workbench, turn: Turn, args: dict) -> ToolResult:
+    if wb.move_take is None:
+        return ToolResult("Takes cannot be moved in this setup.")
+    plan = _plan(wb, turn)
+    item = plan.item((args.get("item_id") or "").strip())
+    if item is None or not item.candidate_id:
+        return ToolResult(f"There is no voiced item {args.get('item_id')}.")
+    if item.status == "approved":
+        return ToolResult(f"{item.item_id} has shipped; the user can move it from the review.")
+    candidate = wb.repo.get_candidate(turn.project_id, item.candidate_id)
+    if candidate is None:
+        return ToolResult(f"The take {item.candidate_id} is gone.")
+    start = max(0.0, float(args.get("start") or 0.0))
+    moved = wb.move_take(turn.project_id, turn.record, candidate, start, None)
+    sel = moved.plan.selection
+    wb.repo.update_item(turn.project_id, turn.plan_id, item.item_id, candidate_id=moved.candidate_id,
+                        selection=Selection(sel.start, sel.end))
+    return ToolResult(f"{item.item_id} now plays at {sel.start:.2f}–{sel.end:.2f} s as take {moved.candidate_id} (the same audio, not voiced again).",
+                      step=f"Moved {item.item_id} to {sel.start:.2f} s")
+
+
 def _measure(wb: Workbench, turn: Turn, args: dict) -> ToolResult:
     c = wb.repo.get_candidate(turn.project_id, (args.get("candidate_id") or "").strip())
     if c is None:
@@ -638,7 +762,7 @@ TOOLS: tuple[Tool, ...] = (
          "but a replacement inside someone's sentence loses that context), v2 (the steadiest, finest style control, reads a tag as words so tags are stripped). "
          "Null picks the default, v4 when the text carries tags.",
          _schema({"text": {"type": "string", "description": "The spoken words only; no name or label in front. Audio tags in square brackets are allowed."},
-                  "voice_id": {"type": "string", "description": "A voice_id from list_voices."},
+                  "voice_id": {"type": "string", "description": "A voice_id from list_voices; empty for the speaker's own voice (a replacement) or the default (a placed line)."},
                   "direction": {"type": "string", "description": "How to say it, in your words: e.g. warm and unhurried, a half-smile; brisk and confident. Empty for none."},
                   "model": {"type": "string", "enum": ["default", "v2", "v3", "v4"], "description": "Which model speaks it."},
                   "stability": _opt("number", "0 varied and emotional … 1 steady and even; v3/v4 read 0, 0.5, 1 as creative, natural, robust. Null leaves it alone."),
@@ -649,6 +773,8 @@ TOOLS: tuple[Tool, ...] = (
                   "start": _opt("number", "Seconds, when placing new words; else null."),
                   "end": _opt("number", "Seconds, when placing new words; else null."),
                   "mix": {"type": "string", "enum": ["layer", "concatenate"], "description": "When placing: layer = over the picture and sound (the usual), concatenate = the picture waits."},
+                  "fit": {"type": "string", "enum": ["fit", "natural", "stretch"], "description": "How the take meets its slot: fit = pauses first, then tempo (the usual); natural = as spoken from the slot's start, running into the pause; stretch = tempo only."},
+                  "picture": {"type": "string", "enum": ["default", "as shot", "may flex"], "description": "Whether the picture under the take may run a little slower or faster to fit it. default = as shot for a placed line, may flex for a replacement."},
                   "item_id": {"type": "string", "description": "An existing item to voice again; empty for a new one."}}), Guard.SPEND, _synthesize_take),
     Tool("keep_take", "Put an earlier take back on an item (after voicing it again and preferring the first).",
          _schema({"item_id": {"type": "string"}, "candidate_id": {"type": "string"}}), Guard.FREE, _keep_take),
@@ -668,6 +794,15 @@ TOOLS: tuple[Tool, ...] = (
                   "name": {"type": "string", "description": "The name to list it under."}}), Guard.COMMIT, _add_from_library),
     Tool("delete_voice", "Remove a voice Voltage made for this clip (designed or added from the library) from the account. Always asks the user first.",
          _schema({"voice_id": {"type": "string"}}), Guard.COMMIT, _delete_voice),
+    Tool("clone_speaker", "Make a speaker's own voice from their speech in this clip, so their lines can be replaced in it. Takes a slot; asks first under Check with me. "
+         "A replacement with an empty voice_id does this on its own.",
+         _schema({"speaker": {"type": "string", "description": "The speaker's name or label, from read_transcript."}}), Guard.COMMIT, _clone_speaker),
+    Tool("remove_line", "Take a spoken line out of the video: the words go, the room's own sound stays, the picture is untouched. Part of the video at once (undo from the review).",
+         _schema({"line": {"type": "integer", "description": "The transcript line."}}), Guard.COMMIT, _remove_line),
+    Tool("shift_line", "Move a spoken line to another time, as it was spoken: nothing is voiced. Part of the video at once (undo from the review).",
+         _schema({"line": {"type": "integer"}, "to": {"type": "number", "description": "Where the words should start, in seconds."}}), Guard.COMMIT, _shift_line),
+    Tool("move_item", "Place a voiced item's take at another time, the same audio, nothing voiced again.",
+         _schema({"item_id": {"type": "string"}, "start": {"type": "number", "description": "Seconds."}}), Guard.FREE, _move_item),
     Tool("measure", "The full sound check of a take: its scores, what was done to fit it, how it was spoken.",
          _schema({"candidate_id": {"type": "string"}}), Guard.FREE, _measure),
     Tool("ship", "Make the voiced lines part of the video and render it. Only when the user asks for it, or said just do it and the work is done.",

@@ -75,9 +75,10 @@ def world():
     shipped: list[list[str]] = []
 
     def generate(project_id, rec, candidate_id, selection, text_, voice_id, fit, mix, on_long, report, delivery=None, voice_notes=(),
-                 voice_settings=None, model=None):
+                 voice_settings=None, model=None, flex_max=None):
         made.append({"candidate_id": candidate_id, "selection": selection, "text": text_, "voice_id": voice_id, "mix": mix,
-                     "delivery": delivery, "voice_settings": voice_settings, "model": model})
+                     "delivery": delivery, "voice_settings": voice_settings, "model": model, "fit": fit, "flex_max": flex_max,
+                     "voice_notes": tuple(voice_notes)})
         ledger.record(project_id, "elevenlabs", "take", len(text_), "characters", 0.03)
         report(0.5, "Synthesizing the new line")
         c = FakeCandidate(candidate_id, selection, text_)
@@ -107,6 +108,40 @@ def world():
         added.append((owner, vid, name))
         return vid
 
+    # 20c: a speech clip's lines and speakers, set by a test; the clone and the cuts as fakes.
+    lines: list = []
+    speakers: list = []
+    cloned: list[tuple] = []
+    removed: list[tuple] = []
+    shifted: list[tuple] = []
+    moved: list[tuple] = []
+
+    def voice_for(project_id, rec, selection, requested, speaker):
+        cloned.append((speaker, requested))
+        spk = next((s for s in speakers if s.label == speaker), None)
+        if spk is None:
+            return SimpleNamespace(voice_id=requested, notes=(), cloned=False)
+        if spk.name == "Mute":
+            return SimpleNamespace(voice_id=requested, notes=("Stock voice: only 3.0 s of Mute's voice, 10 s needed to clone it.",), cloned=False)
+        spk.clone_voice_id = "CLONE" + spk.label
+        return SimpleNamespace(voice_id="CLONE" + spk.label, notes=(), cloned=True)
+
+    def remove_words(project_id, rec, span):
+        removed.append((span.start, span.end))
+        return {"edit_id": "e-rm", "candidate_id": "c-rm", "selection": {"start": span.start, "end": span.end}, "mix": "remove"}
+
+    def shift_words(project_id, rec, span, to):
+        shifted.append((span.start, span.end, to))
+        return {"edit_id": "e-sh", "removed_edit_id": "e-rm", "candidate": {}, "from": {"start": span.start, "end": span.end},
+                "selection": {"start": to, "end": to + (span.end - span.start)}, "mix": "layer"}
+
+    def move_take(project_id, rec, candidate, start, mix):
+        moved.append((candidate.candidate_id, start))
+        length = candidate.plan.selection.end - candidate.plan.selection.start
+        c = FakeCandidate(candidate.candidate_id + "m", Selection(start, start + length), candidate.plan.new_text)
+        repo_candidates[c.candidate_id] = c
+        return c
+
     def put_audio(project_id, data, container, duration):
         audio.append((project_id, data, container, duration))
         return SimpleNamespace(sha256="a" * 63 + str(len(audio)), duration=duration)
@@ -121,7 +156,7 @@ def world():
 
     wb = Workbench(
         repo=repo, ledger=ledger,
-        frames=lambda rec: [], lines=lambda rec: [],
+        frames=lambda rec: [], lines=lambda rec: list(lines),
         room_after=lambda transcript, selection, duration: 0.0,
         voices=lambda: VOICES, library=lambda accent, language="en": [],
         estimate_usd=lambda t: (len(t), round(len(t) * 0.0003, 4)),
@@ -132,6 +167,8 @@ def world():
         design=design, design_cost=lambda text=None: ((len(text) if text else 350), round((len(text) if text else 350) * 0.0003, 4)),
         save_voice=save_voice, add_from_library=add_from_library, delete_voice=deleted.append,
         slots=lambda: (3, 30), put_audio=put_audio,
+        speakers=lambda project_id: list(speakers), voice_for=voice_for, remove_words=remove_words, shift_words=shift_words,
+        move_take=move_take,
     )
     # The repo's candidate store is what `measure` reads; the fake pipeline fills it.
     repo.get_candidate = lambda project_id, candidate_id: repo_candidates.get(candidate_id)
@@ -141,4 +178,5 @@ def world():
                     budget=budget or TurnBudget(), started_at="2000-01-01T00:00:00+00:00", commit_approved=commit_approved)
 
     return SimpleNamespace(repo=repo, ledger=ledger, record=record, wb=wb, turn=turn, made=made, shipped=shipped,
-                           designed=designed, saved=saved, added=added, deleted=deleted, audio=audio)
+                           designed=designed, saved=saved, added=added, deleted=deleted, audio=audio,
+                           lines=lines, speakers=speakers, cloned=cloned, removed=removed, shifted=shifted, moved=moved)

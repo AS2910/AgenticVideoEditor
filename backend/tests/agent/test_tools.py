@@ -65,7 +65,7 @@ def test_under_check_with_me_a_paid_step_waits_for_the_user_until_they_say_go(wo
             "direction": None, "mix": None, "line": None, "item_id": None}
     with pytest.raises(WaitingForUser) as w:
         BY_NAME["synthesize_take"].run(world.wb, world.turn(autonomy="ask"), args)
-    assert w.value.question == "Voice “Welcome to Goa.” with Varsha's voice, about $0.00?"
+    assert w.value.question == "Voice “Welcome to Goa.” in Varsha's voice, about $0.00?"
     assert w.value.options == ("Go ahead", "Not yet")
     assert world.made == []
     BY_NAME["synthesize_take"].run(world.wb, world.turn(autonomy="ask", approved=True), args)
@@ -212,3 +212,94 @@ def test_measure_reads_a_takes_full_report(world):
     assert out.text == ("Take c1: passed the sound check. Runs 1.00 s; 3 words, 3.0 a second. Fit: nearest of 3 takes. "
                         "Spoken with v3, stability 0.5.")
     assert BY_NAME["measure"].run(world.wb, t, {"candidate_id": "c9"}).text == "There is no take c9."
+
+
+# ── 20c: speech clips ─────────────────────────────────────────────────────────
+
+def _spoken(world):
+    """Two speakers and three lines, as read_transcript would show them."""
+    from types import SimpleNamespace as NS
+    world.speakers[:] = [NS(label="A", name="Priya", voice_id=None, clone_voice_id=None),
+                         NS(label="B", name="Mute", voice_id=None, clone_voice_id=None)]
+    world.lines[:] = [NS(index=1, start=0.5, end=2.0, speaker="Priya", text="Get 20% off today only.", syllables=7, budget=9),
+                      NS(index=2, start=2.4, end=3.1, speaker="Mute", text="Hm.", syllables=1, budget=2),
+                      NS(index=3, start=4.0, end=6.0, speaker="Priya", text="Come to Bhaji Cam.", syllables=5, budget=7)]
+    world.record.transcript.__class__  # the fake pipeline never reads words
+    return world
+
+
+def test_the_transcript_names_the_speakers_and_a_replacement_with_no_voice_speaks_in_their_own(world, monkeypatch):
+    _spoken(world)
+    monkeypatch.setattr("app.agent.tools._statements", lambda record: [type("S", (), {"start": 0.5, "speaker": "A"})(), type("S", (), {"start": 4.0, "speaker": "A"})()])
+    read = BY_NAME["read_transcript"].run(world.wb, world.turn(), {})
+    assert "1. [0.5–2.0] Priya: Get 20% off today only.  (7 syl now, up to 9 fit)" in read.text
+    assert read.text.endswith("Speakers: Priya (A); Mute (B). A replacement in a speaker's line speaks in their own voice when voice_id is empty.")
+    t = world.turn("ask")
+    with pytest.raises(WaitingForUser) as w:
+        _take(world, t, text="Get 30% off today only.", voice_id="", line=1, start=None, end=None)
+    assert w.value.question == "Voice “Get 30% off today only.” in Priya's own voice, about $0.01?"
+    assert world.cloned == []                                   # nothing is cloned before the yes
+    out = _take(world, world.turn("ask", approved=True), text="Get 30% off today only.", voice_id="", line=1, start=None, end=None)
+    assert world.cloned == [("A", "EXAVITQu4vr4xnSDxMaL")] and world.made[0]["voice_id"] == "CLONEA"
+    assert out.text.startswith("Take c1 on i1, Priya's own voice, at 0.50–2.00 s (1.50 s slot).")
+    assert world.made[0]["fit"] is None and world.made[0]["flex_max"] is None      # a replacement may flex by default
+    assert out.step == "Voiced “Get 30% off today only.” with Priya's own voice"
+
+
+def test_when_the_speaker_cannot_be_cloned_the_take_says_so_and_uses_the_default(world, monkeypatch):
+    _spoken(world)
+    monkeypatch.setattr("app.agent.tools._statements", lambda record: [type("S", (), {"start": 2.4, "speaker": "B"})()])
+    out = _take(world, world.turn(), text="Oh.", voice_id="", line=2, start=None, end=None)
+    assert world.made[0]["voice_id"] == "EXAVITQu4vr4xnSDxMaL"
+    assert world.made[0]["voice_notes"] == ("Stock voice: only 3.0 s of Mute's voice, 10 s needed to clone it.",)
+    assert "Take c1 on i1, Sarah's voice" in out.text and "Stock voice: only 3.0 s of Mute's voice" in out.text
+
+
+def test_fit_and_picture_reach_the_pipeline(world):
+    _take(world, world.turn(), fit="natural", picture="may flex")
+    assert (world.made[0]["fit"], world.made[0]["flex_max"]) == ("start", None)
+    _take(world, world.turn(), fit="stretch", picture="as shot")
+    assert (world.made[1]["fit"], world.made[1]["flex_max"]) == ("stretch", 1.0)
+    _take(world, world.turn())                                  # a placed line: the picture as shot
+    assert (world.made[2]["fit"], world.made[2]["flex_max"]) == (None, 1.0)
+
+
+def test_clone_speaker_asks_then_makes_the_voice_and_says_when_it_cannot(world):
+    _spoken(world)
+    t = world.turn("ask")
+    assert BY_NAME["clone_speaker"].run(world.wb, t, {"speaker": "Ravi"}).text == "There is no speaker called 'Ravi'. The speakers are: Priya (A), Mute (B)."
+    with pytest.raises(WaitingForUser) as w:
+        BY_NAME["clone_speaker"].run(world.wb, t, {"speaker": "priya"})
+    assert w.value.question.startswith("Clone Priya's voice from their own speech") and w.value.options == ("Clone it", "Not yet")
+    out = BY_NAME["clone_speaker"].run(world.wb, world.turn("ask", commit_approved=True), {"speaker": "A"})
+    assert out.step == "Cloned Priya's voice from their own speech" and "CLONEA" in out.text
+    assert BY_NAME["clone_speaker"].run(world.wb, world.turn(), {"speaker": "Priya"}).text.startswith("Priya's own voice is already made (CLONEA)")
+    out = BY_NAME["clone_speaker"].run(world.wb, world.turn(), {"speaker": "Mute"})
+    assert out.step == "Could not clone Mute's voice" and "only 3.0 s" in out.text
+
+
+def test_remove_and_shift_are_gated_commits_on_a_transcript_line(world):
+    _spoken(world)
+    t = world.turn("ask")
+    assert BY_NAME["remove_line"].run(world.wb, t, {"line": 9}).text == "There is no line 9."
+    with pytest.raises(WaitingForUser) as w:
+        BY_NAME["remove_line"].run(world.wb, t, {"line": 2})
+    assert w.value.question == "Remove line 2 (“Hm.”)? The room's own sound stays in its place."
+    out = BY_NAME["remove_line"].run(world.wb, world.turn(), {"line": 2})
+    assert world.removed == [(2.4, 3.1)] and out.step == "Removed line 2 (“Hm.”)"
+    assert out.text.startswith("Line 2 is removed (2.40–3.10 s; edit e-rm).")
+    with pytest.raises(WaitingForUser) as w:
+        BY_NAME["shift_line"].run(world.wb, t, {"line": 3, "to": 5.0})
+    assert w.value.options == ("Move it", "Not yet")
+    out = BY_NAME["shift_line"].run(world.wb, world.turn(), {"line": 3, "to": 5.0})
+    assert world.shifted == [(4.0, 6.0, 5.0)] and out.step == "Moved line 3 to 5.00 s"
+
+
+def test_move_item_places_the_same_take_elsewhere(world):
+    t = world.turn()
+    _take(world, t)
+    assert BY_NAME["move_item"].run(world.wb, t, {"item_id": "i9", "start": 3.0}).text == "There is no voiced item i9."
+    out = BY_NAME["move_item"].run(world.wb, t, {"item_id": "i1", "start": 3.0})
+    assert world.moved == [("c1", 3.0)] and out.step == "Moved i1 to 3.00 s"
+    [item] = world.repo.get_plan("p1", "plan1").items
+    assert (item.candidate_id, item.selection.start, item.selection.end) == ("c1m", 3.0, 5.0)
