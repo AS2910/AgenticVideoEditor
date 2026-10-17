@@ -706,6 +706,27 @@ describe('App the agent (Phase 13, 20c)', () => {
     expect(saidTo(calls)).toEqual(['make it 30% off'])
   })
 
+  it('takes in a turn that shipped on its own: the render plays, Download is in the bar, the sheet says what is in the file (20d)', async () => {
+    // Under Just do it Voltage ships inside the turn; the plan comes back with the line approved.
+    const calls = agent(PLAN_APPROVED)
+    const user = userEvent.setup()
+    const { container } = render(<App />)
+    await reachEditor(user)
+    await user.click(screen.getByRole('button', { name: 'Just do it' }))
+    await user.type(screen.getByRole('textbox', TEXTBOX), 'make it 30% off and ship it{Enter}')
+
+    await waitFor(() => expect((container.querySelector('video') as HTMLVideoElement).getAttribute('src'))
+      .toBe(`/api/projects/p1/artifacts/${'r'.repeat(64)}`))
+    expect(calls.some((c) => c.url.endsWith('/approve'))).toBe(false)   // Voltage shipped; the panel only rendered
+    const sheet = await screen.findByTestId('ship-sheet')
+    expect(within(sheet).getByRole('list', { name: 'What was said' })).toHaveTextContent('Get 30% off today only.')
+    expect(within(sheet).getByRole('link', { name: 'Download MP4' })).toHaveAttribute('download', 'sample-ad-edited.mp4')
+    await user.click(within(sheet).getByRole('button', { name: 'Back to the transcript' }))
+    expect(screen.getByRole('link', { name: 'Download MP4' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /^Ship/ })).not.toBeInTheDocument()
+    expect(screen.getAllByRole('status').some((el) => el.textContent === 'ready')).toBe(true)
+  })
+
   it('asks one thing, and the answer — a pick or "go" — is the next turn', async () => {
     const calls = agent(PLAN_CLARIFYING, (text) => (text === 'make it 30% off' ? PLAN_CLARIFYING : PLAN))
     const user = userEvent.setup()

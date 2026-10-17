@@ -572,10 +572,15 @@ export default function App() {
       await pullMessages()
       if (finished.status === 'failed') tell(finished.error ?? "Something went wrong on my side. Say it again and I'll retry.")
       const result = finished.result as { type?: string; plan?: Plan } | null
-      if (result && result.type === 'turn' && result.plan) setPlan(result.plan)
+      let fresh: Plan | null = null
+      if (result && result.type === 'turn' && result.plan) fresh = result.plan
       else {
         const latest = await getProject(projectId).catch(() => null)
-        if (latest?.plan) setPlan(latest.plan)
+        if (latest?.plan) fresh = latest.plan
+      }
+      if (fresh) {
+        setPlan(fresh)
+        await takeInShipped(fresh)
       }
     } catch (e) {
       if (!(e instanceof PollCancelled)) tell('I lost track of that turn. Say it again.')
@@ -619,6 +624,35 @@ export default function App() {
     setRendered({ url, duration: result.export.render.duration })
     setView('edited')
     return download
+  }
+
+  /** Under Just do it, Voltage ships inside its turn. The lines it shipped
+   *  come back as approved items the panel has not seen: they become
+   *  revisions, the edited video is rendered (no paid step), the player
+   *  switches to it and the sheet says what is in the file — the same as a
+   *  hand-shipped approval. */
+  const takeInShipped = async (fresh: Plan) => {
+    if (!projectId) return
+    const went = fresh.items.filter((i) => i.status === 'approved' && i.edit_id
+      && !approved.some((r) => r.edit_id === i.edit_id))
+    if (went.length === 0) return
+    setApproved((a) => [...a, ...went.map((i) => ({
+      edit_id: i.edit_id!, start: i.candidate?.plan.selection.start ?? i.selection.start,
+      end: i.candidate?.plan.selection.end ?? i.selection.end, text: i.new_text, mix: i.mix,
+    }))])
+    const render = await runExport()
+    if (!render) return
+    setView('edited')
+    setShipped({
+      items: went,
+      held: fresh.items.filter((i) => i.status === 'ready').length,
+      removed: approved.filter((r) => r.mix === 'remove').length,
+      before: project?.duration ?? 0,
+      after: render.duration,
+      download: render.download,
+      spendUsd: fresh.spend_usd,
+      takesVoiced: fresh.takes_voiced ?? 0,
+    })
   }
 
   /** Ship the ready changes — all of them, or the ones kept — and render;
@@ -754,11 +788,11 @@ export default function App() {
     }
   }
 
-  /** Renders the approved edits; true when the render is ready to play. */
+  /** Renders the approved edits; the render (and its download) once it is ready to play, else null. */
   const runExport = async (
     id: string | null = projectId, filename = project?.filename,
-  ): Promise<boolean> => {
-    if (!id) return false
+  ): Promise<{ download: { url: string; filename: string }; duration: number } | null> => {
+    if (!id) return null
     setError(null)
     setExporting(true)
     try {
@@ -768,12 +802,13 @@ export default function App() {
       setPieces(manifest.pieces ?? piecesFromInserts(manifest.inserts ?? [], project?.duration ?? 0))
       const stem = (filename ?? 'video').replace(/\.[^.]+$/, '')
       const url = artifactUrl(id, manifest.render.sha256)
-      setDownload({ url, filename: `${stem}-edited.mp4` })
+      const download = { url, filename: `${stem}-edited.mp4` }
+      setDownload(download)
       setRendered({ url, duration: manifest.render.duration })
-      return true
+      return { download, duration: manifest.render.duration }
     } catch {
       setError('Export failed.')
-      return false
+      return null
     } finally {
       setExporting(false)
     }
@@ -863,7 +898,7 @@ export default function App() {
     : turnBusy ? 'working'
     : editingLine ? 'standing by'
     : plan?.status === 'proposed' ? 'has a plan'
-    : review ? 'ready to ship'
+    : readyItems.length > 0 ? 'ready to ship'
     : 'ready'
   const sendLabel = clarifying ? 'Answer' : 'Send'
   const placeholder = clarifying ? 'Answer, or tell Voltage anything else'

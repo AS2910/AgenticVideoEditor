@@ -802,7 +802,9 @@ export function LineDoc({
           </div>
         )}
         <span className={hint}>
-          {review ? 'Keep what sounds right; hold the rest as drafts. The Ship button in the bar counts what you keep.'
+          {review ? (items.some((i) => i.status === 'ready')
+              ? 'Keep what sounds right; hold the rest as drafts. The Ship button in the bar counts what you keep.'
+              : 'What shipped, line by line.')
             : editing ? (editing.mode === 'edit' ? `Editing ${clock(statements[editing.index].start)}. Enter to hear it, Esc to cancel.` : `Adding a line after ${clock(statements[editing.index].start)}. Esc to cancel.`)
             : pendingLines.some((p) => p.status === 'reading') ? "Voltage is reading. The line it's on is lit."
             : focusedRow !== null ? <span className="whitespace-nowrap max-[960px]:hidden" data-testid="keys"><kbd className={kbd}>↑</kbd><kbd className={kbd}>↓</kbd> move · <kbd className={kbd}>Enter</kbd> change the words · <kbd className={kbd}>Space</kbd> play · <kbd className={kbd}>A</kbd> add after · <kbd className={kbd}>S</kbd> shift (or drag ⋮⋮) · <kbd className={kbd}>K</kbd> keep · <kbd className={kbd}>U</kbd> undo · <kbd className={kbd}>/</kbd> ask Voltage</span>
