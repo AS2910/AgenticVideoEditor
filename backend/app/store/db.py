@@ -86,6 +86,7 @@ MIGRATIONS = (
     ("projects", "settings", "TEXT NOT NULL DEFAULT '{}'"),   # Phase 12
     ("messages", "kind", "TEXT NOT NULL DEFAULT 'say'"),      # Phase 20: "say" | "step"
     ("messages", "cost", "REAL"),                             # Phase 20: what a step cost, in dollars
+    ("messages", "data", "TEXT"),                             # Phase 20b: a card's facts (voice previews), JSON
 )
 
 

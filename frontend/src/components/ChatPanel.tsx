@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { ReactNode, RefObject } from 'react'
 import type { ChatMessage } from '../types'
+import { artifactUrl } from '../api'
 import { ArrowUp } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -9,6 +10,8 @@ import { Markdown } from './Markdown'
 
 interface ChatPanelProps {
   messages: ChatMessage[]
+  /** The project the thread belongs to; cards that play audio need it. */
+  projectId?: string
   canSubmit: boolean
   onSubmit: (prompt: string) => void
   children?: ReactNode
@@ -30,7 +33,7 @@ interface ChatPanelProps {
 // The panel shows the latest exchange; earlier messages open on request.
 const RECENT = 6
 
-type Group = { kind: 'say'; m: ChatMessage } | { kind: 'step'; steps: ChatMessage[] }
+type Group = { kind: 'say'; m: ChatMessage } | { kind: 'step'; steps: ChatMessage[] } | { kind: 'card'; m: ChatMessage }
 
 /** Consecutive steps fold into one list, so a turn reads as: you, what
  *  Voltage did, what it says. */
@@ -41,7 +44,8 @@ function groups(messages: ChatMessage[]): Group[] {
     if (m.kind === 'step') {
       if (last && last.kind === 'step') last.steps.push(m)
       else out.push({ kind: 'step', steps: [m] })
-    } else out.push({ kind: 'say', m })
+    } else if (m.kind === 'previews' && m.data) out.push({ kind: 'card', m })
+    else out.push({ kind: 'say', m })
   }
   return out
 }
@@ -63,10 +67,32 @@ function Steps({ steps }: { steps: ChatMessage[] }) {
   )
 }
 
+/** Voices Voltage designed from words (20b): one player per preview, click
+ *  to play. Voltage cannot hear them; the user can, and says which. */
+function VoicePreviews({ projectId, m }: { projectId?: string; m: ChatMessage }) {
+  const previews = m.data?.previews ?? []
+  return (
+    <div className="flex max-w-[92%] flex-col gap-2 self-start rounded-lg border bg-card px-3.5 py-3 text-card-foreground" role="group" aria-label={m.text} data-testid="voice-previews">
+      <p className="m-0 text-sm text-muted-foreground">{m.text}</p>
+      <ul className="m-0 flex list-none flex-col gap-2 p-0">
+        {previews.map((p) => (
+          <li key={p.generated_voice_id} className="flex items-center gap-3">
+            <span className="w-20 shrink-0 text-sm font-medium">Preview {p.n}</span>
+            {projectId ? (
+              <audio className="h-11 min-w-0 flex-1" controls preload="none" src={artifactUrl(projectId, p.sha256)} aria-label={`Play preview ${p.n}`} />
+            ) : <span className="min-w-0 flex-1" />}
+            <span className="tnum shrink-0 text-xs text-muted-foreground">{Math.round(p.duration)} s</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
+}
+
 /** The conversation with Voltage: what you ask for, and what comes back — a
  *  reply, a question, a take. */
 export function ChatPanel({
-  messages, canSubmit, onSubmit, children, toolbar, header, hint, inputRef, sendLabel = 'Send', seed,
+  messages, projectId, canSubmit, onSubmit, children, toolbar, header, hint, inputRef, sendLabel = 'Send', seed,
   placeholder = 'Ask for a change, e.g. say "30% off" instead',
 }: ChatPanelProps) {
   const [prompt, setPrompt] = useState('')
@@ -108,6 +134,8 @@ export function ChatPanel({
         )}
         {all.slice(hiddenGroups).map((g, i) => g.kind === 'step' ? (
           <Steps key={hidden + i} steps={g.steps} />
+        ) : g.kind === 'card' ? (
+          <VoicePreviews key={hidden + i} projectId={projectId} m={g.m} />
         ) : (
           <div
             key={hidden + i}

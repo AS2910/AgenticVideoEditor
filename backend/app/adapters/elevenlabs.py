@@ -10,6 +10,15 @@ Facts this relies on were measured against the live API on 2026-09-23 (see the
 Phase 4a plan's spike results): `pcm_24000` is allowed on the free tier, the
 `previous_text`/`next_text` context is accepted by multilingual_v2 and flash but
 refused by eleven_v3, and only `text` is billed — the context is free.
+
+Phase 20b (spiked 2026-10-17): eleven_v3 and eleven_v4 speak *audio tags*
+written in the text ("[sighs]", "[whispers]"); the tag's characters are billed
+and get a span in the alignment, which `words_from_alignment` drops. v3 still
+refuses the context; v4 accepts it. multilingual_v2 reads a tag as words, so
+tags are stripped before it. A voice can be designed from words
+(`/v1/text-to-voice/design`, eleven_ttv_v3): three previews of ~25 s for about
+350 credits, a sample text of 100+ characters or the vendor's own; saving a
+preview takes a voice slot and no credits.
 """
 from __future__ import annotations
 
@@ -49,6 +58,20 @@ VOICE_ENDPOINT = "https://api.elevenlabs.io/v1/voices/{voice_id}"
 # every character, from which the take's own word times are read.
 TIMESTAMPS_ENDPOINT = ENDPOINT + "/with-timestamps"
 VOICES_ENDPOINT = "https://api.elevenlabs.io/v2/voices"
+# 20b: a voice from words. Previews first (billed by the sample text), then
+# one of them is kept as a voice of the account (a slot, no credits).
+DESIGN_ENDPOINT = "https://api.elevenlabs.io/v1/text-to-voice/design"
+CREATE_VOICE_ENDPOINT = "https://api.elevenlabs.io/v1/text-to-voice"
+SUBSCRIPTION_ENDPOINT = "https://api.elevenlabs.io/v1/user/subscription"
+DESIGN_MODEL = "eleven_ttv_v3"
+DESIGN_CHARS = 350          # what a design with the vendor's own sample text billed, measured
+DESIGN_TEXT_MIN = 100       # the API's floor for a sample text of our own
+# Which models take what (measured 2026-10-17). Short names are what Voltage
+# says; the vendor ids are what is sent.
+MODELS = {"v2": "eleven_multilingual_v2", "v3": "eleven_v3", "v4": "eleven_v4"}
+TAG_MODELS = frozenset({"eleven_v3", "eleven_v3_conversational", "eleven_v4", "eleven_v4_turbo"})
+NO_CONTEXT_MODELS = frozenset({"eleven_v3", "eleven_v3_conversational"})
+_TAG = re.compile(r"\[[^\[\]\n]{1,40}\]")
 # ElevenLabs voice ids: 20 alphanumerics. Anything else (e.g. the UI's legacy
 # "speaker-1") means "the configured default voice".
 _VOICE_ID = re.compile(r"[A-Za-z0-9]{20}")
@@ -70,6 +93,7 @@ _COST_MULTIPLIER = {
     "eleven_turbo_v2_5": 0.5,
     "eleven_flash_v2": 0.5,
     "eleven_turbo_v2": 0.5,
+    "eleven_v4_turbo": 0.5,
 }
 
 # (status, body bytes, body text)
@@ -80,6 +104,10 @@ AddVoiceFn = Callable[[str, str, bytes, float], tuple[int, str, str]]
 ConvertFn = Callable[[str, str, bytes, float], tuple[int, bytes, str]]
 # (api key, voice id, timeout) -> (status, body text)
 DeleteVoiceFn = Callable[[str, str, float], tuple[int, str]]
+# (api key, description, sample text or None, timeout) -> (status, payload, error text)
+DesignFn = Callable[[str, str, str | None, float], tuple[int, dict, str]]
+# (api key, name, description, generated voice id, timeout) -> (status, voice id, error text)
+CreateVoiceFn = Callable[[str, str, str, str, float], tuple[int, str, str]]
 
 
 class VoiceError(VendorError):
@@ -179,6 +207,43 @@ def billed_characters(text: str, model: str) -> int:
     return math.ceil(len(text) * _COST_MULTIPLIER.get(model, 1.0))
 
 
+def model_of(plan: EditPlan, default: str) -> str:
+    """The vendor model this take is spoken with: the plan's (a short name
+    or a vendor id), else the adapter's default."""
+    wanted = (plan.model or "").strip()
+    return MODELS.get(wanted, wanted) if wanted else default
+
+
+def spoken_text(text: str, model: str) -> str:
+    """The text as sent: audio tags stay for a model that performs them and
+    go for one that would read them aloud."""
+    if model in TAG_MODELS:
+        return text
+    return re.sub(r"  +", " ", _TAG.sub("", text)).strip()
+
+
+def has_tags(text: str) -> bool:
+    return bool(_TAG.search(text))
+
+
+_SETTING_RANGE = {"stability": (0.0, 1.0), "similarity_boost": (0.0, 1.0), "style": (0.0, 1.0), "speed": (SPEED_MIN, SPEED_MAX)}
+
+
+def clamp_settings(settings: dict | None) -> dict:
+    """The vendor's voice settings Voltage may set, each within the API's
+    range; anything else is dropped."""
+    out: dict = {}
+    for key, value in (settings or {}).items():
+        if value is None:
+            continue
+        if key == "use_speaker_boost":
+            out[key] = bool(value)
+        elif key in _SETTING_RANGE:
+            lo, hi = _SETTING_RANGE[key]
+            out[key] = round(min(hi, max(lo, float(value))), 2)
+    return out
+
+
 def _context(words: list[str], from_end: bool) -> str:
     """Join whole words up to CONTEXT_CHARS, keeping those nearest the edit."""
     picked: list[str] = []
@@ -204,13 +269,15 @@ DELIVERY_SETTINGS: dict[str, dict] = {
 
 
 def to_request(plan: EditPlan, transcript: Transcript | None, model: str, speed: float = 1.0) -> dict:
-    body: dict = {"text": plan.new_text, "model_id": model}
-    settings: dict = dict(DELIVERY_SETTINGS.get((plan.delivery or "").lower(), {}))
+    model = model_of(plan, model)
+    body: dict = {"text": spoken_text(plan.new_text, model), "model_id": model}
+    settings: dict = (clamp_settings(plan.voice_settings) if plan.voice_settings
+                      else dict(DELIVERY_SETTINGS.get((plan.delivery or "").lower(), {})))
     if abs(speed - 1.0) > 1e-3:
         settings["speed"] = round(min(SPEED_MAX, max(SPEED_MIN, speed * settings.get("speed", 1.0))), 2)
     if settings:
         body["voice_settings"] = settings
-    if transcript is None:
+    if transcript is None or model in NO_CONTEXT_MODELS:
         return body
     start, end = plan.selection.start, plan.selection.end
     before = [w.text for w in transcript.words if w.end <= start]
@@ -261,7 +328,23 @@ def words_from_alignment(alignment: dict | None) -> tuple[Word, ...]:
         end = b
     if text:
         words.append(Word(text, round(start, 4), round(end, 4)))
-    return tuple(words)
+    return _without_tags(words)
+
+
+def _without_tags(words: list[Word]) -> tuple[Word, ...]:
+    """An audio tag ("[sighs]", "[long pause]") is performed, not said: its
+    span stays in the audio and leaves the word list."""
+    out: list[Word] = []
+    inside = False
+    for w in words:
+        if not inside and w.text.startswith("["):
+            inside = not w.text.endswith("]")
+            continue
+        if inside:
+            inside = not w.text.endswith("]")
+            continue
+        out.append(w)
+    return tuple(out)
 
 
 def decode_response(content: bytes) -> tuple[bytes, tuple[Word, ...]]:
@@ -340,6 +423,55 @@ def _convert(api_key: str, voice_id: str, wav: bytes, timeout: float) -> tuple[i
     return response.status_code, response.content if ok else b"", "" if ok else response.text
 
 
+def _design(api_key: str, description: str, text: str | None, timeout: float) -> tuple[int, dict, str]:
+    body: dict = {"voice_description": description, "model_id": DESIGN_MODEL}
+    if text:
+        body["text"] = text
+    else:
+        body["auto_generate_text"] = True
+    try:
+        response = httpx.post(DESIGN_ENDPOINT, headers={"xi-api-key": api_key}, json=body, timeout=timeout)
+    except httpx.HTTPError as exc:
+        raise VoiceError(f"Could not reach ElevenLabs ({type(exc).__name__}).") from None
+    if response.status_code != 200:
+        return response.status_code, {}, response.text
+    try:
+        return 200, response.json(), ""
+    except ValueError:
+        return 502, {}, "ElevenLabs answered without previews."
+
+
+def _create_voice(api_key: str, name: str, description: str, generated_voice_id: str, timeout: float) -> tuple[int, str, str]:
+    try:
+        response = httpx.post(
+            CREATE_VOICE_ENDPOINT, headers={"xi-api-key": api_key}, timeout=timeout,
+            json={"voice_name": name, "voice_description": description, "generated_voice_id": generated_voice_id},
+        )
+    except httpx.HTTPError as exc:
+        raise VoiceError(f"Could not reach ElevenLabs ({type(exc).__name__}).") from None
+    if response.status_code != 200:
+        return response.status_code, "", response.text
+    try:
+        return 200, str(response.json()["voice_id"]), ""
+    except (ValueError, KeyError):
+        return 502, "", "ElevenLabs answered without a voice id."
+
+
+def _subscription(api_key: str, timeout: float) -> dict:
+    """The account's slots and credits; {} when it cannot be read (the
+    endpoint is rate-limited), so a caller says "unknown", never a number."""
+    try:
+        response = httpx.get(SUBSCRIPTION_ENDPOINT, headers={"xi-api-key": api_key}, timeout=timeout)
+    except httpx.HTTPError:
+        return {}
+    if response.status_code != 200:
+        return {}
+    try:
+        return response.json()
+    except ValueError:
+        return {}
+
+
 def _delete_voice(api_key: str, voice_id: str, timeout: float) -> tuple[int, str]:
     try:
         response = httpx.delete(
@@ -370,6 +502,9 @@ class ElevenLabsVoiceAdapter:
         convert: ConvertFn = _convert,
         search_library: Callable[..., list[dict]] = _search_library,
         add_from_library: Callable[..., tuple[int, str, str]] = _add_from_library,
+        design: DesignFn = _design,
+        create_voice: CreateVoiceFn = _create_voice,
+        subscription: Callable[[str, float], dict] = _subscription,
         timeout: float = DEFAULT_TIMEOUT,
         takes_per_line: int = 1,
         fit_tolerance: float = fit.DEFAULT_TOLERANCE,
@@ -387,6 +522,9 @@ class ElevenLabsVoiceAdapter:
         self._convert = convert
         self._search_library = search_library
         self._add_from_library = add_from_library
+        self._design = design
+        self._create_voice = create_voice
+        self._subscription = subscription
         # Voice ids known to be a speaker's own clone, so a take in one is
         # labelled "clone" (set by whoever resolves the voice, before synthesis).
         self._clones: set[str] = set()
@@ -405,7 +543,12 @@ class ElevenLabsVoiceAdapter:
         self.last_words: tuple[Word, ...] = ()
 
     def cost_of(self, plan: EditPlan) -> int:
-        return billed_characters(plan.new_text, self._model)
+        model = model_of(plan, self._model)
+        return billed_characters(spoken_text(plan.new_text, model), model)
+
+    @property
+    def model(self) -> str:
+        return self._model
 
     @property
     def default_voice(self) -> str:
@@ -437,6 +580,75 @@ class ElevenLabsVoiceAdapter:
             _raise_for(status, text.replace(self._api_key, "***"))
         self._voices = None
         return added
+
+    # ── a voice from words (20b) ──
+
+    def design_cost(self) -> int:
+        """What one design is likely to bill, in characters."""
+        return DESIGN_CHARS
+
+    def design_voice(self, project_id: str, description: str, text: str | None = None) -> list[dict]:
+        """Up to three previews of a voice described in words, each
+        {generated_voice_id, audio (mp3 bytes), media_type, duration, text}.
+        Billed by the sample text's characters: charged as an estimate before
+        the call and trued up to the text the vendor used."""
+        if text is not None and len(text) < DESIGN_TEXT_MIN:
+            raise VoiceConfigError(f"A sample text needs at least {DESIGN_TEXT_MIN} characters; "
+                                   "leave it out and the vendor writes one.")
+        estimate = len(text) if text else DESIGN_CHARS
+        self._budget.charge(project_id, estimate)
+        try:
+            status, payload, err = self._design(self._api_key, description, text, self._timeout)
+        except VoiceError:
+            self._budget.refund(project_id, estimate)
+            raise
+        if status != 200:
+            self._budget.refund(project_id, estimate)
+            _raise_for(status, err.replace(self._api_key, "***"))
+        used = payload.get("text") or text or ""
+        actual = len(used) or estimate
+        if actual < estimate:
+            self._budget.refund(project_id, estimate - actual)
+        elif actual > estimate:
+            try:
+                self._budget.charge(project_id, actual - estimate)
+            except Exception:  # noqa: BLE001 — the money is spent either way; the ceiling catches the next step
+                pass
+        previews = []
+        for pv in payload.get("previews", []):
+            previews.append({
+                "generated_voice_id": pv["generated_voice_id"],
+                "audio": base64.b64decode(pv.get("audio_base_64") or ""),
+                "media_type": pv.get("media_type") or "audio/mpeg",
+                "duration": float(pv.get("duration_secs") or 0.0),
+                "text": used,
+            })
+        return previews
+
+    def save_voice(self, generated_voice_id: str, name: str, description: str) -> str:
+        """Keep a preview as a voice of the account (a slot, no credits) and
+        put it in the catalogue."""
+        status, voice_id, err = self._create_voice(self._api_key, name, description, generated_voice_id, self._timeout)
+        if status != 200:
+            _raise_for(status, err.replace(self._api_key, "***"))
+        self._voices = None
+        return voice_id
+
+    def delete_voice(self, voice_id: str) -> None:
+        """Remove a voice from the account (one Voltage made: a clone, a
+        designed voice, a library add). Already gone (404) counts as done."""
+        status, text = self._delete_voice(self._api_key, voice_id, self._timeout)
+        if status not in (200, 404):
+            _raise_for(status, text.replace(self._api_key, "***"))
+        self._clones.discard(voice_id)
+        self._voices = None
+
+    def slots(self) -> tuple[int, int] | None:
+        """(used, limit) voice slots on the account, or None when unknown."""
+        sub = self._subscription(self._api_key, self._timeout)
+        if not sub or "voice_limit" not in sub:
+            return None
+        return int(sub.get("voice_slots_used") or 0), int(sub["voice_limit"])
 
     def voice_for(self, plan: EditPlan) -> str:
         """The voice an edit asked for, or the configured default."""
@@ -496,10 +708,7 @@ class ElevenLabsVoiceAdapter:
 
     def delete_clone(self, voice_id: str) -> None:
         """Remove a clone from the vendor. Already gone (404) counts as done."""
-        status, text = self._delete_voice(self._api_key, voice_id, self._timeout)
-        if status not in (200, 404):
-            _raise_for(status, text.replace(self._api_key, "***"))
-        self._clones.discard(voice_id)
+        self.delete_voice(voice_id)
 
     def _take(self, project_id: str, voice_id: str, body: dict, plan: EditPlan) -> tuple[bytes, tuple[Word, ...]]:
         # Charged per attempt, before the call, so concurrent jobs can never
@@ -538,7 +747,7 @@ class ElevenLabsVoiceAdapter:
         if (r > ffmpeg.MAX_TEMPO and r <= ffmpeg.MAX_TEMPO * SPEED_MAX) or \
            (r < ffmpeg.MIN_TEMPO and r >= ffmpeg.MIN_TEMPO * SPEED_MIN):
             speed = min(SPEED_MAX, max(SPEED_MIN, r))
-            faster = self._take(project_id, voice_id, {**body, "voice_settings": {"speed": round(speed, 2)}}, plan)
+            faster = self._take(project_id, voice_id, {**body, "voice_settings": {**body.get("voice_settings", {}), "speed": round(speed, 2)}}, plan)
             if abs(ratio(faster) - 1) < abs(r - 1):
                 notes.append(f"spoken at {speed:.2f}× by the model")
                 return faster

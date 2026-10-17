@@ -80,3 +80,32 @@ it('folds what Voltage did into one small list with the money on the right (Phas
   ])
   expect(screen.getByText('One line over the opening shot. Hear it below.')).toBeInTheDocument()
 })
+
+it('shows designed voices as a card with one player per preview (20b)', () => {
+  render(
+    <ChatPanel
+      projectId="p1"
+      messages={[
+        { role: 'assistant', text: 'Designed a voice from “an Indian woman near fifty” — 3 previews to hear', kind: 'step', cost: 0.1, seq: 2 },
+        {
+          role: 'assistant', text: '3 voices designed from “an Indian woman near fifty”', kind: 'previews', seq: 3,
+          data: { description: 'an Indian woman near fifty', previews: [
+            { n: 1, generated_voice_id: 'g1', sha256: 'a'.repeat(64), duration: 25.2 },
+            { n: 2, generated_voice_id: 'g2', sha256: 'b'.repeat(64), duration: 26.9 },
+            { n: 3, generated_voice_id: 'g3', sha256: 'c'.repeat(64), duration: 30.7 },
+          ] },
+        },
+        { role: 'assistant', text: 'Say which one, or I keep the second.' },
+      ]}
+      canSubmit
+      onSubmit={() => {}}
+    />,
+  )
+  const card = screen.getByRole('group', { name: '3 voices designed from “an Indian woman near fifty”' })
+  const players = within(card).getAllByLabelText(/Play preview \d/)
+  expect(players).toHaveLength(3)
+  expect(players[1]).toHaveAttribute('src', expect.stringContaining('/projects/p1/artifacts/' + 'b'.repeat(64)))
+  expect(players[1]).toHaveAttribute('preload', 'none')
+  expect(within(card).getAllByRole('listitem').map((li) => li.textContent)).toEqual(['Preview 125 s', 'Preview 227 s', 'Preview 331 s'])
+  expect(screen.getByText('Say which one, or I keep the second.')).toBeInTheDocument()
+})

@@ -74,6 +74,12 @@ class EditPlan:
     # Phase 16: the picture over the selection runs this many times slower
     # (1.08 = 8% slower) so the take fits at natural speech; None = as shot.
     flex: float | None = None
+    # Phase 20b: how it is said, as the vendor's own settings (stability,
+    # style, speed, similarity) chosen by Voltage from its direction; None =
+    # whatever `delivery` maps to. `model` names the vendor model for this
+    # take (expressive models take audio tags in the text); None = the default.
+    voice_settings: dict | None = None
+    model: str | None = None
 
 
 @dataclass(frozen=True)

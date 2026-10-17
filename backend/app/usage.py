@@ -20,9 +20,15 @@ WHISPER_USD_PER_MINUTE = 0.006
 CLAUDE_USD_PER_MTOK = {"claude-opus-5": (5.00, 25.00)}   # (input, output)
 
 
-def claude_usd(model: str, input_tokens: int, output_tokens: int) -> float:
+# Prompt caching: a cached read is a tenth of the input rate, writing the
+# cache a quarter more (the 5-minute cache).
+CACHE_READ, CACHE_WRITE = 0.10, 1.25
+
+
+def claude_usd(model: str, input_tokens: int, output_tokens: int, cache_read: int = 0, cache_write: int = 0) -> float:
     per_in, per_out = CLAUDE_USD_PER_MTOK.get(model, (5.00, 25.00))
-    return (input_tokens * per_in + output_tokens * per_out) / 1_000_000
+    return (input_tokens * per_in + cache_read * per_in * CACHE_READ + cache_write * per_in * CACHE_WRITE
+            + output_tokens * per_out) / 1_000_000
 
 
 class SpendCeilingReached(NonRetryableError):

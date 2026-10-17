@@ -283,7 +283,17 @@ export interface Piece { start: number; end: number; out_start: number; out_end:
 export interface ExportManifest { segments: Segment[]; render: MediaArtifact; inserts?: Insert[]; pieces?: Piece[] }
 
 /** A message in the thread. `step` is one thing Voltage did (Phase 20), with what it cost. */
-export interface ChatMessage { role: 'user' | 'assistant'; text: string; kind?: 'say' | 'step'; cost?: number; seq?: number }
+/** One preview of a voice Voltage designed (20b): playable from its artifact. */
+export interface VoicePreview { n: number; generated_voice_id: string; sha256: string; duration: number }
+export interface ChatMessage {
+  role: 'user' | 'assistant'
+  text: string
+  /** say: words; step: one thing Voltage did; previews: voices to hear (a card). */
+  kind?: 'say' | 'step' | 'previews'
+  cost?: number
+  seq?: number
+  data?: { description: string; previews: VoicePreview[] }
+}
 
 export interface EditRequest {
   prompt: string

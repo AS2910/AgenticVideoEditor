@@ -2387,3 +2387,38 @@ def test_a_turn_refused_at_the_ceiling_or_while_another_runs(client, project, mo
     job = await_job(client, resp.json()["job_id"])
     assert "ceiling" in job["result"]["reply"].lower() or "spend" in job["result"]["reply"].lower()
     assert job["result"]["plan"]["status"] == "proposed"
+
+
+def test_a_previews_card_reaches_the_thread_with_its_facts(client, project):
+    """20b: a card message (voices to hear) carries its data to the panel; plain messages carry none."""
+    import app.api.main as main
+    main.repo.add_message("p1", "assistant", "3 voices designed from “an older woman”", kind="previews",
+                          data={"description": "an older woman", "previews": [{"n": 1, "generated_voice_id": "g1", "sha256": "a" * 64, "duration": 25.2}]})
+    main.repo.add_message("p1", "assistant", "Say which one.")
+    card, said = client.get("/projects/p1/messages").json()[-2:]
+    assert card["kind"] == "previews" and card["data"]["previews"][0]["generated_voice_id"] == "g1"
+    assert said == {"role": "assistant", "text": "Say which one.", "kind": "say", "seq": card["seq"] + 1}
+
+
+def test_a_turn_after_a_finished_turn_keeps_working_on_the_lines_not_yet_shipped(client, project, monkeypatch):
+    """20b: a plan marked done at the end of a turn still holds the voiced
+    lines; the next turn works on them rather than starting empty."""
+    import app.api.main as main
+    from tests.agent.conftest import reply, text, use
+    client.put("/projects/p1/settings", json={"autonomy": "draft"})
+    _agent_on(monkeypatch, main, [
+        reply(use("synthesize_take", "c", text="Get 30% off today only.", voice_id="mock", line=1, start=None, end=None,
+                  direction=None, mix=None, item_id=None, model=None, settings=None), stop="tool_use"),
+        reply(text("Hear it.")),
+        reply(use("project_state", "d"), stop="tool_use"),
+        reply(text("Still there.")),
+    ])
+    first = await_job(client, client.post("/projects/p1/turns", json={"text": "make it 30% off"}).json()["job_id"])["result"]
+    assert first["plan"]["status"] == "done" and [i["status"] for i in first["plan"]["items"]] == ["ready"]
+    second = await_job(client, client.post("/projects/p1/turns", json={"text": "and then?"}).json()["job_id"])["result"]
+    assert second["plan"]["plan_id"] == first["plan"]["plan_id"]
+    assert [i["status"] for i in second["plan"]["items"]] == ["ready"]
+    # The model saw the line in its state.
+    state = next(b for m in main.repo.turns("p1") for b in (m["content"] if isinstance(m["content"], list) else [])
+                 if b.get("type") == "tool_result" and b.get("tool_use_id") == "d")
+    assert "i1 at" in state["content"] and "ready, take" in state["content"]

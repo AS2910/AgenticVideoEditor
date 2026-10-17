@@ -892,6 +892,8 @@ export default function App() {
       setTurnBusy(false)
       setTurnStep(null)
       void refreshUsage(projectId)
+      // A turn may have made a voice (designed, or from the library): the catalogue is read again.
+      listVoices().then((r) => setVoices(r.voices)).catch(() => {})
     }
   }
 
@@ -1528,6 +1530,7 @@ export default function App() {
       <aside ref={panelRef} className="flex min-h-0 flex-col border-l bg-card max-[960px]:min-h-[60dvh] max-[960px]:border-t max-[960px]:border-l-0" aria-label="Voltage" aria-busy={busy || undefined}>
         <ChatPanel
           messages={messages}
+          projectId={projectId ?? undefined}
           canSubmit
           onSubmit={submitComposer}
           inputRef={composerRef}

@@ -457,3 +457,80 @@ def test_adding_a_library_voice_refreshes_the_catalogue_and_a_refusal_is_a_plain
     assert added == [("owner1", "v" * 20, "Varsha")] and len(listed) == 2
     with pytest.raises(VoiceConfigError, match="voice slots are full"):
         voice.add_from_library("owner1", "w" * 20, "refused")
+
+
+# --- 20b: tags, models, settings; a voice from words -----------------------------
+
+def test_tags_stay_for_v3_and_v4_and_go_for_v2_and_the_context_follows_the_model():
+    from dataclasses import replace
+    from app.adapters.elevenlabs import spoken_text, has_tags, clamp_settings
+    tagged = replace(PLAN, new_text="[sighs] 30% off")
+    assert to_request(replace(tagged, model="v4"), TRANSCRIPT, "eleven_multilingual_v2") == {
+        "text": "[sighs] 30% off", "model_id": "eleven_v4", "previous_text": "Get", "next_text": "today only"}
+    v3 = to_request(replace(tagged, model="eleven_v3"), TRANSCRIPT, "eleven_multilingual_v2")
+    assert v3 == {"text": "[sighs] 30% off", "model_id": "eleven_v3"}          # no context for v3
+    assert to_request(tagged, TRANSCRIPT, "eleven_multilingual_v2")["text"] == "30% off"   # v2 would read the tag
+    assert spoken_text("A [long pause] word  [x]", "eleven_flash_v2_5") == "A word" and has_tags("[sighs] hi") and not has_tags("hi [")
+    assert clamp_settings({"stability": 1.4, "style": -1, "speed": 0.2, "similarity_boost": 0.5, "use_speaker_boost": 1, "junk": 3, "speed2": None}) == {
+        "stability": 1.0, "style": 0.0, "speed": 0.7, "similarity_boost": 0.5, "use_speaker_boost": True}
+
+
+def test_explicit_settings_win_over_the_delivery_and_the_fitters_speed_folds_in():
+    from dataclasses import replace
+    plan = replace(PLAN, delivery="more excited", voice_settings={"stability": 0.4, "speed": 0.9})
+    assert to_request(plan, None, "m")["voice_settings"] == {"stability": 0.4, "speed": 0.9}
+    assert to_request(plan, None, "m", speed=1.1)["voice_settings"]["speed"] == pytest.approx(0.99)
+
+
+def test_the_cost_counts_the_text_as_sent(store):
+    from dataclasses import replace
+    v = adapter(store)
+    assert v.cost_of(replace(PLAN, new_text="[sighs] 30% off", model="v3")) == 15
+    assert v.cost_of(replace(PLAN, new_text="[sighs] 30% off")) == 7
+    assert v.model == "eleven_multilingual_v2"
+
+
+def test_a_tags_span_stays_in_the_audio_and_leaves_the_words():
+    words = words_from_alignment(_alignment("[sighs] 30% [long pause] off"))
+    assert [w.text for w in words] == ["30%", "off"]
+    assert words[0].start == pytest.approx(0.8)
+
+
+def test_a_voice_is_designed_charged_by_its_sample_text_and_a_preview_kept_as_a_voice():
+    from app.adapters.elevenlabs import DESIGN_CHARS
+    calls = []
+    sample = "x" * 420
+
+    def design(api_key, description, text, timeout):
+        calls.append(("design", description, text))
+        return 200, {"text": sample, "previews": [
+            {"generated_voice_id": "g1", "audio_base_64": base64.b64encode(b"one").decode(), "media_type": "audio/mpeg", "duration_secs": 25.2},
+            {"generated_voice_id": "g2", "audio_base_64": base64.b64encode(b"two").decode(), "media_type": "audio/mpeg", "duration_secs": 26.0},
+        ]}, ""
+
+    def create_voice(api_key, name, description, gid, timeout):
+        calls.append(("create", name, description, gid))
+        return 200, "NEWV" + gid, ""
+
+    budget = VoiceBudget(ceiling=2000)
+    v = ElevenLabsVoiceAdapter(KEY, None, budget, model="m", voice_id="voice-x", design=design, create_voice=create_voice,
+                               get_voices=lambda k, t: [], subscription=lambda k, t: {"voice_slots_used": 4, "voice_limit": 30})
+    previews = v.design_voice("p1", "an older woman", None)
+    assert [p["generated_voice_id"] for p in previews] == ["g1", "g2"] and previews[0]["audio"] == b"one"
+    assert previews[1]["duration"] == 26.0 and previews[0]["text"] == sample
+    # charged DESIGN_CHARS up front, trued up to the 420-character sample the vendor used
+    assert budget.remaining("p1") == 2000 - 420 and DESIGN_CHARS == 350
+    assert v.save_voice("g2", "Dusk", "an older woman") == "NEWVg2"
+    assert calls == [("design", "an older woman", None), ("create", "Dusk", "an older woman", "g2")]
+    assert v.slots() == (4, 30) and v.design_cost() == 350
+    with pytest.raises(VoiceConfigError, match="at least 100 characters"):
+        v.design_voice("p1", "a man", "short")
+
+
+def test_a_failed_design_refunds_and_a_refusal_is_a_plain_error():
+    budget = VoiceBudget(ceiling=1000)
+    v = ElevenLabsVoiceAdapter(KEY, None, budget, model="m", voice_id="voice-x",
+                               design=lambda k, d, t, to: (402, {}, "quota exceeded"), subscription=lambda k, t: {})
+    with pytest.raises(VoiceConfigError, match="quota"):
+        v.design_voice("p1", "a man", None)
+    assert budget.remaining("p1") == 1000 and v.slots() is None
