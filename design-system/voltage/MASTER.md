@@ -37,6 +37,10 @@ Colour never carries meaning alone: every state has a word (Kept, Ready to hear,
 
 **Inter** (variable, self-hosted through `@fontsource-variable/inter`; no external font request). One family. Headings are `font-semibold tracking-tight` and one `h1` per screen. Scale: `text-xs` 12 is the floor (labels, `kbd`, never a sentence), `text-sm` 14 for compact UI, `text-base` 16 for body and inputs. Line-height 1.5. Times and money use `.tnum`. Verdicts and states are sentences first, numbers behind them.
 
+**Voltage's panel has two sizes, not four** (2026-10-17). What Voltage and the user say is `text-chat` (a token in `globals.css`: 15px / 1.6, a step under body so a 550px panel holds a sentence on two lines, not three); everything around the words — labels such as "I noticed" and "Or try", chips, notes, "· my guess", text links, the hint under the composer — is `text-sm` 14, muted where it is secondary. `text-xs` stays for `kbd`, counts and the plan's meta line only. A filename in a sentence is `font-medium break-all`, not bold.
+
+**Voltage's words are markdown, drawn not pasted.** `components/Markdown.tsx` (parser in `lib/markdown.tsx`) renders what the model writes — paragraphs, `- ` and `1. ` lists, **bold**, *italic*, `code`, http(s) links, a heading as a bold line (a chat has no headings) — as React nodes, never HTML, so nothing a model writes reaches the page as markup. A plain sentence stays one text node (tests find it whole). Used for every assistant message in `ChatPanel`, the reading's opening line, a question's text and a plan's summary; the user's own bubble is plain text.
+
 ## Spacing, layout, targets
 
 4px grid via Tailwind. Player left, Voltage panel right at desktop; stacked below 960px with a 16px gutter and no horizontal scroll; Voltage tucks away into a 64px rail (a strip with its own composer on a phone). Full-height screens use `dvh`, never `vh`.

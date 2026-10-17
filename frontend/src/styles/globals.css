@@ -81,6 +81,9 @@
 
 @theme inline {
   --font-sans: 'Inter Variable', ui-sans-serif, system-ui, sans-serif;
+  /* Voltage's words in the panel: a step under body, with room between lines. */
+  --text-chat: 0.9375rem;
+  --text-chat--line-height: 1.6;
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
