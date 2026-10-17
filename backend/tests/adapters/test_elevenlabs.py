@@ -416,3 +416,44 @@ def test_the_takes_words_come_out_fitted_on_the_adapter(store):
     assert [w.text for w in voice.last_words] == ["30%", "off"]
     assert voice.last_words[1].start >= voice.last_words[0].end
     assert voice.last_words[1].end <= 0.9 + 0.05            # inside the fitted take
+
+
+# --- 15e: the catalogue holds the library's voices too; clones never -----------
+
+def test_the_catalogue_lists_premade_and_library_voices_but_never_a_clone():
+    from app.adapters.elevenlabs import in_catalogue
+    raw = [
+        {"voice_id": "kL06KYMvPY56NluIQ72m", "name": "Varsha - Warm and Clear", "category": "professional",
+         "labels": {"gender": "female", "accent": "indian", "age": "middle_aged"}},
+        {"voice_id": "nPczCjzI2devNBz1zQrb", "name": "Brian - Deep, Resonant and Comforting", "category": "premade",
+         "labels": {"gender": "male", "accent": "american", "age": "middle_aged"}},
+        {"voice_id": "c" * 20, "name": "voltage-p3-A", "category": "cloned", "labels": {}},
+        {"voice_id": "d" * 20, "name": "My own clone", "category": "cloned", "labels": {}},
+    ]
+    kept = [to_voice(v) for v in raw if in_catalogue(v)]
+    assert [v["name"] for v in kept] == ["Varsha", "Brian"]
+    assert kept[0]["category"] == "professional" and kept[0]["accent"] == "indian"
+
+
+def test_adding_a_library_voice_refreshes_the_catalogue_and_a_refusal_is_a_plain_error():
+    import pytest
+    from app.adapters.elevenlabs import VoiceConfigError
+    listed = []
+    added = []
+
+    def get_voices(api_key, timeout):
+        listed.append(1)
+        return [{"voice_id": "v" * 20, "name": "Varsha"}] if added else []
+
+    def add_from_library(api_key, owner_id, voice_id, name, timeout):
+        added.append((owner_id, voice_id, name))
+        return (200, voice_id, "") if name != "refused" else (402, "", "voice slots are full")
+
+    voice = ElevenLabsVoiceAdapter(KEY, None, VoiceBudget(ceiling=10), model="m", voice_id="voice-x",
+                                   get_voices=get_voices, add_from_library=add_from_library)
+    assert voice.voices() == []
+    assert voice.add_from_library("owner1", "v" * 20, "Varsha") == "v" * 20
+    assert [v["name"] for v in voice.voices()] == ["Varsha"]
+    assert added == [("owner1", "v" * 20, "Varsha")] and len(listed) == 2
+    with pytest.raises(VoiceConfigError, match="voice slots are full"):
+        voice.add_from_library("owner1", "w" * 20, "refused")

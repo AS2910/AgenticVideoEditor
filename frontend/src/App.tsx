@@ -2,6 +2,7 @@ import { Fragment, useCallback, useEffect, useRef, useState } from 'react'
 import { ConsentSheet } from './components/ConsentSheet'
 import { SignIn } from './components/SignIn'
 import { ShipSheet } from './components/ShipSheet'
+import { ShipCard } from './components/ShipCard'
 import type { Shipped } from './components/ShipSheet'
 import { LoadScreen } from './components/LoadScreen'
 import { Player } from './components/Player'
@@ -39,7 +40,7 @@ import {
   createProject, confirmPlace, previewEdit, approveEdit, exportProject, artifactUrl,
   pollJob, PollCancelled, ApiError, listProjects, getProject, deleteProject, getUsage, listVoices, updateSpeaker, detectSpeakers,
   revertEdit, updateSettings, rewordLine, removeLine, moveCandidate, moveEdit, shiftLine,
-  createPlan, getPlan, updateItem, runPlan, answerItem, redoItem, approvePlan, clarifyPlan,
+  createPlan, getPlan, updateItem, runPlan, answerItem, redoItem, approvePlan, setPlanVoice, clarifyPlan,
   readProject, revisePlan, stopPlan, grantConsent, createVariant, getMe, logout,
 } from './api'
 import type { Me } from './api'
@@ -66,6 +67,8 @@ type Stage = 'load' | 'editor'
 
 /** Words that mean "take your guess" when Voltage has asked something. */
 const GO = /^(go|ok|okay|yes|sure|go ahead|fine|yep|do it)[.!]?$/i
+// 15e: said in the composer, ships the lines kept — the same as the Ship button.
+const SHIP = /^(ship( it| them| all| the rest)?|done|looks good|lgtm|finish( it)?|publish( it)?|export( it)?)[.!]?$/i
 
 /** The chat's voice, or the speaker's own, named for a take. */
 const voiceName = (voices: Voice[], id: string) => voices.find((v) => v.voice_id === id)?.name
@@ -818,8 +821,33 @@ export default function App() {
   const submitComposer = (text: string) => {
     if (plan?.status === 'clarifying') return void clarify(GO.test(text.trim()) ? undefined : text)
     if (selection) return void runPreview(text)
+    if (plan && SHIP.test(text.trim())) return void shipFromChat(text.trim())
     if (plan && plan.status !== 'running' && plan.status !== 'stopping') return void revise(text)
     return void makePlan(text)
+  }
+
+  /** "Ship it" in the composer (15e): the lines kept ship, as the button would. */
+  const shipFromChat = (text: string) => {
+    say({ role: 'user', text })
+    if (!plan) return
+    if (keptItems.length > 0) {
+      tell(`Shipping ${keptItems.length === 1 ? 'the change' : `${keptItems.length} changes`}.`)
+      return void approveAll(keptItems.map((i) => i.item_id))
+    }
+    if (readyItems.length > 0) return tell('Every line is held. Keep at least one, then say ship.')
+    if (plan.status === 'running' || plan.status === 'stopping') return tell("I'm still voicing the plan. Say ship once the lines are ready.")
+    if (plan.items.some((i) => i.status === 'approved') && !plan.items.some((i) => i.kind === 'planned' && i.enabled && i.status === 'planned')) return tell('Everything here has shipped. Download the MP4 from the top bar, or ask for another change.')
+    tell("Nothing is voiced yet. Say go and I'll voice the plan first.")
+  }
+
+  /** 15e: the voice the plan speaks in, picked by hand on the plan card. */
+  const pickPlanVoice = async (voiceIdPicked: string) => {
+    if (!projectId || !plan) return
+    try {
+      setPlan(await setPlanVoice(projectId, plan.plan_id, voiceIdPicked))
+    } catch (e) {
+      tell(e instanceof ApiError ? e.message : "I couldn't change the plan's voice. Try it again.")
+    }
   }
 
   const changeItem = async (item: PlanItem, change: { enabled?: boolean; new_text?: string; include?: boolean; delivery?: string; mix?: Mix }) => {
@@ -1274,17 +1302,6 @@ export default function App() {
             {review ? 'Back to the script' : readyCount > 0 ? `Review · ${readyCount} ready` : 'Review'}
           </Button>
         )}
-        {reviewable && (
-          <Button
-            size="sm"
-            onClick={() => void approveAll(keptItems.map((i) => i.item_id))}
-            disabled={busy || keptItems.length === 0}
-          >
-            {keptItems.length === 0 ? 'Ship'
-              : keptItems.length === readyItems.length ? `Ship ${keptItems.length} ${keptItems.length === 1 ? 'change' : 'changes'}`
-              : `Ship ${keptItems.length} of ${readyItems.length}`}
-          </Button>
-        )}
         <ExportBar segments={segments} inserts={inserts} pieces={pieces} onExport={() => void runExport()} download={download} busy={exporting} />
       </header>
 
@@ -1555,10 +1572,10 @@ export default function App() {
               onAdjust={() => composerRef.current?.focus()}
               onAnswer={(item, option) => answerTheItem(item, option)}
               onRedo={(item) => redoTheItem(item)}
-              onApproveAll={() => setReview(true)}
               onDelivery={(item, delivery) => changeItem(item, { delivery: delivery ?? '' })}
               onMix={(item, mix) => changeItem(item, { mix })}
               onStop={() => stop()}
+              onVoice={(id) => pickPlanVoice(id)}
             />
           )}
           {planBusy && (
@@ -1607,6 +1624,16 @@ export default function App() {
                 note={ranOn ? `Ran ${overrun.toFixed(1)} s into the pause after it` : null}
               />
             </>
+          )}
+          {plan && readyItems.length > 0 && !planBusy && !generating && !clarifying && (
+            <ShipCard
+              ready={readyItems}
+              kept={keptItems}
+              review={review}
+              onReview={() => setReview((r) => !r)}
+              onShip={() => approveAll(keptItems.map((i) => i.item_id))}
+              busy={busy}
+            />
           )}
         </ChatPanel>
       </aside>

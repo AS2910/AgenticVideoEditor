@@ -68,6 +68,10 @@ export interface Plan {
   answers?: [string, string][]
   questions_left?: number
   voice?: string | null
+  /** 15e: the goal asked for a kind of voice and `voice` answers it — it then
+   *  speaks every line not yet voiced; and one plain sentence on the choice. */
+  voice_asked?: boolean
+  voice_note?: string | null
   /** What this plan has cost so far, estimated. */
   spend_usd: number
   /** Voice calls made for this plan so far (the polish pass): the receipt's "takes voiced". */
@@ -93,6 +97,8 @@ export interface Voice {
   gender: string | null
   accent: string | null
   age: string | null
+  /** "premade" (ElevenLabs' own) or a library voice added to the account. */
+  category?: string | null
 }
 export interface Selection { start: number; end: number }
 

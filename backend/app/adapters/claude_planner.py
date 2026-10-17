@@ -11,7 +11,7 @@ from __future__ import annotations
 import base64
 import re
 from pathlib import Path
-from typing import Literal, Sequence
+from typing import Callable, Literal, Sequence
 
 import anthropic
 from pydantic import BaseModel, Field
@@ -20,7 +20,7 @@ from app.adapters.claude_intent import IntentConfigError, IntentError, MODEL
 from app.orchestrator.intent import Meter
 from app.media.fit import syllable_budget
 from app.orchestrator.planner import (
-    MAX_QUESTIONS, NARRATION_RATE, Change, Frame, ItemChange, ItemView, Line, Proposal, Question, Reading, Revision, Role, Sight,
+    MAX_QUESTIONS, NARRATION_RATE, Change, Frame, ItemChange, ItemView, Line, Proposal, VoiceAsk, Question, Reading, Revision, Role, Sight,
 )
 
 MAX_TOKENS = 4000
@@ -67,6 +67,15 @@ null when the goal is clear.
 an added line when it is not the person who spoke the line it follows.
 - `new_text` is only the spoken words. Never put a name or a label such as \
 "Shopkeeper:" in front of them; they would be read aloud.
+- `voice`: only when the goal asks for a kind of voice — an accent, a gender, \
+an age, a character ("an Indian voice", "a woman", "an older man", "a \
+child's voice"). Pick the closest voice from the list of voices you are \
+given: `wanted` is what they asked, in their words; `voice_id` the id you \
+chose; `note` one plain sentence to the user naming the voice and why \
+("Varsha's voice: Indian, warm and clear, as you asked."). When nothing on \
+the list fits, set `voice_id` null and say so plainly in `note` ("No Indian \
+voice is on the list yet, so I kept the default voice."). Leave `voice` null \
+when the goal says nothing about the voice.
 If the goal cannot be met with dialogue changes, return no edits and say why \
 in `summary`.\
 """
@@ -165,6 +174,11 @@ covers, as edits on transcript lines (same rules as planning: words only, no \
 label in front; `speaker` only when someone else says an added line).
 `summary` is one plain sentence to the user on what you changed, e.g. "Left \
 out the line at 0:17 and made the first one warmer."
+`voice`: only when the instruction asks for a kind of voice ("use an Indian \
+voice", "a man instead"): the closest voice from the list you are given — \
+`wanted` in their words, `voice_id` (null when nothing fits), and `note`, \
+one plain sentence naming the voice and why, or saying plainly that nothing \
+fits. It applies to the lines not yet voiced. Otherwise leave `voice` null.
 If the instruction is a new goal for the whole video rather than a change to \
 this plan, set `new_goal` true, leave `changes` and `additions` empty, and \
 say so in `summary`.\
@@ -187,12 +201,19 @@ class _Question(BaseModel):
     guess: str | None
 
 
+class _VoiceAsk(BaseModel):
+    wanted: str = Field(description="The kind of voice the user asked for, in their words.")
+    voice_id: str | None = Field(description="The id of the closest voice on the list; null when nothing fits.")
+    note: str = Field(description="One plain sentence to the user: which voice and why, or why none fits.")
+
+
 class _PlanReading(BaseModel):
     summary: str
     findings: list[str]
     question: _Question | None
     edits: list[_Edit]
     suggestions: list[_Edit]
+    voice: _VoiceAsk | None = None
 
 
 class _Shortening(BaseModel):
@@ -240,16 +261,32 @@ class _Revision(BaseModel):
     new_goal: bool = False
     changes: list[_ItemChange]
     additions: list[_Edit]
+    voice: _VoiceAsk | None = None
+
+
+def render_voices(voices: Sequence[dict]) -> list[str]:
+    """The catalogue as the planner reads it: one line per voice it may pick."""
+    if not voices:
+        return []
+    out = ["Voices that can speak a line (id · name · who · how they sound):"]
+    for v in voices:
+        who = ", ".join(str(x).replace("_", " ") for x in (v.get("gender"), v.get("accent"), v.get("age")) if x)
+        out.append(f"- {v['voice_id']} · {v['name']}" + (f" · {who}" if who else "")
+                   + (f" · {v['description']}" if v.get("description") else ""))
+    out.append("")
+    return out
 
 
 def render_plan_request(goal: str, lines: Sequence[Line], history: Sequence[str],
                         answer: tuple[str, str] | None = None, sight: Sight | None = None,
-                        duration: float | None = None, answers: Sequence[tuple[str, str]] = ()) -> str:
+                        duration: float | None = None, answers: Sequence[tuple[str, str]] = (),
+                        voices: Sequence[dict] = ()) -> str:
     out = []
     if history:
         out.append("Earlier goals in this project:")
         out += [f"- {h}" for h in history]
         out.append("")
+    out += render_voices(voices)
     if not lines and sight is not None:
         return _render_voiceover_request(goal, sight, duration or 0.0, answers or ((answer,) if answer else ()), out)
     if answer:
@@ -330,8 +367,10 @@ def _mmss(t: float) -> str:
     return f"{int(t // 60)}:{int(t % 60):02d}"
 
 
-def render_revise_request(instruction: str, items: Sequence[ItemView], lines: Sequence[Line], goal: str) -> str:
-    out = ["Transcript (each line's syllables now, and how many its slot can hold):"]
+def render_revise_request(instruction: str, items: Sequence[ItemView], lines: Sequence[Line], goal: str,
+                          voices: Sequence[dict] = ()) -> str:
+    out = render_voices(voices)
+    out.append("Transcript (each line's syllables now, and how many its slot can hold):")
     for line in lines:
         who = f" {line.speaker}:" if line.speaker else ""
         fits = (f"  ({line.syllables} syl now, up to {line.budget} fit)"
@@ -385,7 +424,7 @@ def to_revision(reading: _Revision, items: Sequence[ItemView], lines: Sequence[L
     additions = to_proposal(_PlanReading(summary="", findings=[], question=None, edits=reading.additions,
                                          suggestions=[]), lines).edits
     return Revision(summary=reading.summary.strip() or "Changed the plan.", changes=tuple(changes),
-                    additions=additions, new_goal=reading.new_goal)
+                    additions=additions, new_goal=reading.new_goal, voice=to_voice_ask(reading.voice))
 
 
 _LABEL = re.compile(r"^\s*(?:the\s+)?([A-Za-z][\w' ]{0,30}?)\s*:\s+", re.IGNORECASE)
@@ -438,11 +477,33 @@ def to_proposal(reading: _PlanReading, lines: Sequence[Line]) -> Proposal:
         summary=reading.summary.strip() or "Here's my plan.",
         edits=changes(reading.edits), suggestions=changes(reading.suggestions),
         findings=tuple(f.strip() for f in reading.findings if f.strip())[:4],
-        question=question,
+        question=question, voice=to_voice_ask(reading.voice),
     )
 
 
+def to_voice_ask(ask: _VoiceAsk | None) -> VoiceAsk | None:
+    """A voice the goal asked for; nothing when the model left it out or empty.
+    The id is checked against the catalogue by whoever applies it."""
+    if ask is None or not ask.wanted.strip():
+        return None
+    voice_id = (ask.voice_id or "").strip() or None
+    note = ask.note.strip() or (f"I chose a voice for \"{ask.wanted.strip()}\"." if voice_id
+                                else f"No voice on the list fits \"{ask.wanted.strip()}\", so I kept the default.")
+    return VoiceAsk(ask.wanted.strip(), voice_id, note)
+
+
 class ClaudePlanner:
+    # The voices a plan may ask for, read when a request is rendered (set by
+    # whoever wires the voice adapter; a list, or a callable returning one).
+    catalogue: Callable[[], Sequence[dict]] | Sequence[dict] | None = None
+
+    def _voices(self) -> Sequence[dict]:
+        try:
+            voices = self.catalogue() if callable(self.catalogue) else (self.catalogue or ())
+        except Exception:  # noqa: BLE001 — a catalogue that cannot be listed just leaves the voice unasked
+            return ()
+        return tuple(voices)
+
     identity = "claude"
 
     def __init__(
@@ -477,13 +538,15 @@ class ClaudePlanner:
              answers: Sequence[tuple[str, str]] = ()) -> Proposal:
         silent = not lines and sight is not None
         response = self._parse(SILENT_SYSTEM if silent else SYSTEM,
-                               render_plan_request(goal, lines, history, answer, sight, duration, answers),
+                               render_plan_request(goal, lines, history, answer, sight, duration, answers,
+                                                   voices=self._voices()),
                                _PlanReading, "medium", meter)
         if response.stop_reason == "refusal" or response.parsed_output is None:
             return Proposal(summary="I can't plan that request.", edits=())
         proposal = to_proposal(response.parsed_output, lines)
         if silent and len(answers) >= MAX_QUESTIONS and proposal.question is not None:
-            proposal = Proposal(proposal.summary, proposal.edits, proposal.suggestions, proposal.findings, None)
+            proposal = Proposal(proposal.summary, proposal.edits, proposal.suggestions, proposal.findings, None,
+                                voice=proposal.voice)
         return proposal
 
     def look(self, frames: Sequence[Frame], duration: float, meter: Meter | None = None) -> Sight:
@@ -510,7 +573,7 @@ class ClaudePlanner:
 
     def revise(self, instruction: str, items: Sequence[ItemView], lines: Sequence[Line],
                goal: str, meter: Meter | None = None) -> Revision:
-        response = self._parse(REVISE_SYSTEM, render_revise_request(instruction, items, lines, goal),
+        response = self._parse(REVISE_SYSTEM, render_revise_request(instruction, items, lines, goal, voices=self._voices()),
                                _Revision, "medium", meter)
         if response.stop_reason == "refusal" or response.parsed_output is None:
             return Revision(summary="I can't change the plan that way.")

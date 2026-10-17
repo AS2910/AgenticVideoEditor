@@ -25,7 +25,7 @@ const plan = (over: Partial<Plan> = {}): Plan => ({
   findings: [], question: null, spend_usd: 0, log: [], items: [item()], ...over,
 })
 const handlers = () => ({
-  onToggle: vi.fn(), onReword: vi.fn(), onInclude: vi.fn(), onRun: vi.fn(), onAnswer: vi.fn(), onRedo: vi.fn(), onApproveAll: vi.fn(),
+  onToggle: vi.fn(), onReword: vi.fn(), onInclude: vi.fn(), onRun: vi.fn(), onAnswer: vi.fn(), onRedo: vi.fn(),
 })
 
 describe('a sheet is a real modal', () => {

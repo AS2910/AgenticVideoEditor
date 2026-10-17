@@ -9,6 +9,7 @@ import { CheckCircle2, Circle, CircleAlert, Lightbulb, Loader2 } from 'lucide-re
 import { Presence } from './Presence'
 import { Button } from '@/components/ui/button'
 import { Markdown } from './Markdown'
+import { byAccent } from '../lib/voices'
 import { Input } from '@/components/ui/input'
 import { Progress } from '@/components/ui/progress'
 import { cn } from '@/lib/utils'
@@ -28,12 +29,13 @@ interface PlanCardProps {
   onAdjust?: () => void
   onAnswer: (item: PlanItem, option: QuestionOption) => void | Promise<unknown>
   onRedo: (item: PlanItem) => void | Promise<unknown>
-  onApproveAll: () => void
   /** UX-2: how a line is said, and how an added line meets the picture. */
   onDelivery?: (item: PlanItem, delivery: string | null) => void | Promise<unknown>
   onMix?: (item: PlanItem, mix: 'over' | 'concatenate') => void | Promise<unknown>
   /** UX-2: stop a running plan after the line it is on. */
   onStop?: () => void | Promise<unknown>
+  /** 15e: pick the voice the plan speaks in (the lines not yet voiced). */
+  onVoice?: (voiceId: string) => void | Promise<unknown>
 }
 
 const KIND: Record<string, string> = { replace: 'Replaces the line', concatenate: 'Added after the line, the picture makes room', over: 'Added after the line, over the picture', layer: 'Over the original sound' }
@@ -119,10 +121,12 @@ const said = (item: PlanItem, who: string | null, voice?: string) => {
 
 /** The agent's plan: what it will change, or is changing, line by line. */
 export function PlanCard({
-  plan, speakers, voices, projectId, busy, onToggle, onReword, onInclude, onRun, onAdjust, onAnswer, onRedo, onApproveAll,
-  onDelivery, onMix, onStop,
+  plan, speakers, voices, projectId, busy, onToggle, onReword, onInclude, onRun, onAdjust, onAnswer, onRedo,
+  onDelivery, onMix, onStop, onVoice,
 }: PlanCardProps) {
   const [drafts, setDrafts] = useState<Record<string, string>>({})
+  const [pickingVoice, setPickingVoice] = useState(false)
+  const planVoice = voices.find((v) => v.voice_id === plan.voice)
   // The item whose change is on its way to the server: its controls wait, and say so.
   const [pending, setPending] = useState<string | null>(null)
   const run = async (id: string, fn: () => void | Promise<unknown>) => {
@@ -132,7 +136,6 @@ export function PlanCard({
   const planned = plan.items.filter((i) => i.kind === 'planned' && i.status !== 'dismissed')
   const suggestions = plan.items.filter((i) => i.kind === 'suggestion' && i.status === 'suggested')
   const ticked = planned.filter((i) => i.enabled)
-  const ready = planned.filter((i) => i.status === 'ready')
   const settled = planned.filter((i) => ['ready', 'approved', 'needs-you', 'failed'].includes(i.status))
   const proposed = plan.status === 'proposed' || plan.status === 'clarifying'
   const running = plan.status === 'running' || plan.status === 'stopping'
@@ -180,6 +183,35 @@ export function PlanCard({
             </>
           )}
         </div>
+        {(plan.voice_asked || plan.voice_note) && (
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5 pb-2 text-sm" data-testid="plan-voice">
+            <span className="text-muted-foreground">Voice</span>
+            {pickingVoice && onVoice ? (
+              <select
+                className="h-8 max-w-52 rounded-md border border-input bg-transparent px-2 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 pointer-coarse:h-11 dark:bg-input/30 dark:[&>option]:bg-popover"
+                aria-label="The plan's voice"
+                autoFocus
+                value={plan.voice ?? ''}
+                onChange={(e) => { setPickingVoice(false); void run('voice', () => onVoice(e.target.value)) }}
+                onBlur={() => setPickingVoice(false)}
+                onKeyDown={(e) => { if (e.key === 'Escape') setPickingVoice(false) }}
+              >
+                {byAccent(voices).map(([accent, group]) => (
+                  <optgroup key={accent} label={accent}>
+                    {group.map((v) => <option key={v.voice_id} value={v.voice_id}>{[v.name, [v.gender, v.accent].filter(Boolean).join(', ')].filter(Boolean).join(' · ')}</option>)}
+                  </optgroup>
+                ))}
+              </select>
+            ) : (
+              <>
+                <span className="font-medium">{planVoice ? planVoice.name : 'the default'}</span>
+                {planVoice && (planVoice.gender || planVoice.accent) && <span className="text-muted-foreground">{[planVoice.gender, planVoice.accent].filter(Boolean).join(', ')}</span>}
+                {onVoice && !running && <Button type="button" variant="link" className="h-auto px-1 py-0 text-sm text-primary underline-offset-4 hover:underline pointer-coarse:h-11" onClick={() => setPickingVoice(true)} disabled={pending === 'voice'}>Change</Button>}
+              </>
+            )}
+            {plan.voice_note && <span className="basis-full text-muted-foreground"><Markdown as="span" text={plan.voice_note} />{voiced.length > 0 && toVoice.length === 0 && plan.voice_asked ? ' A line already voiced keeps its take until you redo it.' : ''}</span>}
+          </div>
+        )}
 
         {proposed && planned.length === 0 && (
           <div className="border-t pt-3 pb-1 text-sm leading-normal text-muted-foreground" data-testid="plan-empty">
@@ -317,15 +349,7 @@ export function PlanCard({
         </div>
       ))}
 
-      {/* The last thing in the panel is what you do next. */}
-      {!proposed && ready.length > 0 && !busy && (
-        <div className="flex items-center gap-3 rounded-lg border bg-card p-3 text-card-foreground shadow-xs" data-testid="next-action">
-          <span className="flex-1 text-sm">
-            {ready.length === 1 ? 'One change is' : `${ready.length} changes are`} ready to hear and ship.
-          </span>
-          <Button onClick={onApproveAll}>Review and ship</Button>
-        </div>
-      )}
+      {/* What you do next — review and ship — is the panel's own last card (ShipCard, 15e). */}
     </div>
   )
 }
