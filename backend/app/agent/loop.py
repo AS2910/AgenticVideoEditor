@@ -24,12 +24,17 @@ log = logging.getLogger(__name__)
 MODEL = "claude-opus-5-5"
 MAX_TOKENS = 16000
 # Betas: a classifier refusal falls through to another model rather than
-# failing the turn; old tool results (frames) are cleared server-side.
+# failing the turn; old frames are cleared server-side once the thread is
+# long (20b: only `look_at_frames` results, the one tool whose results are
+# images; the last three looks stay). Clearing counts as no edit for the
+# thinking-block check, where a client-side cut would.
 BETAS = ("server-side-fallback-2026-07-01", "context-management-2025-06-27")
-CONTEXT_MANAGEMENT = {"edits": [{"type": "clear_tool_uses_20250919", "trigger": {"type": "input_tokens", "value": 60000},
-                                 "keep": {"type": "tool_uses", "value": 6}}]}
+CONTEXT_MANAGEMENT = {"edits": [{"type": "clear_tool_uses_20250919", "trigger": {"type": "input_tokens", "value": 40000},
+                                 "keep": {"type": "tool_uses", "value": 3},
+                                 "exclude_tools": [n for n in BY_NAME if n != "look_at_frames"]}]}
 
-Meter = Callable[[str, int, int], None]
+# (model, input, output, cache_read, cache_write) tokens of one request.
+Meter = Callable[[str, int, int, int, int], None]
 OnStep = Callable[[str, float], None]
 
 
@@ -56,6 +61,67 @@ def _text_of(content: Sequence[Any]) -> str:
         if kind == "text":
             parts.append(getattr(b, "text", None) or b.get("text", ""))
     return "\n".join(p for p in parts if p).strip()
+
+
+def with_cache_point(messages: list[dict]) -> list[dict]:
+    """The thread with a cache breakpoint on its last block, so the next
+    request (the next step, or the next turn) reads the prefix from the
+    cache. A moved marker is not an edit: the blocks are unchanged."""
+    if not messages:
+        return messages
+    last = messages[-1]
+    content = last["content"]
+    blocks = [{"type": "text", "text": content}] if isinstance(content, str) else [dict(b) for b in content]
+    if not blocks:
+        return messages
+    blocks[-1] = {k: v for k, v in blocks[-1].items() if k != "cache_control"} | {"cache_control": {"type": "ephemeral"}}
+    return messages[:-1] + [{**last, "content": blocks}]
+
+
+INTERRUPTED = "Not run: the turn was interrupted before this step finished. Do it again if it is still wanted."
+
+
+def _blocks(message: dict) -> list[dict]:
+    content = message.get("content")
+    if isinstance(content, str):
+        return [{"type": "text", "text": content}]
+    return [b for b in (content or []) if isinstance(b, dict)]
+
+
+def _unanswered(assistant: dict, following: dict | None) -> list[dict]:
+    uses = [b for b in _blocks(assistant) if b.get("type") == "tool_use"]
+    if not uses:
+        return []
+    have = {b.get("tool_use_id") for b in _blocks(following) if b.get("type") == "tool_result"} if following and following.get("role") == "user" else set()
+    return [u for u in uses if u["id"] not in have]
+
+
+def repaired(history: Sequence[dict]) -> list[dict]:
+    """The thread with every tool call answered. A turn that died mid-step
+    (a restart, a crash) leaves a `tool_use` with no result, and the API
+    refuses the thread until it has one; the result goes at the head of the
+    message that follows (or a message of its own). Pure, so each turn
+    repairs the stored thread the same way and the prefix stays identical."""
+    out: list[dict] = []
+    for m in history:
+        m = dict(m)
+        if out and out[-1].get("role") == "assistant":
+            missing = _unanswered(out[-1], m)
+            if missing:
+                fixes = [_result_block(u["id"], ToolResult(INTERRUPTED), True) for u in missing]
+                if m.get("role") == "user":
+                    m["content"] = fixes + _blocks(m)
+                else:
+                    out.append({"role": "user", "content": fixes})
+        out.append(m)
+    return out
+
+
+def dangling_tool_uses(history: Sequence[dict]) -> list[dict]:
+    """Tool calls at the very end of the thread that never got a result."""
+    if not history or history[-1].get("role") != "assistant":
+        return []
+    return _unanswered(history[-1], None)
 
 
 def _result_block(tool_use_id: str, result: ToolResult, is_error: bool = False) -> dict:
@@ -85,7 +151,7 @@ class Agent:
         return self._model
 
     def _create(self, system: list[dict], messages: list[dict]) -> Any:
-        params: dict = dict(model=self._model, max_tokens=MAX_TOKENS, system=system, messages=list(messages),
+        params: dict = dict(model=self._model, max_tokens=MAX_TOKENS, system=system, messages=with_cache_point(list(messages)),
                             tools=[t.definition() for t in self._tools], output_config={"effort": self._effort})
         if self._extras:
             params.update(betas=list(BETAS), fallbacks="default", context_management=CONTEXT_MANAGEMENT)
@@ -105,19 +171,31 @@ class Agent:
         `persist(role, content)` is called for every message appended."""
         out = Outcome()
         system = [{"type": "text", "text": SYSTEM, "cache_control": {"type": "ephemeral"}}]
-        messages = list(history)
+        messages = repaired(history)
 
         def append(role: str, content: Any) -> None:
             messages.append({"role": role, "content": content})
             if persist:
                 persist(role, content)
 
+        # A step the last turn never finished is answered first, in the same
+        # message as the user's words, so the thread is whole again.
+        left = dangling_tool_uses(messages)
+        if left:
+            blocks = user_content if isinstance(user_content, list) else [{"type": "text", "text": user_content}]
+            user_content = [_result_block(u["id"], ToolResult(INTERRUPTED), True) for u in left] + list(blocks)
         append("user", user_content)
         started = wb.ledger.spent_usd(turn.project_id)
         while True:
             response = self._create(system, messages)
-            if meter is not None and getattr(response, "usage", None) is not None:
-                meter(self._model, response.usage.input_tokens, response.usage.output_tokens)
+            usage = getattr(response, "usage", None)
+            if usage is not None:
+                read = getattr(usage, "cache_read_input_tokens", 0) or 0
+                wrote = getattr(usage, "cache_creation_input_tokens", 0) or 0
+                log.info("agent request: input %d, cache read %d, cache write %d, output %d, stop %s",
+                         usage.input_tokens, read, wrote, usage.output_tokens, getattr(response, "stop_reason", "?"))
+                if meter is not None:
+                    meter(self._model, usage.input_tokens, usage.output_tokens, read, wrote)
             content = [_dump(b) for b in response.content]
             append("assistant", content)
             stop = getattr(response, "stop_reason", "end_turn")

@@ -121,7 +121,7 @@ def health() -> dict:
 
 
 _MEDIA_TYPES = {"mp4": "video/mp4", "mov": "video/quicktime", "webm": "video/webm",
-                "wav": "audio/wav", "m4a": "audio/mp4"}
+                "wav": "audio/wav", "m4a": "audio/mp4", "mp3": "audio/mpeg"}
 
 
 class EditRequest(BaseModel):
@@ -211,6 +211,8 @@ def _candidate_dict(candidate: EditCandidate) -> dict:
             "mix": candidate.plan.mix,
             "delivery": candidate.plan.delivery,
             "flex": candidate.plan.flex,
+            "voice_settings": candidate.plan.voice_settings,
+            "model": candidate.plan.model,
         },
         "audio": _artifact_dict(candidate.audio),
         "frames": _artifact_dict(candidate.frames),
@@ -733,6 +735,14 @@ def delete_project(project_id: str, owner: str = Depends(current_owner)) -> None
     if left:
         logging.getLogger("ave").warning(
             "project %s deleted, but these voice clone(s) are still at ElevenLabs: %s", project_id, ", ".join(left))
+    # Voices Voltage made for the clip (designed, or added from the library;
+    # 20b) go with it too, so slots come back.
+    for made in repo.settings(project_id).get("made_voices") or []:
+        try:
+            getattr(voice, "delete_voice", lambda v: None)(made["voice_id"])
+        except Exception as exc:  # noqa: BLE001
+            logging.getLogger("ave").warning("project %s deleted, but voice %s (%s) is still at ElevenLabs: %s",
+                                             project_id, made.get("name"), made["voice_id"], exc)
     repo.delete(project_id)
     shutil.rmtree(artifacts.root / project_id, ignore_errors=True)
 
@@ -885,9 +895,9 @@ def preview_edit(
 
 def _meter(project_id: str, what: str):
     """Records a Claude call against the project, as `what` in the ledger."""
-    def meter(model: str, input_tokens: int, output_tokens: int) -> None:
-        ledger.record(project_id, "anthropic", what, input_tokens + output_tokens, "tokens",
-                      claude_usd(model, input_tokens, output_tokens))
+    def meter(model: str, input_tokens: int, output_tokens: int, cache_read: int = 0, cache_write: int = 0) -> None:
+        ledger.record(project_id, "anthropic", what, input_tokens + output_tokens + cache_read + cache_write, "tokens",
+                      claude_usd(model, input_tokens, output_tokens, cache_read, cache_write))
     return meter
 
 
@@ -910,6 +920,7 @@ def _generate(
     project_id: str, record: ProjectRecord, candidate_id: str, selection: Selection,
     text: str, voice_id: str, fit: str | None, mix: str, on_long: str | None, report,
     delivery: str | None = None, voice_notes: tuple[str, ...] = (),
+    voice_settings: dict | None = None, model: str | None = None,
 ) -> EditCandidate:
     """One line through generation and continuity, placed by the project's
     long-line policy, saved as a candidate. Raises SpanMismatch when the line
@@ -925,15 +936,16 @@ def _generate(
             window = Selection(selection.end, min(record.source.duration, selection.end + room))
             try:
                 candidate = _generate(project_id, record, candidate_id, window, text, voice_id,
-                                      None, "layer", "ask", report, delivery, voice_notes)
+                                      None, "layer", "ask", report, delivery, voice_notes, voice_settings, model)
             except SpanMismatch:
                 candidate = None
             if candidate is not None:
                 return candidate
             report(0.1, "No room to play over the picture; holding it instead")
         return _generate(project_id, record, candidate_id, selection, text, voice_id,
-                         fit, "concatenate", on_long, report, delivery, voice_notes)
-    plan = EditPlan(selection, text, voice_id, fit=fit, mix=mix, delivery=delivery)
+                         fit, "concatenate", on_long, report, delivery, voice_notes, voice_settings, model)
+    plan = EditPlan(selection, text, voice_id, fit=fit, mix=mix, delivery=delivery,
+                    voice_settings=voice_settings or None, model=model or None)
     cost = voice.cost_of(plan)
     if not budget.can_afford(project_id, cost):
         raise BudgetExceeded(cost, budget.remaining(project_id))
@@ -2223,6 +2235,8 @@ def _message_dict(m) -> dict:
     out = {"role": m.role, "text": m.text, "kind": m.kind, "seq": m.seq}
     if m.cost is not None:
         out["cost"] = round(m.cost, 4)
+    if m.data is not None:
+        out["data"] = m.data
     return out
 
 
@@ -2267,12 +2281,25 @@ def _workbench() -> Workbench:
         chars = voice.cost_of(EditPlan(Selection(0.0, 1.0), text, getattr(voice, "default_voice", "speaker-1"))) * takes
         return chars, round(chars * budget.usd_per_1k / 1000, 4)
 
+    def design_cost(text: str | None = None) -> tuple[int, float]:
+        chars = len(text) if text else int(getattr(voice, "design_cost", lambda: 0)())
+        return chars, round(chars * budget.usd_per_1k / 1000, 4)
+
+    def put_audio(project_id: str, data: bytes, container: str, duration: float):
+        return artifacts.put_bytes(project_id, data, kind="audio", container=container, duration=duration)
+
+    can_design = hasattr(voice, "design_voice")
     return Workbench(
         repo=repo, ledger=ledger, frames=_frames, lines=_lines, room_after=room_after,
         voices=_catalogue, library=getattr(voice, "library", lambda accent, language="en": []),
         estimate_usd=estimate_usd, generate=_generate, ensure_spend=_ensure_spend, ship=_ship,
         default_voice=lambda: getattr(voice, "default_voice", "speaker-1"),
         hear=_hear_levels, sight_text=_sight_text, now=_now,
+        design=voice.design_voice if can_design else None, design_cost=design_cost,
+        save_voice=voice.save_voice if can_design else None,
+        add_from_library=getattr(voice, "add_from_library", None),
+        delete_voice=getattr(voice, "delete_voice", None),
+        slots=getattr(voice, "slots", lambda: None), put_audio=put_audio,
     )
 
 
@@ -2283,9 +2310,15 @@ class TurnRequest(BaseModel):
 
 
 def _turn_plan(project_id: str, text: str) -> Plan:
-    """The plan a turn works on: the latest one still open, else a new one."""
+    """The plan a turn works on: the latest one while it still holds work
+    (a line planned or voiced and not shipped), else a new one. A turn that
+    ends without a question marks its plan done, but the lines stay the
+    user's to hear and ship; only once every line is shipped or dropped does
+    the next goal start a fresh plan (20b)."""
     plan = repo.latest_plan(project_id)
     if plan is not None and plan.status != "done":
+        return plan
+    if plan is not None and any(i.kind == "planned" and i.status not in ("approved", "dismissed") for i in plan.items):
         return plan
     plan = Plan(plan_id=repo.next_plan_id(project_id), project_id=project_id, goal=text, summary="", items=(),
                 mode=_settings(project_id)["autonomy"], status="proposed", created_at=_now())

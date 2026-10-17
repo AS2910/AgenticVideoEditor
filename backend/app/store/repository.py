@@ -49,9 +49,10 @@ class Message:
     role: str   # "user" | "assistant"
     text: str
     at: str
-    kind: str = "say"          # "say" (a message) | "step" (one thing Voltage did, Phase 20)
+    kind: str = "say"          # "say" (a message) | "step" (one thing Voltage did, Phase 20) | "previews" (voices to hear, 20b)
     cost: float | None = None  # what a step cost, in dollars
     seq: int = 0
+    data: dict | None = None   # a card's facts, e.g. the previews' ids and audio
 
 
 def _record(row) -> ProjectRecord:
@@ -302,22 +303,24 @@ class ProjectRepository:
 
     # ── chat ──
 
-    def add_message(self, project_id: str, role: str, text: str, kind: str = "say", cost: float | None = None) -> int:
+    def add_message(self, project_id: str, role: str, text: str, kind: str = "say", cost: float | None = None,
+                    data: dict | None = None) -> int:
         with self.db.tx() as c:
             c.execute(
-                "INSERT INTO messages (project_id, seq, role, text, at, kind, cost) VALUES (?, "
-                "(SELECT COALESCE(MAX(seq), 0) + 1 FROM messages WHERE project_id = ?), ?, ?, ?, ?, ?)",
-                (project_id, project_id, role, text, _now(), kind, cost),
+                "INSERT INTO messages (project_id, seq, role, text, at, kind, cost, data) VALUES (?, "
+                "(SELECT COALESCE(MAX(seq), 0) + 1 FROM messages WHERE project_id = ?), ?, ?, ?, ?, ?, ?)",
+                (project_id, project_id, role, text, _now(), kind, cost, json.dumps(data) if data is not None else None),
             )
             return int(c.execute("SELECT MAX(seq) FROM messages WHERE project_id = ?", (project_id,)).fetchone()[0])
 
     def messages(self, project_id: str, after: int = 0) -> list[Message]:
         with self.db.tx() as c:
             rows = c.execute(
-                "SELECT role, text, at, kind, cost, seq FROM messages WHERE project_id = ? AND seq > ? ORDER BY seq",
+                "SELECT role, text, at, kind, cost, seq, data FROM messages WHERE project_id = ? AND seq > ? ORDER BY seq",
                 (project_id, after),
             ).fetchall()
-        return [Message(r["role"], r["text"], r["at"], r["kind"] or "say", r["cost"], r["seq"]) for r in rows]
+        return [Message(r["role"], r["text"], r["at"], r["kind"] or "say", r["cost"], r["seq"],
+                        json.loads(r["data"]) if r["data"] else None) for r in rows]
 
     # ── the model's own thread (Phase 20) ──
 

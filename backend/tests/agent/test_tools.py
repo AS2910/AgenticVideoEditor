@@ -6,11 +6,14 @@ from app.agent.tools import BY_NAME, definitions, delivery_of
 
 
 def test_every_tool_has_a_strict_schema_with_every_property_required():
+    from app.agent.tools import MAX_UNIONS, union_count
     for d in definitions():
         assert d["strict"] is True
         schema = d["input_schema"]
         assert schema["additionalProperties"] is False
         assert set(schema["required"]) == set(schema["properties"]), d["name"]
+    # The API refused 18 union-typed parameters across the tools (live, 2026-10-17).
+    assert union_count() <= MAX_UNIONS
 
 
 def test_a_silent_clip_reads_as_no_speech_and_the_whole_clip_as_room(world):
@@ -27,7 +30,7 @@ def test_a_silent_clip_reads_as_no_speech_and_the_whole_clip_as_room(world):
 def test_voices_are_listed_with_the_default_named(world):
     out = BY_NAME["list_voices"].run(world.wb, world.turn(), {})
     assert "- kL06KYMvPY56NluIQ72m · Varsha · female, indian, middle aged · Warm and Clear" in out.text
-    assert out.text.endswith("The default is EXAVITQu4vr4xnSDxMaL.")
+    assert "The default is EXAVITQu4vr4xnSDxMaL." in out.text
     assert out.step == "Looked through 2 voices"
 
 
@@ -39,7 +42,7 @@ def test_a_take_is_placed_by_time_as_a_ready_item_and_costs_what_the_ledger_says
     })
     assert out.step == "Voiced “Welcome to Goa.” with Varsha — warm and unhurried, a half-smile"
     assert out.cost_usd == pytest.approx(0.03)
-    assert "Take c1 on i1, Varsha's voice, placed at 0.40 s, over the picture. It sounds right. Fit: nearest of 3 takes. The take itself runs 1.0 s, 3.0 words a second. Cost $0.03." in out.text
+    assert "Take c1 on i1, Varsha's voice, placed at 0.40 s, over the picture. It sounds right. Fit: nearest of 3 takes. The take itself runs 1.0 s, 3.0 words a second. Spoken with the default model. Cost $0.03." in out.text
     assert world.made[0]["mix"] == "layer" and world.made[0]["delivery"] == "calmer"   # "unhurried" wins
     [item] = world.repo.get_plan("p1", "plan1").items
     assert (item.status, item.candidate_id, item.new_text, item.old_text, item.mix) == ("ready", "c1", "Welcome to Goa.", "", "layer")
@@ -126,3 +129,86 @@ def test_voicing_a_placed_item_again_with_a_new_span_moves_it(world):
     [item] = world.repo.get_plan("p1", "plan1").items
     assert (item.selection.start, item.selection.end, item.candidate_id, item.new_text) == (0.4, 7.3, "c2", "Welcome to Goa.")
     assert (world.made[1]["selection"].start, world.made[1]["selection"].end) == (0.4, 7.3)
+
+
+# ── 20b: expression and voices made for the clip ──────────────────────────────
+
+def _take(world, t, **over):
+    args = {"text": "Welcome to Goa.", "voice_id": "kL06KYMvPY56NluIQ72m", "start": 0.4, "end": 2.4, "direction": "",
+            "mix": "layer", "line": None, "item_id": "", "model": "default", "stability": None, "style": None, "speed": None, "similarity": None}
+    args.update(over)
+    return BY_NAME["synthesize_take"].run(world.wb, t, args)
+
+
+def test_the_models_settings_and_model_reach_the_pipeline_and_tags_pick_v4(world):
+    t = world.turn()
+    out = _take(world, t, text="[sighs] Welcome to Goa.", stability=0.3, speed=0.9)
+    assert world.made[0]["model"] == "v4" and world.made[0]["voice_settings"] == {"stability": 0.3, "speed": 0.9}
+    assert "Spoken with v4, stability 0.3, speed 0.9." in out.text
+    _take(world, t, model="v2")
+    assert world.made[1]["model"] == "v2" and world.made[1]["voice_settings"] is None
+    _take(world, t, model="v3")
+    assert world.made[2]["model"] == "v3"
+
+
+def test_designing_a_voice_is_gated_costed_and_leaves_previews_the_user_can_hear(world):
+    t = world.turn("ask")
+    args = {"description": "An Indian woman near fifty, unhurried, a smile in the voice", "sample_text": None}
+    with pytest.raises(WaitingForUser) as w:
+        BY_NAME["design_voice"].run(world.wb, t, args)
+    assert w.value.question == "Design a voice from “An Indian woman near fifty, unhurried, a smile in the voice” — three previews to hear, about $0.10?"
+    assert w.value.gate is True and world.designed == []
+    out = BY_NAME["design_voice"].run(world.wb, world.turn("ask", approved=True), args)
+    assert world.designed == [{"description": args["description"], "text": None}]
+    assert out.step == "Designed a voice from “An Indian woman near fifty, unhurried, a smile in the vo…” — 3 previews to hear"
+    assert out.cost_usd == pytest.approx(0.105)
+    assert "preview 1: g1 (21 s); preview 2: g2 (22 s); preview 3: g3 (23 s)" in out.text
+    assert "You cannot hear them" in out.text and "3 of 30 voice slots are used." in out.text
+    # the previews are kept as audio the user can play, and told to the thread as a card
+    assert [a[2] for a in world.audio] == ["mp3", "mp3", "mp3"]
+    [card] = [m for m in world.repo.messages("p1") if m.kind == "previews"]
+    assert card.text == "3 voices designed from “An Indian woman near fifty, unhurried, a smile in the voice”"
+    assert card.data["previews"][1] == {"n": 2, "generated_voice_id": "g2", "sha256": "a" * 63 + "2", "duration": 22.0}
+    assert set(world.repo.settings("p1")["designs"]) == {"g1", "g2", "g3"}
+
+
+def test_a_short_sample_text_and_the_turns_cap_are_refused_in_a_sentence(world):
+    out = BY_NAME["design_voice"].run(world.wb, world.turn(), {"description": "a man", "sample_text": "Too short."})
+    assert out.text.startswith("A sample text needs at least 100 characters")
+    out = BY_NAME["design_voice"].run(world.wb, world.turn(budget=TurnBudget(usd=0.05)), {"description": "a man", "sample_text": None})
+    assert out.text.startswith("This step would cost about $0.10; the turn's cap is $0.05")
+    assert world.designed == []
+
+
+def test_a_preview_is_kept_as_a_named_voice_and_only_a_preview_of_this_clip(world):
+    t = world.turn()
+    out = BY_NAME["save_voice"].run(world.wb, t, {"generated_voice_id": "g2", "name": "Dusk"})
+    assert out.text == "g2 is not a preview of this project; design_voice gives the ids."
+    BY_NAME["design_voice"].run(world.wb, t, {"description": "an older woman", "sample_text": None})
+    out = BY_NAME["save_voice"].run(world.wb, t, {"generated_voice_id": "g2", "name": "  Dusk  "})
+    assert world.saved == [("g2", "Dusk", "an older woman")]
+    assert out.step == "Kept preview 2 as “Dusk”"
+    assert out.text == "Saved preview 2 as “Dusk” (NEWVOICEg2); it is in the catalogue now and can speak a line. 3 of 30 voice slots are used."
+    assert world.repo.settings("p1")["made_voices"][0]["voice_id"] == "NEWVOICEg2"
+
+
+def test_a_library_voice_is_added_by_its_ids_and_a_made_voice_deletes_only_after_a_yes(world):
+    t = world.turn()
+    out = BY_NAME["add_voice_from_library"].run(world.wb, t, {"voice_id": "LIB", "owner_id": "OWN", "name": "Riya"})
+    assert world.added == [("OWN", "LIB", "Riya")] and out.step == "Added Riya from the voice library"
+    assert BY_NAME["delete_voice"].run(world.wb, t, {"voice_id": "EXAVITQu4vr4xnSDxMaL"}).text.endswith("only those can be deleted here.")
+    with pytest.raises(WaitingForUser) as w:
+        BY_NAME["delete_voice"].run(world.wb, t, {"voice_id": "LIB"})
+    assert (w.value.question, w.value.options) == ("Delete the voice “Riya” from the account?", ("Delete it", "Keep it"))
+    out = BY_NAME["delete_voice"].run(world.wb, world.turn(commit_approved=True), {"voice_id": "LIB"})
+    assert world.deleted == ["LIB"] and out.step == "Deleted the voice “Riya”"
+    assert world.repo.settings("p1")["made_voices"] == []
+
+
+def test_measure_reads_a_takes_full_report(world):
+    t = world.turn()
+    _take(world, t, model="v3", stability=0.5, direction="wistful")
+    out = BY_NAME["measure"].run(world.wb, t, {"candidate_id": "c1"})
+    assert out.text == ("Take c1: passed the sound check. Runs 1.00 s; 3 words, 3.0 a second. Fit: nearest of 3 takes. "
+                        "Spoken with v3, stability 0.5.")
+    assert BY_NAME["measure"].run(world.wb, t, {"candidate_id": "c9"}).text == "There is no take c9."

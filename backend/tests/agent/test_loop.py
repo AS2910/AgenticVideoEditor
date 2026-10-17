@@ -90,3 +90,66 @@ def test_extras_are_dropped_after_a_400_that_names_them(world):
     out, _, _ = run(world, client)
     assert out.reply == "Done."
     assert "fallbacks" in client.calls[0] and "fallbacks" not in client.calls[1] and "betas" not in client.calls[1]
+
+
+def test_the_thread_is_cached_at_its_last_block_and_cache_tokens_are_metered(world):
+    from types import SimpleNamespace
+    from app.agent.loop import with_cache_point
+    r = reply(use("read_transcript", "a"), stop="tool_use")
+    r.usage = SimpleNamespace(input_tokens=100, output_tokens=20, cache_read_input_tokens=5000, cache_creation_input_tokens=700)
+    client = ScriptedClient([r, reply(text("Done."))])
+    metered = []
+    run(world, client, meter=lambda *a: metered.append(a))
+    # Each request marks the last block of the last message, and nothing else in the thread.
+    for call in client.calls:
+        sent = call["messages"]
+        assert sent[-1]["content"][-1]["cache_control"] == {"type": "ephemeral"}
+        marked = [b for m in sent for b in (m["content"] if isinstance(m["content"], list) else []) if "cache_control" in b]
+        assert len(marked) == 1
+    # The persisted thread carries no marker (a moved marker is not an edit).
+    assert metered[0] == ("claude-opus-5-5", 100, 20, 5000, 700)
+    assert with_cache_point([]) == []
+    assert with_cache_point([{"role": "user", "content": "hi"}]) == [{"role": "user", "content": [{"type": "text", "text": "hi", "cache_control": {"type": "ephemeral"}}]}]
+
+
+def test_context_editing_clears_only_old_frames():
+    from app.agent.loop import CONTEXT_MANAGEMENT
+    [edit] = CONTEXT_MANAGEMENT["edits"]
+    assert edit["trigger"] == {"type": "input_tokens", "value": 40000} and edit["keep"] == {"type": "tool_uses", "value": 3}
+    assert "look_at_frames" not in edit["exclude_tools"] and "synthesize_take" in edit["exclude_tools"]
+
+
+def test_a_step_the_last_turn_never_finished_is_answered_before_the_users_words(world):
+    """A turn that died mid-step (a restart) left a tool_use with no result;
+    the next turn answers it as not run, in the same message as the words."""
+    history = [{"role": "user", "content": [{"type": "text", "text": "Design a voice"}]},
+               {"role": "assistant", "content": [{"type": "text", "text": "Designing."},
+                                                 {"type": "tool_use", "id": "lost", "name": "design_voice", "input": {"description": "x", "sample_text": ""}}]}]
+    client = ScriptedClient([reply(text("Carrying on."))])
+    out = Agent(client).run(world.wb, world.turn(), history, "go")
+    assert out.reply == "Carrying on."
+    [sent] = client.calls
+    last = sent["messages"][-1]
+    assert last["role"] == "user" and len(sent["messages"]) == 3
+    assert last["content"][0]["type"] == "tool_result" and last["content"][0]["tool_use_id"] == "lost" and last["content"][0]["is_error"]
+    assert last["content"][0]["content"].startswith("Not run: the turn was interrupted")
+    assert last["content"][1] == {"type": "text", "text": "go", "cache_control": {"type": "ephemeral"}}
+
+
+def test_a_lost_step_buried_by_later_messages_is_answered_where_it_happened(world):
+    """Two failed retries after a dead turn left user messages after the lost
+    tool_use; the repair puts its result at the head of the message that follows."""
+    from app.agent.loop import repaired
+    history = [{"role": "user", "content": [{"type": "text", "text": "Design a voice"}]},
+               {"role": "assistant", "content": [{"type": "tool_use", "id": "lost", "name": "design_voice", "input": {}}]},
+               {"role": "user", "content": [{"type": "text", "text": "go"}]},
+               {"role": "user", "content": "go"}]
+    fixed = repaired(history)
+    assert fixed[2]["content"][0]["tool_use_id"] == "lost" and fixed[2]["content"][1] == {"type": "text", "text": "go"}
+    assert fixed[3] == {"role": "user", "content": "go"} and history[2]["content"][0]["type"] == "text"   # the stored thread is untouched
+    # Two assistant messages in a row get a result message between them.
+    two = repaired(history[:2] + [{"role": "assistant", "content": [{"type": "text", "text": "Hm."}]}])
+    assert two[2]["role"] == "user" and two[2]["content"][0]["tool_use_id"] == "lost" and len(two) == 4
+    client = ScriptedClient([reply(text("Carrying on."))])
+    out = Agent(client).run(world.wb, world.turn(), history, "go")
+    assert out.reply == "Carrying on." and client.calls[0]["messages"][2]["content"][0]["tool_use_id"] == "lost"

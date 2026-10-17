@@ -51,9 +51,12 @@ def use(name, _id="tu1", **args):
 class FakeCandidate:
     def __init__(self, candidate_id, selection, new_text, passed=True, warnings=()):
         self.candidate_id = candidate_id
-        self.plan = SimpleNamespace(selection=selection, new_text=new_text, fit=None, voice_profile_id="v")
-        self.continuity = SimpleNamespace(passed=passed, warnings=tuple(warnings))
+        self.plan = SimpleNamespace(selection=selection, new_text=new_text, fit=None, voice_profile_id="v", delivery=None,
+                                    voice_settings=None, model=None)
+        self.continuity = SimpleNamespace(passed=passed, warnings=tuple(warnings), prosody=None, audio_integration=None,
+                                          voice_match=None, naturalness=None, measured=())
         self.fit_notes = ("nearest of 3 takes",)
+        self.audio = SimpleNamespace(duration=1.0, sha256="b" * 64)
         self.words = (SimpleNamespace(text="Welcome", start=0.0, end=0.5), SimpleNamespace(text="to", start=0.5, end=0.6),
                       SimpleNamespace(text="Goa", start=0.6, end=1.0))
 
@@ -71,11 +74,42 @@ def world():
     made: list[dict] = []
     shipped: list[list[str]] = []
 
-    def generate(project_id, rec, candidate_id, selection, text_, voice_id, fit, mix, on_long, report, delivery=None, voice_notes=()):
-        made.append({"candidate_id": candidate_id, "selection": selection, "text": text_, "voice_id": voice_id, "mix": mix, "delivery": delivery})
+    def generate(project_id, rec, candidate_id, selection, text_, voice_id, fit, mix, on_long, report, delivery=None, voice_notes=(),
+                 voice_settings=None, model=None):
+        made.append({"candidate_id": candidate_id, "selection": selection, "text": text_, "voice_id": voice_id, "mix": mix,
+                     "delivery": delivery, "voice_settings": voice_settings, "model": model})
         ledger.record(project_id, "elevenlabs", "take", len(text_), "characters", 0.03)
         report(0.5, "Synthesizing the new line")
-        return FakeCandidate(candidate_id, selection, text_)
+        c = FakeCandidate(candidate_id, selection, text_)
+        c.plan.voice_settings, c.plan.model, c.plan.delivery = voice_settings, model, delivery
+        repo_candidates[candidate_id] = c
+        return c
+
+    repo_candidates: dict = {}
+    designed: list[dict] = []
+    saved: list[tuple] = []
+    added: list[tuple] = []
+    deleted: list[str] = []
+    audio: list[tuple] = []
+
+    def design(project_id, description, text):
+        designed.append({"description": description, "text": text})
+        ledger.record(project_id, "elevenlabs", "design", 350, "characters", 0.105)
+        sample = text or "The vendor's own sample text, a little over one hundred characters long so that the previews show the voice."
+        return [{"generated_voice_id": f"g{n}", "audio": b"mp3" + bytes([n]), "media_type": "audio/mpeg", "duration": 20.0 + n, "text": sample}
+                for n in (1, 2, 3)]
+
+    def save_voice(gid, name, description):
+        saved.append((gid, name, description))
+        return "NEWVOICE" + gid
+
+    def add_from_library(owner, vid, name):
+        added.append((owner, vid, name))
+        return vid
+
+    def put_audio(project_id, data, container, duration):
+        audio.append((project_id, data, container, duration))
+        return SimpleNamespace(sha256="a" * 63 + str(len(audio)), duration=duration)
 
     def ship(project_id, rec, plan_id, item_ids):
         shipped.append(list(item_ids))
@@ -95,10 +129,16 @@ def world():
         default_voice=lambda: "EXAVITQu4vr4xnSDxMaL",
         hear=lambda rec, start, end: {"noise_db": -40.0, "speech_db": None},
         sight_text=lambda project_id: "A wide beach at sunset.",
+        design=design, design_cost=lambda text=None: ((len(text) if text else 350), round((len(text) if text else 350) * 0.0003, 4)),
+        save_voice=save_voice, add_from_library=add_from_library, delete_voice=deleted.append,
+        slots=lambda: (3, 30), put_audio=put_audio,
     )
+    # The repo's candidate store is what `measure` reads; the fake pipeline fills it.
+    repo.get_candidate = lambda project_id, candidate_id: repo_candidates.get(candidate_id)
 
     def turn(autonomy="draft", approved=False, budget=None, commit_approved=False):
         return Turn(project_id="p1", record=record, plan_id="plan1", autonomy=autonomy, spend_approved=approved,
                     budget=budget or TurnBudget(), started_at="2000-01-01T00:00:00+00:00", commit_approved=commit_approved)
 
-    return SimpleNamespace(repo=repo, ledger=ledger, record=record, wb=wb, turn=turn, made=made, shipped=shipped)
+    return SimpleNamespace(repo=repo, ledger=ledger, record=record, wb=wb, turn=turn, made=made, shipped=shipped,
+                           designed=designed, saved=saved, added=added, deleted=deleted, audio=audio)
