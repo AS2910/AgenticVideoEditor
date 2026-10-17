@@ -510,7 +510,7 @@ def _drop_item(wb: Workbench, turn: Turn, args: dict) -> ToolResult:
     if item is None:
         return ToolResult(f"There is no item {args['item_id']}.")
     if item.status == "approved":
-        return ToolResult(f"{item.item_id} has shipped; the user can undo it from the review.")
+        return ToolResult(f"{item.item_id} is in the video; undo_edit takes it out.")
     wb.repo.update_item(turn.project_id, turn.plan_id, item.item_id, status="dismissed", enabled=False)
     return ToolResult(f"{item.item_id} is dropped.", step=f"Dropped {item.item_id} (“{item.new_text[:40]}”)")
 
@@ -670,12 +670,11 @@ def _remove_line(wb: Workbench, turn: Turn, args: dict) -> ToolResult:
     line = _line_at(wb, turn, args.get("line"))
     if line is None:
         return ToolResult(f"There is no line {args.get('line')}.")
-    if turn.autonomy == "ask" and not turn.commit_approved:
-        raise WaitingForUser(f"Remove line {line.index} (“{line.text}”)? The room's own sound stays in its place.", ("Remove it", "Not yet"), "Remove it")
     out = wb.remove_words(turn.project_id, turn.record, Selection(line.start, line.end))
     sel = out["selection"]
-    return ToolResult(f"Line {line.index} is removed ({sel['start']:.2f}–{sel['end']:.2f} s; edit {out['edit_id']}). It is part of the video already; "
-                      "the user can undo it from the review.", step=f"Removed line {line.index} (“{line.text[:40]}”)")
+    return ToolResult(f"Line {line.index} is proposed removed ({sel['start']:.2f}–{sel['end']:.2f} s; item {out['item_id']}): the room's own "
+                      "sound in its place. Nothing is paid. Ship makes it part of the video.",
+                      step=f"Proposed removing line {line.index} (“{line.text[:40]}”)")
 
 
 def _shift_line(wb: Workbench, turn: Turn, args: dict) -> ToolResult:
@@ -690,7 +689,7 @@ def _shift_line(wb: Workbench, turn: Turn, args: dict) -> ToolResult:
     out = wb.shift_words(turn.project_id, turn.record, Selection(line.start, line.end), to)
     sel = out["selection"]
     return ToolResult(f"Line {line.index} now plays from {sel['start']:.2f} s (edit {out['edit_id']}); the room's sound is where it was. "
-                      "It is part of the video already; the user can undo it from the review.",
+                      "It is part of the video already; undo_edit takes it out.",
                       step=f"Moved line {line.index} to {sel['start']:.2f} s")
 
 
@@ -702,7 +701,7 @@ def _move_item(wb: Workbench, turn: Turn, args: dict) -> ToolResult:
     if item is None or not item.candidate_id:
         return ToolResult(f"There is no voiced item {args.get('item_id')}.")
     if item.status == "approved":
-        return ToolResult(f"{item.item_id} has shipped; the user can move it from the review.")
+        return ToolResult(f"{item.item_id} is in the video; the user can move it from its row.")
     candidate = wb.repo.get_candidate(turn.project_id, item.candidate_id)
     if candidate is None:
         return ToolResult(f"The take {item.candidate_id} is gone.")
@@ -766,7 +765,7 @@ def _ship(wb: Workbench, turn: Turn, args: dict) -> ToolResult:
 
 def _undo_edit(wb: Workbench, turn: Turn, args: dict) -> ToolResult:
     if wb.revert is None:
-        return ToolResult("Edits cannot be undone in this setup; the user can, from the review.")
+        return ToolResult("Edits cannot be undone in this setup; the user can, with Take it out on the line.")
     edit_id = (args.get("edit_id") or "").strip()
     edit = next((e for e in wb.edits(turn.project_id) if e.edit_id == edit_id and not getattr(e, "reverted", False)), None)
     if edit is None:
@@ -853,8 +852,8 @@ TOOLS: tuple[Tool, ...] = (
     Tool("clone_speaker", "Make a speaker's own voice from their speech in this clip, so their lines can be replaced in it. Takes a slot; asks first under Check with me. "
          "A replacement with an empty voice_id does this on its own.",
          _schema({"speaker": {"type": "string", "description": "The speaker's name or label, from read_transcript."}}), Guard.COMMIT, _clone_speaker),
-    Tool("remove_line", "Take a spoken line out of the video: the words go, the room's own sound stays, the picture is untouched. Part of the video at once (undo from the review).",
-         _schema({"line": {"type": "integer", "description": "The transcript line."}}), Guard.COMMIT, _remove_line),
+    Tool("remove_line", "Propose taking a spoken line out: the words go, the room's own sound stays, the picture is untouched. A proposal like a take; ship makes it part of the video.",
+         _schema({"line": {"type": "integer", "description": "The transcript line."}}), Guard.FREE, _remove_line),
     Tool("shift_line", "Move a spoken line to another time, as it was spoken: nothing is voiced. Part of the video at once (undo from the review).",
          _schema({"line": {"type": "integer"}, "to": {"type": "number", "description": "Where the words should start, in seconds."}}), Guard.COMMIT, _shift_line),
     Tool("move_item", "Place a voiced item's take at another time, the same audio, nothing voiced again.",

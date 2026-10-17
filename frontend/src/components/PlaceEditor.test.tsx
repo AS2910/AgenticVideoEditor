@@ -10,8 +10,8 @@ import { LineDoc } from './LineDoc'
 import { PlaceEditor } from './PlaceEditor'
 
 const handlers = () => ({
-  onSeek: vi.fn(), onHear: vi.fn(), onKeep: vi.fn(), onAnother: vi.fn(), onUndo: vi.fn(),
-  onRemove: vi.fn(), onPlayTake: vi.fn(),
+  onSeek: vi.fn(), onHear: vi.fn(), onAdd: vi.fn(), onDiscard: vi.fn(), onUndo: vi.fn(),
+  onRemove: vi.fn(), onHearTake: vi.fn(),
 })
 
 describe('placing a voice-over', () => {
@@ -23,10 +23,10 @@ describe('placing a voice-over', () => {
     expect(within(editor).getByRole('heading', { name: 'Where should the voice-over go?' })).toBeInTheDocument()
     expect(within(editor).getByRole('textbox', { name: 'Starts at' })).toHaveValue('0:00.50')
     expect(within(editor).getByRole('textbox', { name: 'Ends at' })).toHaveValue('0:03.50')
-    expect(within(editor).getByRole('button', { name: 'Hear it' })).toBeDisabled()
+    expect(within(editor).getByRole('button', { name: 'Voice it' })).toBeDisabled()
     await userEvent.type(within(editor).getByRole('textbox', { name: 'Words for the voice-over' }), 'Welcome to Goa')
     await userEvent.click(within(editor).getByRole('button', { name: 'Warmer' }))
-    await userEvent.click(within(editor).getByRole('button', { name: 'Hear it' }))
+    await userEvent.click(within(editor).getByRole('button', { name: 'Voice it' }))
     expect(h.onHear).toHaveBeenCalledWith('0.500-3.500', expect.objectContaining({
       selection: { start: 0.5, end: 3.5 }, text: 'Welcome to Goa', mix: 'layer', delivery: 'warmer',
     }))
@@ -44,7 +44,7 @@ describe('placing a voice-over', () => {
     expect(end).toHaveAttribute('aria-invalid', 'true')
     expect(screen.getByRole('alert')).toHaveTextContent("inside the clip's 0:07.50")
     await userEvent.type(screen.getByRole('textbox', { name: 'Words for the voice-over' }), 'Hello')
-    expect(screen.getByRole('button', { name: 'Hear it' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Voice it' })).toBeDisabled()
   })
 
   it('puts a block on the monitor bar for the span, and follows the block when it is dragged', () => {

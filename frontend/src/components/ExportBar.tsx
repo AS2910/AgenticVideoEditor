@@ -13,6 +13,9 @@ interface ExportBarProps {
   pieces?: Piece[]
   /** A render is running: one button, disabled, saying so (UX-6). */
   busy?: boolean
+  /** 20e: a variant — this clip again, the plan as a draft, as its own project — once there is a render. */
+  onVariant?: () => void
+  varianting?: boolean
 }
 
 const secs = (t: number) => `${Math.floor(t / 60)}:${(t % 60).toFixed(1).padStart(4, '0')}`
@@ -20,7 +23,7 @@ const secs = (t: number) => `${Math.floor(t / 60)}:${(t % 60).toFixed(1).padStar
 /** The header's export: one button that says where things stand — Export,
  *  Exporting…, then Download with Export again beside it — and a strip of
  *  where the edits fall, described in words for a screen reader. */
-export function ExportBar({ segments, onExport, download, inserts = [], pieces = [], busy }: ExportBarProps) {
+export function ExportBar({ segments, onExport, download, inserts = [], pieces = [], busy, onVariant, varianting }: ExportBarProps) {
   const length = (p: Piece) => p.out_end - p.out_start
   const room = pieces.filter((p) => p.kind === 'living' || p.kind === 'hold').reduce((t, p) => t + length(p), 0)
   const held = pieces.filter((p) => p.kind === 'hold').reduce((t, p) => t + length(p), 0)
@@ -63,6 +66,7 @@ export function ExportBar({ segments, onExport, download, inserts = [], pieces =
         <>
           <Button asChild size="sm"><a href={download.url} download={download.filename}>Download MP4</a></Button>
           <Button variant="ghost" size="sm" className="text-muted-foreground" onClick={onExport}>Export again</Button>
+          {onVariant && <Button variant="ghost" size="sm" className="text-muted-foreground" onClick={onVariant} disabled={varianting} aria-busy={varianting || undefined}>{varianting ? 'Making a variant…' : 'Make a variant'}</Button>}
         </>
       ) : (
         <Button variant="outline" size="sm" onClick={onExport}>Export MP4</Button>

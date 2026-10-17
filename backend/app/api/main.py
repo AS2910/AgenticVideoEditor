@@ -960,9 +960,33 @@ def _revert(project_id: str, edit_id: str, by: str = "You") -> bool:
     return True
 
 
+class ExportRequest(BaseModel):
+    # 20e: render the proposed takes too (the plan's ready items), so the user
+    # can play the video with what is waiting for their Add it.
+    with_proposals: bool = False
+
+
 @app.post("/projects/{project_id}/export")
-def export_project(project_id: str, owner: str = Depends(current_owner)) -> dict:
-    return _export(_owned(project_id, owner))
+def export_project(project_id: str, req: ExportRequest | None = None, owner: str = Depends(current_owner)) -> dict:
+    return _export(_owned(project_id, owner), proposals=bool(req and req.with_proposals))
+
+
+def _proposal_edits(project_id: str) -> list[tuple[str, ApprovedEdit]]:
+    """The plan's proposed takes as edits a render can carry, for a preview:
+    nothing is approved, nothing is stored."""
+    plan = repo.latest_plan(project_id)
+    out: list[tuple[str, ApprovedEdit]] = []
+    for item in (plan.items if plan else ()):
+        if item.kind != "planned" or item.status != "ready" or not item.candidate_id:
+            continue
+        candidate = repo.get_candidate(project_id, item.candidate_id)
+        if candidate is None:
+            continue
+        out.append((item.item_id, ApprovedEdit(
+            edit_id=f"preview-{item.item_id}", candidate_id=candidate.candidate_id, plan=candidate.plan,
+            audio=candidate.audio, frames=candidate.frames, overridden=not candidate.continuity.passed,
+        )))
+    return out
 
 
 def _cuts(project_id: str, record: ProjectRecord) -> list[float]:
@@ -975,11 +999,10 @@ def _cuts(project_id: str, record: ProjectRecord) -> list[float]:
     return found
 
 
-def _pieces(record: ProjectRecord, manifest) -> list[retime.Piece]:
+def _pieces(record: ProjectRecord, manifest, edits: list[ApprovedEdit]) -> list[retime.Piece]:
     """The export as pieces (Phase 16): flexed lines, living holds for added
     lines, copies between. The picture's motion steers where time is added."""
     source = record.source
-    edits = [e for e in repo.list_edits(source.project_id) if not e.reverted]
     motion_fn = lambda a, b: motion.motion(source.media.path, a, b)   # noqa: E731
     flexed = retime.flex_pieces(edits, motion_fn, settings.max_flex)
     living = retime.living_pieces(
@@ -1003,10 +1026,13 @@ def _stems(record: ProjectRecord, manifest):
         return stems_module.separate(wav, artifacts.root / record.source.project_id / "stems")
 
 
-def _export(record: ProjectRecord) -> dict:
+def _export(record: ProjectRecord, proposals: bool = False) -> dict:
     project_id = record.source.project_id
-    manifest = render(record.source, repo.list_edits(project_id))
-    pieces = _pieces(record, manifest)
+    edits = [e for e in repo.list_edits(project_id) if not e.reverted]
+    previewed = _proposal_edits(project_id) if proposals else []
+    edits = edits + [e for _, e in previewed]
+    manifest = render(record.source, edits)
+    pieces = _pieces(record, manifest, edits)
     # Synchronous: with nothing but copies the video is stream-copied and only
     # the audio re-encoded, so even a 3-minute source renders in seconds; a
     # flexed or living piece re-encodes the picture.
@@ -1023,6 +1049,8 @@ def _export(record: ProjectRecord) -> dict:
     held_at = {p.start: p.out for p in pieces if p.kind == "hold"}
     return {
         "render": _artifact_dict(rendered),
+        # 20e: the proposals this render carries (none for the final).
+        "proposals": [item_id for item_id, _ in previewed],
         # Phase 16: every stretch of the output and where it came from.
         "pieces": retime.manifest(pieces),
         "segments": [
@@ -1242,21 +1270,43 @@ def remove_line(project_id: str, req: RemoveRequest, owner: str = Depends(curren
     if not any(w.end > req.start and w.start < req.end for w in record.transcript.words):
         raise HTTPException(status_code=422, detail="Nothing is said there to remove.")
     out = _remove_words(project_id, record, Selection(req.start, req.end))
-    repo.add_message(project_id, "user", f"Removed the line at {_clock(out['selection']['start'])}")
+    repo.add_message(project_id, "user", f"Proposed removing the line at {_clock(out['selection']['start'])}")
     return out
 
 
 def _remove_words(project_id: str, record: ProjectRecord, span: Selection) -> dict:
-    """The words in `span` taken out, the room's sound left in their place;
-    approved at once (nothing is voiced). The agent's `remove_line` and the
-    UX-1 route share it."""
+    """The words in `span` proposed removed (20e): a plan item, ready, whose
+    take is the room's own sound; Add it (ship) makes it part of the video.
+    Nothing is voiced. The agent's `remove_line` and the UX-1 route share it."""
     selection = snap_to_word_boundaries(record.transcript, span)
     candidate = _room_tone_candidate(project_id, record, selection)
-    edit_id = _approve_candidate(project_id, candidate, overridden=False)
+    words = " ".join(w.text for w in record.transcript.words if w.end > selection.start and w.start < selection.end)
+    plan = _turn_plan(project_id, "Remove a line")
+    item = PlanItem(item_id=f"i{len(plan.items) + 1}", selection=selection, old_text=words, new_text="",
+                    mix="remove", reason="Removed by hand", kind="planned", enabled=True, status="ready",
+                    candidate_id=candidate.candidate_id)
+    plan = repo.update_plan(project_id, plan.plan_id, items=plan.items + (item,))
     return {
-        "edit_id": edit_id, "candidate_id": candidate.candidate_id,
+        "item_id": item.item_id, "candidate_id": candidate.candidate_id,
         "selection": {"start": selection.start, "end": selection.end}, "mix": "remove",
+        "plan": _plan_dict(plan),
     }
+
+
+@app.post("/projects/{project_id}/plans/{plan_id}/items/{item_id}/dismiss")
+def dismiss_item(project_id: str, plan_id: str, item_id: str, owner: str = Depends(current_owner)) -> dict:
+    """Discard a proposal (20e): the line leaves the plan; a shipped one is
+    taken out with Revert instead."""
+    _owned(project_id, owner)
+    plan = _plan_or_404(project_id, plan_id)
+    item = plan.item(item_id)
+    if item is None:
+        raise HTTPException(status_code=404, detail="item not found")
+    if item.status == "approved":
+        raise HTTPException(status_code=409, detail="That line is in the video; undo it instead.")
+    plan = repo.update_item(project_id, plan_id, item_id, status="dismissed", enabled=False)
+    repo.append_log(project_id, plan_id, f"You discarded the line at {_clock(item.selection.start)}")
+    return _plan_dict(repo.get_plan(project_id, plan_id))
 
 
 # ── UX-1c: shift a line of the original speech ──────────────────────────────

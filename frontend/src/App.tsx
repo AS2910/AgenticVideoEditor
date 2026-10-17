@@ -2,7 +2,6 @@ import { Fragment, useCallback, useEffect, useRef, useState } from 'react'
 import { ConsentSheet } from './components/ConsentSheet'
 import { SignIn } from './components/SignIn'
 import { ShipSheet } from './components/ShipSheet'
-import { ShipCard } from './components/ShipCard'
 import type { Shipped } from './components/ShipSheet'
 import { LoadScreen } from './components/LoadScreen'
 import { Player } from './components/Player'
@@ -19,8 +18,6 @@ import type { LineRequest, PendingLine } from './components/LineDoc'
 import { keyOf } from './transcript/keys'
 import type { LineKey } from './transcript/keys'
 import { PlanCard } from './components/PlanCard'
-import { ReviewPanel } from './components/ReviewPanel'
-import type { SeamPlaying } from './components/ReviewPanel'
 import { ActivityLog } from './components/ActivityLog'
 import { ReadingCard } from './components/ReadingCard'
 import { AutonomySwitch } from './components/AutonomySwitch'
@@ -35,7 +32,7 @@ import { SpeakersBar } from './components/SpeakersBar'
 import { clock } from './transcript/format'
 import { speakerSlot } from './transcript/speakers'
 import {
-  createProject, confirmPlace, exportProject, artifactUrl, pollJob, PollCancelled, ApiError, listProjects, getProject, deleteProject, getUsage, listVoices, updateSpeaker, detectSpeakers, revertEdit, updateSettings, removeLine, moveCandidate, moveEdit, shiftLine, getPlan, approvePlan, readProject, grantConsent, createVariant, getMe, logout, postTurn, getMessages,
+  createProject, confirmPlace, exportProject, artifactUrl, pollJob, PollCancelled, ApiError, listProjects, getProject, deleteProject, getUsage, listVoices, updateSpeaker, detectSpeakers, revertEdit, updateSettings, removeLine, dismissItem, moveCandidate, moveEdit, shiftLine, getPlan, approvePlan, readProject, grantConsent, createVariant, getMe, logout, postTurn, getMessages,
 } from './api'
 import type { Me, PlanApproval } from './api'
 import type {
@@ -84,7 +81,11 @@ export default function App() {
   const [uploadShare, setUploadShare] = useState<number | null>(null)
   // The latest render of the approved edits, and which version the player shows.
   const [rendered, setRendered] = useState<{ url: string; duration: number } | null>(null)
-  const [view, setView] = useState<'original' | 'edited'>('original')
+  // 20e: what plays — the original, the final (the added lines), or with the proposals mixed in.
+  const [view, setView] = useState<'original' | 'final' | 'proposals'>('original')
+  // The preview render with the proposals, keyed by the takes it carries (stale when they change).
+  const [preview, setPreview] = useState<{ url: string; duration: number; pieces: Piece[]; key: string } | null>(null)
+  const [previewing, setPreviewing] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [projects, setProjects] = useState<ProjectSummary[]>([])
   const [usage, setUsage] = useState<Usage | null>(null)
@@ -110,13 +111,10 @@ export default function App() {
   const showPanel = () => { setPanelHidden(false); window.setTimeout(() => panelRef.current?.scrollIntoView?.({ block: 'start', behavior: 'smooth' }), 0) }
   // An example picked from Voltage's first message, put into the composer.
   const [seed, setSeed] = useState<{ text: string; id: number } | null>(null)
-  const [review, setReview] = useState(false)
   // Phase 20: a turn of Voltage with tools is running; its latest step.
   const [turnBusy, setTurnBusy] = useState(false)
   const [turnStep, setTurnStep] = useState<string | null>(null)
   const seenSeq = useRef(0)
-  // UX-7d: Keep or Hold per change, decided in the script; a take that failed its sound check starts held.
-  const [decisions, setDecisions] = useState<Record<string, 'keep' | 'hold'>>({})
   // While Voltage reads, the transcript line it is "on" is lit in turn.
   // The line open in the hands-on editor, so the panel can stand by.
   const [editingLine, setEditingLine] = useState<Statement | null>(null)
@@ -126,8 +124,6 @@ export default function App() {
   const takeAudio = useRef<HTMLAudioElement | null>(null)
   // The take playing in place, whole: its words light up as they are said (the polish pass).
   const playingCandidate = useRef<Candidate | null>(null)
-  // The seam a review row is playing in the monitor, and how far along it is.
-  const [seam, setSeam] = useState<SeamPlaying | null>(null)
   // What the phone's strip composer holds while Voltage is tucked away.
   const [railText, setRailText] = useState('')
   // The word timeline is for exact spans; hidden until asked for.
@@ -188,6 +184,7 @@ export default function App() {
     setDownload(null)
     setRendered(null)
     setView('original')
+    setPreview(null)
     setError(null)
     setUsage(null)
     setApproved([])
@@ -197,7 +194,6 @@ export default function App() {
     setPlan(null)
     setReading(null)
     setReadingBusy(false)
-    setReview(false)
     setShipped(null)
     setConsentAsk(null)
     consentGiven.current = false
@@ -384,7 +380,7 @@ export default function App() {
         : rev.partner === editId ? { ...rev, partner: r.edit_id } : rev
       )))
       setDownload(null)
-      if (await runExport()) setView('edited')
+      if (await runExport()) setView('final')
     } catch (e) {
       setError(e instanceof ApiError ? e.message : 'Could not move the line.')
     }
@@ -402,18 +398,31 @@ export default function App() {
   }
   const statementsNow = (): Statement[] => (project?.statements?.length ? project.statements : placedStatements())
 
-  /** Keep the take under a line: its plan item is approved and rendered —
-   *  Ship, for one line. A take that failed its sound check is kept on purpose. */
-  const keepItem = async (item: PlanItem) => {
+  /** Add it (20e): the proposal under a line goes into the video — its plan
+   *  item is approved and rendered. A take that failed its sound check is
+   *  added on the user's word. */
+  const addItem = async (item: PlanItem) => {
     if (!projectId || !plan) return
     setError(null)
     try {
       const passed = item.candidate?.continuity.passed ?? true
       takeInApproval(await approvePlan(projectId, plan.plan_id, passed ? { items: [item.item_id] } : { items: [item.item_id], override: true }))
+      setPreview(null)
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : 'Keep failed.')
+      setError(e instanceof ApiError ? e.message : 'Could not add that line.')
     } finally {
       void refreshUsage(projectId)
+    }
+  }
+  /** Discard a proposal: it leaves the plan; nothing in the video changes. */
+  const discardItem = async (item: PlanItem) => {
+    if (!projectId || !plan) return
+    setError(null)
+    try {
+      setPlan(await dismissItem(projectId, plan.plan_id, item.item_id))
+      setPreview(null)
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : 'Could not discard that line.')
     }
   }
   const removeStatement = async (s: Statement) => {
@@ -421,11 +430,9 @@ export default function App() {
     setError(null)
     try {
       const r = await removeLine(projectId, { start: s.start, end: s.end })
-      setApproved((a) => [...a, { edit_id: r.edit_id, start: r.selection.start, end: r.selection.end, text: '', mix: 'remove' }])
-      setDownload(null)
-      if (await runExport()) setView('edited')
+      setPlan(r.plan)
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : 'Could not remove that line.')
+      setError(e instanceof ApiError ? e.message : 'Could not propose removing that line.')
     }
   }
   /** Move a line of the original speech to another time (UX-1c): two paired
@@ -441,13 +448,15 @@ export default function App() {
         { edit_id: r.edit_id, start: r.selection.start, end: r.selection.end, text: s.text, mix: 'layer', partner: r.removed_edit_id },
       ])
       setDownload(null)
-      if (await runExport()) setView('edited')
+      if (await runExport()) setView('final')
     } catch (e) {
       setError(e instanceof ApiError ? e.message : 'Could not move that line.')
     }
   }
   /** Play a take in place: the video runs from the line while the take's
-   *  audio plays over it (the original muted for a replacement). */
+   *  audio plays over it (the original muted for a replacement). Over the
+   *  final render when there is one and its clock is the source's (20e), so
+   *  the lines already added are heard under it; else over the original. */
   const playTake = (c: Candidate) => {
     if (!project) return
     const audio = takeAudio.current ?? (takeAudio.current = new Audio())
@@ -461,7 +470,8 @@ export default function App() {
     audio.onended = () => { setPlayingTake(null); playingCandidate.current = null }
     playingCandidate.current = c
     const span = c.plan.selection
-    setView('original')
+    const overFinal = rendered !== null && pieces.every((p) => p.kind === 'copy')
+    setView(overFinal ? 'final' : 'original')
     setSeekRequest((r) => ({ time: span.start, id: (r?.id ?? 0) + 1, play: true, until: span.start + c.audio.duration + 0.3 }))
     setCurrentTime(span.start)
     setPlayingTake(c.candidate_id)
@@ -525,7 +535,6 @@ export default function App() {
     if (autonomy === 'draft' && !consentGiven.current) return withConsent(null, () => void takeTurn(text, again))
     if (!again) say({ role: 'user', text })
     setError(null)
-    setReview(false)
     setTurnBusy(true)
     setTurnStep('Thinking…')
     try {
@@ -607,6 +616,7 @@ export default function App() {
    *  Returns the download when there is a render. */
   const takeInApproval = (result: PlanApproval) => {
     setPlan(result.plan)
+    setPreview(null)
     const fresh = result.plan.items.filter((i) => i.status === 'approved' && i.edit_id
       && !approved.some((r) => r.edit_id === i.edit_id))
     setApproved((a) => [...a, ...fresh.map((i) => ({
@@ -622,7 +632,7 @@ export default function App() {
     const download = { url, filename: `${stem}-edited.mp4` }
     setDownload(download)
     setRendered({ url, duration: result.export.render.duration })
-    setView('edited')
+    setView('final')
     return download
   }
 
@@ -642,7 +652,7 @@ export default function App() {
     }))])
     const render = await runExport()
     if (!render) return
-    setView('edited')
+    setView('final')
     setShipped({
       items: went,
       held: fresh.items.filter((i) => i.status === 'ready').length,
@@ -655,32 +665,22 @@ export default function App() {
     })
   }
 
-  /** Ship the ready changes — all of them, or the ones kept — and render;
-   *  the rest stay as drafts. Then the sheet says what is in the file. */
-  const approveAll = async (items?: string[]) => {
+  /** Add them all (20e): every proposal goes into the video in one render,
+   *  flagged takes included — the user asked for all of them. */
+  const approveAll = async (items: PlanItem[]) => {
     if (!projectId || !plan) return
     setError(null)
     try {
-      const result = await approvePlan(projectId, plan.plan_id, items ? { items } : {})
-      const download = takeInApproval(result)
-      if (result.export && download) {
-        const went = new Set(result.approved.map((a) => a.item_id))
-        setShipped({
-          items: result.plan.items.filter((i) => went.has(i.item_id)),
-          held: result.plan.items.filter((i) => i.status === 'ready').length,
-          removed: approved.filter((r) => r.mix === 'remove').length,
-          before: project?.duration ?? 0,
-          after: result.export.render.duration,
-          download,
-          spendUsd: result.plan.spend_usd,
-          takesVoiced: result.plan.takes_voiced ?? 0,
-        })
-      }
+      const result = await approvePlan(projectId, plan.plan_id, {
+        items: items.map((i) => i.item_id), override: items.some((i) => !(i.candidate?.continuity.passed ?? true)),
+      })
+      takeInApproval(result)
+      setPreview(null)
       if (result.skipped.length > 0) {
-        setError(`${result.skipped.length} ${result.skipped.length === 1 ? 'change' : 'changes'} skipped: the sound check failed. Listen to them, then ask for another take or keep them one by one.`)
+        setError(`${result.skipped.length} ${result.skipped.length === 1 ? 'line was' : 'lines were'} not added. Hear them, then Add it one by one or ask for another take.`)
       }
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : 'Approve failed.')
+      setError(e instanceof ApiError ? e.message : 'Could not add those lines.')
     } finally {
       void refreshUsage(projectId)
     }
@@ -700,27 +700,6 @@ export default function App() {
     } finally {
       setVarianting(false)
     }
-  }
-
-  /** Hear the seam: the edited video from a moment before the line to a
-   *  moment after, where a pasted edit gives itself away. Without a render
-   *  yet, the original at that line. */
-  const compareItem = (item: PlanItem) => {
-    setSelection(item.selection)
-    const span = item.candidate?.plan.selection ?? item.selection
-    const edited = rendered !== null
-    setView(edited ? 'edited' : 'original')
-    const from = Math.max(0, (edited ? renderTimeFrom(span.start, pieces) : span.start) - 1.5)
-    const until = (edited ? renderTimeFrom(span.end, pieces) : span.end) + (item.mix === 'concatenate' && item.candidate ? item.candidate.audio.duration : 0) + 1.5
-    setSeekRequest((r) => ({ time: from, id: (r?.id ?? 0) + 1, play: true, until }))
-    setCurrentTime(from)
-    setSeam({ itemId: item.item_id, from, until, now: from })
-  }
-
-  /** The review row's Stop: the monitor pauses where it is. */
-  const stopSeam = () => {
-    setSeekRequest((r) => ({ time: currentTime, id: (r?.id ?? 0) + 1, stop: true }))
-    setSeam(null)
   }
 
   const findSpeakers = async () => {
@@ -753,7 +732,7 @@ export default function App() {
 
   const seekToStatement = (s: Statement) => {
     setSelection({ start: s.start, end: s.end })
-    const edited = view === 'edited' && rendered !== null
+    const edited = view === 'final' && rendered !== null
     const time = edited ? renderTimeFrom(s.start, pieces) : s.start
     setSeekRequest((r) => ({ time, id: (r?.id ?? 0) + 1 }))
     setCurrentTime(time)
@@ -778,13 +757,35 @@ export default function App() {
       getPlan(projectId, plan.plan_id).then(setPlan).catch(() => {})
     }
     if (remaining.length > 0) {
-      if (await runExport()) setView('edited')
+      if (await runExport()) setView('final')
     } else {
       setRendered(null)
       setSegments([])
       setInserts([])
-    setPieces([])
+      setPieces([])
       setView('original')
+    }
+    setPreview(null)
+  }
+
+  /** 20e: the preview render with the proposals mixed in, for "With proposals"
+   *  playback; made once per set of takes and dropped when they change. */
+  const ensurePreview = async () => {
+    if (!projectId || previewing) return
+    const key = (plan?.items ?? []).filter((i) => i.kind === 'planned' && i.status === 'ready').map((i) => i.candidate?.candidate_id ?? i.item_id).join(',')
+    if (preview && preview.key === key) return
+    setPreviewing(true)
+    setError(null)
+    try {
+      const manifest = await exportProject(projectId, true)
+      const url = artifactUrl(projectId, manifest.render.sha256)
+      setPreview({ url, duration: manifest.render.duration, key,
+        pieces: manifest.pieces ?? piecesFromInserts(manifest.inserts ?? [], project?.duration ?? 0) })
+    } catch {
+      setError('Could not render the preview with the proposals.')
+      setView(rendered ? 'final' : 'original')
+    } finally {
+      setPreviewing(false)
     }
   }
 
@@ -828,7 +829,7 @@ export default function App() {
       })))
       // Approved edits are rendered again, so Play hears them straight away.
       if (live.length > 0 && await runExport(opened.project_id, opened.filename)) {
-        setView('edited')
+        setView('final')
       }
     } catch (e) {
       setError(e instanceof ApiError ? e.message : 'Could not open that project.')
@@ -872,7 +873,6 @@ export default function App() {
       </LoadScreen>
     )
   }
-  const showEdited = view === 'edited' && rendered !== null
   const speakers = project.speakers ?? []
   const statements = statementsNow()
   const leave = () => {
@@ -886,28 +886,28 @@ export default function App() {
   const pendingLines: PendingLine[] = planItems
     .filter((i) => ['planned', 'working', 'ready', 'needs-you', 'failed'].includes(i.status))
     .map((i) => ({ selection: i.selection, status: i.status, text: i.new_text, mix: i.mix }))
-  const readyCount = plan?.items.filter((i) => i.status === 'ready').length ?? 0
-  const reviewable = (plan?.items.filter((i) => i.status === 'ready' || i.status === 'approved').length ?? 0) > 0
-  const reviewCount = plan?.items.filter((i) => i.kind === 'planned' && (i.status === 'ready' || i.status === 'approved')).length ?? 0
-  const isHeld = (item: PlanItem) => (decisions[item.item_id] ? decisions[item.item_id] === 'hold' : !(item.candidate?.continuity.passed ?? true))
   const readyItems = plan?.items.filter((i) => i.kind === 'planned' && i.status === 'ready') ?? []
-  const keptItems = readyItems.filter((i) => !isHeld(i))
+  // 20e: which render plays. "With proposals" is a preview render keyed by the takes it carries.
+  const previewKey = readyItems.map((i) => i.candidate?.candidate_id ?? i.item_id).join(',')
+  const previewReady = preview !== null && preview.key === previewKey
+  const shown = view === 'final' && rendered ? { url: rendered.url, duration: rendered.duration, pieces }
+    : view === 'proposals' && previewReady ? { url: preview!.url, duration: preview!.duration, pieces: preview!.pieces }
+    : null
   const busy = turnBusy
   const clarifying = plan?.status === 'clarifying'
   const stateWord = clarifying ? 'has a question'
     : turnBusy ? 'working'
     : editingLine ? 'standing by'
     : plan?.status === 'proposed' ? 'has a plan'
-    : readyItems.length > 0 ? 'ready to ship'
+    : readyItems.length > 0 ? 'has proposals'
     : 'ready'
   const sendLabel = clarifying ? 'Answer' : 'Send'
   const placeholder = clarifying ? 'Answer, or tell Voltage anything else'
-    : review ? "What's off?"
     : selection ? 'Ask for a change, e.g. say "30% off" instead'
     : plan ? 'Say what to change, or ask for another take; "ship it" when it sounds right'
     : 'What should this video say?'
 
-  const sourceClock = showEdited ? sourceTimeFrom(currentTime, pieces) : currentTime
+  const sourceClock = shown ? sourceTimeFrom(currentTime, shown.pieces) : currentTime
   const voiceLine = usage?.lines.find((l) => l.vendor === 'elevenlabs' && l.units > 0)
   const usdPerChar = voiceLine ? voiceLine.usd / voiceLine.units : null
   const playingMix = playingTake
@@ -918,7 +918,7 @@ export default function App() {
   const needsYou = planItems.filter((i) => i.status === 'needs-you')
   // UX-7b: the monitor's timeline and caption. Times follow the version that
   // plays: an insert in the edited render pushes everything after it later.
-  const toRender = (t: number) => (showEdited ? renderTimeFrom(t, pieces) : t)
+  const toRender = (t: number) => (shown ? renderTimeFrom(t, shown.pieces) : t)
   const blocks: Block[] = [
     ...statements.map((s) => ({ start: toRender(s.start), end: toRender(s.end), tone: speakerSlot(speakers, s.speaker) as Block['tone'] })),
     ...approved.filter((r) => r.mix !== 'remove').map((r) => ({ start: toRender(r.start), end: toRender(r.end), tone: 'changed' as const })),
@@ -962,22 +962,16 @@ export default function App() {
             <Button variant="ghost" size="sm" onClick={() => void signOut()}>Sign out</Button>
           </span>
         )}
-        {reviewable && (
-          <Button variant="outline" size="sm" aria-pressed={review} className="aria-pressed:bg-accent" onClick={() => setReview((r) => !r)}>
-            {review ? 'Back to the script' : readyCount > 0 ? `Review · ${readyCount} ready` : 'Review'}
-          </Button>
-        )}
-        <ExportBar segments={segments} inserts={inserts} pieces={pieces} onExport={() => void runExport()} download={download} busy={exporting} />
+        <ExportBar segments={segments} inserts={inserts} pieces={pieces} onExport={() => void runExport()} download={download} busy={exporting} onVariant={() => void makeVariant()} varianting={varianting} />
       </header>
 
       <main id="main" className="flex min-h-0 flex-col gap-4 overflow-y-auto px-6 pt-4 pb-8 max-[960px]:overflow-visible max-[960px]:px-4 max-[960px]:pb-6 [&>*]:shrink-0" aria-busy={turnBusy || undefined}>
         <Player
-          src={showEdited ? rendered.url : artifactUrl(project.project_id, project.media.sha256)}
-          duration={showEdited ? rendered.duration : project.duration}
+          src={shown ? shown.url : artifactUrl(project.project_id, project.media.sha256)}
+          duration={shown ? shown.duration : project.duration}
           currentTime={currentTime}
           onSeek={setCurrentTime}
-          onTimeUpdate={(t) => { setCurrentTime(t); setSeam((s) => (s ? { ...s, now: t } : s)) }}
-          onPlayingChange={(p) => { if (!p) setSeam(null) }}
+          onTimeUpdate={setCurrentTime}
           seekRequest={seekRequest}
           blocks={blocks}
           words={transcript}
@@ -987,21 +981,31 @@ export default function App() {
           onPlace={(start) => setPlacing((p) => (p ? { ...p, start } : p))}
         >
           <Button variant={precise ? 'secondary' : 'ghost'} size="sm" aria-pressed={precise} onClick={() => setPrecise((p) => !p)}>Precise</Button>
-          {rendered && (
-            <div className="inline-flex gap-0.5 rounded-md bg-muted p-0.5" role="group" aria-label="Version">
-              {(['edited', 'original'] as const).map((v) => (
+          {(rendered || readyItems.length > 0) && (
+            <div className="inline-flex gap-0.5 rounded-md bg-muted p-0.5" role="group" aria-label="Play">
+              {([
+                ...(rendered ? [['final', 'Final'] as const] : []),
+                ...(readyItems.length > 0 ? [['proposals', 'With proposals'] as const] : []),
+                ['original', 'Original'] as const,
+              ]).map(([v, label]) => (
                 <Button
                   key={v}
                   variant="ghost"
                   size="sm"
-                  className={view === v ? 'bg-background shadow-xs hover:bg-background' : 'text-muted-foreground'}
+                  className={cn('whitespace-nowrap', view === v ? 'bg-background shadow-xs hover:bg-background' : 'text-muted-foreground')}
                   aria-pressed={view === v}
-                  onClick={() => { setView(v); setCurrentTime(0) }}
+                  onClick={() => { setView(v); setCurrentTime(0); if (v === 'proposals') void ensurePreview() }}
                 >
-                  {v === 'edited' ? 'Edited' : 'Original'}
+                  {label}
                 </Button>
               ))}
             </div>
+          )}
+          {view === 'proposals' && !previewReady && (
+            <span className="flex items-center gap-2 text-sm text-muted-foreground" role="status" aria-busy={previewing || undefined}>
+              {previewing && <Loader2 className="size-4 shrink-0 animate-spin" aria-hidden="true" />}
+              {previewing ? 'Rendering with the proposals…' : 'The proposals changed; rendering again…'}
+            </span>
           )}
         </Player>
         {error && <div className="rounded-md border border-needs/40 bg-needs-soft px-3 py-2 text-sm text-needs" role="alert">{error}</div>}
@@ -1039,35 +1043,19 @@ export default function App() {
           playing={playingTake}
           onSeek={seekToStatement}
           onHear={hearLine}
-          onKeep={(item) => keepItem(item)}
-          onAnother={(item) => redoTheItem(item)}
+          onAdd={(item) => addItem(item)}
+          onDiscard={(item) => discardItem(item)}
+          onAddAll={(items) => approveAll(items)}
+          onHearTake={(_item, c) => playTake(c)}
           onUndo={(id) => void revert(id)}
           onRemove={(s) => void removeStatement(s)}
           onShift={(s, to) => void shiftStatement(s, to)}
-          onPlayTake={playTake}
           onMove={(item, c, start) => void moveTake(item, c, start)}
           onMoveKept={(id, start) => void moveKept(id, start)}
           placing={placing}
           onPlacing={setPlacing}
           onEditingChange={setEditingLine}
           duration={project.duration}
-          filter={reviewable && plan ? { count: reviewCount, on: review, onChange: setReview } : undefined}
-          review={review && plan ? (
-            <ReviewPanel
-              plan={plan}
-              speakers={speakers}
-              busy={busy}
-              onCompare={compareItem}
-              onStop={stopSeam}
-              seam={seam}
-              onPlayTake={playTake}
-              playingTake={playingTake}
-              onRedo={(item) => void redoTheItem(item)}
-              onUndo={(item) => { if (item.edit_id) void revert(item.edit_id) }}
-              isHeld={isHeld}
-              onDecide={(item, keep) => setDecisions((d) => ({ ...d, [item.item_id]: keep ? 'keep' : 'hold' }))}
-            />
-          ) : undefined}
         />
       </main>
 
@@ -1179,7 +1167,7 @@ export default function App() {
               Earlier: {plan.items.filter((i) => i.status === 'approved').length} changes shipped · Show
             </Button>
           )}
-          {plan && (review || plan.status === 'done') && !(editingLine && plan.status === 'done' && !showPlanWhileEditing) && (
+          {plan && plan.status === 'done' && !(editingLine && plan.status === 'done' && !showPlanWhileEditing) && (
             <ActivityLog plan={plan} />
           )}
           {plan && !clarifying && !(editingLine && plan.status === 'done' && !showPlanWhileEditing) && (
@@ -1200,16 +1188,6 @@ export default function App() {
               <span>{turnStep ?? 'Working…'}</span>
             </div>
           )}
-          {plan && readyItems.length > 0 && !turnBusy && !clarifying && (
-            <ShipCard
-              ready={readyItems}
-              kept={keptItems}
-              review={review}
-              onReview={() => setReview((r) => !r)}
-              onShip={() => approveAll(keptItems.map((i) => i.item_id))}
-              busy={busy}
-            />
-          )}
         </ChatPanel>
       </aside>
       )}
@@ -1226,7 +1204,7 @@ export default function App() {
             void revert(item.edit_id)
             setShipped((sh) => (sh ? { ...sh, items: sh.items.filter((i) => i.item_id !== item.item_id), held: sh.held + 1 } : sh))
           }}
-          onClose={() => { setShipped(null); setReview(false) }}
+          onClose={() => setShipped(null)}
         />
       )}
     </div>

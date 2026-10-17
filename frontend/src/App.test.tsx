@@ -71,6 +71,10 @@ const PLAN_DONE = { ...PLAN, status: 'done', items: [{ ...PLAN_ITEM, status: 're
 const PLAN_APPROVED = { ...PLAN, status: 'done', takes_voiced: 3, items: [{ ...PLAN_ITEM, status: 'approved', candidate: BRIAN_TAKE, edit_id: 'e1' }],
   log: [...PLAN.log, { at: '2026-10-02T10:01:00Z', text: 'Rendered the edited video', detail: '$0.02 in total' }] }
 
+/** A removal proposed by hand (20e): a ready item whose take is the room's own sound. */
+const PLAN_REMOVAL = { ...PLAN, status: 'done', items: [{ ...PLAN_ITEM, item_id: 'i7', mix: 'remove', new_text: '', status: 'ready',
+  candidate: { ...CANDIDATE, candidate_id: 'c7', plan: { ...CANDIDATE.plan, selection: { start: 0, end: 2.3 }, new_text: '', mix: 'remove' } } }] }
+
 const READING = { opening: 'One person, one line. The offer is said once, at 0:00.', roles: [] }
 
 const JOB_ACCEPTED = {
@@ -94,7 +98,7 @@ function routeFetch(job: unknown = JOB_TURN) {
   return vi.fn(async (url: string, _init?: RequestInit) => {
     if (url.includes('/jobs/')) return ok(job)
     if (url.endsWith('/revert')) return ok({ edit_id: 'e1', reverted: true })
-    if (url.endsWith('/lines/remove')) return ok({ edit_id: 'e7', candidate_id: 'c7', selection: { start: 0, end: 2.3 }, mix: 'remove' })
+    if (url.endsWith('/lines/remove')) return ok({ item_id: 'i7', candidate_id: 'c7', selection: { start: 0, end: 2.3 }, mix: 'remove', plan: PLAN_REMOVAL })
     if (url.endsWith('/lines/shift')) {
       return ok({ edit_id: 'e9', removed_edit_id: 'e8', candidate: CANDIDATE, from: { start: 0, end: 2.3 }, selection: { start: 1.0, end: 2.3 }, mix: 'layer' })
     }
@@ -198,15 +202,14 @@ describe('App full journey', () => {
 
     // Everything goes through one door.
     expect(calls[0]).toMatchObject({ url: '/api/projects/p1/turns', body: { text: 'change "20% off" to "30% off"' } })
-    await waitFor(() => expect(screen.getAllByText("Take · Brian's voice").length).toBeGreaterThan(0))
+    await waitFor(() => expect(screen.getAllByTestId('take').some((t) => t.textContent?.includes("Brian's voice"))).toBe(true))
     await waitFor(() => expect(screen.getByTestId('spend')).toHaveTextContent('7 of 2,000 voice characters'))
-    const card = screen.getByRole('group', { name: 'Ready to ship' })
-    expect(screen.getByRole('log', { name: 'The conversation' }).lastElementChild).toBe(card)
-
-    await user.click(within(card).getByRole('button', { name: 'Ship 1 change' }))
-    const sheet = await screen.findByTestId('ship-sheet')
-    expect(calls.find((c) => c.url.endsWith('/plans/plan1/approve'))?.body).toEqual({ items: ['i1'] })
-    await user.click(within(sheet).getByRole('button', { name: 'Back to the transcript' }))
+    // 20e: the proposal is a row in the one transcript, with its verbs; nothing to ship in the panel.
+    expect(screen.queryByRole('group', { name: 'Ready to ship' })).toBeNull()
+    expect(screen.getByText('Proposed')).toBeInTheDocument()
+    await user.click(within(screen.getByRole('group', { name: 'Proposal at 0:00' })).getByRole('button', { name: 'Add it' }))
+    await waitFor(() => expect(calls.find((c) => c.url.endsWith('/plans/plan1/approve'))?.body).toEqual({ items: ['i1'] }))
+    expect(screen.queryByTestId('ship-sheet')).toBeNull()
 
     await waitFor(() => expect(screen.getAllByTestId('segment')).toHaveLength(3))
     const link = screen.getByRole('link', { name: /download mp4/i })
@@ -263,7 +266,7 @@ describe('App full journey', () => {
     await waitFor(() => expect(granted).toHaveLength(1))
     // Once, with the words as said; then the plan comes back as on any turn.
     await waitFor(() => expect(saidTo(calls)).toEqual(['change "20% off" to "30% off"']))
-    await waitFor(() => expect(screen.getAllByText("Take · Brian's voice").length).toBeGreaterThan(0))
+    await waitFor(() => expect(screen.getAllByTestId('take').some((t) => t.textContent?.includes("Brian's voice"))).toBe(true))
   })
 
   it('opens on the load screen; no gate before anything is seen', async () => {
@@ -295,14 +298,15 @@ describe('App playback after shipping', () => {
     await reachGoal(user)
 
     await user.type(screen.getByRole('textbox', TEXTBOX), 'change "20% off" to "30% off"{Enter}')
-    await user.click(await screen.findByRole('button', { name: 'Ship 1 change' }))
+    // 20e: with a proposal waiting, the player offers "With proposals" beside Original.
+    expect(within(await screen.findByRole('group', { name: 'Play' })).getAllByRole('button').map((b) => b.textContent)).toEqual(['With proposals', 'Original'])
+    await user.click(within(screen.getByRole('group', { name: 'Proposal at 0:00' })).getByRole('button', { name: 'Add it' }))
 
     const video = () => container.querySelector('video') as HTMLVideoElement
     const renderUrl = `/api/projects/p1/artifacts/${'r'.repeat(64)}`
     await waitFor(() => expect(video().getAttribute('src')).toBe(renderUrl))
-    // The sheet is a modal; the version toggle is behind it until it closes.
-    await user.click(within(await screen.findByTestId('ship-sheet')).getByRole('button', { name: 'Back to the transcript' }))
-    expect(screen.getByRole('button', { name: 'Edited' })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByRole('button', { name: 'Final' })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.queryByRole('button', { name: 'With proposals' })).toBeNull()   // nothing is proposed any more
 
     await user.click(screen.getByRole('button', { name: 'Original' }))
     expect(video().getAttribute('src')).toBe(`/api/projects/p1/artifacts/${'s'.repeat(64)}`)
@@ -389,7 +393,7 @@ describe('App projects (Phase 9a)', () => {
 })
 
 describe('App editing at the line (Phase 10, 20c)', () => {
-  it('edits a line in place: Hear it says the change to Voltage, in the chosen voice and delivery', async () => {
+  it('edits a line in place: Voice it says the change to Voltage, in the chosen voice and delivery', async () => {
     const calls = agent(PLAN_DONE)
     const user = userEvent.setup()
     render(<App />)
@@ -402,11 +406,11 @@ describe('App editing at the line (Phase 10, 20c)', () => {
     const box = screen.getByRole('textbox', { name: /new wording/i })
     await user.clear(box)
     await user.type(box, 'Get 30% off today only.')
-    await user.click(screen.getByRole('button', { name: 'Hear it' }))
+    await user.click(screen.getByRole('button', { name: 'Voice it' }))
 
     expect(saidTo(calls)).toEqual(["Replace the line at 0:00 (“Get 20% off today only.”) with “Get 30% off today only.”, said warmer, in Brian's voice"])
     // The take comes back under the line, not in the panel.
-    expect(await screen.findByTestId('take')).toHaveTextContent("Take · Brian's voice")
+    expect(await screen.findByTestId('take')).toHaveTextContent("Brian's voice ·")
   })
 
   it('leaves the voice and the delivery out of the sentence when neither was chosen', async () => {
@@ -530,7 +534,7 @@ describe('App undo (Phase 12)', () => {
     const video = () => container.querySelector('video') as HTMLVideoElement
     await waitFor(() => expect(video().getAttribute('src')).toBe(`/api/projects/p1/artifacts/${'r'.repeat(64)}`))
 
-    await userEvent.setup().click(screen.getByRole('button', { name: 'Undo' }))
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Take it out' }))
 
     await waitFor(() => expect(f.mock.calls.some(
       ([url, init]) => String(url).endsWith('/edits/e1/revert') && init?.method === 'POST')).toBe(true))
@@ -562,36 +566,26 @@ describe('App the agent (Phase 13, 20c)', () => {
 
     // Your go is the next turn.
     await user.type(screen.getByRole('textbox', TEXTBOX), 'go{Enter}')
-    await waitFor(() => expect(screen.getAllByText("Take · Brian's voice").length).toBeGreaterThan(0))
+    await waitFor(() => expect(screen.getAllByTestId('take').some((t) => t.textContent?.includes("Brian's voice"))).toBe(true))
     expect(saidTo(calls)).toEqual(['make it 30% off', 'go'])
-    expect(screen.getByText('Ready to hear')).toBeInTheDocument()
+    expect(screen.getByText('Proposed')).toBeInTheDocument()
     expect(screen.getByTestId('activity')).toHaveTextContent('Read your goal and all 1 lines')
     expect(screen.getByTestId('activity')).toHaveTextContent('$0.01 for this plan')
 
-    // W5: review and ship.
-    await user.click(screen.getByRole('button', { name: 'Review · 1 ready' }))
-    expect(screen.getByRole('button', { name: 'Changes · 1' })).toHaveAttribute('aria-pressed', 'true')
-    expect(screen.getByTestId('review-row')).toHaveTextContent('Before')
-    await user.click(screen.getByRole('button', { name: 'Ship 1 change' }))
+    // W5 (20e): hear it, then Add it, on the line itself.
+    const verbs = screen.getByRole('group', { name: 'Proposal at 0:00' })
+    expect(within(verbs).getAllByRole('button').map((b) => b.textContent)).toEqual(['Hear it', 'Add it', 'Edit it', 'Discard'])
+    await user.click(within(verbs).getByRole('button', { name: 'Add it' }))
 
     await waitFor(() => expect((container.querySelector('video') as HTMLVideoElement).getAttribute('src'))
       .toBe(`/api/projects/p1/artifacts/${'r'.repeat(64)}`))
     expect(calls.some((c) => c.url.endsWith('/plans/plan1/approve'))).toBe(true)
-    // UX-3: the sheet says what is in the file.
-    const sheet = await screen.findByTestId('ship-sheet')
-    expect(sheet).toHaveTextContent('Same length as before, 2.3 seconds.')
-    expect(within(sheet).getByText('line changed')).toBeInTheDocument()
-    expect(sheet).toHaveTextContent('$0.01')
-    expect(within(sheet).getByText('takes voiced')).toBeInTheDocument()   // the polish pass: 3 voice calls for the plan
-    expect(within(sheet).getByRole('list', { name: 'What was said' })).toHaveTextContent('Get 30% off today only.')
-    expect(sheet).toHaveTextContent('stand-in voice')
-    expect(within(sheet).getByRole('link', { name: 'Download MP4' })).toHaveAttribute('download', 'sample-ad-edited.mp4')
-    await user.click(within(sheet).getByRole('button', { name: 'Back to the transcript' }))
-    expect(screen.queryByTestId('ship-sheet')).not.toBeInTheDocument()
+    await waitFor(() => expect(screen.getByText('Added')).toBeInTheDocument())
+    expect(screen.getByRole('link', { name: 'Download MP4' })).toHaveAttribute('download', 'sample-ad-edited.mp4')
     expect(screen.getByTestId('activity')).toHaveTextContent('Rendered the edited video')
   })
 
-  it('ships from the chat: the card is the panel\'s last element, and "ship it" in the composer ships (15e)', async () => {
+  it('"ship it" in the composer is a turn, and the panel holds no ship card (15e, 20e)', async () => {
     const calls = agent(PLAN, (text) => (text === 'go' ? PLAN_DONE : PLAN))
     const user = userEvent.setup()
     render(<App />)
@@ -599,15 +593,12 @@ describe('App the agent (Phase 13, 20c)', () => {
     await user.type(screen.getByRole('textbox', TEXTBOX), 'make it 30% off{Enter}')
     await screen.findByText('I read 1 line. One change does it.')
     await user.type(screen.getByRole('textbox', TEXTBOX), 'go{Enter}')
-    await waitFor(() => expect(screen.getByText('Ready to hear')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText('Proposed')).toBeInTheDocument())
 
-    // The ship card closes the panel; the header has only Review.
-    const card = screen.getByRole('group', { name: 'Ready to ship' })
-    expect(card).toHaveTextContent('One line is ready to ship. It sounds right.')
-    const log = screen.getByRole('log', { name: 'The conversation' })
-    expect(log.lastElementChild).toBe(card)
-    expect(screen.getAllByRole('button', { name: 'Ship 1 change' })).toHaveLength(1)
-    expect(within(card).getByRole('button', { name: 'Ship 1 change' })).toBeInTheDocument()
+    // 20e: the proposal's verbs live on its row; the panel and the header hold no ship button.
+    expect(screen.queryByRole('group', { name: 'Ready to ship' })).toBeNull()
+    expect(screen.queryByRole('button', { name: /^ship|^review/i })).toBeNull()
+    expect(screen.getByRole('group', { name: 'Proposal at 0:00' })).toBeInTheDocument()
 
     // Said in the composer, it goes to Voltage as a turn (its ship tool ships, with the gate under Check with me).
     await user.type(screen.getByRole('textbox', TEXTBOX), 'ship it')
@@ -616,7 +607,7 @@ describe('App the agent (Phase 13, 20c)', () => {
     expect(calls.some((c) => c.url.endsWith('/plans/plan1/approve'))).toBe(false)
   })
 
-  it('ships the lines kept and holds the rest; a shipped line can be undone; a variant starts from the plan (UX-3)', async () => {
+  it('adds one of two proposals; an added line can be taken out; a variant starts from the plan (UX-3, 20e)', async () => {
     const two = { ...PLAN_ITEM, item_id: 'i2', selection: { start: 1.5, end: 2.0 }, new_text: 'Thirty off.', mix: 'over' }
     const done = { ...PLAN, status: 'done', items: [{ ...PLAN_ITEM, status: 'ready', candidate: BRIAN_TAKE }, { ...two, status: 'ready', candidate: BRIAN_TAKE }] }
     const partly = { ...done, items: [{ ...done.items[0], status: 'approved', edit_id: 'e1' }, done.items[1]] }
@@ -640,28 +631,25 @@ describe('App the agent (Phase 13, 20c)', () => {
     await user.type(screen.getByRole('textbox', TEXTBOX), 'make it 30% off{Enter}')
     await screen.findByText('I read 1 line. One change does it.')
     await user.type(screen.getByRole('textbox', TEXTBOX), 'go{Enter}')
-    await user.click(await screen.findByRole('button', { name: 'Review · 2 ready' }))
+    await waitFor(() => expect(screen.getAllByText('Proposed')).toHaveLength(2))
+    expect(screen.getByRole('button', { name: 'Add all 2' })).toBeInTheDocument()
 
-    // Hold the second; ship the first.
-    expect(screen.getByRole('button', { name: 'Changes · 2' })).toHaveAttribute('aria-pressed', 'true')
-    await user.click(within(screen.getByRole('group', { name: 'Keep or hold the change at 0:00' })).getByRole('button', { name: 'Hold' }))
-    expect(screen.getByText('1 kept, 1 held as a draft.')).toBeInTheDocument()
-    await user.click(screen.getByRole('button', { name: 'Ship 1 of 2' }))
-    await waitFor(() => expect(calls.find((c) => c.url.endsWith('/approve'))?.body).toEqual({ items: ['i2'] }))
+    // Add the first; the second stays proposed.
+    await user.click(within(screen.getAllByRole('group', { name: 'Proposal at 0:00' })[0]).getByRole('button', { name: 'Add it' }))
+    await waitFor(() => expect(calls.find((c) => c.url.endsWith('/approve'))?.body).toEqual({ items: ['i1'] }))
+    await waitFor(() => expect(screen.getByText('Added')).toBeInTheDocument())
+    expect(screen.getAllByText('Proposed')).toHaveLength(1)
+    expect(screen.queryByRole('button', { name: /add all/i })).toBeNull()
 
-    const sheet = await screen.findByTestId('ship-sheet')
-    expect(sheet).toHaveTextContent('held as a draft')
-    await user.click(within(sheet).getByRole('button', { name: 'Back to the transcript' }))
-
-    // Review again: one shipped with Undo, one still a draft.
-    await user.click(screen.getByRole('button', { name: 'Review · 1 ready' }))
-    await user.click(screen.getByRole('button', { name: 'Undo' }))
+    // Take it out: the line is back to a proposal, and with nothing in the video the render and its download go.
+    await user.click(screen.getByRole('button', { name: 'Take it out' }))
     await waitFor(() => expect(calls.some((c) => c.url.endsWith('/edits/e1/revert'))).toBe(true))
+    await waitFor(() => expect(screen.getAllByText('Proposed')).toHaveLength(2))
+    expect(screen.queryByRole('button', { name: 'Make a variant' })).toBeNull()
 
-    // The hold on the first change stands; the undone one is kept again.
-    // A variant: the same clip, the plan as a draft, opened as its own project.
-    await user.click(screen.getByRole('button', { name: 'Ship 1 of 2' }))
-    await user.click(within(await screen.findByTestId('ship-sheet')).getByRole('button', { name: 'Make a variant' }))
+    // Add it again; a variant — the same clip, the plan as a draft, as its own project — is offered beside the download.
+    await user.click(within(screen.getAllByRole('group', { name: 'Proposal at 0:00' })[0]).getByRole('button', { name: 'Add it' }))
+    await user.click(await screen.findByRole('button', { name: 'Make a variant' }))
     await waitFor(() => expect(calls.some((c) => c.url.endsWith('/projects/p1/variants'))).toBe(true))
     await waitFor(() => expect(window.location.hash).toBe('#p2'))
     expect(await screen.findByTestId('plan')).toHaveTextContent('Say “Get 30% off today only.” at 0:00')
@@ -685,7 +673,7 @@ describe('App the agent (Phase 13, 20c)', () => {
     expect(screen.queryByRole('button', { name: /use a shorter line/i })).not.toBeInTheDocument()
 
     await user.type(screen.getByRole('textbox', TEXTBOX), 'Use the shorter line{Enter}')
-    await waitFor(() => expect(screen.getByText('Ready to hear')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText('Proposed')).toBeInTheDocument())
     expect(saidTo(calls)).toEqual(['make it 30% off', 'Use the shorter line'])
   })
 
@@ -702,7 +690,7 @@ describe('App the agent (Phase 13, 20c)', () => {
 
     await user.type(screen.getByRole('textbox', TEXTBOX), 'make it 30% off{Enter}')
 
-    await waitFor(() => expect(screen.getAllByText("Take · Brian's voice").length).toBeGreaterThan(0))
+    await waitFor(() => expect(screen.getAllByTestId('take').some((t) => t.textContent?.includes("Brian's voice"))).toBe(true))
     expect(saidTo(calls)).toEqual(['make it 30% off'])
   })
 
@@ -746,19 +734,20 @@ describe('App the agent (Phase 13, 20c)', () => {
     expect(screen.getByTestId('plan')).toHaveTextContent('Say “Get 30% off today only.” at 0:00')
   })
 
-  it('hears the seam: plays the edited video across the change', async () => {
+  it('Hear it on a proposal plays the take in place, over the original when nothing is rendered yet', async () => {
     const calls = agent(PLAN_DONE)
     const user = userEvent.setup()
     const { container } = render(<App />)
     await reachGoal(user)
     await user.type(screen.getByRole('textbox', TEXTBOX), 'make it 30% off{Enter}')
-    await user.click(await screen.findByRole('button', { name: 'Review · 1 ready' }))
+    const verbs = await screen.findByRole('group', { name: 'Proposal at 0:00' })
 
-    await user.click(screen.getByRole('button', { name: /play the seam/i }))
+    await user.click(within(verbs).getByRole('button', { name: 'Hear it' }))
 
-    // No render yet, so the original at that line, from a moment before it.
+    // The video runs from where the take starts; the take's audio plays over it.
     const video = container.querySelector('video') as HTMLVideoElement
-    expect(video.currentTime).toBe(0)   // 0.4 - 1.5, clamped
+    expect(video.currentTime).toBeCloseTo(0.4)
+    expect(within(verbs).getByRole('button', { name: 'Stop' })).toHaveAttribute('aria-pressed', 'true')
     expect(calls.length).toBeGreaterThan(0)
   })
 
@@ -803,7 +792,7 @@ describe('App the agent (Phase 13, 20c)', () => {
     }))
     window.location.hash = 'p1'
     render(<App />)
-    expect((await screen.findAllByText("Take · Brian's voice")).length).toBeGreaterThan(0)
+    expect((await screen.findAllByTestId('take')).some((t) => t.textContent?.includes("Brian's voice"))).toBe(true)
     expect(screen.queryByTestId('reading')).not.toBeInTheDocument()
   })
 
@@ -843,7 +832,7 @@ describe('App fit notes (Phase 14)', () => {
 })
 
 describe('App panel order', () => {
-  it('puts the receipt above the plan and the action last', async () => {
+  it('puts the receipt above the plan; the action on a proposal is on its row (20e)', async () => {
     const base = routeFetch()
     vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
       if (url.endsWith('/projects/p1')) {
@@ -854,11 +843,13 @@ describe('App panel order', () => {
     }))
     window.location.hash = 'p1'
     render(<App />)
-    await screen.findByTestId('next-action')
+    await screen.findByTestId('plan')
     const panel = screen.getByTestId('activity').parentElement as HTMLElement
     const ids = Array.from(panel.querySelectorAll('[data-testid]')).map((e) => e.getAttribute('data-testid'))
     expect(ids.indexOf('activity')).toBeLessThan(ids.indexOf('plan'))
-    expect(ids[ids.length - 1]).toBe('next-action')
+    // 20e: the action on a proposal is on its transcript row, so the plan's record closes the panel.
+    expect(screen.queryByTestId('next-action')).toBeNull()
+    expect(screen.getByRole('group', { name: 'Proposal at 0:00' })).toBeInTheDocument()
   })
 
   it('opens a clip with no speech in the workspace: Voltage says what it saw, the place editor is the transcript (UX-5, UX-7c)', async () => {
@@ -892,7 +883,7 @@ describe('App panel order', () => {
     await user.click(await screen.findByRole('button', { name: /sample ad/i }))
     const editor = await screen.findByTestId('place-editor')
     await user.type(within(editor).getByRole('textbox', { name: 'Words for the voice-over' }), 'Welcome to Goa.')
-    await user.click(within(editor).getByRole('button', { name: 'Hear it' }))
+    await user.click(within(editor).getByRole('button', { name: 'Voice it' }))
     await waitFor(() => expect(saidTo(calls)).toEqual(['Add “Welcome to Goa.” at 0:00–0:02, over the picture']))
   })
 })
@@ -923,7 +914,7 @@ describe('App with Voltage as an agent (Phase 20a)', () => {
     return calls
   }
 
-  it('sends the composer to a turn, shows each step as it comes, then the take and the ship card — and no voice picker', async () => {
+  it('sends the composer to a turn, shows each step as it comes, then the take on its row — and no voice picker', async () => {
     const calls = agentRoutes()
     const user = userEvent.setup()
     render(<App />)
@@ -940,9 +931,10 @@ describe('App with Voltage as an agent (Phase 20a)', () => {
       '·Listened — no one speaks', '·Looked through 25 voices', '·Voiced “Welcome to Goa.” with Varsha — warm and unhurried$0.03', '$0.03 this turn',
     ])
     expect(await screen.findByText("One line over the opening shot, in Varsha's voice. Hear it below.")).toBeInTheDocument()
-    await waitFor(() => expect(screen.getByText('Ready to hear')).toBeInTheDocument())
-    const card = screen.getByRole('group', { name: 'Ready to ship' })
-    expect(screen.getByRole('log', { name: 'The conversation' }).lastElementChild).toBe(card)
+    await waitFor(() => expect(screen.getByText('Proposed')).toBeInTheDocument())
+    // 20e: the verbs are on the proposal's row; the panel holds no ship card.
+    expect(screen.queryByRole('group', { name: 'Ready to ship' })).toBeNull()
+    expect(screen.getByRole('group', { name: 'Proposal at 0:00' })).toBeInTheDocument()
     expect(screen.queryByTestId('turn-working')).toBeNull()
   })
 
@@ -983,22 +975,22 @@ describe('App keyboard (UX-4)', () => {
 })
 
 describe('App: the line is the unit (UX-1)', () => {
-  it('keeps a take from the row: its plan item is approved and rendered, and the line shows it with Undo', async () => {
+  it('adds a take from the row: its plan item is approved and rendered, and the line shows it Added with Take it out', async () => {
     const calls = agent(PLAN_DONE)
     const user = userEvent.setup()
     render(<App />)
     await reachGoal(user)
 
     await hearNewWords(user)
-    const take = await screen.findByTestId('take')
+    await screen.findByTestId('take')
 
-    await user.click(within(take).getByRole('button', { name: 'Keep' }))
+    await user.click(within(screen.getByRole('group', { name: 'Proposal at 0:00' })).getByRole('button', { name: 'Add it' }))
 
     await waitFor(() => expect(calls.find((c) => c.url.endsWith('/plans/plan1/approve'))?.body).toEqual({ items: ['i1'] }))
-    await waitFor(() => expect(screen.getByText('Kept')).toBeInTheDocument())
-    expect(screen.getByRole('button', { name: 'Undo' })).toBeInTheDocument()
+    await waitFor(() => expect(screen.getByText('Added')).toBeInTheDocument())
+    expect(screen.getByRole('button', { name: 'Take it out' })).toBeInTheDocument()
     expect(screen.queryByTestId('take')).not.toBeInTheDocument()
-    expect(screen.queryByTestId('ship-sheet')).not.toBeInTheDocument()   // Keep is one line, not Ship
+    expect(screen.queryByTestId('ship-sheet')).not.toBeInTheDocument()   // Add it is one line; no sheet
   })
 
   it('asks for another take in words', async () => {
@@ -1007,26 +999,28 @@ describe('App: the line is the unit (UX-1)', () => {
     render(<App />)
     await reachGoal(user)
     await hearNewWords(user)
-    const take = await screen.findByTestId('take')
+    await screen.findByTestId('take')
 
-    await user.click(within(take).getByRole('button', { name: 'Another take' }))
+    // Another take is asked of Voltage from the plan's record; the row's own way is Edit it → Voice it.
+    await user.click(within(screen.getByTestId('plan')).getByRole('button', { name: 'Another take' }))
 
     await waitFor(() => expect(saidTo(calls).at(-1)).toBe('Another take of “Get 30% off today only.” (i1)'))
   })
 
-  it('removes a line: struck through, room tone in its place, undo at hand', async () => {
+  it('Discard on a line as shot proposes removing it: struck through, Remove it at hand (20e)', async () => {
     const f = routeFetch()
     vi.stubGlobal('fetch', f)
     const user = userEvent.setup()
     render(<App />)
     await reachEditor(user)
 
-    await user.click(within(screen.getByRole('group', { name: 'Actions for 0:00' })).getByRole('button', { name: 'Remove' }))
+    await user.click(within(screen.getByRole('group', { name: 'Actions for 0:00' })).getByRole('button', { name: 'Discard' }))
 
-    await waitFor(() => expect(screen.getByText('Removed')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText('Proposed')).toBeInTheDocument())
     expect(screen.getByText('Get 20% off today only.').tagName).toBe('DEL')
     expect(f.mock.calls.some(([url, init]) => String(url).endsWith('/lines/remove') && init?.method === 'POST')).toBe(true)
-    expect(screen.getByRole('button', { name: 'Undo' })).toBeInTheDocument()
+    expect(within(screen.getByRole('group', { name: 'Proposal at 0:00' })).getByRole('button', { name: 'Remove it' })).toBeInTheDocument()
+    expect(f.mock.calls.some(([url]) => String(url).endsWith('/export'))).toBe(false)   // nothing rendered: nothing is in the video yet
   })
 
   it('adds a line after a line, over the picture by default: said to Voltage', async () => {
@@ -1060,14 +1054,15 @@ describe('App: the line is the unit (UX-1)', () => {
     const { container } = render(<App />)
     await reachGoal(user)
     await hearNewWords(user)
-    const take = await screen.findByTestId('take')
+    await screen.findByTestId('take')
+    const verbs = screen.getByRole('group', { name: 'Proposal at 0:00' })
 
-    await user.click(within(take).getByRole('button', { name: /play the take in the video/i }))
+    await user.click(within(verbs).getByRole('button', { name: 'Hear it' }))
 
     const video = container.querySelector('video') as HTMLVideoElement
     expect(video.currentTime).toBe(0.4)
     expect(video.muted).toBe(true)   // a replacement: the original's words are off
-    expect(within(take).getByRole('button', { name: /play the take in the video/i })).toHaveAttribute('aria-pressed', 'true')
+    expect(within(verbs).getByRole('button', { name: 'Stop' })).toHaveAttribute('aria-pressed', 'true')
   })
 })
 
@@ -1092,7 +1087,7 @@ describe('App: shifting original speech (UX-1c)', () => {
     expect(screen.getByText(/Moved to 0:01\.00/)).toBeInTheDocument()
     expect(screen.getByRole('listitem', { name: 'Moved line at 0:01' })).toHaveTextContent('Get 20% off today only.')
     expect(screen.getByText('Moved')).toBeInTheDocument()
-    await user.click(screen.getAllByRole('button', { name: 'Undo' })[0])
+    await user.click(screen.getByRole('button', { name: 'Put it back' }))
     await waitFor(() => expect(f.mock.calls.some(([url]) => String(url).endsWith('/edits/e8/revert'))).toBe(true))
     await waitFor(() => expect(screen.queryByText('Moved')).not.toBeInTheDocument())
     expect(screen.queryByText('Moved away')).not.toBeInTheDocument()

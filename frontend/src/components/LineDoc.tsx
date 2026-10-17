@@ -59,15 +59,20 @@ interface LineDocProps {
   onSeek: (statement: Statement) => void
   /** Hear it: what the editor asks for; App says it to Voltage as one turn. */
   onHear: (key: LineKey, request: LineRequest) => void
-  /** Keep the take under a line: its plan item is approved and rendered. */
-  onKeep: (item: PlanItem) => void | Promise<unknown>
-  /** Another take of the line: asked of Voltage in words. */
-  onAnother: (item: PlanItem) => void | Promise<unknown>
+  /** Add it (20e): the proposal under a line goes into the video — its plan item is approved and rendered. */
+  onAdd: (item: PlanItem) => void | Promise<unknown>
+  /** Discard a proposal: it leaves the plan. */
+  onDiscard: (item: PlanItem) => void | Promise<unknown>
+  /** Add them all: every proposal at once. */
+  onAddAll?: (items: PlanItem[]) => void | Promise<unknown>
+  /** Take it out: an added line leaves the video and stands as a proposal again. */
   onUndo: (editId: string) => void
+  /** Discard on a line as shot: proposes removing it (the room's own sound in its place). */
   onRemove: (statement: Statement) => void
+  /** Hear it on a proposal: the take in place. */
+  onHearTake: (item: PlanItem, candidate: Candidate) => void
   /** UX-1c: move this line of the original speech to start at `to`. */
   onShift?: (s: Statement, to: number) => void
-  onPlayTake: (candidate: Candidate) => void
   /** A take dragged to a new start; the moved take replaces it under the line. */
   onMove?: (item: PlanItem, candidate: Candidate, start: number) => void
   /** A kept line dragged to a new start. */
@@ -78,17 +83,14 @@ interface LineDocProps {
   onEditingChange?: (statement: Statement | null) => void
   /** UX-5: the clip's length, so a voice-over can be placed on a clip with no speech. */
   duration?: number
-  /** UX-7d: review is the script filtered to what changed — a segmented control in the heading. */
-  filter?: { count: number; on: boolean; onChange: (on: boolean) => void }
-  /** The review rows, shown in place of the lines while the filter is on. */
-  review?: ReactNode
 }
 
 const overlaps = (a: { start: number; end: number }, b: { start: number; end: number }) =>
   a.start < b.end && b.start < a.end
 
 const STATUS: Record<string, string> = {
-  reading: 'Reading', planned: 'Planned', working: 'Voicing…', ready: 'Ready to hear', 'needs-you': 'Needs you', failed: "Couldn't voice it",
+  reading: 'Reading', planned: 'Planned', working: 'Voicing…', ready: 'Proposed', 'needs-you': 'Needs you', failed: "Couldn't voice it",
+  kept: 'Added', removed: 'Removed',
 }
 /** A row's state is a quiet badge, tinted only where it means something: changed, needs you, kept. */
 const TONE: Record<string, string> = {
@@ -142,9 +144,9 @@ const PlayIcon = () => <Play size={14} aria-hidden="true" fill="currentColor" />
 /** The transcript as the working surface: every line carries its own state,
  *  actions, editor and takes. Nothing about a line happens anywhere else. */
 export function LineDoc({
-  statements, words = [], speakers = [], voices = [], revisions = [], selection, currentTime, filter, review,
+  statements, words = [], speakers = [], voices = [], revisions = [], selection, currentTime,
   pendingLines = [], items = [], disabled, usdPerChar, playing,
-  onSeek, onHear, onKeep, onAnother, onUndo, onRemove, onPlayTake,
+  onSeek, onHear, onAdd, onDiscard, onAddAll, onUndo, onRemove, onHearTake,
   onEditingChange, onMove, onMoveKept, placing, onPlacing, onShift, duration,
 }: LineDocProps) {
   const [at, setAt] = useState<string>('')          // the add editor's "starts at", as typed
@@ -223,10 +225,17 @@ export function LineDoc({
     return <p className="m-0 py-6 text-muted-foreground">No lines to show. This video has no transcribed speech.</p>
   }
 
+  /** The speaker's name; an unnamed one is Speaker 1, 2, 3 in order of appearance (20e). */
   const name = (label?: string | null) => {
+    if (!label) return null
     const sp = speakers.find((s) => s.label === label)
-    return sp?.name ?? (label ? `Speaker ${label}` : null)
+    if (sp?.name) return sp.name
+    const order = speakers.length ? speakers.map((x) => x.label) : [...new Set(statements.map((st) => st.speaker).filter(Boolean))] as string[]
+    const n = order.indexOf(label)
+    return `Speaker ${n >= 0 ? n + 1 : label}`
   }
+
+  const proposals = items.filter((i) => i.status === 'ready' && i.candidate)
 
   /** The line as it stands now: the kept wording, or the original. */
   const standing = (s: Statement): string => {
@@ -293,8 +302,8 @@ export function LineDoc({
         break
       }
       case 'k': case 'K': {
-        const own = ownItem(s)
-        if (own?.status === 'ready' && own.candidate && !disabled) { e.preventDefault(); onKeep(own) }
+        const own = ownItem(s) ?? addedItem(s)
+        if (own?.status === 'ready' && own.candidate && !disabled) { e.preventDefault(); void onAdd(own) }
         break
       }
       case 'u': case 'U': {
@@ -306,6 +315,8 @@ export function LineDoc({
       case 'Delete': case 'Backspace': {
         const live = revisions.filter((r) => overlaps(r, s))
         if (live.some((r) => r.mix === 'remove') || disabled) break
+        const own = ownItem(s) ?? addedItem(s)
+        if (own && own.status !== 'approved') { e.preventDefault(); void onDiscard(own); break }
         e.preventDefault()
         const now = Date.now()
         if (e.key === 'Backspace' && !(armed.current && armed.current.index === index && now - armed.current.at < 2000)) {
@@ -399,16 +410,16 @@ export function LineDoc({
           </ControlRow>
         )}
         <div className="flex flex-wrap items-center gap-2 border-t pt-3">
-          <span className={cn(faint, 'tnum')}>≈ {chars} characters{cost} · ready in about 10 s</span>
+          <span className={cn(faint, 'tnum')}>≈ {chars} characters{cost} · Voltage voices it; the take comes back proposed</span>
           <span className="flex-1" />
           <Button type="button" variant="outline" onClick={close}>Cancel</Button>
           <Button
             type="button"
-            aria-label="Hear it"
+            aria-label="Voice it"
             disabled={disabled || !draft.trim() || badAt || (mode === 'edit' && draft.trim() === base)}
             onClick={() => hear(s)}
           >
-            Hear it
+            Voice it
           </Button>
         </div>
       </div>
@@ -446,43 +457,47 @@ export function LineDoc({
     )
   }
 
-  /** The take under a line: play it in place, where it starts, Keep, Another take. */
-  const takeCard = (item: PlanItem, c: Candidate, s: Statement) => {
+  /** A proposal's own line of facts (20e): whose voice, the verdict in words, where it starts. */
+  const takeMeta = (item: PlanItem, c: Candidate, s: Statement) => {
     const v = verdict(c, name(s.speaker))
     const voice = voices.find((x) => x.voice_id === c.plan.voice_profile_id)?.name
     const held = item.mix === 'over' && c.plan.mix === 'concatenate'
     return (
-      <div className={cn('flex flex-col gap-2 rounded-lg border bg-card p-3 text-card-foreground shadow-xs', riseClass)} data-testid="take">
-        <div className="flex items-center gap-2.5">
-          <Button
-            variant={playing === c.candidate_id ? 'default' : 'outline'}
-            size="icon-sm"
-            className="rounded-full"
-            aria-label="Play the take in the video"
-            aria-pressed={playing === c.candidate_id}
-            onClick={() => onPlayTake(c)}
-          ><PlayIcon /></Button>
-          <span className="min-w-0 text-sm font-medium">Take{voice ? ` · ${voice}'s voice` : ''}</span>
-          <span className="flex-1" />
-          {v.score !== null && <span className="tnum text-sm text-muted-foreground">{v.score.toFixed(2)}</span>}
+      <div className="flex flex-col gap-1" data-testid="take">
+        <div className={cn(metaClass, !v.passed && 'text-needs')}>
+          {voice ? `${voice}'s voice · ` : ''}{v.text}{held ? ' Held the picture: no room to play over it.' : ''}
+          {!v.passed && ' Add it anyway if it sounds right to you.'}
         </div>
-        <div className="text-sm leading-normal">{v.text}{held ? ' Held the picture: no room to play over it.' : ''}</div>
         {onMove && placeControl(c.candidate_id, c.plan.selection.start, c.audio.duration, (t) => onMove(item, c, t))}
-        <div className="flex flex-wrap gap-2">
-          <Button onClick={() => void run(`keep-${item.item_id}`, () => onKeep(item))} disabled={disabled || pending !== null} aria-busy={pending === `keep-${item.item_id}` || undefined}>{pending === `keep-${item.item_id}` ? 'Keeping…' : 'Keep'}</Button>
-          <Button variant="outline" onClick={() => void run(`another-${item.item_id}`, () => onAnother(item))} disabled={disabled || pending !== null} aria-busy={pending === `another-${item.item_id}` || undefined}>{pending === `another-${item.item_id}` ? 'Asking…' : 'Another take'}</Button>
-        </div>
       </div>
     )
   }
 
-  /** What stands under a line: Voltage voicing it, or the take to hear and keep. */
+  /** The four verbs on a proposal (20e): Hear it, Add it, Edit it, Discard. */
+  const verbs = (item: PlanItem, c: Candidate, index: number, mode: 'edit' | 'add') => (
+    <span className="flex flex-wrap items-center justify-end gap-1.5" role="group" aria-label={`Proposal at ${clock(c.plan.selection.start)}`}>
+      <Button
+        variant={playing === c.candidate_id ? 'default' : 'outline'} size="sm" className={actionBtn}
+        aria-pressed={playing === c.candidate_id}
+        onClick={() => onHearTake(item, c)}
+      ><PlayIcon />{playing === c.candidate_id ? 'Stop' : 'Hear it'}</Button>
+      <Button size="sm" className={actionBtn} onClick={() => void run(`add-${item.item_id}`, () => onAdd(item))} disabled={disabled || pending !== null} aria-busy={pending === `add-${item.item_id}` || undefined}>
+        {pending === `add-${item.item_id}` ? 'Adding…' : item.mix === 'remove' ? 'Remove it' : 'Add it'}
+      </Button>
+      {item.mix !== 'remove' && <Button variant="outline" size="sm" className={actionBtn} onClick={() => open(index, mode)}>Edit it</Button>}
+      <Button variant="ghost" size="sm" className={cn(actionBtn, 'text-muted-foreground')} onClick={() => void run(`discard-${item.item_id}`, () => onDiscard(item))} disabled={disabled || pending !== null} aria-busy={pending === `discard-${item.item_id}` || undefined}>
+        {pending === `discard-${item.item_id}` ? 'Discarding…' : 'Discard'}
+      </Button>
+    </span>
+  )
+
+  /** What stands under a line while Voltage is on it. */
   const lineBlock = (item: PlanItem | null, s: Statement) => {
     if (!item) return null
     if (item.status === 'working') {
       return <div className={cn('flex items-center gap-2 text-sm text-muted-foreground', riseClass)} data-testid="line-working" role="status"><Spinner /><span>{item.progress ?? 'Voicing the line…'}</span></div>
     }
-    if (item.status === 'ready' && item.candidate) return takeCard(item, item.candidate, s)
+    if (item.status === 'ready' && item.candidate) return takeMeta(item, item.candidate, s)
     return null
   }
 
@@ -644,7 +659,9 @@ export function LineDoc({
       : revision && !removed ? revision : null
     const own = ownItem(s)
     const added = addedItem(s)
-    const status: string | null = pending?.status ?? (removed ? 'removed' : revision ? 'kept' : null)
+    // The row's state word comes from the plan's item itself when there is one (20e), so a proposal reads Proposed without the plan's pending list.
+    const itemStatus = own && own.status !== 'approved' && own.status !== 'dismissed' && STATUS[own.status] ? own.status : null
+    const status: string | null = pending?.status ?? itemStatus ?? (removed ? 'removed' : revision ? 'kept' : null)
     const label = name(s.speaker)
     const newSpeaker = !!label && s.speaker !== statements[i - 1]?.speaker
     const isEditing = editing?.index === i && editing.mode === 'edit'
@@ -686,7 +703,7 @@ export function LineDoc({
               <div className="flex flex-col gap-1.5">
                 <button className={lineClass} onClick={() => open(i, 'edit')} title="Change the words" data-testid={shown ? 'revision' : undefined}>
                   {s.placed && !shown && !removed ? <span className="italic text-muted-foreground">Voice-over, {timecode(s.start)}–{timecode(s.end)}</span>
-                    : removed ? <del className={DEL}>{s.text}</del>
+                    : removed || (own?.mix === 'remove' && own.status === 'ready') ? <del className={DEL}>{s.text}</del>
                     : shown ? trackedChanges(s, shown, words).map((run, k) => (
                       <Fragment key={k}>{k > 0 && ' '}
                         {run.kind === 'same' ? <span>{run.text}</span> : run.kind === 'del' ? <del className={DEL}>{run.text}</del> : <ins className={INS}>{run.text}</ins>}
@@ -696,8 +713,7 @@ export function LineDoc({
                 {(revision || removed) && (
                   <div className={metaClass}>
                     {movedTo ? `Moved to ${timecode(movedTo.start)}; the room's own sound stays here.`
-                      : removed ? "Removed. The gap is closed with the room's own sound; the picture is untouched." : `Kept${shown && MIX_NOTE[shown.mix] ? ` · ${MIX_NOTE[shown.mix]}` : ''}.`}
-                    {revision?.edit_id && <> <LinkButton onClick={() => onUndo(revision.edit_id!)}>Undo</LinkButton></>}
+                      : removed ? "Removed. The gap is closed with the room's own sound; the picture is untouched." : `In the video${shown && MIX_NOTE[shown.mix] ? ` · ${MIX_NOTE[shown.mix]}` : ''}.`}
                   </div>
                 )}
                 {revision && !removed && revision.edit_id && onMoveKept && (
@@ -707,17 +723,30 @@ export function LineDoc({
                   placeControl(`shift-${key}`, s.start, Math.max(0.05, s.end - s.start), (t) => onShift(s, t))
                 )}
                 {pending && !revision && pending.text && MIX_NOTE[pending.mix ?? 'replace'] && (
-                  <div className={metaClass}>Added · {MIX_NOTE[pending.mix ?? 'replace']}</div>
+                  <div className={metaClass}>New line · {MIX_NOTE[pending.mix ?? 'replace']}</div>
+                )}
+                {own?.mix === 'remove' && own.status === 'ready' && (
+                  <div className={cn(metaClass, 'text-needs')}>Proposed: these words go, and the room's own sound stays in their place.</div>
                 )}
                 {!isEditing && <div className={unfold}>{lineBlock(own, s)}</div>}
               </div>
             )}
           </div>
           <span className={sideClass}>
-            {status && STATUS[status] && <StatusBadge status={status} role="status">{STATUS[status]}</StatusBadge>}
-            {status === 'kept' && <StatusBadge status="kept">Kept</StatusBadge>}
-            {status === 'removed' && <StatusBadge status="removed">{movedTo ? 'Moved away' : 'Removed'}</StatusBadge>}
-            {!isEditing && !isAdding && (
+            {status && STATUS[status] && status !== 'removed' && <StatusBadge status={status} role="status">{STATUS[status]}</StatusBadge>}
+            {status === 'removed' && <StatusBadge status="removed" role="status">{movedTo ? 'Moved away' : 'Removed'}</StatusBadge>}
+            {own?.status === 'ready' && own.candidate && !isEditing && !isAdding && verbs(own, own.candidate, i, 'edit')}
+            {revision && !removed && revision.edit_id && !isEditing && !isAdding && (
+              <span className="flex flex-wrap items-center justify-end gap-1.5" role="group" aria-label={`Added line at ${clock(s.start)}`}>
+                <Button variant="outline" size="sm" className={actionBtn} onClick={() => onSeek(s)}><PlayIcon />Hear it</Button>
+                <Button variant="outline" size="sm" className={actionBtn} onClick={() => onUndo(revision.edit_id!)}>Take it out</Button>
+                <Button variant="outline" size="sm" className={actionBtn} onClick={() => open(i, 'edit')}>Edit it</Button>
+              </span>
+            )}
+            {removed && revision?.edit_id && !isEditing && !isAdding && (
+              <Button variant="outline" size="sm" className={actionBtn} onClick={() => onUndo(revision.edit_id!)}>Put it back</Button>
+            )}
+            {!isEditing && !isAdding && !(own?.status === 'ready' && own.candidate) && !(revision && !removed) && (
               <Button
                 type="button"
                 variant="outline"
@@ -728,18 +757,17 @@ export function LineDoc({
                 onClick={() => setActionsOpen((o) => (o === i ? null : i))}
               >…</Button>
             )}
-            {!isEditing && !isAdding && (
+            {!isEditing && !isAdding && !(own?.status === 'ready' && own.candidate) && !(revision && !removed) && (
               <span className={actionsClass} role="group" aria-label={`Actions for ${clock(s.start)}`}>
-                <Button variant="outline" size="sm" className={actionBtn} onClick={() => { setActionsOpen(null); open(i, 'edit') }}>Change the words</Button>
-                <Button variant="outline" size="sm" className={actionBtn} onClick={() => { setActionsOpen(null); open(i, 'edit', true) }}>Change the delivery</Button>
+                <Button variant="outline" size="sm" className={actionBtn} onClick={() => { setActionsOpen(null); onSeek(s) }}><PlayIcon />Hear it</Button>
+                {!removed && <Button variant="outline" size="sm" className={actionBtn} onClick={() => { setActionsOpen(null); open(i, 'edit') }}>Edit it</Button>}
+                {!removed && !own && <Button variant="outline" size="sm" className={actionBtn} onClick={() => { setActionsOpen(null); onRemove(s) }}>Discard</Button>}
                 <Button variant="outline" size="sm" className={actionBtn} onClick={() => { setActionsOpen(null); open(i, 'add') }}>Add a line after</Button>
-                {!removed && <Button variant="outline" size="sm" className={actionBtn} onClick={() => { setActionsOpen(null); onRemove(s) }}>Remove</Button>}
                 {mover && up !== null && <Button variant="outline" size="sm" className={actionBtn} onClick={() => { setActionsOpen(null); mover.apply(up) }}>Move up</Button>}
                 {mover && down !== null && <Button variant="outline" size="sm" className={actionBtn} onClick={() => { setActionsOpen(null); mover.apply(down) }}>Move down</Button>}
                 {mover && onPlacing && (
                   <Button variant="outline" size="sm" className={actionBtn} onClick={() => { onPlacing({ id: mover.id, start: mover.start, duration: mover.duration }); setPlaceText(timecode(mover.start)) }}>Shift to a time…</Button>
                 )}
-                <Button variant="outline" size="sm" className={actionBtn} onClick={() => onSeek(s)}>Play original</Button>
               </span>
             )}
           </span>
@@ -764,7 +792,10 @@ export function LineDoc({
                 <div className={unfold}>{lineBlock(added, s)}</div>
               </div>
             </div>
-            <span className={sideClass}>{STATUS[added.status] && <StatusBadge status={added.status} role="status">{STATUS[added.status]}</StatusBadge>}</span>
+            <span className={sideClass}>
+              {STATUS[added.status] && <StatusBadge status={added.status} role="status">{STATUS[added.status]}</StatusBadge>}
+              {added.status === 'ready' && added.candidate && verbs(added, added.candidate, i, 'add')}
+            </span>
           </div>
         )}
         {!isAdding && !added && i === statements.length - 1 && !(s.placed && placingAnother) && (
@@ -795,30 +826,25 @@ export function LineDoc({
     <section className="flex flex-col gap-0.5" aria-label="Transcript">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2 px-2.5 pb-2 pt-1">
         <h2 className="m-0 text-base font-semibold">Transcript</h2>
-        {filter && (
-          <div className="inline-flex gap-0.5 rounded-lg border bg-muted p-0.5" role="group" aria-label="Show">
-            <Button variant="ghost" size="sm" className={cn('whitespace-nowrap', filter.on && 'bg-background shadow-xs hover:bg-background dark:hover:bg-background')} aria-pressed={filter.on} onClick={() => filter.onChange(true)}>Changes · {filter.count}</Button>
-            <Button variant="ghost" size="sm" className={cn('whitespace-nowrap', !filter.on && 'bg-background shadow-xs hover:bg-background dark:hover:bg-background')} aria-pressed={!filter.on} onClick={() => filter.onChange(false)}>The whole script</Button>
-          </div>
+        {proposals.length > 1 && onAddAll && (
+          <Button size="sm" className="whitespace-nowrap" onClick={() => void run('add-all', () => onAddAll(proposals))} disabled={disabled || pending !== null} aria-busy={pending === 'add-all' || undefined}>
+            {pending === 'add-all' ? 'Adding…' : `Add all ${proposals.length}`}
+          </Button>
         )}
         <span className={hint}>
-          {review ? (items.some((i) => i.status === 'ready')
-              ? 'Keep what sounds right; hold the rest as drafts. The Ship button in the bar counts what you keep.'
-              : 'What shipped, line by line.')
-            : editing ? (editing.mode === 'edit' ? `Editing ${clock(statements[editing.index].start)}. Enter to hear it, Esc to cancel.` : `Adding a line after ${clock(statements[editing.index].start)}. Esc to cancel.`)
+          {editing ? (editing.mode === 'edit' ? `Editing ${clock(statements[editing.index].start)}. Enter to hear it, Esc to cancel.` : `Adding a line after ${clock(statements[editing.index].start)}. Esc to cancel.`)
             : pendingLines.some((p) => p.status === 'reading') ? "Voltage is reading. The line it's on is lit."
-            : focusedRow !== null ? <span className="whitespace-nowrap max-[960px]:hidden" data-testid="keys"><kbd className={kbd}>↑</kbd><kbd className={kbd}>↓</kbd> move · <kbd className={kbd}>Enter</kbd> change the words · <kbd className={kbd}>Space</kbd> play · <kbd className={kbd}>A</kbd> add after · <kbd className={kbd}>S</kbd> shift (or drag ⋮⋮) · <kbd className={kbd}>K</kbd> keep · <kbd className={kbd}>U</kbd> undo · <kbd className={kbd}>/</kbd> ask Voltage</span>
-            : armedRow !== null ? <span role="status">Press Backspace again to remove the line at {clock(statements[armedRow].start)}.</span>
-            : 'Each line carries its own state. Tap or hover a line, or press ↑ ↓ to move between them.'}
+            : focusedRow !== null ? <span className="whitespace-nowrap max-[960px]:hidden" data-testid="keys"><kbd className={kbd}>↑</kbd><kbd className={kbd}>↓</kbd> move · <kbd className={kbd}>Enter</kbd> edit it · <kbd className={kbd}>Space</kbd> hear it · <kbd className={kbd}>K</kbd> add it · <kbd className={kbd}>Delete</kbd> discard · <kbd className={kbd}>A</kbd> add after · <kbd className={kbd}>S</kbd> shift (or drag ⋮⋮) · <kbd className={kbd}>U</kbd> take it out · <kbd className={kbd}>/</kbd> ask Voltage</span>
+            : armedRow !== null ? <span role="status">Press Backspace again to propose removing the line at {clock(statements[armedRow].start)}.</span>
+            : proposals.length > 0 ? `${proposals.length === 1 ? 'One line is proposed' : `${proposals.length} lines are proposed`}: hear it, then Add it, Edit it or Discard. Nothing is in the video until you add it.`
+            : 'One transcript: what is in the video, and what is proposed. Tap or hover a line for Hear it, Edit it, Discard.'}
         </span>
       </div>
 
-      {review ?? (
       <div role="list" className="flex flex-col gap-0.5" ref={list} onFocusCapture={() => setFocusTick((t) => t + 1)} onBlurCapture={() => setFocusTick((t) => t + 1)} data-focus-tick={focusTick}>
         {rows.map((entry, order) => (entry.kind === 'moved' ? movedRow(entry, order) : lineRow(entry.s, entry.i, order)))}
         {drag && dropIndexFor(drag.to) === rows.length && dropMarker()}
       </div>
-      )}
     </section>
   )
 }

@@ -28,7 +28,7 @@ more is a sign to ask. One line, one item: drop a take you are not keeping \
 so the plan shows what the user will hear.
 - A voiced line is a *take* on a plan item the user can hear, keep, redo or \
 move. Shipping is what makes it part of the video; do that only when the \
-user asks for it (in words, or by the Ship button), or when they said "just \
+user asks for it (in words, or by Add it on the line), or when they said "just \
 do it" and the work is done.
 - Keep the user's own words when they give them in quotes. Never put a \
 name or a label in front of spoken words; they would be read aloud. Text \
@@ -97,7 +97,7 @@ def opening(plan: Plan | None, *, duration: float, filename: str, speakers: Sequ
             if i.kind != "planned" or i.status == "dismissed":
                 continue
             where = f"{i.selection.start:.1f}–{i.selection.end:.1f} s"
-            state = {"ready": "voiced, not shipped", "approved": "shipped", "planned": "not voiced",
+            state = {"ready": "proposed, not in the video" if i.mix != "remove" else "removal proposed", "approved": "in the video", "planned": "not voiced",
                      "working": "being voiced", "needs-you": "needs the user", "failed": "failed"}.get(i.status, i.status)
             out.append(f"- {i.item_id} at {where}: “{i.new_text}” ({state}"
                        + (f"; take {i.candidate_id}" if i.candidate_id else "") + ")")

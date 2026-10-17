@@ -155,8 +155,13 @@ export async function pollJob(
   }
 }
 
-export const exportProject = (id: string) =>
-  post<ExportManifest>(`/projects/${id}/export`)
+/** Renders the video: the added lines only, or (20e) with the proposals mixed in for "With proposals" playback. */
+export const exportProject = (id: string, withProposals = false) =>
+  post<ExportManifest>(`/projects/${id}/export`, withProposals ? { with_proposals: true } : undefined)
+
+/** Discard a proposal (20e): it leaves the plan. */
+export const dismissItem = (id: string, planId: string, itemId: string) =>
+  post<Plan>(`/projects/${id}/plans/${planId}/items/${itemId}/dismiss`)
 
 /** Undoes an approved edit. The edit is kept and marked; the render skips it. */
 export const revertEdit = (id: string, editId: string) =>
@@ -184,9 +189,9 @@ export const moveCandidate = (id: string, candidateId: string, req: { start: num
 export const moveEdit = (id: string, editId: string, req: { start: number; mix?: Mix }) =>
   post<{ edit_id: string; reverted: string; candidate: Candidate }>(`/projects/${id}/edits/${editId}/move`, req)
 
-/** Takes a line out: its words go, the room's own sound stays. Approved at once. */
+/** Proposes taking a line out (20e): a plan item whose take is the room's own sound; Add it makes it so. */
 export const removeLine = (id: string, span: { start: number; end: number }) =>
-  post<{ edit_id: string; candidate_id: string; selection: Selection; mix: Mix }>(`/projects/${id}/lines/remove`, span)
+  post<{ item_id: string; candidate_id: string; selection: Selection; mix: Mix; plan: Plan }>(`/projects/${id}/lines/remove`, span)
 
 async function put<T>(path: string, body: unknown): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {

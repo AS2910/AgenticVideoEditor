@@ -318,3 +318,29 @@ Ten goals across the three clips, each a fresh upload and one turn under Just do
 **Where it stands.** The plan's bar was 9 of 10. Over four runs the decisions pass every time; what fails is the closing line's exactness about numbers it did not get from a tool. That is the next thing to build (20e): give the closing words their facts — a final `project_state` the loop appends before the model writes its last line, so the speed-up, the line count and the cost come from the record and not from memory — and name the source of a claim ("the catalogue describes her as…", "the frames show…"). Four runs cost about $6 in all; each run's JSON is in `backend/bench/agent-evals/`.
 
 What the grader kept asking for across the runs, worth a 20e: Voltage sometimes says a voice is "confident" or a place is Goa as if it had heard or knew — the catalogue's description and the frames should be named as the source; the off-gender first take (Sarah for a male shopkeeper) when the speaker's own voice cannot be made; browsing voices before the first take rather than after.
+
+
+## As built · 20e, one transcript (2026-10-18, on `main`)
+
+The user's words, after an overlay turn went wrong: *"I specifically asked for an overlay — instead it deleted the last audio that was added, and added a new one. Again why are we not being agentic? Where is the design gap"*, then: *"I want only these options: Hear It / Add It / Edit It / Discard … Ideally we should have only one transcript … Non approved audios should be highlighted … Even for existing audio we should have option 2 … if speaker name is not given, say Speaker 1, 2, 3 … When I play video, I should be able to play with only approved audios, or with both approved and audios waiting for approval."*
+
+### What was found behind the overlay turn (the three gaps)
+
+1. **The commit step refused a flagged take with no override the agent could reach.** `approve` had `override`, the `ship` tool did not expose it, so *"ship it as it is"* was refused and Voltage said it could not override. Now `ship(anyway=true)` carries the user's word; the prompt says the sound check is advice, never a lock.
+2. **Voltage could not see what was in the video.** The opening view and `project_state` listed the current plan only; shipped edits from earlier plans were invisible, and layered edits stack in the composer, so *"said more excited"* shipped a second narration over the first — p54 had three Varsha lines playing at once. Now both list the live shipped edits ("In the video already…"), `undo_edit` (a gated commit) takes one out, and the rule is a redo swaps and never piles up; an overlay the user asks for is a new layer.
+3. **Hear it played a take over the original**, so the layers already added vanished in the preview — what the user heard as "it deleted the last audio". Hear it now plays over the final render when its clock is the source's; the exact case is the new "With proposals" playback.
+
+### The single transcript
+
+- **One row per line, one state word, four verbs.** `LineDoc` is the only transcript: `ReviewPanel`, `ShipCard`, the Changes/whole-script filter, Keep/Hold decisions, the seam player and the take card are deleted. A proposal (a ready item) shows its words as a change, its facts on one line (whose voice · the verdict in words · Starts at/Move) and **Hear it · Add it · Edit it · Discard** on its row; a line as shot shows **Hear it · Edit it · Discard** (hover/focus, "…" on touch); an added line **Hear it · Take it out · Edit it**; a removed one **Put it back**. **Add all N** in the heading. The editor's submit is **Voice it**: Voltage voices the take and it comes back proposed. Unnamed speakers are Speaker 1, 2, 3.
+- **Every change is a proposal first, removal included.** `POST /lines/remove` no longer commits: it makes a ready plan item (`mix="remove"`, the room's own sound as its take) on the working plan; Add it ("Remove it") approves it like any take. The agent's `remove_line` is the same proposal (no gate; `ship` is the gate). `POST /plans/{id}/items/{item}/dismiss` is Discard. Shift (UX-1c) stays an immediate, undoable pair of edits — the one hand action not yet a proposal.
+- **Playback: Final · With proposals · Original.** `POST /export` takes `{"with_proposals": true}` and renders the live edits plus the plan's ready takes as preview edits (`preview-<item>`, nothing stored as an edit); the manifest names the `proposals` it carries. The front end keys the preview by the takes it holds and remakes it when they change; a status line says "Rendering with the proposals…".
+- **A turn that ships on its own** (Just do it) is taken in like a hand approval (fixed earlier the same night, d7150fd): the render plays, Download is in the bar, the sheet says what is in the file. Hand approvals no longer open the sheet: the row turns Added and the player switches to Final. **Make a variant** moved to the export bar beside Download.
+
+### Kept in the panel, by decision
+
+The plan card stays as Voltage's record (items, states, Hear it, Another take, the Voice row); it is not a transcript. The activity log and the question card are unchanged.
+
+### Tests
+
+Backend: `tests/agent/test_tools.py` (ship anyway, project_state lists the shipped edits, undo_edit gated, remove_line as a proposal), `tests/agent/test_context.py` (the opening lists the shipped edits), `tests/api/test_endpoints.py` (removal as a proposal → preview render carries it → Add it → room tone; dismiss; a shipped line cannot be dismissed). Front end: `LineDoc.test.tsx` (the verbs on a line as shot, on a proposal, Add all, a flagged take, a proposed removal, Speaker numbering, Added/Take it out/Put it back, keys), `App.test.tsx` (Add it from the row, With proposals in the play switch, Hear it over the original when nothing is rendered, two proposals → one added → Take it out → variant from the export bar, Discard proposes a removal, the panel's order without a ship card).

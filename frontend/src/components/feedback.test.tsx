@@ -28,28 +28,27 @@ const ITEM: PlanItem = {
   edit_id: null, question: null, error: null, note: null, progress: null,
 }
 const handlers = () => ({
-  onSeek: vi.fn(), onHear: vi.fn(), onKeep: vi.fn(), onAnother: vi.fn(), onUndo: vi.fn(),
-  onRemove: vi.fn(), onPlayTake: vi.fn(),
+  onSeek: vi.fn(), onHear: vi.fn(), onAdd: vi.fn(), onDiscard: vi.fn(), onUndo: vi.fn(),
+  onRemove: vi.fn(), onHearTake: vi.fn(),
 })
 
 describe('a control that waits says so', () => {
-  it('Keep reads Keeping… and is disabled until the request returns', async () => {
+  it('Add it reads Adding… and is disabled until the request returns', async () => {
     let finish: () => void = () => {}
-    const onKeep = vi.fn(() => new Promise<void>((resolve) => { finish = resolve }))
+    const onAdd = vi.fn(() => new Promise<void>((resolve) => { finish = resolve }))
     render(
-      <LineDoc statements={STATEMENTS} currentTime={0} {...handlers()} onKeep={onKeep} items={[ITEM]} />,
+      <LineDoc statements={STATEMENTS} currentTime={0} {...handlers()} onAdd={onAdd} items={[ITEM]} />,
     )
-    const keep = screen.getByRole('button', { name: 'Keep' })
-    await userEvent.click(keep)
-    expect(screen.getByRole('button', { name: 'Keeping…' })).toBeDisabled()
-    expect(screen.getByRole('button', { name: 'Keeping…' })).toHaveAttribute('aria-busy', 'true')
+    await userEvent.click(screen.getByRole('button', { name: 'Add it' }))
+    expect(screen.getByRole('button', { name: 'Adding…' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Adding…' })).toHaveAttribute('aria-busy', 'true')
     finish()
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Keep' })).toBeEnabled())
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Add it' })).toBeEnabled())
   })
 })
 
 describe('an unreadable time cannot be voiced', () => {
-  it('marks "Starts at" invalid, explains in a sentence, and disables Hear it', async () => {
+  it('marks "Starts at" invalid, explains in a sentence, and disables Voice it', async () => {
     const h = handlers()
     render(<LineDoc statements={STATEMENTS} currentTime={0} {...h} />)
     await userEvent.click(within(screen.getByRole('group', { name: 'Actions for 0:05' })).getByRole('button', { name: 'Add a line after' }))
@@ -59,11 +58,11 @@ describe('an unreadable time cannot be voiced', () => {
     await userEvent.type(at, 'soonish')
     expect(at).toHaveAttribute('aria-invalid', 'true')
     expect(within(editor).getByRole('alert')).toHaveTextContent('A time like 0:04.96')
-    expect(within(editor).getByRole('button', { name: 'Hear it' })).toBeDisabled()
+    expect(within(editor).getByRole('button', { name: 'Voice it' })).toBeDisabled()
     await userEvent.clear(at)
     await userEvent.type(at, '0:06.20')
     expect(at).not.toHaveAttribute('aria-invalid')
-    await userEvent.click(within(editor).getByRole('button', { name: 'Hear it' }))
+    await userEvent.click(within(editor).getByRole('button', { name: 'Voice it' }))
     expect(h.onHear).toHaveBeenCalledWith('add-6.900', expect.objectContaining({ at: 6.2, text: 'Welcome to Goa' }))
   })
 })

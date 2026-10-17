@@ -141,7 +141,7 @@ export function PlaceEditor({
         <span className="tnum text-sm text-muted-foreground">≈ {chars} characters{cost} · ready in about 10 s</span>
         <span className="flex-1" />
         {onCancel && <Button type="button" variant="outline" onClick={onCancel}>Cancel</Button>}
-        <Button type="button" disabled={!canHear} onClick={hear}>Hear it</Button>
+        <Button type="button" disabled={!canHear} onClick={hear}>Voice it</Button>
       </div>
     </div>
   )

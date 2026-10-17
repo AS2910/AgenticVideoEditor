@@ -327,16 +327,14 @@ def test_a_take_is_one_take_the_retry_being_voltages_own(world):
     assert world.made[0]["max_regenerations"] == 0
 
 
-def test_remove_and_shift_are_gated_commits_on_a_transcript_line(world):
+def test_remove_is_a_proposal_and_shift_a_gated_commit_on_a_transcript_line(world):
     _spoken(world)
     t = world.turn("ask")
     assert BY_NAME["remove_line"].run(world.wb, t, {"line": 9}).text == "There is no line 9."
-    with pytest.raises(WaitingForUser) as w:
-        BY_NAME["remove_line"].run(world.wb, t, {"line": 2})
-    assert w.value.question == "Remove line 2 (“Hm.”)? The room's own sound stays in its place."
-    out = BY_NAME["remove_line"].run(world.wb, world.turn(), {"line": 2})
-    assert world.removed == [(2.4, 3.1)] and out.step == "Removed line 2 (“Hm.”)"
-    assert out.text.startswith("Line 2 is removed (2.40–3.10 s; edit e-rm).")
+    # 20e: a removal is proposed like a take, under either autonomy; ship is the gate.
+    out = BY_NAME["remove_line"].run(world.wb, t, {"line": 2})
+    assert world.removed == [(2.4, 3.1)] and out.step == "Proposed removing line 2 (“Hm.”)"
+    assert out.text.startswith("Line 2 is proposed removed (2.40–3.10 s; item i-rm)")
     with pytest.raises(WaitingForUser) as w:
         BY_NAME["shift_line"].run(world.wb, t, {"line": 3, "to": 5.0})
     assert w.value.options == ("Move it", "Not yet")

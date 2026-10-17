@@ -1097,12 +1097,24 @@ def test_an_added_line_holds_the_picture_when_there_is_no_room(client, project):
     assert result["plan"]["mix"] == "concatenate"
 
 
-def test_removing_a_line_leaves_room_tone_and_can_be_undone(client, project):
+def test_removing_a_line_is_a_proposal_that_ships_to_room_tone_and_can_be_undone(client, project):
     resp = client.post("/projects/p1/lines/remove", json={"start": 0.5, "end": 1.0})
     assert resp.status_code == 200
     body = resp.json()
-    assert body["mix"] == "remove" and body["edit_id"] == "e1"
+    # 20e: a removal is proposed like a take — a ready plan item with the room's sound as its take.
+    assert body["mix"] == "remove" and body["item_id"] == "i1"
     assert body["selection"] == {"start": 0.4, "end": 1.3}
+    item = body["plan"]["items"][0]
+    assert (item["status"], item["mix"], item["old_text"], item["new_text"]) == ("ready", "remove", "20% off", "")
+    assert client.get("/projects/p1").json()["edits"] == []
+    # With proposals, the preview render carries it; the final does not.
+    preview = client.post("/projects/p1/export", json={"with_proposals": True}).json()
+    assert preview["proposals"] == ["i1"] and [s["kind"] for s in preview["segments"]] == ["original", "edited", "original"]
+    assert [s["kind"] for s in client.post("/projects/p1/export").json()["segments"]] == ["original"]
+    # Add it: approving the item makes the edit.
+    plan_id = body["plan"]["plan_id"]
+    shipped = client.post(f"/projects/p1/plans/{plan_id}/approve", json={"items": ["i1"]}).json()
+    assert [a["edit_id"] for a in shipped["approved"]] == ["e1"]
     edits = client.get("/projects/p1").json()["edits"]
     assert edits[0]["mix"] == "remove" and edits[0]["new_text"] == ""
     export = client.post("/projects/p1/export").json()
@@ -1186,7 +1198,20 @@ def test_a_kept_line_moves_in_one_step(client, project):
 
 def test_a_removal_cannot_be_moved(client, project):
     rm = client.post("/projects/p1/lines/remove", json={"start": 0.5, "end": 1.0}).json()
-    assert client.post(f"/projects/p1/edits/{rm['edit_id']}/move", json={"start": 1.0}).status_code == 422
+    shipped = client.post(f"/projects/p1/plans/{rm['plan']['plan_id']}/approve", json={"items": [rm["item_id"]]}).json()
+    assert client.post(f"/projects/p1/edits/{shipped['approved'][0]['edit_id']}/move", json={"start": 1.0}).status_code == 422
+
+
+def test_a_proposal_can_be_discarded_but_a_shipped_line_cannot(client, project):
+    rm = client.post("/projects/p1/lines/remove", json={"start": 0.5, "end": 1.0}).json()
+    plan_id = rm["plan"]["plan_id"]
+    assert client.post(f"/projects/p1/plans/{plan_id}/items/nope/dismiss").status_code == 404
+    plan = client.post(f"/projects/p1/plans/{plan_id}/items/i1/dismiss").json()
+    assert plan["items"][0]["status"] == "dismissed" and plan["items"][0]["enabled"] is False
+    assert plan["log"][-1]["text"] == "You discarded the line at 0:00"
+    rm2 = client.post("/projects/p1/lines/remove", json={"start": 0.5, "end": 1.0}).json()
+    client.post(f"/projects/p1/plans/{plan_id}/approve", json={"items": [rm2["item_id"]]})
+    assert client.post(f"/projects/p1/plans/{plan_id}/items/{rm2['item_id']}/dismiss").status_code == 409
 
 
 # ── UX-2: the panel does one job ─────────────────────────────────────────────

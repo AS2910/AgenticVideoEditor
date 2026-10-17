@@ -128,7 +128,7 @@ def world():
 
     def remove_words(project_id, rec, span):
         removed.append((span.start, span.end))
-        return {"edit_id": "e-rm", "candidate_id": "c-rm", "selection": {"start": span.start, "end": span.end}, "mix": "remove"}
+        return {"item_id": "i-rm", "candidate_id": "c-rm", "selection": {"start": span.start, "end": span.end}, "mix": "remove", "plan": None}
 
     def shift_words(project_id, rec, span, to):
         shifted.append((span.start, span.end, to))
