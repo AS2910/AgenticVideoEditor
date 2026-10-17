@@ -8,6 +8,7 @@ import { Avatar } from './Avatar'
 import { CheckCircle2, Circle, CircleAlert, Lightbulb, Loader2 } from 'lucide-react'
 import { Presence } from './Presence'
 import { Button } from '@/components/ui/button'
+import { Markdown } from './Markdown'
 import { Input } from '@/components/ui/input'
 import { Progress } from '@/components/ui/progress'
 import { cn } from '@/lib/utils'
@@ -154,7 +155,7 @@ export function PlanCard({
       {proposed && suggestions.length > 0 && (
         <div className="text-sm leading-normal text-muted-foreground">
           I also noticed {suggestions.map((s, k) => (
-            <span key={s.item_id}>{k > 0 && ' and '}“{s.old_text}” at {clock(s.selection.start)}</span>
+            <span key={s.item_id}>{k > 0 && ' and '}{s.old_text ? <>“{s.old_text}”</> : 'a moment'} at {clock(s.selection.start)}</span>
           ))}. I'll ask about {suggestions.length === 1 ? 'it' : 'those'} after {planned.length === 1 ? 'this one' : `these ${planned.length}`}, so you can see {planned.length === 1 ? 'it' : 'them'} first.
         </div>
       )}
@@ -182,7 +183,7 @@ export function PlanCard({
 
         {proposed && planned.length === 0 && (
           <div className="border-t pt-3 pb-1 text-sm leading-normal text-muted-foreground" data-testid="plan-empty">
-            Nothing to change for that. {plan.summary} Try saying what should be different, or click a line to change it yourself.
+            Nothing to change for that. <Markdown as="span" text={plan.summary} /> Try saying what should be different, or click a line to change it yourself.
           </div>
         )}
         {planned.map((item) => {

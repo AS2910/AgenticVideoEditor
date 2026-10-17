@@ -4,9 +4,10 @@ import { speakerSlot } from '../transcript/speakers'
 import { Avatar } from './Avatar'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Markdown } from './Markdown'
 
 // Small text-link and pill buttons, shared by the rows below.
-const LINK = 'h-auto px-1 py-0 text-xs text-primary underline-offset-4 hover:underline pointer-coarse:h-11'
+const LINK = 'h-auto px-1 py-0 text-sm text-primary underline-offset-4 hover:underline pointer-coarse:h-11'
 const CHIP = 'rounded-full'
 
 const EXAMPLES = [
@@ -74,9 +75,9 @@ export function ReadingCard({ project, reading, speakers, onName, onPlace, onExa
   }
   return (
     <div className="flex flex-col gap-3" data-testid="reading" role="status" aria-busy={reading === null || undefined}>
-      <p className="m-0 text-base leading-relaxed">
-        {silent ? <>I've looked at <strong>{project.filename}</strong>.</> : <>I've read all {lines} {lines === 1 ? 'line' : 'lines'} of <strong>{project.filename}</strong>.</>}{' '}
-        {reading === null ? <span className="text-muted-foreground">Taking it in…</span> : opening}
+      <p className="m-0 text-chat">
+        {silent ? <>I've looked at <span className="font-medium break-all">{project.filename}</span>.</> : <>I've read all {lines} {lines === 1 ? 'line' : 'lines'} of <span className="font-medium break-all">{project.filename}</span>.</>}{' '}
+        {reading === null ? <span className="text-muted-foreground">Taking it in…</span> : <Markdown as="span" text={opening} />}
       </p>
       {!silent && speakers.length > 0 && (
         <div className="flex flex-wrap items-center gap-x-3.5 gap-y-2 text-sm" data-testid="cast">
@@ -103,7 +104,7 @@ export function ReadingCard({ project, reading, speakers, onName, onPlace, onExa
                   <>
                     <span className="font-medium">
                       {guessed ? 'the ' : ''}{shown(s.label)}
-                      {guessed && <span className="text-xs font-normal text-muted-foreground"> · my guess{g.why ? `: ${g.why}` : ''}</span>}
+                      {guessed && <span className="font-normal text-muted-foreground"> · my guess{g.why ? `: ${g.why}` : ''}</span>}
                     </span>
                     {onName && (
                       <Button
@@ -128,9 +129,9 @@ export function ReadingCard({ project, reading, speakers, onName, onPlace, onExa
       )}
       {silent && sight && (
         <div className="flex flex-col gap-2" data-testid="noticed">
-          <span className="whitespace-nowrap text-xs text-muted-foreground">I noticed</span>
+          <span className="whitespace-nowrap text-sm text-muted-foreground">I noticed</span>
           <ul className="m-0 flex list-none flex-wrap gap-x-2 gap-y-1.5 p-0">
-            {noticed.map((d) => <li key={d} className="whitespace-nowrap rounded-full bg-secondary px-2.5 py-1 text-xs text-secondary-foreground">{d}</li>)}
+            {noticed.map((d) => <li key={d} className="whitespace-nowrap rounded-full bg-secondary px-2.5 py-0.5 text-sm text-secondary-foreground">{d}</li>)}
           </ul>
           {(sight.place_guess || sight.place_confirmed) && (
             <div className="flex flex-wrap items-center gap-x-2.5 gap-y-2 text-sm" role="group" aria-label="Where this is">
@@ -153,12 +154,12 @@ export function ReadingCard({ project, reading, speakers, onName, onPlace, onExa
                 </>
               ) : sight.place_confirmed ? (
                 <>
-                  <span>{sight.place_confirmed}<span className="text-xs font-normal text-muted-foreground"> · you confirmed</span></span>
+                  <span>{sight.place_confirmed}<span className="font-normal text-muted-foreground"> · you confirmed</span></span>
                   {onPlace && <Button type="button" variant="link" className={LINK} onClick={() => { setPlaceDraft(sight.place_confirmed ?? ''); setPlacing(true) }}>Change</Button>}
                 </>
               ) : (
                 <>
-                  <span>{sight.place_guess}<span className="text-xs font-normal text-muted-foreground"> · my guess{sight.confidence ? `, ${sight.confidence} confidence` : ''}</span></span>
+                  <span>{sight.place_guess}<span className="font-normal text-muted-foreground"> · my guess{sight.confidence ? `, ${sight.confidence} confidence` : ''}</span></span>
                   {onPlace && <Button type="button" variant="outline" size="sm" className={CHIP} onClick={() => onPlace(sight.place_guess)}>Looks right</Button>}
                   {onPlace && <Button type="button" variant="link" className={LINK} onClick={() => { setPlaceDraft(''); setPlacing(true) }}>Somewhere else…</Button>}
                 </>
@@ -173,7 +174,7 @@ export function ReadingCard({ project, reading, speakers, onName, onPlace, onExa
           : "Tell me what this video should say and I'll plan it across every line it touches, in the right person's voice, and show you each one before anything is final. Or click any line to change it yourself."}
       </p>
       <div className="flex flex-wrap items-center gap-2">
-        <span className="whitespace-nowrap text-xs text-muted-foreground">Or try</span>
+        <span className="whitespace-nowrap text-sm text-muted-foreground">Or try</span>
         {(silent ? SILENT_EXAMPLES : EXAMPLES).map((e) => (
           <Button key={e} variant="outline" size="sm" className={`${CHIP} h-auto min-h-8 py-1 text-left whitespace-normal`} onClick={() => onExample(e)}>{e}</Button>
         ))}

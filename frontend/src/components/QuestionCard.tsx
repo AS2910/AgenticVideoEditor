@@ -1,5 +1,6 @@
 import type { Question, QuestionOption } from '../types'
 import { Button } from '@/components/ui/button'
+import { Markdown } from './Markdown'
 
 interface QuestionCardProps {
   question: Question
@@ -10,7 +11,7 @@ interface QuestionCardProps {
 export function QuestionCard({ question, onChoose }: QuestionCardProps) {
   return (
     <div className="flex flex-col gap-3 rounded-lg border bg-card p-3 text-card-foreground shadow-xs">
-      <div className="text-base">“{question.text}”</div>
+      <Markdown className="text-chat" text={`“${question.text}”`} />
       <div className="flex flex-wrap gap-2">
         {question.options.map((o, k) => (
           <Button

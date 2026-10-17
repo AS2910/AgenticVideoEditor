@@ -5,6 +5,7 @@ import { ArrowUp } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
+import { Markdown } from './Markdown'
 
 interface ChatPanelProps {
   messages: ChatMessage[]
@@ -73,14 +74,14 @@ export function ChatPanel({
           <div
             key={hidden + i}
             className={cn(
-              'text-base leading-relaxed',
+              'text-chat',
               m.role === 'user'
-                ? 'max-w-[86%] self-end rounded-lg bg-secondary px-3.5 py-2.5 text-secondary-foreground'
+                ? 'max-w-[86%] self-end rounded-lg bg-secondary px-3.5 py-2 text-secondary-foreground'
                 : 'max-w-[92%] self-start text-foreground',
             )}
           >
             <span className="sr-only">{m.role === 'user' ? 'You: ' : 'Voltage: '}</span>
-            <span>{m.text}</span>
+            {m.role === 'user' ? <span>{m.text}</span> : <Markdown text={m.text} />}
           </div>
         ))}
         {children}
