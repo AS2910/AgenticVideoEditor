@@ -33,7 +33,7 @@ def test_a_turn_looks_voices_and_closes_with_a_sentence(world):
     # The request: the system prompt is cached, the tools are strict, extras on.
     first = client.calls[0]
     assert first["system"][0]["cache_control"] == {"type": "ephemeral"}
-    assert all(t["strict"] for t in first["tools"]) and first["fallbacks"] == "default"
+    assert all(t["strict"] is bool(t["input_schema"]["properties"]) for t in first["tools"]) and first["fallbacks"] == "default"
     assert first["output_config"] == {"effort": "high"} and first["model"] == "claude-opus-5-5"
     assert len(client.calls[2]["messages"]) == 5
 

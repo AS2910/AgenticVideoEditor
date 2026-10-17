@@ -85,7 +85,10 @@ class Tool:
     run: Callable[[Workbench, Turn, dict], ToolResult]
 
     def definition(self) -> dict:
-        return {"name": self.name, "description": self.description, "input_schema": self.schema, "strict": True}
+        # Strict schemas where an argument can be got wrong; a tool with no
+        # arguments needs none (the API allows MAX_STRICT strict tools).
+        return {"name": self.name, "description": self.description, "input_schema": self.schema,
+                "strict": bool(self.schema.get("properties"))}
 
 
 def _schema(properties: dict, required: Sequence[str] | None = None) -> dict:
@@ -102,6 +105,7 @@ def _opt(t: str, description: str, **extra) -> dict:
 
 
 MAX_UNIONS = 8   # what the schemas may use between them; the API refused 18
+MAX_STRICT = 20  # strict tools per request; the API refused 22
 
 
 # ── free: look and listen ─────────────────────────────────────────────────────
@@ -421,9 +425,12 @@ def _synthesize_take(wb: Workbench, turn: Turn, args: dict) -> ToolResult:
     before = wb.ledger.spent_usd(turn.project_id)
     candidate_id = wb.repo.next_candidate_id(turn.project_id)
     try:
+        # One take per call (the adapter's takes-by-duration aside): a take that
+        # fails the sound check comes back with its report, and the retry — with
+        # a different direction, voice or wording — is Voltage's own call.
         candidate = wb.generate(turn.project_id, record, candidate_id, selection, text, voice_id,
                                 fit, mix, None, step, delivery=delivery, voice_notes=voice_notes,
-                                voice_settings=settings, model=model, flex_max=flex_max)
+                                voice_settings=settings, model=model, flex_max=flex_max, max_regenerations=0)
     except Exception as exc:  # noqa: BLE001 — the model hears why and decides; nothing crashes the turn
         reason = str(exc) or type(exc).__name__
         wb.repo.update_item(turn.project_id, turn.plan_id, item.item_id, status="failed", error=reason, progress=None)
@@ -615,13 +622,17 @@ def _clone_speaker(wb: Workbench, turn: Turn, args: dict) -> ToolResult:
     if spk is None:
         names = ", ".join(f"{s.name} ({s.label})" for s in wb.speakers(turn.project_id)) or "none"
         return ToolResult(f"There is no speaker called {args.get('speaker')!r}. The speakers are: {names}.")
-    if spk.clone_voice_id:
+    if spk.clone_voice_id and not spk.voice_id:
         return ToolResult(f"{spk.name}'s own voice is already made ({spk.clone_voice_id}); a replacement in their line uses it when voice_id is empty.")
+    picked = f" {_voice_name(wb, spk.voice_id)} was picked for them by hand; their own voice replaces it." if spk.voice_id else ""
     if turn.autonomy == "ask" and not turn.commit_approved:
-        raise WaitingForUser(f"Clone {spk.name}'s voice from their own speech in this clip? It stays with this project and goes when the project does.",
+        raise WaitingForUser(f"Clone {spk.name}'s voice from their own speech in this clip? It stays with this project and goes when the project does.{picked}",
                              ("Clone it", "Not yet"), "Clone it")
     turn.report(turn.progress, f"Cloning {spk.name}'s voice")
     record = turn.record
+    if spk.voice_id:
+        # A voice picked by hand wins over a clone (15a); the user asked for their own, so the pick goes.
+        wb.repo.set_speaker(turn.project_id, spk.label, clear_voice=True)
     choice = wb.voice_for(turn.project_id, record, Selection(0.0, record.source.duration), wb.default_voice(), spk.label)
     if choice.cloned:
         return ToolResult(f"{spk.name}'s own voice is made ({choice.voice_id}). A replacement in their line speaks in it when voice_id is empty.",
@@ -813,6 +824,10 @@ TOOLS: tuple[Tool, ...] = (
 )
 
 BY_NAME = {t.name: t for t in TOOLS}
+
+
+def strict_count() -> int:
+    return sum(1 for t in TOOLS if t.definition()["strict"])
 
 
 def union_count() -> int:

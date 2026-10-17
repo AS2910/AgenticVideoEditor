@@ -75,10 +75,10 @@ def world():
     shipped: list[list[str]] = []
 
     def generate(project_id, rec, candidate_id, selection, text_, voice_id, fit, mix, on_long, report, delivery=None, voice_notes=(),
-                 voice_settings=None, model=None, flex_max=None):
+                 voice_settings=None, model=None, flex_max=None, max_regenerations=None):
         made.append({"candidate_id": candidate_id, "selection": selection, "text": text_, "voice_id": voice_id, "mix": mix,
                      "delivery": delivery, "voice_settings": voice_settings, "model": model, "fit": fit, "flex_max": flex_max,
-                     "voice_notes": tuple(voice_notes)})
+                     "voice_notes": tuple(voice_notes), "max_regenerations": max_regenerations})
         ledger.record(project_id, "elevenlabs", "take", len(text_), "characters", 0.03)
         report(0.5, "Synthesizing the new line")
         c = FakeCandidate(candidate_id, selection, text_)

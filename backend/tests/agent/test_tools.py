@@ -6,14 +6,14 @@ from app.agent.tools import BY_NAME, definitions, delivery_of
 
 
 def test_every_tool_has_a_strict_schema_with_every_property_required():
-    from app.agent.tools import MAX_UNIONS, union_count
+    from app.agent.tools import MAX_STRICT, MAX_UNIONS, strict_count, union_count
     for d in definitions():
-        assert d["strict"] is True
         schema = d["input_schema"]
+        assert d["strict"] is bool(schema["properties"])      # strict wherever there is an argument to get wrong
         assert schema["additionalProperties"] is False
         assert set(schema["required"]) == set(schema["properties"]), d["name"]
-    # The API refused 18 union-typed parameters across the tools (live, 2026-10-17).
-    assert union_count() <= MAX_UNIONS
+    # The API refused 18 union-typed parameters across the tools, and 22 strict tools (live, 2026-10-17).
+    assert union_count() <= MAX_UNIONS and strict_count() <= MAX_STRICT
 
 
 def test_a_silent_clip_reads_as_no_speech_and_the_whole_clip_as_room(world):
@@ -276,6 +276,18 @@ def test_clone_speaker_asks_then_makes_the_voice_and_says_when_it_cannot(world):
     assert BY_NAME["clone_speaker"].run(world.wb, world.turn(), {"speaker": "Priya"}).text.startswith("Priya's own voice is already made (CLONEA)")
     out = BY_NAME["clone_speaker"].run(world.wb, world.turn(), {"speaker": "Mute"})
     assert out.step == "Could not clone Mute's voice" and "only 3.0 s" in out.text
+    # A voice picked by hand would win over the clone (15a): cloning on purpose clears the pick first.
+    world.speakers[0].voice_id, world.speakers[0].clone_voice_id = "EXAVITQu4vr4xnSDxMaL", None
+    with pytest.raises(WaitingForUser) as w:
+        BY_NAME["clone_speaker"].run(world.wb, world.turn("ask"), {"speaker": "Priya"})
+    assert w.value.question.endswith("Sarah was picked for them by hand; their own voice replaces it.")
+    BY_NAME["clone_speaker"].run(world.wb, world.turn(), {"speaker": "Priya"})
+    assert world.repo.speakers("p1") == [] or all(s.voice_id is None for s in world.repo.speakers("p1"))
+
+
+def test_a_take_is_one_take_the_retry_being_voltages_own(world):
+    _take(world, world.turn())
+    assert world.made[0]["max_regenerations"] == 0
 
 
 def test_remove_and_shift_are_gated_commits_on_a_transcript_line(world):

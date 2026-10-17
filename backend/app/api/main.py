@@ -919,6 +919,7 @@ def _generate(
     text: str, voice_id: str, fit: str | None, mix: str, on_long: str | None, report,
     delivery: str | None = None, voice_notes: tuple[str, ...] = (),
     voice_settings: dict | None = None, model: str | None = None, flex_max: float | None = None,
+    max_regenerations: int | None = None,
 ) -> EditCandidate:
     """One line through generation and continuity, placed by the project's
     long-line policy, saved as a candidate. Raises SpanMismatch when the line
@@ -934,14 +935,16 @@ def _generate(
             window = Selection(selection.end, min(record.source.duration, selection.end + room))
             try:
                 candidate = _generate(project_id, record, candidate_id, window, text, voice_id,
-                                      None, "layer", "ask", report, delivery, voice_notes, voice_settings, model, flex_max)
+                                      None, "layer", "ask", report, delivery, voice_notes, voice_settings, model, flex_max,
+                                      max_regenerations)
             except SpanMismatch:
                 candidate = None
             if candidate is not None:
                 return candidate
             report(0.1, "No room to play over the picture; holding it instead")
         return _generate(project_id, record, candidate_id, selection, text, voice_id,
-                         fit, "concatenate", on_long, report, delivery, voice_notes, voice_settings, model, flex_max)
+                         fit, "concatenate", on_long, report, delivery, voice_notes, voice_settings, model, flex_max,
+                         max_regenerations)
     plan = EditPlan(selection, text, voice_id, fit=fit, mix=mix, delivery=delivery,
                     voice_settings=voice_settings or None, model=model or None, flex_max=flex_max)
     cost = voice.cost_of(plan)
@@ -952,7 +955,7 @@ def _generate(
         return run_edit(
             candidate_id, plan, record.source, voice, lipsync, continuity, report,
             transcript=record.transcript,
-            max_regenerations=settings.max_regenerations,
+            max_regenerations=settings.max_regenerations if max_regenerations is None else max_regenerations,
             voice_notes=voice_notes, route=settings.voice_route,
         )
 
