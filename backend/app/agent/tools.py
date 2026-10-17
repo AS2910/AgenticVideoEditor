@@ -60,6 +60,9 @@ class Workbench:
     remove_words: Callable[[str, Any, Selection], dict] | None = None           # -> {edit_id, candidate_id, selection}
     shift_words: Callable[[str, Any, Selection, float], dict] | None = None     # -> {edit_id, removed_edit_id, candidate, from, selection}
     move_take: Callable[..., Any] | None = None       # (project_id, record, candidate, start, mix) -> candidate
+    # 20e: what is in the video already, and taking one edit back out.
+    edits: Callable[[str], Sequence[Any]] = lambda project_id: []         # -> live ApprovedEdit (not reverted)
+    revert: Callable[[str, str], bool] | None = None                      # (project_id, edit_id) -> undone
 
 
 @dataclass
@@ -256,7 +259,27 @@ def _project_state(wb: Workbench, turn: Turn, args: dict) -> ToolResult:
     for i in items:
         out.append(f"- {i.item_id} at {i.selection.start:.1f}–{i.selection.end:.1f} s: “{i.new_text}” — {i.status}"
                    + (f", take {i.candidate_id}" if i.candidate_id else ""))
+    out.extend(shipped_lines(wb.edits(turn.project_id)))
     return ToolResult("\n".join(out))
+
+
+_MIX_WORDS = {"layer": "layered over the picture and sound", "over": "over the picture", "replace": "replacing the words",
+              "concatenate": "added after the line, the picture holding", "remove": "the words removed"}
+
+
+def shipped_lines(edits: Sequence[Any]) -> list[str]:
+    """What is in the video already, one line per live edit, for the agent's
+    view of the project (20e). Layered edits stack: two over the same span
+    both play."""
+    live = [e for e in edits if not getattr(e, "reverted", False)]
+    if not live:
+        return []
+    out = ["In the video already (shipped; undo_edit takes one out):"]
+    for e in live:
+        sel = e.plan.selection
+        words = f"“{e.plan.new_text}”" if e.plan.new_text else "(silence)"
+        out.append(f"- {e.edit_id} at {sel.start:.1f}–{sel.end:.1f} s: {words} — {_MIX_WORDS.get(e.plan.mix, e.plan.mix)}")
+    return out
 
 
 # ── spend: a take ─────────────────────────────────────────────────────────────
@@ -723,16 +746,38 @@ def _ship(wb: Workbench, turn: Turn, args: dict) -> ToolResult:
     if not ready:
         return ToolResult("Nothing is ready to ship: no voiced line that is not already shipped.")
     n = len(ready)
+    anyway = bool(args.get("anyway"))
     if turn.autonomy == "ask" and not turn.commit_approved:
-        raise WaitingForUser(f"Ship {n} {'change' if n == 1 else 'changes'} and render the video?", ("Ship it", "Not yet"), "Ship it")
-    result = wb.ship(turn.project_id, turn.record, turn.plan_id, [i.item_id for i in ready])
+        raise WaitingForUser(f"Ship {n} {'change' if n == 1 else 'changes'} and render the video?"
+                             + (" One did not pass its check." if anyway else ""), ("Ship it", "Not yet"), "Ship it")
+    result = wb.ship(turn.project_id, turn.record, turn.plan_id, [i.item_id for i in ready], override=anyway)
     shipped = len(result.get("approved", []))
     skipped = result.get("skipped", [])
+    flagged = [s for s in skipped if s.get("reason") == "continuity check failed"]
     text = f"Shipped {shipped} {'change' if shipped == 1 else 'changes'}" + (
         f"; {len(skipped)} skipped ({'; '.join(s['reason'] for s in skipped)})" if skipped else "") + "."
+    if flagged:
+        text += (" A take that did not pass its check ships only on the user's word: when they say ship it as it is, "
+                 "call ship again with anyway set, and say the check flagged it.")
     if result.get("export"):
         text += " The edited video is rendered; the user can download it from the top bar."
-    return ToolResult(text, step=text.rstrip("."))
+    return ToolResult(text, step=text.split(" A take that")[0].rstrip("."))
+
+
+def _undo_edit(wb: Workbench, turn: Turn, args: dict) -> ToolResult:
+    if wb.revert is None:
+        return ToolResult("Edits cannot be undone in this setup; the user can, from the review.")
+    edit_id = (args.get("edit_id") or "").strip()
+    edit = next((e for e in wb.edits(turn.project_id) if e.edit_id == edit_id and not getattr(e, "reverted", False)), None)
+    if edit is None:
+        return ToolResult(f"There is no live edit {edit_id or '(none)'}; project_state lists what is in the video.")
+    words = edit.plan.new_text or "the removal"
+    if turn.autonomy == "ask" and not turn.commit_approved:
+        raise WaitingForUser(f"Take {edit_id} (“{words}”) back out of the video?", ("Undo it", "Keep it"), "Undo it")
+    if not wb.revert(turn.project_id, edit_id):
+        return ToolResult(f"{edit_id} could not be undone.")
+    return ToolResult(f"{edit_id} is undone: the video no longer carries “{words}”. The render is remade when something ships next.",
+                      step=f"Undid {edit_id} (“{words[:40]}”)")
 
 
 def _ask(wb: Workbench, turn: Turn, args: dict) -> ToolResult:
@@ -817,7 +862,11 @@ TOOLS: tuple[Tool, ...] = (
     Tool("measure", "The full sound check of a take: its scores, what was done to fit it, how it was spoken.",
          _schema({"candidate_id": {"type": "string"}}), Guard.FREE, _measure),
     Tool("ship", "Make the voiced lines part of the video and render it. Only when the user asks for it, or said just do it and the work is done.",
-         _schema({"item_ids": {"type": "array", "items": {"type": "string"}, "description": "Which items; empty for every voiced line."}}), Guard.COMMIT, _ship),
+         _schema({"item_ids": {"type": "array", "items": {"type": "string"}, "description": "Which items; empty for every voiced line."},
+                  "anyway": {"type": "boolean", "description": "Ship a take that did not pass its check. Only when the user said to ship it as it is."}}),
+         Guard.COMMIT, _ship),
+    Tool("undo_edit", "Take a shipped edit back out of the video (project_state lists them). A redo of a line that is in the video already: voice the new take, ship it, then undo the old edit, so lines do not pile up.",
+         _schema({"edit_id": {"type": "string"}}), Guard.COMMIT, _undo_edit),
     Tool("ask", "Stop and ask the user one thing, with two or three options and your own guess. The turn ends; their answer starts the next.",
          _schema({"question": {"type": "string"}, "options": {"type": "array", "items": {"type": "string"}},
                   "guess": {"type": "string", "description": "The option you would take; empty for none."}}), Guard.FREE, _ask),

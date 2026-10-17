@@ -1,6 +1,8 @@
 """The tools, one by one: what the model reads, what the thread shows, what is guarded."""
 import pytest
 
+from app.domain.models import Selection
+
 from app.agent.guards import TurnBudget, WaitingForUser
 from app.agent.tools import BY_NAME, definitions, delivery_of
 
@@ -101,6 +103,42 @@ def test_ship_sends_the_voiced_lines_and_waits_under_check_with_me(world):
     assert world.shipped == [["i1"]]
     again = BY_NAME["ship"].run(world.wb, t, {"item_ids": None})
     assert again.text.startswith("Nothing is ready to ship")
+
+
+def _live_edit(edit_id="e1", text="Where the sand runs wide.", mix="layer", start=0.4, end=7.3):
+    from types import SimpleNamespace
+    return SimpleNamespace(edit_id=edit_id, reverted=False,
+                           plan=SimpleNamespace(selection=Selection(start, end), new_text=text, mix=mix))
+
+
+def test_ship_anyway_carries_the_users_word_past_the_check(world):
+    """20e: the sound check is advice; `anyway` is the user's word, passed to the app as override."""
+    t = world.turn()
+    BY_NAME["synthesize_take"].run(world.wb, t, {"text": "Wohooo!", "voice_id": "kL06KYMvPY56NluIQ72m", "start": 0, "end": 7, "direction": None, "mix": "layer", "line": None, "item_id": None})
+    with pytest.raises(WaitingForUser) as w:
+        BY_NAME["ship"].run(world.wb, world.turn(autonomy="ask"), {"item_ids": [], "anyway": True})
+    assert w.value.question == "Ship 1 change and render the video? One did not pass its check."
+    out = BY_NAME["ship"].run(world.wb, t, {"item_ids": [], "anyway": True})
+    assert out.text.startswith("Shipped 1 change.")
+    assert world.shipped == [["i1", "anyway"]]
+
+
+def test_project_state_lists_what_is_in_the_video_and_undo_edit_takes_one_out(world):
+    """20e: shipped edits are visible to the agent, layers stack, and undo_edit is a gated commit."""
+    world.live_edits.extend([_live_edit(), _live_edit("e2", "[excited] Where the sand runs WIDE.", start=0.0)])
+    state = BY_NAME["project_state"].run(world.wb, world.turn(), {}).text
+    assert "In the video already (shipped; undo_edit takes one out):" in state
+    assert "- e1 at 0.4–7.3 s: “Where the sand runs wide.” — layered over the picture and sound" in state
+    assert "- e2 at 0.0–7.3 s" in state
+    with pytest.raises(WaitingForUser) as w:
+        BY_NAME["undo_edit"].run(world.wb, world.turn(autonomy="ask"), {"edit_id": "e1"})
+    assert (w.value.question, w.value.options) == ("Take e1 (“Where the sand runs wide.”) back out of the video?", ("Undo it", "Keep it"))
+    out = BY_NAME["undo_edit"].run(world.wb, world.turn(), {"edit_id": "e1"})
+    assert out.text.startswith("e1 is undone: the video no longer carries “Where the sand runs wide.”")
+    assert out.step == "Undid e1 (“Where the sand runs wide.”)"
+    assert world.undone == ["e1"]
+    assert "- e1 at" not in BY_NAME["project_state"].run(world.wb, world.turn(), {}).text
+    assert BY_NAME["undo_edit"].run(world.wb, world.turn(), {"edit_id": "e1"}).text.startswith("There is no live edit e1")
 
 
 def test_ask_ends_the_turn_with_options_and_a_guess(world):

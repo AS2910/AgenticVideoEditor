@@ -142,12 +142,23 @@ def world():
         repo_candidates[c.candidate_id] = c
         return c
 
+    live_edits: list = []
+    undone: list[str] = []
+
+    def revert(project_id, edit_id):
+        for e in live_edits:
+            if e.edit_id == edit_id and not e.reverted:
+                e.reverted = True
+                undone.append(edit_id)
+                return True
+        return False
+
     def put_audio(project_id, data, container, duration):
         audio.append((project_id, data, container, duration))
         return SimpleNamespace(sha256="a" * 63 + str(len(audio)), duration=duration)
 
-    def ship(project_id, rec, plan_id, item_ids):
-        shipped.append(list(item_ids))
+    def ship(project_id, rec, plan_id, item_ids, override=False):
+        shipped.append(list(item_ids) + (["anyway"] if override else []))
         p = repo.get_plan(project_id, plan_id)
         for i in p.items:
             if i.item_id in item_ids:
@@ -169,6 +180,8 @@ def world():
         slots=lambda: (3, 30), put_audio=put_audio,
         speakers=lambda project_id: list(speakers), voice_for=voice_for, remove_words=remove_words, shift_words=shift_words,
         move_take=move_take,
+        edits=lambda project_id: [e for e in live_edits if not e.reverted],
+        revert=revert,
     )
     # The repo's candidate store is what `measure` reads; the fake pipeline fills it.
     repo.get_candidate = lambda project_id, candidate_id: repo_candidates.get(candidate_id)
@@ -179,4 +192,5 @@ def world():
 
     return SimpleNamespace(repo=repo, ledger=ledger, record=record, wb=wb, turn=turn, made=made, shipped=shipped,
                            designed=designed, saved=saved, added=added, deleted=deleted, audio=audio,
-                           lines=lines, speakers=speakers, cloned=cloned, removed=removed, shifted=shifted, moved=moved)
+                           lines=lines, speakers=speakers, cloned=cloned, removed=removed, shifted=shifted, moved=moved,
+                           live_edits=live_edits, undone=undone)

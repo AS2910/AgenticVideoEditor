@@ -936,9 +936,16 @@ def revert_edit(project_id: str, edit_id: str, owner: str = Depends(current_owne
     nothing is lost; the render skips it and the transcript shows the line as
     shot. Reverting again is harmless."""
     _owned(project_id, owner)
+    if not _revert(project_id, edit_id):
+        raise HTTPException(status_code=404, detail="edit not found")
+    return {"edit_id": edit_id, "reverted": True}
+
+
+def _revert(project_id: str, edit_id: str, by: str = "You") -> bool:
+    """Undo an approved edit; False when there is no such edit."""
     edit = next((e for e in repo.list_edits(project_id) if e.edit_id == edit_id), None)
     if edit is None or not repo.revert_edit(project_id, edit_id):
-        raise HTTPException(status_code=404, detail="edit not found")
+        return False
     # A shifted line is two edits; undoing one undoes the other.
     if edit.partner:
         repo.revert_edit(project_id, edit.partner)
@@ -949,8 +956,8 @@ def revert_edit(project_id: str, edit_id: str, owner: str = Depends(current_owne
         for item in plan.items:
             if item.edit_id == edit_id and item.status == "approved":
                 repo.update_item(project_id, plan.plan_id, item.item_id, status="ready", edit_id=None)
-                repo.append_log(project_id, plan.plan_id, f"You undid the line at {_clock(item.selection.start)}")
-    return {"edit_id": edit_id, "reverted": True}
+                repo.append_log(project_id, plan.plan_id, f"{by} undid the line at {_clock(item.selection.start)}")
+    return True
 
 
 @app.post("/projects/{project_id}/export")
@@ -1465,6 +1472,8 @@ def _workbench() -> Workbench:
         repo=repo, ledger=ledger, frames=_frames, lines=_lines, room_after=room_after,
         voices=_catalogue, library=getattr(voice, "library", lambda accent, language="en": []),
         estimate_usd=estimate_usd, generate=_generate, ensure_spend=_ensure_spend, ship=_ship,
+        edits=lambda pid: [e for e in repo.list_edits(pid) if not e.reverted],
+        revert=lambda pid, edit_id: _revert(pid, edit_id, by="Voltage"),
         default_voice=lambda: getattr(voice, "default_voice", "speaker-1"),
         hear=_hear_levels, sight_text=_sight_text, now=_now,
         design=voice.design_voice if can_design else None, design_cost=design_cost,
@@ -1545,7 +1554,8 @@ def take_turn(project_id: str, req: TurnRequest, owner: str = Depends(current_ow
         head = opening(repo.get_plan(project_id, plan.plan_id), duration=record.source.duration,
                        filename=record.source.filename, speakers=names, lines=len(lines), autonomy=autonomy,
                        spent_usd=ledger.spent_usd(project_id), ceiling_usd=ledger.ceiling_usd,
-                       turn_usd=prefs["turn_usd"], sight=_sight_text(project_id) if not lines else "")
+                       turn_usd=prefs["turn_usd"], sight=_sight_text(project_id) if not lines else "",
+                       edits=[e for e in repo.list_edits(project_id) if not e.reverted])
         content = [{"type": "text", "text": head}, {"type": "text", "text": f"The user says: {text}"
                    + (" (They are answering yes to what you asked.)" if approve else "")}]
         history = repo.turns(project_id)

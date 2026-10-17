@@ -2,7 +2,7 @@
 project as it stands. Nothing about taste."""
 from __future__ import annotations
 
-from typing import Sequence
+from typing import Any, Sequence
 
 from app.domain.plan import Plan
 
@@ -57,6 +57,14 @@ When the user says go, do exactly what you asked about.
 Shipping finished work is yours to do then — but a compromise is shown, not \
 shipped, until the user says: a stand-in voice when their own was asked for, \
 a take that did not pass its check, words you had to cut.
+- The sound check is advice, not a lock. When the user says ship it as it is, \
+ship with `anyway` and say the check flagged it; the editor never refuses \
+their word.
+- The lines already in the video are listed at the top as shipped edits, and \
+layers stack: two over the same span both play. A redo of a line that is in \
+the video is a new take, shipped, then `undo_edit` of the old one, so lines \
+never pile up. An overlay the user asks for on top of what is there is a new \
+layer and nothing is undone.
 
 How you speak
 - Plain sentences, to the person, present tense for what you are doing now. \
@@ -73,7 +81,7 @@ three options and your own guess, so they can just say go.
 
 def opening(plan: Plan | None, *, duration: float, filename: str, speakers: Sequence[str],
             lines: int, autonomy: str, spent_usd: float, ceiling_usd: float, turn_usd: float,
-            sight: str = "") -> str:
+            sight: str = "", edits: Sequence[Any] = ()) -> str:
     """The project as it stands, at the top of a turn."""
     who = (f"{len(speakers)} speakers ({', '.join(speakers)})" if len(speakers) > 1
            else f"one speaker ({speakers[0]})" if speakers else "no speech")
@@ -93,4 +101,6 @@ def opening(plan: Plan | None, *, duration: float, filename: str, speakers: Sequ
                      "working": "being voiced", "needs-you": "needs the user", "failed": "failed"}.get(i.status, i.status)
             out.append(f"- {i.item_id} at {where}: “{i.new_text}” ({state}"
                        + (f"; take {i.candidate_id}" if i.candidate_id else "") + ")")
+    from app.agent.tools import shipped_lines
+    out.extend(shipped_lines(edits))
     return "\n".join(out)
