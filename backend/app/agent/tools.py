@@ -417,7 +417,7 @@ def _synthesize_take(wb: Workbench, turn: Turn, args: dict) -> ToolResult:
     else:
         item = existing
         wb.repo.update_item(turn.project_id, turn.plan_id, item.item_id, status="working", new_text=text,
-                            delivery=delivery, error=None, selection=selection, mix=mix)
+                            delivery=delivery, reason=direction or "", error=None, selection=selection, mix=mix)
 
     def step(progress: float, what: str) -> None:
         turn.report(turn.progress, what)

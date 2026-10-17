@@ -1574,6 +1574,11 @@ def take_turn(project_id: str, req: TurnRequest, owner: str = Depends(current_ow
         status = "clarifying" if question else "done"
         if outcome.reply:
             repo.add_message(project_id, "assistant", outcome.reply)
+        # What Voltage's own thinking cost this turn, as a step of its own (20d):
+        # the tools say what they spent; this is the rest of the turn's money.
+        thought = ledger.spent_usd_since(project_id, started_at, vendor="anthropic")
+        if thought > 0:
+            repo.add_message(project_id, "assistant", "Thinking", kind="step", cost=round(thought, 4))
         if question:
             repo.add_message(project_id, "assistant", question["text"])
             repo.append_log(project_id, plan.plan_id, f"Asked: {question['text']}")

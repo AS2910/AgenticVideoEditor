@@ -57,7 +57,7 @@ def test_voicing_the_same_item_again_replaces_its_take_and_keep_take_puts_one_ba
                                                        "direction": "slower", "mix": None, "line": None, "item_id": "i1"})
     assert "Take c2 on i1" in out.text
     [item] = world.repo.get_plan("p1", "plan1").items
-    assert (item.candidate_id, item.new_text, item.delivery) == ("c2", "Welcome to Cavelossim.", "calmer")
+    assert (item.candidate_id, item.new_text, item.delivery, item.reason) == ("c2", "Welcome to Cavelossim.", "calmer", "slower")
 
 
 def test_under_check_with_me_a_paid_step_waits_for_the_user_until_they_say_go(world):

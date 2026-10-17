@@ -86,12 +86,14 @@ class Ledger:
             ).fetchone()
         return float(row["usd"])
 
-    def spent_usd_since(self, project_id: str, at: str) -> float:
-        """What one plan cost: everything recorded since it was made."""
+    def spent_usd_since(self, project_id: str, at: str, vendor: str | None = None) -> float:
+        """What one plan or turn cost: everything recorded since `at`, or
+        one vendor's share of it (20d: Voltage's own thinking is "anthropic")."""
         with self.db.tx() as c:
             row = c.execute(
-                "SELECT COALESCE(SUM(usd), 0) AS usd FROM usage WHERE project_id = ? AND at >= ?",
-                (project_id, at),
+                "SELECT COALESCE(SUM(usd), 0) AS usd FROM usage WHERE project_id = ? AND at >= ?"
+                + (" AND vendor = ?" if vendor else ""),
+                (project_id, at) + ((vendor,) if vendor else ()),
             ).fetchone()
         return float(row["usd"])
 

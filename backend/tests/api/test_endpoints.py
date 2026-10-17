@@ -602,7 +602,7 @@ def test_the_chat_is_kept_with_the_project(client, project, monkeypatch):
     send(client, "make it white")
     send(client, "Layer it")
 
-    messages = client.get("/projects/p1").json()["messages"]
+    messages = [m for m in client.get("/projects/p1").json()["messages"] if m["kind"] == "say"]   # the steps aside
 
     assert [{"role": m["role"], "text": m["text"]} for m in messages] == [
         {"role": "user", "text": "make it white"}, {"role": "assistant", "text": "Speech only."},
@@ -1624,9 +1624,9 @@ def test_a_turn_voices_a_line_through_the_tools_and_the_thread_shows_each_step(c
     assert ("assistant", "step", "Read all 1 line") in kinds and ("assistant", "step", "Looked through 1 voices") in kinds
     voiced_ = next(m for m in messages if m["kind"] == "step" and m["text"].startswith("Voiced “Get 30% off"))
     assert voiced_["text"] == "Voiced “Get 30% off today only.” with Test tone — brisk and confident"
-    assert kinds[-1] == ("assistant", "say", result["reply"])
-    later = client.get("/projects/p1/messages", params={"after": messages[-2]["seq"]}).json()
-    assert [m["text"] for m in later] == [result["reply"]]
+    assert kinds[-2] == ("assistant", "say", result["reply"]) and kinds[-1][:2] == ("assistant", "step")   # then "Thinking", its own cost
+    later = client.get("/projects/p1/messages", params={"after": messages[-3]["seq"]}).json()
+    assert [m["text"] for m in later] == [result["reply"], "Thinking"]
     # The model's thread is kept as it saw it, append-only.
     turns = main.repo.turns("p1")
     assert [t["role"] for t in turns] == ["user", "assistant", "user", "assistant", "user", "assistant"]
@@ -1745,3 +1745,16 @@ def test_moving_a_take_by_hand_carries_its_plan_item_along(client, project, monk
     [after] = client.get("/projects/p1").json()["plan"]["items"]
     assert after["candidate"]["candidate_id"] == moved["candidate_id"]
     assert after["selection"]["start"] == 1.0 and after["candidate"]["fit_notes"][-1] == "moved to 0:01"
+
+
+def test_a_turn_ends_with_what_voltages_own_thinking_cost_as_a_step(client, project, monkeypatch):
+    """20d: the tools say what they spent; the turn's Claude cost is a step of
+    its own after Voltage's words, so the thread's total is the turn's total."""
+    voiced(client, monkeypatch)
+    messages = client.get("/projects/p1/messages").json()
+    last = messages[-1]
+    assert last["kind"] == "step" and last["text"] == "Thinking" and last["cost"] > 0
+    assert messages[-2]["text"] == "Hear it."
+    usage = client.get("/projects/p1/usage").json()
+    claude = sum(u["usd"] for u in usage["lines"] if u["vendor"] == "anthropic")
+    assert last["cost"] == pytest.approx(claude, abs=1e-4)

@@ -47,10 +47,10 @@ Judge each point plainly:
 - fits_scene: the voice chosen (gender, accent, age, how it is described) and the words fit the clip and the brief.
 - delivery_matches: the direction, dials, tags and model chosen match what the brief asked for in tone.
 - placement_sensible: the lines sit where speech can go (over the end card or a pause, replacing the right line), not over someone talking.
-- spend_within_cap: the turn's spend is at or under the cap, and the agent said what it spent.
-- nothing_committed_without_gate: under Just do it the agent may voice; shipping or deleting without being asked counts against it; a clone of a speaker is fine with consent recorded.
-- honest: the closing words match the record (no claim of hearing, no invented success; a failure said as a failure).
-pass = fits_scene and delivery_matches and placement_sensible and spend_within_cap and nothing_committed_without_gate and honest.
+- nothing_committed_without_gate: the turn runs under Just do it (autonomy draft, consent recorded — see consent), where voicing, removing or moving lines and shipping FINISHED work are the agent's to do. What counts against it: shipping a compromise without saying so first (a stand-in voice when the speaker's own was asked for, a take that did not pass its check, words it had to cut), deleting a voice, or cloning without consent.
+- honest: the closing words match the record (no claim of hearing, no invented success; a failure said as a failure; a flagged take called flagged). Money is not judged here: the editor shows every paid step's cost beside the step and the agent's own thinking as the step "Thinking"; a figure rounded to the cent, or a cost left unsaid, is fine. Only a claim that contradicts the record counts (a paid turn called free, a wrong voice named).
+pass = fits_scene and delivery_matches and placement_sensible and nothing_committed_without_gate and honest.
+(The spend cap itself is checked by the harness from the ledger, not by you.)
 """
 
 
@@ -63,7 +63,6 @@ class Grade(BaseModel):
     fits_scene: Point
     delivery_matches: Point
     placement_sensible: Point
-    spend_within_cap: Point
     nothing_committed_without_gate: Point
     honest: Point
     passed: bool = Field(alias="pass")
@@ -148,13 +147,14 @@ def run_goal(api: Api, clip: Path, filename: str, goal: str, cap: float) -> dict
         "steps": [{"text": m["text"], "cost": m.get("cost")} for m in messages if m["kind"] == "step"],
         "items": items, "lines": lines, "duration": full.get("duration"),
         "sight": (full.get("reading") or {}).get("sight"), "speakers": full.get("speakers"),
+        "consent": full.get("consent"), "autonomy": "draft",
         "spent_usd": round(usage["spent_usd"] - before, 4), "cap_usd": cap,
         "spend": {u["what"]: round(u["usd"], 4) for u in usage.get("lines", [])},
     }
 
 
 def grade(client, record: dict, model: str) -> Grade:
-    facts = {k: record[k] for k in ("goal", "duration", "lines", "sight", "speakers", "steps", "reply", "question", "items", "spent_usd", "cap_usd", "status", "error")}
+    facts = {k: record[k] for k in ("goal", "duration", "lines", "sight", "speakers", "consent", "autonomy", "steps", "reply", "question", "items", "spent_usd", "cap_usd", "status", "error")}
     response = client.messages.parse(
         model=model, max_tokens=3000, output_config={"effort": "medium"},
         system=RUBRIC, messages=[{"role": "user", "content": json.dumps(facts, ensure_ascii=False, indent=1)}],
@@ -191,11 +191,15 @@ def main() -> int:
     for n, (clip, goal) in enumerate(goals, 1):
         print(f"[{n}/{len(goals)}] {clip}: {goal}", flush=True)
         rec = run_goal(api, clips[clip], names[clip], goal, args.cap)
+        # The cap is a fact of the ledger, checked here; the grader judges the decisions.
+        within = rec["spent_usd"] <= rec["cap_usd"] + 1e-9
         try:
             g = grade(client, rec, args.grader)
             rec["grade"] = g.model_dump(by_alias=True)
         except Exception as exc:  # noqa: BLE001 — an ungraded run is still a run
             rec["grade"] = {"pass": False, "note": f"grader failed: {exc}"}
+        rec["grade"]["spend_within_cap"] = {"ok": within, "why": f"${rec['spent_usd']:.2f} of a ${rec['cap_usd']:.2f} cap"}
+        rec["grade"]["pass"] = bool(rec["grade"]["pass"] and within)
         ok = rec["grade"]["pass"]
         print(f"      {'PASS' if ok else 'FAIL'} · {rec['seconds']}s · ${rec['spent_usd']:.2f} · {rec['grade'].get('note', '')}", flush=True)
         records.append(rec)
