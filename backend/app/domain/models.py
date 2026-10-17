@@ -86,20 +86,6 @@ class EditPlan:
 
 
 @dataclass(frozen=True)
-class Intent:
-    """What the user asked for, read from their words.
-
-    `speak` carries the line to say; `unsupported` and `clarify` carry a reply
-    for the chat instead. `mix` is None unless the request says how the line
-    should meet the original sound.
-    """
-    action: str               # "speak" | "unsupported" | "clarify"
-    new_text: str | None = None
-    mix: str | None = None
-    reply: str | None = None
-
-
-@dataclass(frozen=True)
 class Consent:
     """The uploader's confirmation that they may edit and clone this speaker.
 

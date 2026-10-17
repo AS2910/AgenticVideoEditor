@@ -8,7 +8,7 @@ from app.adapters.mock import MockVoiceAdapter
 from app.media import ffmpeg
 from app.orchestrator.clones import CloneService
 from app.orchestrator.pipeline import STOCK_VOICE_WARNING
-from tests.api.test_endpoints import PREVIEW, await_job, start_preview, upload
+from tests.api.test_endpoints import WORDS, generate, upload
 
 pytestmark = pytest.mark.skipif(
     not ffmpeg.available(), reason="ffmpeg/ffprobe not installed (`brew install ffmpeg`)",
@@ -65,28 +65,32 @@ def cloning(monkeypatch):
     return install
 
 
-def warnings_of(client, **overrides):
-    job = await_job(client, start_preview(client, **overrides)["job_id"])
-    assert job["status"] == "succeeded", job
-    return job["result"]["continuity"]["warnings"]
+def warnings_of():
+    """A take of the words "20% off" in the speaker's own voice, the way the
+    agent's `synthesize_take` asks for one: the voice is resolved first (the
+    clone, made now if it is the first), then the take is made with its notes."""
+    from app.domain.models import Selection
+    record = main.repo.get("p1")
+    choice = main._voice_for("p1", record, Selection(*WORDS), main.voice.default_voice)
+    return generate(voice_id=choice.voice_id, voice_notes=tuple(choice.notes))["continuity"]["warnings"]
 
 
 def test_the_first_line_makes_the_clone_and_later_lines_reuse_it(client, sample_video, cloning):
     voice = cloning(min_seconds=1.0)
     assert upload(client, sample_video).status_code == 200
-    first = warnings_of(client)
+    first = warnings_of()
     assert STOCK_VOICE_WARNING not in first                 # the speaker's own voice, not a stock one
     assert voice.made == [f"voltage-p1-{main.repo.WHOLE_CLIP}"]
     assert main.repo.clones("p1") == {main.repo.WHOLE_CLIP: CLONE}
 
-    warnings_of(client)
+    warnings_of()
     assert len(voice.made) == 1                              # reused, never cloned twice
 
 
 def test_too_little_speech_is_stock_and_says_why(client, sample_video, cloning):
     voice = cloning(min_seconds=10.0)
     assert upload(client, sample_video).status_code == 200
-    warnings = warnings_of(client)
+    warnings = warnings_of()
     assert any("10 s needed to clone it" in w for w in warnings)
     assert STOCK_VOICE_WARNING not in warnings              # the reason stands in its place
     assert voice.made == []
@@ -95,7 +99,7 @@ def test_too_little_speech_is_stock_and_says_why(client, sample_video, cloning):
 def test_deleting_the_project_deletes_the_clone_at_the_vendor(client, sample_video, cloning):
     voice = cloning(min_seconds=1.0)
     assert upload(client, sample_video).status_code == 200
-    warnings_of(client)
+    warnings_of()
     assert client.delete("/projects/p1").status_code == 204
     assert voice.deleted == [CLONE]
 
@@ -123,7 +127,7 @@ def test_an_export_with_an_edit_separates_the_voice_from_the_bed(client, sample_
     assert client.post("/projects/p1/export").status_code == 200
     assert asked == [] and seen["stems"] is None          # nothing edited: no separation, no cost
 
-    candidate = await_job(client, start_preview(client)["job_id"])["result"]
+    candidate = generate()
     assert client.post("/projects/p1/edits", json={"candidate_id": candidate["candidate_id"]}).status_code == 200
     assert client.post("/projects/p1/export").status_code == 200
     assert len(asked) == 1 and asked[0].name == "stems"   # kept under the project, once per source

@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import {
-  createProject, previewEdit, approveEdit, exportProject, artifactUrl,
+  createProject, exportProject, artifactUrl,
   pollJob, PollCancelled, ApiError,
 } from './api'
 
@@ -119,24 +119,6 @@ describe('api client', () => {
     })
   })
 
-  it('previewEdit posts the edit request to the preview route', async () => {
-    const f = mockFetch(200, { candidate_id: 'c1', plan: {}, audio: {}, frames: {}, continuity: {} })
-    vi.stubGlobal('fetch', f)
-    await previewEdit('p1', { prompt: 'x', start: 0.5, end: 1, voice_profile_id: 'speaker-1' })
-    expect(f.mock.calls[0][0]).toBe('/api/projects/p1/edits/preview')
-  })
-
-  it('approveEdit posts just the candidate id to the edits route', async () => {
-    const f = mockFetch(200, { edit_id: 'e1', candidate_id: 'c1', continuity: {} })
-    vi.stubGlobal('fetch', f)
-    const res = await approveEdit('p1', 'c1')
-    expect(res.edit_id).toBe('e1')
-    expect(f.mock.calls[0][0]).toBe('/api/projects/p1/edits')
-    // The previewed candidate is named, not re-described — the server must not
-    // regenerate media on approval.
-    expect(JSON.parse(f.mock.calls[0][1].body)).toEqual({ candidate_id: 'c1' })
-  })
-
   it('exportProject posts to the export route', async () => {
     const f = mockFetch(200, { segments: [], render: null })
     vi.stubGlobal('fetch', f)
@@ -144,19 +126,9 @@ describe('api client', () => {
     expect(f.mock.calls[0][0]).toBe('/api/projects/p1/export')
   })
 
-  it('throws ApiError with status on non-2xx', async () => {
+  it('throws ApiError with status and the detail on non-2xx', async () => {
     vi.stubGlobal('fetch', mockFetch(422, { detail: 'continuity check failed' }))
-    await expect(approveEdit('p1', 'c1')).rejects.toMatchObject({ status: 422 })
-    await expect(approveEdit('p1', 'c1')).rejects.toBeInstanceOf(ApiError)
-  })
-
-  it('approveEdit sends override only when asked', async () => {
-    const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) =>
-      ({ ok: true, status: 200, json: async () => ({}) }) as Response)
-    vi.stubGlobal('fetch', fetchMock)
-    await approveEdit('p1', 'c1', true)
-    expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toEqual({
-      candidate_id: 'c1', override: true,
-    })
+    await expect(exportProject('p1')).rejects.toMatchObject({ status: 422, message: 'continuity check failed' })
+    await expect(exportProject('p1')).rejects.toBeInstanceOf(ApiError)
   })
 })

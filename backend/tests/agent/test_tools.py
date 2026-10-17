@@ -164,11 +164,10 @@ def test_designing_a_voice_is_gated_costed_and_leaves_previews_the_user_can_hear
     assert out.cost_usd == pytest.approx(0.105)
     assert "preview 1: g1 (21 s); preview 2: g2 (22 s); preview 3: g3 (23 s)" in out.text
     assert "You cannot hear them" in out.text and "3 of 30 voice slots are used." in out.text
-    # the previews are kept as audio the user can play, and told to the thread as a card
+    # the previews are kept as audio the user can play, and handed to the loop as a card (shown after the step)
     assert [a[2] for a in world.audio] == ["mp3", "mp3", "mp3"]
-    [card] = [m for m in world.repo.messages("p1") if m.kind == "previews"]
-    assert card.text == "3 voices designed from “An Indian woman near fifty, unhurried, a smile in the voice”"
-    assert card.data["previews"][1] == {"n": 2, "generated_voice_id": "g2", "sha256": "a" * 63 + "2", "duration": 22.0}
+    assert out.card["text"] == "3 voices designed from “An Indian woman near fifty, unhurried, a smile in the voice”"
+    assert out.card["data"]["previews"][1] == {"n": 2, "generated_voice_id": "g2", "sha256": "a" * 63 + "2", "duration": 22.0}
     assert set(world.repo.settings("p1")["designs"]) == {"g1", "g2", "g3"}
 
 

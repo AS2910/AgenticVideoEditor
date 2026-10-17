@@ -14,11 +14,11 @@ from typing import Literal
 
 from app.domain.models import (
     Source, Selection, ContinuityReport, EditCandidate, ApprovedEdit, MediaArtifact,
-    Consent, EditPlan, Intent,
+    Consent, EditPlan,
 )
 from app.domain.plan import Plan, PlanItem
 from app.domain.transcript import (
-    assign_speakers, room_after, room_before, snap_to_word_boundaries, speaker_of, statements_of,
+    assign_speakers, room_after, snap_to_word_boundaries, speaker_of, statements_of,
 )
 from app.media.fit import speaking_rate, syllable_budget, syllables
 from app.config import load_settings
@@ -29,14 +29,12 @@ from app.adapters.base import VendorError
 from app.adapters.mock import MockLipSyncAdapter
 from app.adapters.openai_whisper import TranscriptionError
 from app.adapters.selection import (
-    select_continuity, select_interpreter, select_planner, select_transcriber, select_voice,
+    select_continuity, select_planner, select_transcriber, select_voice,
 )
 from app.errors import NonRetryableError
 from app import chaos as chaos_module
 from app.budget import VoiceBudget, BudgetExceeded
-from app.orchestrator.intent import Turn, edit_context
 from app.orchestrator.planner import Line, Frame, Sight
-from app.orchestrator.questions import fit_question, mix_question
 from app.media.ffmpeg import SpanMismatch
 from app.orchestrator.clones import CloneService, VoiceChoice
 from app.orchestrator.pipeline import run_edit
@@ -49,7 +47,7 @@ from app.render.renderer import render
 from app.render.compose import compose
 from app.render import retime
 from app.jobs.store import JobStore, Job
-from app.jobs.runner import JobRunner, with_retries
+from app.jobs.runner import JobRunner
 from app.agent import loop as agent_loop
 from app.agent.guards import TurnBudget, is_go
 from app.agent.tools import Turn as AgentTurn, Workbench
@@ -82,7 +80,6 @@ continuity, continuity_label = select_continuity(voice.identity, artifacts)
 # Phase 15a: each speaker's own voice, made once and reused (never under dry-run).
 clones = CloneService(repo, artifacts, voice, enabled=settings.clone and not settings.dry_run,
                       min_seconds=settings.clone_min_seconds)
-interpreter, interpreter_label = select_interpreter(settings, chaos)
 planner, planner_label = select_planner(settings, chaos)
 jobs = JobStore()
 runner = JobRunner(jobs)
@@ -106,7 +103,6 @@ def health() -> dict:
         "room": "on" if settings.stems and stems_module.available() else "off",
         "lipsync": "mock",
         "continuity": continuity_label,
-        "intent": interpreter_label,
         "planner": planner_label,
         # Phase 20: Voltage as an agent with tools (AVE_AGENT=1 and an Anthropic key).
         "agent": _agent_on(),
@@ -119,43 +115,6 @@ def health() -> dict:
 
 _MEDIA_TYPES = {"mp4": "video/mp4", "mov": "video/quicktime", "webm": "video/webm",
                 "wav": "audio/wav", "m4a": "audio/mp4", "mp3": "audio/mpeg"}
-
-
-class EditRequest(BaseModel):
-    prompt: str
-    start: float
-    end: float
-    voice_profile_id: str = "speaker-1"
-    # Set when answering a question: the line already read from the prompt,
-    # so it is not read again (and cannot come back different).
-    text: str | None = None
-    fit: Literal["start", "stretch"] | None = None
-    mix: Literal["replace", "layer", "concatenate", "over"] | None = None
-    # How it is said (UX-1): one of DELIVERIES, or the user's own words.
-    delivery: str | None = None
-    # What the chat shows for this turn when it isn't the prompt itself — the
-    # label of an option picked in answer to a question.
-    display: str | None = None
-    # What to do when the line runs longer than the selection (Phase 12):
-    # "pause" runs it into the pause after the selection when there is room,
-    # "stretch" speeds it up, "ask" asks. Unset = the project's setting.
-    on_long: Literal["pause", "shorten", "stretch", "ask"] | None = None
-
-
-# How a line longer than its selection is placed, unless the project says
-# otherwise: into the pause after it, without asking, when there is room.
-DEFAULT_LONG_LINES = "pause"
-# How much the agent does on its own (Phase 13): "ask" shows the plan and
-# waits for Run — the controlled default; "draft" voices it straight away.
-DEFAULT_AUTONOMY = "ask"
-# For the plan's time estimate: one line took ~15 s live with three takes.
-SECONDS_PER_ITEM = 12
-# Slack allowed when the overrun is judged against the pause: timings are
-# Whisper's, and a line a few hundredths long is not worth a question.
-PAUSE_SLACK = 0.05
-# Phase 14: a long line may also start a little early, into the pause before
-# it, when the pause after is not quite enough.
-BORROW_BEFORE = 0.15
 
 
 class ApproveRequest(BaseModel):
@@ -234,6 +193,12 @@ async def _spool(upload: UploadFile, dest: Path) -> None:
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _clock(seconds: float) -> str:
+    """A time in the clip as m:ss, for the log and a take's notes."""
+    whole = int(seconds)
+    return f"{whole // 60}:{whole % 60:02d}"
 
 
 CONSENT_REQUIRED = (
@@ -376,6 +341,8 @@ def _sight(project_id: str, record: ProjectRecord) -> Sight:
     if saved:
         known = {k: v for k, v in saved.items() if k in Sight.__dataclass_fields__}
         return Sight(**{**known, "beats": tuple(saved.get("beats", ())), "details": tuple(saved.get("details", ()))})
+    if planner is None:
+        raise HTTPException(status_code=503, detail=NEEDS_CLAUDE)
     frames = [Frame(at=f.at, path=str(f.path)) for f in _frames(record)]
     sight = planner.look(frames, record.source.duration, meter=_meter(project_id, "looking"))
     repo.set_settings(project_id, sight=asdict(sight))
@@ -444,11 +411,20 @@ def _project_dict(record: ProjectRecord) -> dict:
     }
 
 
+NEEDS_CLAUDE = "Voltage needs Claude for this (set ANTHROPIC_API_KEY)."
+EFFORTS = ("medium", "high", "xhigh")
+DEFAULT_AUTONOMY = "ask"
+
+
 def _settings(project_id: str) -> dict:
+    """What Voltage may do on this project (20d): the autonomy, what one
+    turn may spend, and how hard it thinks; the project's ceiling is read-only."""
     saved = repo.settings(project_id)
     return {
-        "long_lines": saved.get("long_lines", DEFAULT_LONG_LINES),
         "autonomy": saved.get("autonomy", DEFAULT_AUTONOMY),
+        "turn_usd": float(saved.get("turn_usd") or settings.agent_turn_usd),
+        "effort": saved.get("effort") or settings.agent_effort,
+        "ceiling_usd": ledger.ceiling_usd,
     }
 
 
@@ -608,19 +584,21 @@ def get_usage(project_id: str, owner: str = Depends(current_owner)) -> dict:
 
 
 class SettingsUpdate(BaseModel):
-    long_lines: Literal["pause", "shorten", "stretch", "ask"] | None = None
     autonomy: Literal["ask", "draft"] | None = None
+    # 20d: what one turn may spend, and how hard Voltage thinks.
+    turn_usd: float | None = None
+    effort: Literal["medium", "high", "xhigh"] | None = None
 
 
 @app.put("/projects/{project_id}/settings")
 def update_settings(
     project_id: str, req: SettingsUpdate, owner: str = Depends(current_owner),
 ) -> dict:
-    """Per-project preferences. `long_lines` is remembered from the first
-    answer about a line that runs long: "pause" (run into the pause after it
-    when there is room), "stretch", or "ask" each time."""
+    """What Voltage may do on this project: the autonomy, a turn's spend
+    cap (between a cent and the project's ceiling) and the effort."""
     _owned(project_id, owner)
-    repo.set_settings(project_id, long_lines=req.long_lines, autonomy=req.autonomy)
+    turn_usd = None if req.turn_usd is None else round(min(ledger.ceiling_usd, max(0.01, req.turn_usd)), 2)
+    repo.set_settings(project_id, autonomy=req.autonomy, turn_usd=turn_usd, effort=req.effort)
     return {"settings": _settings(project_id)}
 
 
@@ -701,6 +679,8 @@ def read_project(project_id: str, req: ReadRequest, owner: str = Depends(current
         return out
     try:
         _ensure_spend(project_id)
+        if planner is None:
+            raise HTTPException(status_code=503, detail=NEEDS_CLAUDE)
         reading = planner.read(lines, meter=_meter(project_id, "reading"))
     except SpendCeilingReached as exc:
         raise HTTPException(status_code=402, detail=str(exc)) from exc
@@ -824,73 +804,6 @@ def _job_dict(job: Job) -> dict:
     }
 
 
-@app.post("/projects/{project_id}/edits/preview", status_code=202)
-def preview_edit(
-    project_id: str, req: EditRequest, owner: str = Depends(current_owner),
-) -> dict:
-    """Start generation and hand back a job to poll.
-
-    Generation takes minutes once lip-sync is a real vendor (design spec §7),
-    so this cannot be a synchronous call.
-    """
-    record = _owned(project_id, owner)
-    if record.consent is None:
-        # Design spec §2/§7: non-negotiable, and this is the moment it binds —
-        # the last point before anything synthesizes this speaker's voice.
-        raise HTTPException(status_code=403, detail=CONSENT_REQUIRED)
-
-    selection = snap_to_word_boundaries(record.transcript, Selection(req.start, req.end))
-    context = edit_context(record.transcript, selection, record.source.duration)
-    # The chat so far comes from the server's record, not the client.
-    history = [Turn(m.role, m.text) for m in repo.messages(project_id)]
-    repo.add_message(project_id, "user", req.display or req.prompt)
-    candidate_id = repo.next_candidate_id(project_id)
-    job = jobs.create("preview", project_id)
-
-    meter = _meter(project_id, "intent")
-
-    def work(report) -> dict:
-        # No new paid work once the project has reached its spend ceiling.
-        _ensure_spend(project_id)
-        if req.text is not None:
-            intent = Intent(action="speak", new_text=req.text)
-        else:
-            report(0.02, "Reading your request")
-            intent = interpreter.interpret(req.prompt, history, context, meter=meter)
-        if intent.action != "speak":
-            repo.add_message(project_id, "assistant", intent.reply)
-            return {"type": "reply", "text": intent.reply}
-
-        # Replacing speech is the obvious reading of an edit over words; over
-        # music or silence it is not, so the user is asked.
-        mix = req.mix or intent.mix or ("replace" if context.has_speech else None)
-        if mix is None:
-            return _asked(mix_question(intent.new_text, context))
-
-        choice = _voice_for(project_id, record, selection, req.voice_profile_id)
-        voice_id = choice.voice_id
-        try:
-            candidate = _generate(
-                project_id, record, candidate_id, selection, intent.new_text, voice_id,
-                req.fit, mix, req.on_long, report, delivery=req.delivery, voice_notes=choice.notes,
-            )
-        except SpanMismatch as exc:
-            if req.fit is not None:
-                raise   # the user already chose a placement and it still fails
-            return _asked(fit_question(
-                intent.new_text, mix, exc.natural, exc.target,
-                selection.start, record.source.duration,
-            ))
-        return _candidate_dict(candidate)
-
-    def _asked(question: dict) -> dict:
-        repo.add_message(project_id, "assistant", question["question"])
-        return question
-
-    runner.submit(job, work)
-    return _job_dict(job)
-
-
 def _meter(project_id: str, what: str):
     """Records a Claude call against the project, as `what` in the ledger."""
     def meter(model: str, input_tokens: int, output_tokens: int, cache_read: int = 0, cache_write: int = 0) -> None:
@@ -916,14 +829,14 @@ MIN_OVER_ROOM = 0.3
 
 def _generate(
     project_id: str, record: ProjectRecord, candidate_id: str, selection: Selection,
-    text: str, voice_id: str, fit: str | None, mix: str, on_long: str | None, report,
+    text: str, voice_id: str, fit: str | None, mix: str, report,
     delivery: str | None = None, voice_notes: tuple[str, ...] = (),
     voice_settings: dict | None = None, model: str | None = None, flex_max: float | None = None,
     max_regenerations: int | None = None,
 ) -> EditCandidate:
-    """One line through generation and continuity, placed by the project's
-    long-line policy, saved as a candidate. Raises SpanMismatch when the line
-    does not fit and the policy says to ask.
+    """One line through generation and continuity, saved as a candidate.
+    A take that does not fit its slot raises SpanMismatch to the caller
+    (Voltage, who decides on a shorter wording or another placement).
 
     "over" (UX-1): an added line plays *after* the selection, over the picture
     that follows — layered on the pause there, fitted to it. When the pause is
@@ -935,7 +848,7 @@ def _generate(
             window = Selection(selection.end, min(record.source.duration, selection.end + room))
             try:
                 candidate = _generate(project_id, record, candidate_id, window, text, voice_id,
-                                      None, "layer", "ask", report, delivery, voice_notes, voice_settings, model, flex_max,
+                                      None, "layer", report, delivery, voice_notes, voice_settings, model, flex_max,
                                       max_regenerations)
             except SpanMismatch:
                 candidate = None
@@ -943,7 +856,7 @@ def _generate(
                 return candidate
             report(0.1, "No room to play over the picture; holding it instead")
         return _generate(project_id, record, candidate_id, selection, text, voice_id,
-                         fit, "concatenate", on_long, report, delivery, voice_notes, voice_settings, model, flex_max,
+                         fit, "concatenate", report, delivery, voice_notes, voice_settings, model, flex_max,
                          max_regenerations)
     plan = EditPlan(selection, text, voice_id, fit=fit, mix=mix, delivery=delivery,
                     voice_settings=voice_settings or None, model=model or None, flex_max=flex_max)
@@ -959,81 +872,13 @@ def _generate(
             voice_notes=voice_notes, route=settings.voice_route,
         )
 
-    try:
-        candidate = generate(plan)
-    except SpanMismatch as exc:
-        if plan.fit is not None:
-            raise
-        # A longer line is placed without asking when the project says how
-        # (Phase 12). The take that did not fit is held by the adapter, so
-        # placing it costs nothing more.
-        policy = on_long or _settings(project_id)["long_lines"]
-        placed, early = _long_line_fit(policy, exc, selection, record.transcript, record.source.duration)
-        if early > 0:
-            # Start a touch early, into the pause before the line.
-            selection = Selection(selection.start - early, selection.end)
-            plan = replace(plan, selection=selection)
-        if placed is None and policy == "shorten" and exc.natural > exc.target:
-            # Prefer a shorter wording: the agent's own fix, without asking.
-            report(0.1, "Asking for a shorter line")
-            shorter = _shorter_line(project_id, record, selection, text, exc.target / exc.natural)
-            if shorter:
-                report(0.12, "Voicing the shorter line")
-                try:
-                    candidate = generate(replace(plan, new_text=shorter))
-                except SpanMismatch:
-                    raise exc from None
-                repo.save_candidate(project_id, candidate)
-                return candidate
-        if placed is None:
-            raise
-        report(0.1, "Placing the line")
-        candidate = generate(replace(plan, fit=placed))
+    # A take that does not fit its slot raises SpanMismatch to the caller:
+    # Voltage hears why and decides (a shorter wording, another placement).
+    candidate = generate(plan)
     # Retained so approval commits this exact candidate rather than re-running
     # generation, which real vendors would not reproduce byte-for-byte.
     repo.save_candidate(project_id, candidate)
     return candidate
-
-
-def _shorter_line(project_id: str, record: ProjectRecord, selection: Selection,
-                  text: str, share: float) -> str | None:
-    """A shorter wording from the planner, or None (offline, or nothing better)."""
-    names = {s.label: s.name for s in repo.speakers(project_id)}
-    speaker = speaker_of(record.transcript, selection)
-    context = edit_context(record.transcript, selection, record.source.duration)
-    line = Line(0, selection.start, selection.end, names.get(speaker or ""), context.selected)
-    try:
-        return planner.shorten(text, share, line, meter=_meter(project_id, "wording"))
-    except (VendorError, NonRetryableError):
-        return None
-
-
-def _long_line_fit(policy: str, exc: SpanMismatch, selection: Selection,
-                   transcript, duration: float) -> tuple[str | None, float]:
-    """How to place a line that ran long — (fit, seconds to start early) — or
-    (None, 0) to ask the user.
-
-    Only a *long* line is placed automatically — a short one always asks,
-    since silence or a slowed line is a real choice. "stretch" speeds it up;
-    "pause" lets it run into the pause after the selection if that pause (plus
-    a little slack) can hold the overrun and the video does not end first;
-    when it is not quite enough, up to BORROW_BEFORE of the pause before the
-    line is used too (Phase 14).
-    """
-    if exc.natural <= exc.target or policy in ("ask", "shorten"):
-        return None, 0.0
-    if policy == "stretch":
-        return "stretch", 0.0
-    overrun = exc.natural - exc.target
-    room = room_after(transcript, selection, duration)
-    if selection.start + exc.natural > duration + PAUSE_SLACK:
-        return None, 0.0
-    if overrun <= room + PAUSE_SLACK:
-        return "start", 0.0
-    before = min(BORROW_BEFORE, room_before(transcript, selection))
-    if overrun <= room + before + PAUSE_SLACK:
-        return "start", round(min(before, max(0.0, overrun - room)), 3)
-    return None, 0.0
 
 
 @app.get("/jobs/{job_id}")
@@ -1106,61 +951,6 @@ def revert_edit(project_id: str, edit_id: str, owner: str = Depends(current_owne
                 repo.update_item(project_id, plan.plan_id, item.item_id, status="ready", edit_id=None)
                 repo.append_log(project_id, plan.plan_id, f"You undid the line at {_clock(item.selection.start)}")
     return {"edit_id": edit_id, "reverted": True}
-
-
-class RewordRequest(BaseModel):
-    start: float
-    end: float
-    # The user's own draft of the line so far, if they have started one.
-    draft: str | None = None
-    # What kind of rewording; the default is a tighter, more natural line.
-    instruction: str | None = None
-
-
-DEFAULT_REWORD = "so it is shorter and more natural, keeping its meaning and the speaker's tone"
-
-
-@app.post("/projects/{project_id}/lines/reword")
-def reword_line(
-    project_id: str, req: RewordRequest, owner: str = Depends(current_owner),
-) -> dict:
-    """Ask Claude for a new wording of the line in a span (Phase 12, the
-    hands-on editor's "Ask Voltage for wording"). Nothing is spoken: this is a
-    text suggestion the user can edit before previewing. Needs the Claude
-    interpreter; offline there is no one to ask."""
-    record = _owned(project_id, owner)
-    if getattr(interpreter, "identity", "rules") != "claude":
-        raise HTTPException(
-            status_code=503,
-            detail="Wording suggestions need Claude. Set ANTHROPIC_API_KEY to turn them on.",
-        )
-    try:
-        _ensure_spend(project_id)
-    except SpendCeilingReached as exc:
-        raise HTTPException(status_code=402, detail=str(exc)) from exc
-    selection = snap_to_word_boundaries(record.transcript, Selection(req.start, req.end))
-    context = edit_context(record.transcript, selection, record.source.duration)
-    how = (req.instruction or "").strip() or DEFAULT_REWORD
-    draft = (req.draft or "").strip()
-    rate = speaking_rate(record.transcript, speaker_of(record.transcript, selection))
-    room = room_after(record.transcript, selection, record.source.duration)
-    budget = syllable_budget(rate, selection.end - selection.start + min(room, 1.0))
-    limit = (f" It must be no more than {budget} syllables, so it can be spoken in the time "
-             f"the line has (the original is {syllables(context.selected)}).")
-    if draft and draft != context.selected:
-        prompt = (f'The user has drafted this wording for the selected line: "{draft}". '
-                  f"Improve the draft {how}.{limit} Reply with the full new line.")
-    else:
-        prompt = f"Rewrite the selected line {how}.{limit} Reply with the full new line."
-
-    def meter(model: str, input_tokens: int, output_tokens: int) -> None:
-        ledger.record(project_id, "anthropic", "wording", input_tokens + output_tokens, "tokens",
-                      claude_usd(model, input_tokens, output_tokens))
-
-    intent = interpreter.interpret(prompt, [], context, meter=meter)
-    if intent.action != "speak" or not intent.new_text:
-        raise HTTPException(status_code=422, detail=intent.reply or "Could not suggest a wording.")
-    return {"text": intent.new_text, "selection": {"start": selection.start, "end": selection.end}}
 
 
 @app.post("/projects/{project_id}/export")
@@ -1248,26 +1038,6 @@ def _export(record: ProjectRecord) -> dict:
 
 # ── Phase 13: the agent ──────────────────────────────────────────────────────
 
-class ItemUpdate(BaseModel):
-    enabled: bool | None = None
-    new_text: str | None = None
-    delivery: str | None = None
-    mix: Literal["replace", "over", "concatenate"] | None = None
-    # For a suggestion: True adds it to the plan, False leaves it.
-    include: bool | None = None
-
-
-class RunRequest(BaseModel):
-    items: list[str] | None = None
-
-
-class AnswerRequest(BaseModel):
-    fit: Literal["start", "stretch"] | None = None
-    mix: Literal["replace", "layer", "concatenate"] | None = None
-    # The agent's own fix, or the user's: a different wording.
-    text: str | None = None
-
-
 class PlanApproveRequest(BaseModel):
     items: list[str] | None = None
     override: bool = False
@@ -1313,7 +1083,6 @@ def _plan_dict(plan: Plan | None) -> dict | None:
         "question": plan.question,
         # UX-5: the brief so far, and how many questions may still come.
         "answers": [list(a) for a in plan.answers],
-        "questions_left": 0,
         "voice": plan.voice,
         "voice_asked": plan.voice_asked,
         "voice_note": plan.voice_note,
@@ -1339,6 +1108,10 @@ def _lines(record: ProjectRecord) -> list[Line]:
             budget=syllable_budget(rates[st.speaker], st.end - st.start + min(room, 1.0)),
         ))
     return out
+
+
+# A rough time per line, for the plan's estimate.
+SECONDS_PER_ITEM = 12
 
 
 def _estimate(project_id: str, items: tuple[PlanItem, ...]) -> dict:
@@ -1378,264 +1151,6 @@ def _plan_or_404(project_id: str, plan_id: str) -> Plan:
     if plan is None:
         raise HTTPException(status_code=404, detail="plan not found")
     return plan
-
-
-@app.put("/projects/{project_id}/plans/{plan_id}/items/{item_id}")
-def update_item(
-    project_id: str, plan_id: str, item_id: str, req: ItemUpdate,
-    owner: str = Depends(current_owner),
-) -> dict:
-    """Before (or between) runs: untick an item, reword it, or add / leave a
-    suggestion. Rewording a voiced item sends it back to planned."""
-    _owned(project_id, owner)
-    plan = _plan_or_404(project_id, plan_id)
-    item = plan.item(item_id)
-    if item is None:
-        raise HTTPException(status_code=404, detail="item not found")
-    changes: dict = {}
-    if req.include is True and item.kind == "suggestion":
-        changes.update(kind="planned", enabled=True, status="planned")
-        repo.append_log(project_id, plan_id, f"You added the suggestion at {_clock(item.selection.start)}")
-    elif req.include is False:
-        # Leave it — also for a suggestion that was added and thought better of.
-        changes.update(kind="suggestion", enabled=False, status="dismissed")
-    if req.enabled is not None:
-        changes["enabled"] = req.enabled
-    if req.delivery is not None:
-        changes["delivery"] = req.delivery.strip() or None
-        if item.status in ("ready", "needs-you", "failed"):
-            changes.update(status="planned", candidate_id=None, question=None, error=None)
-    if req.mix is not None and item.mix != "replace":
-        changes["mix"] = req.mix
-        if item.status in ("ready", "needs-you", "failed"):
-            changes.update(status="planned", candidate_id=None, question=None, error=None)
-    if req.new_text is not None:
-        text = req.new_text.strip()
-        if not text:
-            raise HTTPException(status_code=422, detail="The new wording is empty.")
-        if text != item.new_text:
-            changes.update(new_text=text, fit=None, note="Your wording")
-            if item.status in ("ready", "needs-you", "failed"):
-                changes.update(status="planned", candidate_id=None, question=None, error=None)
-    updated = repo.update_item(project_id, plan_id, item_id, **changes)
-    updated = repo.update_plan(project_id, plan_id, estimate=_estimate(project_id, updated.items),
-                               status=_status_after_edit(updated))
-    return _plan_dict(updated)
-
-
-def _status_after_edit(plan: Plan) -> str:
-    """A finished plan with something planned again waits for Go ahead."""
-    if plan.status == "done" and plan.runnable:
-        return "proposed"
-    return plan.status
-
-
-# ── UX-2: revise the plan in words, and stop it ──────────────────────────────
-
-# Plans asked to stop: checked by the running job between lines.
-_stops: set[str] = set()
-
-
-@app.post("/projects/{project_id}/plans/{plan_id}/stop")
-def stop_plan(project_id: str, plan_id: str, owner: str = Depends(current_owner)) -> dict:
-    """Stop a running plan after the line it is on. What is done stays done;
-    the rest waits as planned, for Go ahead later."""
-    _owned(project_id, owner)
-    plan = _plan_or_404(project_id, plan_id)
-    if plan.status != "running":
-        raise HTTPException(status_code=409, detail="The plan is not running.")
-    _stops.add(plan_id)
-    repo.append_log(project_id, plan_id, "You stopped the plan")
-    return _plan_dict(repo.update_plan(project_id, plan_id, status="stopping"))
-
-
-def _clock(t: float) -> str:
-    return f"{int(t // 60)}:{int(t % 60):02d}"
-
-
-def _placement_note(candidate: EditCandidate, selection: Selection) -> str | None:
-    overrun = candidate.plan.selection.end - selection.end
-    if candidate.plan.mix != "concatenate" and overrun > 0.01:
-        return f"Ran {overrun:.1f} s into the pause after it"
-    return None
-
-
-def _agent_fix(project_id: str, record: ProjectRecord, item: PlanItem, exc: SpanMismatch, report) -> dict:
-    """The question for a line that does not fit — with the agent's own fix,
-    a shorter wording, offered first when the line runs long."""
-    question = fit_question(
-        item.new_text, item.mix, exc.natural, exc.target, item.selection.start, record.source.duration,
-    )
-    if exc.natural > exc.target:
-        room = room_after(record.transcript, item.selection, record.source.duration)
-        over = exc.natural - exc.target
-        where = ("there's no pause after it to run into" if room < PAUSE_SLACK
-                 else f"the pause after it is only {room:.1f} s")
-        question["question"] = f"The new line runs {over:.1f} s long and {where}."
-        report(0.5, "Asking for a shorter line")
-        names = {s.label: s.name for s in repo.speakers(project_id)}
-        line = Line(0, item.selection.start, item.selection.end, names.get(item.speaker or ""), item.old_text)
-        try:
-            shorter = planner.shorten(item.new_text, exc.target / exc.natural, line,
-                                      meter=_meter(project_id, "wording"))
-        except (VendorError, NonRetryableError):
-            shorter = None
-        if shorter:
-            question["options"].insert(0, {
-                "label": f"Use a shorter line: “{shorter}”", "fit": None, "mix": None,
-                "warning": None, "text": shorter,
-            })
-    return question
-
-
-def _run_plan(project_id: str, record: ProjectRecord, plan_id: str, item_ids: list[str]) -> Job:
-    """One job voicing several items, each with its own status."""
-    job = jobs.create("plan", project_id)
-    repo.update_plan(project_id, plan_id, status="running")
-
-    def work(report) -> dict:
-        plan = repo.get_plan(project_id, plan_id)
-        targets = [i for i in plan.items if i.item_id in item_ids and i.kind == "planned" and i.enabled]
-        total = max(1, len(targets))
-        for n, item in enumerate(targets):
-            if plan_id in _stops:
-                _stops.discard(plan_id)
-                left = len(targets) - n
-                repo.append_log(project_id, plan_id,
-                                f"Stopped with {left} {'line' if left == 1 else 'lines'} still planned")
-                break
-            repo.update_item(project_id, plan_id, item.item_id, status="working", error=None)
-            base = n / total
-
-            def step(progress: float, text: str, n=n, base=base, item_id=item.item_id) -> None:
-                report(base + progress / total, f"{n + 1} of {total}: {text}")
-                repo.update_item(project_id, plan_id, item_id, progress=text)
-
-            step(0.05, "Synthesizing the new line")
-            try:
-                _ensure_spend(project_id)
-                # A voice the goal asked for speaks every line of the plan; else
-                # the speaker's own (picked, or cloned), else the chat's default.
-                choice = (VoiceChoice(plan.voice) if plan.voice_asked and plan.voice
-                          else _voice_for(project_id, record, item.selection,
-                                          plan.voice or getattr(voice, "default_voice", "speaker-1"),
-                                          speaker=item.speaker))
-                voice_id = choice.voice_id
-                candidate_id = repo.next_candidate_id(project_id)
-                candidate = with_retries(lambda: _generate(
-                    project_id, record, candidate_id, item.selection, item.new_text, voice_id,
-                    item.fit, item.mix, None, step, delivery=item.delivery, voice_notes=choice.notes,
-                ))
-            except SpanMismatch as exc:
-                question = _agent_fix(project_id, record, item, exc, step)
-                repo.update_item(project_id, plan_id, item.item_id, status="needs-you", question=question,
-                                 progress=None)
-                repo.append_log(project_id, plan_id,
-                                f"Needs you: the line at {_clock(item.selection.start)} does not fit")
-                continue
-            except (BudgetExceeded, SpendCeilingReached) as exc:
-                repo.update_item(project_id, plan_id, item.item_id, status="failed", error=str(exc), progress=None)
-                repo.append_log(project_id, plan_id, "Stopped: the project's budget is used up")
-                break
-            except NonRetryableError as exc:
-                repo.update_item(project_id, plan_id, item.item_id, status="failed", error=str(exc), progress=None)
-                continue
-            except VendorError:
-                repo.update_item(project_id, plan_id, item.item_id, status="failed", progress=None,
-                                 error="Generation failed after several attempts. Redo to try again.")
-                continue
-            retried = next((w for w in candidate.continuity.warnings if w.startswith("Regenerated")), None)
-            takes = 1 + (int(retried.split()[1].rstrip("×")) if retried else 0)
-            cost = voice.cost_of(candidate.plan)
-            shortened = candidate.plan.new_text != item.new_text
-            held = item.mix == "over" and candidate.plan.mix == "concatenate"
-            repo.update_item(project_id, plan_id, item.item_id, status="ready", candidate_id=candidate_id,
-                             question=None, error=None, progress=None,
-                             new_text=candidate.plan.new_text,
-                             note=("Shortened to fit" if shortened else None)
-                             or ("Held the picture: no room to play over it" if held else None)
-                             or ("Plays over the picture" if item.mix == "over" else None)
-                             or _placement_note(candidate, item.selection) or item.note)
-            repo.append_log(project_id, plan_id,
-                            f"Voiced the line at {_clock(item.selection.start)}"
-                            + (f" ({retried.rstrip('.').lower()})" if retried else ""),
-                            f"{cost * takes} characters" if cost else "")
-        _stops.discard(plan_id)
-        plan = repo.get_plan(project_id, plan_id)
-        still = any(i.status == "working" for i in plan.items)
-        # Stopped, or a line left planned: the plan waits for Go ahead again.
-        status = "running" if still else "proposed" if plan.runnable else "done"
-        repo.update_plan(project_id, plan_id, status=status)
-        return _plan_dict(repo.get_plan(project_id, plan_id))
-
-    runner.submit(job, work)
-    return job
-
-
-@app.post("/projects/{project_id}/plans/{plan_id}/run", status_code=202)
-def run_plan(
-    project_id: str, plan_id: str, req: RunRequest, owner: str = Depends(current_owner),
-) -> dict:
-    """Voice the ticked items (or the ones named). Returns the job to poll;
-    the plan itself shows each item's status as it goes."""
-    record = _owned(project_id, owner)
-    if record.consent is None:
-        raise HTTPException(status_code=403, detail=CONSENT_REQUIRED)
-    plan = _plan_or_404(project_id, plan_id)
-    if plan.status == "clarifying":
-        raise HTTPException(status_code=409, detail="Answer Voltage's question first (or take its guess).")
-    if plan.status in ("running", "stopping"):
-        raise HTTPException(status_code=409, detail="The plan is already running.")
-    ids = req.items or [i.item_id for i in plan.runnable]
-    if not ids:
-        raise HTTPException(status_code=422, detail="Nothing is ticked to run.")
-    return _job_dict(_run_plan(project_id, record, plan_id, ids))
-
-
-@app.post("/projects/{project_id}/plans/{plan_id}/items/{item_id}/answer", status_code=202)
-def answer_item(
-    project_id: str, plan_id: str, item_id: str, req: AnswerRequest,
-    owner: str = Depends(current_owner),
-) -> dict:
-    """Answer a needs-you item — the agent's shorter line, a different
-    wording, or how to place it — and voice it again."""
-    record = _owned(project_id, owner)
-    if record.consent is None:
-        raise HTTPException(status_code=403, detail=CONSENT_REQUIRED)
-    plan = _plan_or_404(project_id, plan_id)
-    item = plan.item(item_id)
-    if item is None:
-        raise HTTPException(status_code=404, detail="item not found")
-    changes: dict = {"question": None, "status": "planned", "error": None}
-    if req.text:
-        changes.update(new_text=req.text.strip(), fit=None, note="The shorter line you picked")
-        repo.append_log(project_id, plan_id, f"You picked the shorter line at {_clock(item.selection.start)}")
-    else:
-        changes.update(fit=req.fit)
-        repo.append_log(project_id, plan_id,
-                        f"You chose how to place the line at {_clock(item.selection.start)}")
-    if req.mix:
-        changes["mix"] = req.mix
-    repo.update_item(project_id, plan_id, item_id, **changes)
-    return _job_dict(_run_plan(project_id, record, plan_id, [item_id]))
-
-
-@app.post("/projects/{project_id}/plans/{plan_id}/items/{item_id}/redo", status_code=202)
-def redo_item(
-    project_id: str, plan_id: str, item_id: str, owner: str = Depends(current_owner),
-) -> dict:
-    """Another take of one item."""
-    record = _owned(project_id, owner)
-    if record.consent is None:
-        raise HTTPException(status_code=403, detail=CONSENT_REQUIRED)
-    plan = _plan_or_404(project_id, plan_id)
-    item = plan.item(item_id)
-    if item is None:
-        raise HTTPException(status_code=404, detail="item not found")
-    repo.update_item(project_id, plan_id, item_id, status="planned", candidate_id=None,
-                     question=None, error=None, enabled=True)
-    repo.append_log(project_id, plan_id, f"Redoing the line at {_clock(item.selection.start)}")
-    return _job_dict(_run_plan(project_id, record, plan_id, [item_id]))
 
 
 @app.post("/projects/{project_id}/plans/{plan_id}/approve")
@@ -1852,7 +1367,15 @@ def move_candidate(
         raise HTTPException(status_code=404, detail="candidate not found")
     if source.plan.mix == "remove":
         raise HTTPException(status_code=422, detail="A removal has no audio to move.")
-    return _candidate_dict(_moved(project_id, record, source, req.start, req.mix))
+    moved = _moved(project_id, record, source, req.start, req.mix)
+    # The plan item that carries this take follows it (20d), so Keep ships the moved take.
+    plan = repo.latest_plan(project_id)
+    if plan is not None:
+        for item in plan.items:
+            if item.candidate_id == candidate_id and item.status == "ready":
+                repo.update_item(project_id, plan.plan_id, item.item_id, candidate_id=moved.candidate_id,
+                                 selection=Selection(moved.plan.selection.start, moved.plan.selection.end))
+    return _candidate_dict(moved)
 
 
 @app.post("/projects/{project_id}/edits/{edit_id}/move")
@@ -1990,13 +1513,16 @@ def take_turn(project_id: str, req: TurnRequest, owner: str = Depends(current_ow
         raise HTTPException(status_code=422, detail="Say what you want.")
     if any(j.kind == "turn" and j.project_id == project_id and not j.done for j in jobs.all()):
         raise HTTPException(status_code=409, detail="Voltage is still on the last thing you said.")
-    autonomy = _settings(project_id)["autonomy"]
-    if autonomy == "draft" and record.consent is None:
-        raise HTTPException(status_code=403, detail=CONSENT_REQUIRED)
+    prefs = _settings(project_id)
+    autonomy = prefs["autonomy"]
     plan = _turn_plan(project_id, text)
     # A yes to a gate question (a paid or committing step that waited): a go word, or its first option.
     gate = plan.question if plan.question and plan.question.get("gate") else None
     approve = req.approve or bool(gate and (is_go(text) or text.strip().lower() == str(gate["options"][0]).lower()))
+    # Consent binds before anything synthesizes this speaker's voice: under
+    # Just do it before the turn, under Check with me at the yes.
+    if record.consent is None and (autonomy == "draft" or approve):
+        raise HTTPException(status_code=403, detail=CONSENT_REQUIRED)
     repo.add_message(project_id, "user", text)
     repo.update_plan(project_id, plan.plan_id, status="running", question=None)
     job = jobs.create("turn", project_id)
@@ -2009,7 +1535,7 @@ def take_turn(project_id: str, req: TurnRequest, owner: str = Depends(current_ow
             repo.update_plan(project_id, plan.plan_id, status="proposed")
             repo.add_message(project_id, "assistant", str(exc))
             return {"plan": _plan_dict(repo.get_plan(project_id, plan.plan_id)), "reply": str(exc), "question": None}
-        budget_ = TurnBudget(usd=settings.agent_turn_usd)
+        budget_ = TurnBudget(usd=prefs["turn_usd"])
         turn = AgentTurn(project_id=project_id, record=record, plan_id=plan.plan_id, autonomy=autonomy,
                          spend_approved=approve or autonomy == "draft", budget=budget_, started_at=started_at,
                          report=report, commit_approved=approve)
@@ -2019,7 +1545,7 @@ def take_turn(project_id: str, req: TurnRequest, owner: str = Depends(current_ow
         head = opening(repo.get_plan(project_id, plan.plan_id), duration=record.source.duration,
                        filename=record.source.filename, speakers=names, lines=len(lines), autonomy=autonomy,
                        spent_usd=ledger.spent_usd(project_id), ceiling_usd=ledger.ceiling_usd,
-                       turn_usd=settings.agent_turn_usd, sight=_sight_text(project_id) if not lines else "")
+                       turn_usd=prefs["turn_usd"], sight=_sight_text(project_id) if not lines else "")
         content = [{"type": "text", "text": head}, {"type": "text", "text": f"The user says: {text}"
                    + (" (They are answering yes to what you asked.)" if approve else "")}]
         history = repo.turns(project_id)
@@ -2029,9 +1555,13 @@ def take_turn(project_id: str, req: TurnRequest, owner: str = Depends(current_ow
             repo.append_log(project_id, plan.plan_id, step, f"${cost:.2f}" if cost else "")
             report(min(0.95, 0.05 + 0.9 * turn.budget.calls_made / turn.budget.calls), step)
 
+        def on_card(text_: str, data: dict) -> None:
+            repo.add_message(project_id, "assistant", text_, kind="previews", data=data)
+
         try:
             outcome = _agent().run(_workbench(), turn, history, content, meter=_meter(project_id, "agent"),
-                                   on_step=on_step, persist=lambda role, c: repo.append_turn(project_id, role, c))
+                                   on_step=on_step, on_card=on_card, effort=prefs["effort"],
+                                   persist=lambda role, c: repo.append_turn(project_id, role, c))
         except Exception as exc:  # noqa: BLE001 — the user hears a sentence; the log has the rest
             logging.getLogger(__name__).exception("turn failed")
             why = str(exc)[:200] or type(exc).__name__

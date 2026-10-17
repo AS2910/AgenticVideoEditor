@@ -11,13 +11,11 @@ import { captionAt, takeCaption } from './transcript/caption'
 import type { CaptionPending } from './transcript/caption'
 import { Timeline } from './components/Timeline'
 import { ChatPanel } from './components/ChatPanel'
-import { CandidateCard } from './components/CandidateCard'
-import { QuestionCard } from './components/QuestionCard'
 import { ExportBar } from './components/ExportBar'
 import { ProjectList } from './components/ProjectList'
 import { SpendMeter } from './components/SpendMeter'
 import { LineDoc } from './components/LineDoc'
-import type { LineRequest, LineState, PendingLine, FitReadout } from './components/LineDoc'
+import type { LineRequest, PendingLine } from './components/LineDoc'
 import { keyOf } from './transcript/keys'
 import type { LineKey } from './transcript/keys'
 import { PlanCard } from './components/PlanCard'
@@ -26,45 +24,34 @@ import type { SeamPlaying } from './components/ReviewPanel'
 import { ActivityLog } from './components/ActivityLog'
 import { ReadingCard } from './components/ReadingCard'
 import { AutonomySwitch } from './components/AutonomySwitch'
+import { WhatVoltageMayDo } from './components/WhatVoltageMayDo'
+import type { MayDo } from './components/WhatVoltageMayDo'
 import { Presence } from './components/Presence'
 import { ThemeToggle } from './components/ThemeToggle'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
-import { ArrowUp, ChevronLeft, ChevronRight, Loader2 } from 'lucide-react'
-import { VoicePicker } from './components/VoicePicker'
+import { ArrowUp, ChevronLeft, ChevronRight, Loader2, SlidersHorizontal } from 'lucide-react'
 import { SpeakersBar } from './components/SpeakersBar'
 import { clock } from './transcript/format'
 import { speakerSlot } from './transcript/speakers'
 import {
-  createProject, confirmPlace, previewEdit, approveEdit, exportProject, artifactUrl, pollJob, PollCancelled, ApiError, listProjects, getProject, deleteProject, getUsage, listVoices, updateSpeaker, detectSpeakers, revertEdit, updateSettings, rewordLine, removeLine, moveCandidate, moveEdit, shiftLine, getPlan, updateItem, runPlan, answerItem, redoItem, approvePlan, readProject, stopPlan, grantConsent, createVariant, getMe, logout, postTurn, getMessages,
+  createProject, confirmPlace, exportProject, artifactUrl, pollJob, PollCancelled, ApiError, listProjects, getProject, deleteProject, getUsage, listVoices, updateSpeaker, detectSpeakers, revertEdit, updateSettings, removeLine, moveCandidate, moveEdit, shiftLine, getPlan, approvePlan, readProject, grantConsent, createVariant, getMe, logout, postTurn, getMessages,
 } from './api'
-import type { Me } from './api'
+import type { Me, PlanApproval } from './api'
 import type {
-  Word, Selection, Candidate, Segment, Project, ChatMessage, Question, QuestionOption,
-  Fit, Mix, Insert, ProjectSummary, Usage, Statement, Voice, Revision, LongLines,
+  Word, Selection, Candidate, Segment, Project, ChatMessage,
+  Insert, ProjectSummary, Usage, Statement, Voice, Revision,
   Plan, PlanItem, Autonomy, Reading, Piece,
 } from './types'
 import { piecesFromInserts, renderTimeFrom, sourceTimeFrom } from './timeline/selection'
 
-/** Smooth scrolling and motion are the user's call (UX-6). */
-const prefersReducedMotion = () =>
-  typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches
-
 /** Bundled demo clip, uploaded through the same path as any other file. */
 const SAMPLE_URL = '/sample-ad.mp4'
-// Until the voice list loads: the server's configured default voice.
-const DEFAULT_VOICE = 'speaker-1'
-
-/** An answer to a question: the line already read, and the choices so far. */
-interface Answer { text: string; fit?: Fit; mix?: Mix; on_long?: LongLines; delivery?: string }
 
 type Stage = 'load' | 'editor'
 
-/** Words that mean "take your guess" when Voltage has asked something. */
-// 15e: said in the composer, ships the lines kept — the same as the Ship button.
-
-/** The chat's voice, or the speaker's own, named for a take. */
-const voiceName = (voices: Voice[], id: string) => voices.find((v) => v.voice_id === id)?.name
+// What Voltage may do until the project says otherwise (the server's defaults).
+const MAY_DO: MayDo = { autonomy: 'ask', turn_usd: 0.5, effort: 'high', ceiling_usd: 2 }
 
 export default function App() {
   const [stage, setStage] = useState<Stage>('load')
@@ -87,18 +74,6 @@ export default function App() {
   const [selection, setSelection] = useState<Selection | null>(null)
   const [currentTime, setCurrentTime] = useState(0)
   const [messages, setMessages] = useState<ChatMessage[]>([])
-  const [candidate, setCandidate] = useState<Candidate | null>(null)
-  // The span the open take was asked for — a line that ran into the pause
-  // after it ends later than this.
-  const [asked, setAsked] = useState<Selection | null>(null)
-  // The open question, with the request it is about — answering re-sends that
-  // request for the same selection, plus the choice.
-  const [question, setQuestion] = useState<
-    { question: Question; prompt: string; selection: Selection } | null
-  >(null)
-  const [generating, setGenerating] = useState(false)
-  const [working, setWorking] = useState<Selection | null>(null)
-  const [progress, setProgress] = useState<{ value: number; step: string } | null>(null)
   const [segments, setSegments] = useState<Segment[]>([])
   const [inserts, setInserts] = useState<Insert[]>([])
   // Phase 16: the render as pieces — copies, flexed lines, living holds, held frames — for the clocks.
@@ -114,16 +89,14 @@ export default function App() {
   const [projects, setProjects] = useState<ProjectSummary[]>([])
   const [usage, setUsage] = useState<Usage | null>(null)
   const [voices, setVoices] = useState<Voice[]>([])
-  const [voiceId, setVoiceId] = useState(DEFAULT_VOICE)
   const [seekRequest, setSeekRequest] = useState<{ time: number; id: number; play?: boolean; until?: number } | null>(null)
   const [detecting, setDetecting] = useState(false)
   // Approved edits still in force, shown as tracked changes in the transcript.
   const [approved, setApproved] = useState<Revision[]>([])
-  // How this project places a line that runs long; remembered on the server.
-  const [longLines, setLongLines] = useState<LongLines>('pause')
-  // The agent (Phase 13): how much it does on its own, its latest plan, and
-  // the job voicing that plan.
+  // The agent (Phase 13): how much it does on its own, and its latest plan.
   const [autonomy, setAutonomy] = useState<Autonomy>('ask')
+  const [mayDo, setMayDo] = useState<MayDo>(MAY_DO)
+  const [mayDoOpen, setMayDoOpen] = useState(false)
   const [plan, setPlan] = useState<Plan | null>(null)
   // Voltage's first look at the clip (UX-2), for the goal stage.
   const [reading, setReading] = useState<Reading | null>(null)
@@ -137,8 +110,6 @@ export default function App() {
   const showPanel = () => { setPanelHidden(false); window.setTimeout(() => panelRef.current?.scrollIntoView?.({ block: 'start', behavior: 'smooth' }), 0) }
   // An example picked from Voltage's first message, put into the composer.
   const [seed, setSeed] = useState<{ text: string; id: number } | null>(null)
-  const [planBusy, setPlanBusy] = useState(false)
-  const [planProgress, setPlanProgress] = useState<{ value: number; step: string } | null>(null)
   const [review, setReview] = useState(false)
   // Phase 20: a turn of Voltage with tools is running; its latest step.
   const [turnBusy, setTurnBusy] = useState(false)
@@ -150,10 +121,6 @@ export default function App() {
   // The line open in the hands-on editor, so the panel can stand by.
   const [editingLine, setEditingLine] = useState<Statement | null>(null)
   const [showPlanWhileEditing, setShowPlanWhileEditing] = useState(false)
-  // How the last take on each line was made to fit, for the editor's readout.
-  const [readouts, setReadouts] = useState<FitReadout[]>([])
-  // Hands-on work, line by line: takes to choose from, questions, errors.
-  const [lines, setLines] = useState<Record<LineKey, LineState>>({})
   // The take playing in place of the line, with its own audio under the video.
   const [playingTake, setPlayingTake] = useState<string | null>(null)
   const takeAudio = useRef<HTMLAudioElement | null>(null)
@@ -168,8 +135,6 @@ export default function App() {
   // A take or kept line being dragged to a new start on the bar.
   const [placing, setPlacing] = useState<{ id: string; start: number; duration: number } | null>(null)
   const composerRef = useRef<HTMLInputElement>(null)
-  const previewToken = useRef(0)
-  const planToken = useRef(0)
 
   const refreshProjects = useCallback(async () => {
     try {
@@ -212,18 +177,11 @@ export default function App() {
 
   /** Back to a blank editor state, e.g. before opening another project. */
   const clearEditor = () => {
-    previewToken.current += 1 // abandon any poll in flight
     setProject(null)
     setTranscript([])
     setSelection(null)
     setCurrentTime(0)
     setMessages([])
-    setCandidate(null)
-    setAsked(null)
-    setQuestion(null)
-    setGenerating(false)
-    setWorking(null)
-    setProgress(null)
     setSegments([])
     setInserts([])
     setPieces([])
@@ -233,32 +191,21 @@ export default function App() {
     setError(null)
     setUsage(null)
     setApproved([])
-    setLongLines('pause')
-    planToken.current += 1
     setAutonomy('ask')
+    setMayDo(MAY_DO)
+    setMayDoOpen(false)
     setPlan(null)
     setReading(null)
     setReadingBusy(false)
-    setPlanBusy(false)
-    setPlanProgress(null)
     setReview(false)
     setShipped(null)
     setConsentAsk(null)
     consentGiven.current = false
     setEditingLine(null)
-    setReadouts([])
-    setLines({})
     setPlayingTake(null)
     setPlacing(null)
     takeAudio.current?.pause()
   }
-
-  const setLine = (key: LineKey, patch: Partial<LineState> | null) =>
-    setLines((all) => {
-      if (patch === null) { const { [key]: _, ...rest } = all; return rest }
-      const prev: LineState = all[key] ?? { status: 'working', takes: [] }
-      return { ...all, [key]: { ...prev, ...patch } }
-    })
 
   // "/" puts the cursor in the box, from anywhere that is not already typing (UX-4).
   useEffect(() => {
@@ -287,8 +234,6 @@ export default function App() {
   }, [])
 
   const projectId = project?.project_id ?? null
-  // Phase 20: the composer talks to Voltage with tools.
-  const agent = project?.agent === true
 
   /** Re-reads what the project has spent; after anything that may have paid. */
   const refreshUsage = useCallback(async (id: string | null) => {
@@ -306,11 +251,8 @@ export default function App() {
   useEffect(() => {
     if (stage !== 'editor' || voices.length > 0) return
     listVoices()
-      .then((r) => {
-        setVoices(r.voices)
-        setVoiceId((v) => (v === DEFAULT_VOICE ? r.default : v))
-      })
-      .catch(() => {}) // without the list, edits use the default voice
+      .then((r) => setVoices(r.voices))
+      .catch(() => {}) // without the list, the editor offers no voice to pick
   }, [stage, voices.length])
 
   // When a fresh project opens, Voltage takes the clip in once: an opening
@@ -331,8 +273,9 @@ export default function App() {
     setProject(loaded)
     consentGiven.current = loaded.consent !== null && loaded.consent !== undefined
     setTranscript(loaded.transcript)
-    setLongLines(loaded.settings?.long_lines ?? 'pause')
     setAutonomy(loaded.settings?.autonomy ?? 'ask')
+    setMayDo({ autonomy: loaded.settings?.autonomy ?? 'ask', turn_usd: loaded.settings?.turn_usd ?? MAY_DO.turn_usd,
+      effort: loaded.settings?.effort ?? MAY_DO.effort, ceiling_usd: loaded.settings?.ceiling_usd ?? MAY_DO.ceiling_usd })
     setPlan(loaded.plan ?? null)
     setReading(loaded.reading ?? null)
     // UX-7c: one workspace. A fresh project is read on arrival (a clip with
@@ -375,14 +318,6 @@ export default function App() {
    *  where it was asked (UX-6); the strip under the player is for the engine. */
   const tell = (text: string) => say({ role: 'assistant', text })
 
-  /** Whose voice a span belongs to, for the consent sentence: "the Shopkeeper". */
-  const whoAt = (at: Selection | null | undefined) => {
-    if (!at) return null
-    const st = (project?.statements ?? []).find((x) => x.start < at.end && at.start < x.end)
-    const name = project?.speakers?.find((sp) => sp.label === st?.speaker)?.name
-    return name ? (/^Speaker /.test(name) ? name : `the ${name}`) : null
-  }
-
   /** Run `go` once the project's consent is recorded — asking for it first,
    *  in a sentence, the first time a voice is about to be made (UX-3). */
   const withConsent = (who: string | null, go: () => void) => {
@@ -407,138 +342,32 @@ export default function App() {
     }
   }
 
-  const runPreview = async (
-    prompt: string,
-    answer?: Answer,
-    at: Selection | null = selection,
-    shown: string = prompt,
-    voice: string = voiceId,
-    line?: { key: LineKey; request: LineRequest },
-  ) => {
-    if (!projectId || !at) return
-    if (!consentGiven.current) {
-      return withConsent(whoAt(at), () => void runPreview(prompt, answer, at, shown, voice, line))
+  /** A line edited at the line (UX-1): Hear it says what was asked, in one
+   *  sentence, to Voltage. Nothing is voiced outside a turn. */
+  const hearLine = (_key: LineKey, request: LineRequest) => {
+    const words = `“${request.text}”`
+    const voice = request.voiceId ? voices.find((v) => v.voice_id === request.voiceId)?.name : undefined
+    const how = `${request.delivery ? `, said ${request.delivery}` : ''}${voice ? `, in ${voice}'s voice` : ''}`
+    const picture = request.mix === 'concatenate' ? 'holding the picture' : 'over the picture'
+    const { start, end } = request.selection
+    const line = (project?.statements ?? []).find((st) => st.start === start && st.end === end)
+    if (request.mix === 'replace' && line) return takeTurn(`Replace the line at ${clock(start)} (“${line.text}”) with ${words}${how}`)
+    if (request.at != null) return takeTurn(`Add ${words} at ${clock(request.at)}, ${picture}${how}`)
+    if (!line || request.mix === 'layer') {
+      // UX-5: a voice-over placed by time on a clip with no speech — the chosen
+      // span stands where a line would, so the row's machinery applies.
+      setPlaced((p) => (p.some((x) => x.start === start && x.end === end) ? p : [...p, request.selection]))
+      return takeTurn(`Add ${words} at ${clock(start)}–${clock(end)}, ${picture}${how}`)
     }
-    say({ role: 'user', text: shown })
-    setError(null)
-    if (line) {
-      setLine(line.key, { status: 'working', question: null, error: null, progress: 'Voicing the line…', request: line.request })
-    } else {
-      setCandidate(null)
-      setQuestion(null)
-      setGenerating(true)
-      setWorking(at)
-    }
-    setAsked(at)
-    setProgress({ value: 0, step: 'Queued' })
-
-    // A newer prompt supersedes an older one; the stale poll stops rather than
-    // racing to overwrite the newer candidate.
-    const token = ++previewToken.current
-    const superseded = () => previewToken.current !== token
-
-    try {
-      const job = await previewEdit(projectId, {
-        prompt,
-        start: at.start,
-        end: at.end,
-        voice_profile_id: voice,
-        ...(shown !== prompt ? { display: shown } : {}),
-        ...answer,
-      })
-      const finished = await pollJob(job.job_id, {
-        shouldStop: superseded,
-        onUpdate: (j) => {
-          setProgress({ value: j.progress, step: j.step })
-          if (line) setLine(line.key, { progress: j.step })
-        },
-      })
-      if (superseded()) return
-
-      const result = finished.result
-      if (finished.status === 'failed' || !result) {
-        if (line) setLine(line.key, { status: 'failed', error: finished.error ?? "Couldn't voice it. Try again.", progress: null })
-        else setError(finished.error ?? 'Preview failed. Try again.')
-        return
-      }
-      if (result.type === 'reply') {
-        say({ role: 'assistant', text: result.text })
-        if (line) setLine(line.key, null)
-        return
-      }
-      if (result.type === 'question') {
-        say({ role: 'assistant', text: result.question })
-        if (line) setLine(line.key, { status: 'needs-you', question: result, progress: null })
-        else setQuestion({ question: result, prompt, selection: at })
-        return
-      }
-      if (!('candidate_id' in result)) return   // a plan's job, not a preview's
-      if (line) {
-        setLines((all) => ({ ...all, [line.key]: { ...all[line.key], status: 'ready', takes: [...(all[line.key]?.takes ?? []), result], progress: null, question: null } }))
-      } else {
-        setSelection(result.plan.selection) // the backend's snapped range
-        setCandidate(result)
-      }
-      const over = result.plan.mix === 'layer' ? 0 : result.plan.selection.end - at.end
-      const notes = result.fit_notes ?? []
-      const tags = [
-        ...(result.plan.new_text !== (answer?.text ?? result.plan.new_text) ? ['shortened to fit'] : []),
-        ...notes,
-        ...(over > 0.01 && result.plan.mix !== 'concatenate' ? [`ran ${over.toFixed(1)} s into the pause`] : []),
-        ...(result.plan.fit === 'stretch' ? ['voice sped up to fit'] : notes.some((n) => n.includes('speed')) ? [] : ['voice at natural speed']),
-        'picture untouched',
-      ]
-      setReadouts((rs) => [...rs.filter((r) => r.selection.start !== at.start || r.selection.end !== at.end), { selection: at, tags }])
-    } catch (e) {
-      if (e instanceof PollCancelled) return
-      const message = e instanceof ApiError ? e.message : 'Preview failed. Try again.'
-      if (line) setLine(line.key, { status: 'failed', error: message, progress: null })
-      else setError(message)
-    } finally {
-      if (!superseded() && !line) {
-        setGenerating(false)
-        setWorking(null)
-        setProgress(null)
-      }
-      void refreshUsage(projectId)
-    }
+    return takeTurn(`Add ${words} after the line at ${clock(start)}, ${picture}${how}`)
   }
-
-  /** A line edited at the line (UX-1): hear it, keep it, another take, undo. */
-  const hearLine = (key: LineKey, request: LineRequest) => {
-    // UX-5: a voice-over placed by time on a clip with no speech — the chosen
-    // span is the selection, the line plays over the sound there.
-    if (request.mix === 'layer') {
-      setPlaced((p) => (p.some((x) => x.start === request.selection.start && x.end === request.selection.end) ? p : [...p, request.selection]))
-      void runPreview(
-        `Add the line "${request.text}"`,
-        { text: request.text, mix: 'layer', on_long: request.onLong, ...(request.delivery ? { delivery: request.delivery } : {}) },
-        request.selection, `Voice-over at ${clock(request.selection.start)}: “${request.text}”`, request.voiceId ?? voiceId, { key, request },
-      )
-      return
-    }
-    const s = statementsNow().find((st) => st.start === request.selection.start && st.end === request.selection.end)
-    const display = request.mix === 'replace'
-      ? `“${s?.text ?? ''}” → “${request.text}”`
-      : `Add after ${clock(request.selection.start)}: “${request.text}”`
-    // A chosen start: the line goes there, at its natural length — over the
-    // sound there, or with the picture held there.
-    const placed = request.mix !== 'replace' && request.at != null
-    const span = placed ? { start: request.at!, end: request.at! + 0.05 } : request.selection
-    const mix = placed ? (request.mix === 'concatenate' ? 'concatenate' : 'layer') : request.mix
-    void runPreview(
-      request.mix === 'replace' ? `Replace this line with "${request.text}"` : `Add the line "${request.text}"`,
-      { text: request.text, mix, on_long: request.onLong, ...(placed ? { fit: 'start' as const } : {}), ...(request.delivery ? { delivery: request.delivery } : {}) },
-      span, display, request.voiceId ?? voiceId, { key, request },
-    )
-  }
-  /** A take dragged to a new start: the same audio, placed again, replaces it under the line. */
-  const moveTake = async (key: LineKey, c: Candidate, start: number) => {
+  /** A take dragged to a new start: the same audio, placed again, stands under the line. */
+  const moveTake = async (item: PlanItem, c: Candidate, start: number) => {
     if (!projectId) return
     setError(null)
     try {
       const moved = await moveCandidate(projectId, c.candidate_id, { start })
-      setLines((all) => ({ ...all, [key]: { ...all[key], takes: all[key].takes.map((t) => (t.candidate_id === c.candidate_id ? moved : t)) } }))
+      setPlan((p) => (p ? { ...p, items: p.items.map((i) => (i.item_id === item.item_id ? { ...i, candidate: moved } : i)) } : p))
     } catch (e) {
       setError(e instanceof ApiError ? e.message : 'Could not move the take.')
     }
@@ -573,35 +402,19 @@ export default function App() {
   }
   const statementsNow = (): Statement[] => (project?.statements?.length ? project.statements : placedStatements())
 
-  const keepTake = async (key: LineKey, c: Candidate) => {
-    if (!projectId) return
+  /** Keep the take under a line: its plan item is approved and rendered —
+   *  Ship, for one line. A take that failed its sound check is kept on purpose. */
+  const keepItem = async (item: PlanItem) => {
+    if (!projectId || !plan) return
     setError(null)
     try {
-      const result = await approveEdit(projectId, c.candidate_id, !c.continuity.passed)
-      const { selection: at, new_text: text, mix = 'replace' } = c.plan
-      setApproved((a) => [...a, { edit_id: result.edit_id, start: at.start, end: at.end, text, mix }])
-      setLine(key, null)
-      setDownload(null)
-      if (await runExport()) setView('edited')
+      const passed = item.candidate?.continuity.passed ?? true
+      takeInApproval(await approvePlan(projectId, plan.plan_id, passed ? { items: [item.item_id] } : { items: [item.item_id], override: true }))
     } catch (e) {
       setError(e instanceof ApiError ? e.message : 'Keep failed.')
+    } finally {
+      void refreshUsage(projectId)
     }
-  }
-  const anotherTake = (key: LineKey) => {
-    const request = lines[key]?.request
-    if (request) hearLine(key, request)
-  }
-  const answerLine = (key: LineKey, option: QuestionOption) => {
-    const state = lines[key]
-    if (!state?.question || !state.request) return
-    const q = state.question
-    const request = { ...state.request, text: option.text ?? q.text }
-    say({ role: 'user', text: option.label })
-    void runPreview(
-      `Replace this line with "${request.text}"`,
-      { text: request.text, mix: option.mix ?? q.mix ?? request.mix, fit: option.fit ?? undefined, ...(request.delivery ? { delivery: request.delivery } : {}) },
-      request.selection, option.label, request.voiceId ?? voiceId, { key, request },
-    )
   }
   const removeStatement = async (s: Statement) => {
     if (!projectId) return
@@ -656,20 +469,10 @@ export default function App() {
     if (started && typeof started.catch === 'function') started.catch(() => {})
   }
 
-  /** Remember, for this project, what to do when a line runs long. */
-  const rememberLongLines = async (value: LongLines) => {
-    if (!projectId || value === longLines) return
-    setLongLines(value)
-    try {
-      await updateSettings(projectId, { long_lines: value })
-    } catch (e) {
-      tell(e instanceof ApiError ? e.message : "I couldn't save that setting. Try it again.")
-    }
-  }
-
   const rememberAutonomy = async (value: Autonomy) => {
     if (!projectId || value === autonomy) return
     setAutonomy(value)
+    setMayDo((m) => ({ ...m, autonomy: value }))
     try {
       await updateSettings(projectId, { autonomy: value })
     } catch (e) {
@@ -677,43 +480,16 @@ export default function App() {
     }
   }
 
-  /** Follows a job voicing the plan, refreshing the plan as it goes. */
-  const followPlanJob = async (jobId: string, planId: string) => {
+  /** "What Voltage may do" (20d): each choice in the sheet is saved as it is made. */
+  const changeMayDo = async (change: Partial<Pick<MayDo, 'autonomy' | 'turn_usd' | 'effort'>>) => {
     if (!projectId) return
-    const token = ++planToken.current
-    const superseded = () => planToken.current !== token
-    setPlanBusy(true)
-    setPlanProgress({ value: 0, step: 'Queued' })
-    let ticks = 0
-    let settled = false
+    if (change.autonomy) return rememberAutonomy(change.autonomy)
+    setMayDo((m) => ({ ...m, ...change }))
     try {
-      const finished = await pollJob(jobId, {
-        shouldStop: superseded,
-        onUpdate: (j) => {
-          setPlanProgress({ value: j.progress, step: j.step })
-          // The plan carries each line's status; re-read it now and then. A
-          // read still in flight when the job ends must not overwrite the result.
-          if (ticks++ % 4 === 0) {
-            getPlan(projectId, planId).then((p) => { if (!superseded() && !settled) setPlan(p) }).catch(() => {})
-          }
-        },
-      })
-      settled = true
-      if (superseded()) return
-      if (finished.status === 'failed') {
-        tell(finished.error ?? 'Voicing the plan failed. Say go again and I\'ll retry it.')
-      }
-      const result = finished.result
-      setPlan(result && 'type' in result && result.type === 'plan' ? result : await getPlan(projectId, planId))
+      const saved = await updateSettings(projectId, change)
+      setMayDo((m) => ({ ...m, turn_usd: saved.turn_usd ?? m.turn_usd, effort: saved.effort ?? m.effort, ceiling_usd: saved.ceiling_usd ?? m.ceiling_usd }))
     } catch (e) {
-      if (e instanceof PollCancelled) return
-      tell(e instanceof ApiError ? e.message : 'Voicing the plan failed. Say go again and I\'ll retry it.')
-    } finally {
-      if (!superseded()) {
-        setPlanBusy(false)
-        setPlanProgress(null)
-      }
-      void refreshUsage(projectId)
+      tell(e instanceof ApiError ? e.message : "I couldn't save that setting. Try it again.")
     }
   }
 
@@ -735,29 +511,19 @@ export default function App() {
     return takeTurn(answer ?? plan.question.guess ?? plan.question.options[0])
   }
 
-  /** Stop a running plan after the line it is on; the rest waits as planned. */
-  const stop = async () => {
-    if (!projectId || !plan) return
-    try {
-      setPlan(await stopPlan(projectId, plan.plan_id))
-    } catch (e) {
-      tell(e instanceof ApiError ? e.message : "I couldn't stop the plan. It will finish the line it's on.")
-    }
-  }
-
-  /** The box is for the whole video: a goal, or a change to the plan. A
-   *  selection on the Precise timeline still previews through it. */
-  const submitComposer = (text: string) => {
-    if (selection) return void runPreview(text)
-    return void takeTurn(text)
-  }
+  /** The box is for the whole video: a goal, a change to the plan, an answer.
+   *  With words selected on the Precise timeline, the sentence names the time. */
+  const submitComposer = (text: string) => void takeTurn(selection ? `At ${clock(selection.start)}: ${text}` : text)
 
   /** Phase 20: one turn of Voltage with tools. The steps arrive as messages
-   *  while it works; the result is the plan and Voltage's closing line. */
-  const takeTurn = async (text: string) => {
+   *  while it works; the result is the plan and Voltage's closing line. A
+   *  paid step needs the project's consent (UX-3): asked before the turn
+   *  under Just do it, and when the server asks for it (403) under Check
+   *  with me — then the same turn goes again, once. */
+  const takeTurn = async (text: string, again = false) => {
     if (!projectId) return
-    if (autonomy === 'draft' && !consentGiven.current) return withConsent(null, () => void takeTurn(text))
-    say({ role: 'user', text })
+    if (autonomy === 'draft' && !consentGiven.current) return withConsent(null, () => void takeTurn(text, again))
+    if (!again) say({ role: 'user', text })
     setError(null)
     setReview(false)
     setTurnBusy(true)
@@ -766,9 +532,12 @@ export default function App() {
       const job = await postTurn(projectId, text)
       await followTurn(job.job_id)
     } catch (e) {
-      tell(e instanceof ApiError ? e.message : "I couldn't take that in. Try saying it another way.")
       setTurnBusy(false)
       setTurnStep(null)
+      if (e instanceof ApiError && e.status === 403 && !consentGiven.current && !again) {
+        return withConsent(null, () => void takeTurn(text, true))
+      }
+      tell(e instanceof ApiError ? e.message : "I couldn't take that in. Try saying it another way.")
     }
   }
 
@@ -825,40 +594,31 @@ export default function App() {
     return takeTurn(`Use ${name}'s voice for the lines`)
   }
 
-  const changeItem = async (item: PlanItem, change: { enabled?: boolean; new_text?: string; include?: boolean; delivery?: string; mix?: Mix }) => {
-    if (!projectId || !plan) return
-    try {
-      setPlan(await updateItem(projectId, plan.plan_id, item.item_id, change))
-    } catch (e) {
-      tell(e instanceof ApiError ? e.message : "I couldn't change that item. Try it again.")
-    }
-  }
+  /** Another take of a line, or a failed one again: asked of Voltage in words (20c). */
+  const redoTheItem = (item: PlanItem) => takeTurn(`Another take of “${item.new_text}” (${item.item_id})`)
 
-  const startJob = async (start: () => Promise<{ job_id: string }>) => {
-    if (!projectId || !plan) return
-    if (!consentGiven.current) {
-      const first = plan.items.find((i) => i.kind === 'planned' && i.enabled)
-      return withConsent(whoAt(first?.selection), () => void startJob(start))
-    }
-    setError(null)
-    try {
-      const job = await start()
-      void followPlanJob(job.job_id, plan.plan_id)
-    } catch (e) {
-      tell(e instanceof ApiError ? e.message : "I couldn't start that. Say go again.")
-    }
-  }
-
-  const runThePlan = () => startJob(() => runPlan(projectId!, plan!.plan_id))
-  // 20c: another take is asked of Voltage in words; the plan runner's redo stays for a plan voiced by Run.
-  const redoTheItem = (item: PlanItem) => item.status === 'planned' && plan
-    ? startJob(() => redoItem(projectId!, plan.plan_id, item.item_id))
-    : takeTurn(`Another take of “${item.new_text}” (${item.item_id})`)
-  const answerTheItem = (item: PlanItem, option: QuestionOption) => {
-    say({ role: 'user', text: option.label })
-    return startJob(() => answerItem(projectId!, plan!.plan_id, item.item_id, {
-      fit: option.fit ?? undefined, mix: option.mix ?? undefined, text: option.text ?? undefined,
-    }))
+  /** The plan after an approval: its items as they stand, the new edits as
+   *  revisions on their lines, and the render, which the player switches to.
+   *  Returns the download when there is a render. */
+  const takeInApproval = (result: PlanApproval) => {
+    setPlan(result.plan)
+    const fresh = result.plan.items.filter((i) => i.status === 'approved' && i.edit_id
+      && !approved.some((r) => r.edit_id === i.edit_id))
+    setApproved((a) => [...a, ...fresh.map((i) => ({
+      edit_id: i.edit_id!, start: i.candidate?.plan.selection.start ?? i.selection.start,
+      end: i.candidate?.plan.selection.end ?? i.selection.end, text: i.new_text, mix: i.mix,
+    }))])
+    if (!result.export || !projectId) return null
+    setSegments(result.export.segments)
+    setInserts(result.export.inserts ?? [])
+    setPieces(result.export.pieces ?? piecesFromInserts(result.export.inserts ?? [], project?.duration ?? 0))
+    const stem = (project?.filename ?? 'video').replace(/\.[^.]+$/, '')
+    const url = artifactUrl(projectId, result.export.render.sha256)
+    const download = { url, filename: `${stem}-edited.mp4` }
+    setDownload(download)
+    setRendered({ url, duration: result.export.render.duration })
+    setView('edited')
+    return download
   }
 
   /** Ship the ready changes — all of them, or the ones kept — and render;
@@ -868,23 +628,8 @@ export default function App() {
     setError(null)
     try {
       const result = await approvePlan(projectId, plan.plan_id, items ? { items } : {})
-      setPlan(result.plan)
-      const fresh = result.plan.items.filter((i) => i.status === 'approved' && i.edit_id
-        && !approved.some((r) => r.edit_id === i.edit_id))
-      setApproved((a) => [...a, ...fresh.map((i) => ({
-        edit_id: i.edit_id!, start: i.candidate?.plan.selection.start ?? i.selection.start,
-        end: i.candidate?.plan.selection.end ?? i.selection.end, text: i.new_text, mix: i.mix,
-      }))])
-      if (result.export) {
-        setSegments(result.export.segments)
-        setInserts(result.export.inserts ?? [])
-        setPieces(result.export.pieces ?? piecesFromInserts(result.export.inserts ?? [], project?.duration ?? 0))
-        const stem = (project?.filename ?? 'video').replace(/\.[^.]+$/, '')
-        const url = artifactUrl(projectId, result.export.render.sha256)
-        const download = { url, filename: `${stem}-edited.mp4` }
-        setDownload(download)
-        setRendered({ url, duration: result.export.render.duration })
-        setView('edited')
+      const download = takeInApproval(result)
+      if (result.export && download) {
         const went = new Set(result.approved.map((a) => a.item_id))
         setShipped({
           items: result.plan.items.filter((i) => went.has(i.item_id)),
@@ -898,7 +643,7 @@ export default function App() {
         })
       }
       if (result.skipped.length > 0) {
-        setError(`${result.skipped.length} ${result.skipped.length === 1 ? 'change' : 'changes'} skipped: the sound check failed. Listen to them, then Redo or approve them one by one.`)
+        setError(`${result.skipped.length} ${result.skipped.length === 1 ? 'change' : 'changes'} skipped: the sound check failed. Listen to them, then ask for another take or keep them one by one.`)
       }
     } catch (e) {
       setError(e instanceof ApiError ? e.message : 'Approve failed.')
@@ -944,28 +689,6 @@ export default function App() {
     setSeam(null)
   }
 
-  /** Ask Claude for tighter wordings of a line: two, for the editor to offer. */
-  const reword = async (s: Statement, draft: string): Promise<string[]> => {
-    if (!projectId) return []
-    setError(null)
-    try {
-      const asks = [
-        rewordLine(projectId, { start: s.start, end: s.end, draft }),
-        rewordLine(projectId, { start: s.start, end: s.end, draft, instruction: 'so it is shorter while keeping every detail, name and number' }),
-      ]
-      const results = await Promise.allSettled(asks)
-      const texts = results.flatMap((r) => (r.status === 'fulfilled' ? [r.value.text] : []))
-      if (texts.length === 0) {
-        const failed = results.find((r) => r.status === 'rejected') as PromiseRejectedResult | undefined
-        const reason = failed?.reason
-        tell(reason instanceof ApiError ? reason.message : "I couldn't come up with a wording just now. Try again in a moment.")
-      }
-      return Array.from(new Set(texts))
-    } finally {
-      void refreshUsage(projectId)
-    }
-  }
-
   const findSpeakers = async () => {
     if (!projectId) return
     setDetecting(true)
@@ -1000,38 +723,6 @@ export default function App() {
     const time = edited ? renderTimeFrom(s.start, pieces) : s.start
     setSeekRequest((r) => ({ time, id: (r?.id ?? 0) + 1 }))
     setCurrentTime(time)
-  }
-
-  const answer = (option: QuestionOption) => {
-    if (!question) return
-    const { question: q, prompt, selection: at } = question
-    void runPreview(prompt, {
-      text: q.text,
-      mix: option.mix ?? q.mix ?? undefined,
-      fit: option.fit ?? undefined,
-    }, at, option.label)
-  }
-
-  const approve = async (override = false) => {
-    if (!projectId || !candidate) return
-    setError(null)
-    try {
-      const result = await approveEdit(projectId, candidate.candidate_id, override)
-      const { selection: at, new_text: text, mix = 'replace' } = candidate.plan
-      setApproved((a) => [...a, { edit_id: result.edit_id, start: at.start, end: at.end, text, mix }])
-      setCandidate(null)
-      setAsked(null)
-      setDownload(null) // the last render no longer includes every approved edit
-      // Render straight away, so pressing Play hears the edit.
-      if (await runExport()) setView('edited')
-    } catch (e) {
-      // Never silently drop the candidate — leave it on screen to iterate on.
-      if (e instanceof ApiError && e.status === 422) {
-        setError('Continuity check failed — this edit cannot ship.')
-      } else {
-        setError('Approve failed.')
-      }
-    }
   }
 
   /** Undo an approved edit: the transcript shows the line as shot, and the
@@ -1155,74 +846,41 @@ export default function App() {
     setStage('load')
   }
 
-  // Where things stand line by line: the plan's items, and the one edit the
-  // chat may be working on.
-  const pendingLines: PendingLine[] = [
-    ...(plan?.items ?? [])
-      .filter((i) => i.kind === 'planned' && i.enabled && ['planned', 'working', 'ready', 'needs-you', 'failed'].includes(i.status))
-      .map((i) => ({ selection: i.selection, status: i.status, text: i.new_text, mix: i.mix })),
-    ...(generating && working ? [{ selection: working, status: 'working' as const }]
-      : question ? [{ selection: question.selection, status: 'needs-you' as const }]
-      : candidate ? [{ selection: candidate.plan.selection, status: 'ready' as const }]
-      : []),
-  ]
+  // Where things stand line by line: the plan's items, and nothing else.
+  const planItems = plan?.items.filter((i) => i.kind === 'planned' && i.enabled) ?? []
+  const pendingLines: PendingLine[] = planItems
+    .filter((i) => ['planned', 'working', 'ready', 'needs-you', 'failed'].includes(i.status))
+    .map((i) => ({ selection: i.selection, status: i.status, text: i.new_text, mix: i.mix }))
   const readyCount = plan?.items.filter((i) => i.status === 'ready').length ?? 0
   const reviewable = (plan?.items.filter((i) => i.status === 'ready' || i.status === 'approved').length ?? 0) > 0
   const reviewCount = plan?.items.filter((i) => i.kind === 'planned' && (i.status === 'ready' || i.status === 'approved')).length ?? 0
   const isHeld = (item: PlanItem) => (decisions[item.item_id] ? decisions[item.item_id] === 'hold' : !(item.candidate?.continuity.passed ?? true))
   const readyItems = plan?.items.filter((i) => i.kind === 'planned' && i.status === 'ready') ?? []
   const keptItems = readyItems.filter((i) => !isHeld(i))
-  const busy = generating || planBusy || turnBusy
+  const busy = turnBusy
   const clarifying = plan?.status === 'clarifying'
-  const planned = plan?.items.filter((i) => i.kind === 'planned' && i.enabled) ?? []
-  const doneCount = planned.filter((i) => ['ready', 'approved', 'needs-you', 'failed'].includes(i.status)).length
   const stateWord = clarifying ? 'has a question'
-    : plan?.status === 'stopping' ? 'stopping after this line'
-    : planBusy ? `working · ${doneCount} of ${planned.length} done`
+    : turnBusy ? 'working'
     : editingLine ? 'standing by'
     : plan?.status === 'proposed' ? 'has a plan'
     : review ? 'ready to ship'
     : 'ready'
-  const sendLabel = clarifying ? 'Answer'
-    : selection ? 'Preview the change'
-    : 'Send'
+  const sendLabel = clarifying ? 'Answer' : 'Send'
   const placeholder = clarifying ? 'Answer, or tell Voltage anything else'
     : review ? "What's off?"
     : selection ? 'Ask for a change, e.g. say "30% off" instead'
-    : plan && (plan.status === 'running' || plan.status === 'stopping') ? 'Voicing the plan; Stop it to change it'
     : plan ? 'Say what to change, or ask for another take; "ship it" when it sounds right'
     : 'What should this video say?'
-  const secondsLeft = plan && planBusy ? Math.max(5, Math.round((plan.estimate.seconds || 12) * (1 - (planned.length ? doneCount / planned.length : 0)))) : 0
-
-  // The take's own details: whose line, in which voice, and whether it ran on.
-  const takeSpeakerLabel = candidate
-    ? statements.find((s) => s.start < candidate.plan.selection.end && candidate.plan.selection.start < s.end)?.speaker
-    : null
-  const takeSpeaker = speakers.find((s) => s.label === takeSpeakerLabel)
-  const takeVoice = candidate ? voiceName(voices, candidate.plan.voice_profile_id) : undefined
-  const overrun = candidate && asked ? candidate.plan.selection.end - asked.end : 0
-  const ranOn = candidate?.plan.mix !== 'concatenate' && overrun > 0.01
 
   const sourceClock = showEdited ? sourceTimeFrom(currentTime, pieces) : currentTime
   const voiceLine = usage?.lines.find((l) => l.vendor === 'elevenlabs' && l.units > 0)
   const usdPerChar = voiceLine ? voiceLine.usd / voiceLine.units : null
   const playingMix = playingTake
     ? (playingCandidate.current?.candidate_id === playingTake ? playingCandidate.current.plan.mix : null)
-      ?? Object.values(lines).flatMap((l) => l.takes).find((c) => c.candidate_id === playingTake)?.plan.mix ?? 'replace'
+      ?? plan?.items.find((i) => i.candidate?.candidate_id === playingTake)?.candidate?.plan.mix ?? 'replace'
     : null
-  // What is waiting on you, line by line, for the panel's last word.
-  const lineEntries = Object.entries(lines)
-  const needsYou = lineEntries.filter(([, l]) => l.status === 'needs-you')
-  const readyLines = lineEntries.filter(([, l]) => l.status === 'ready')
-  const atLine = (key: LineKey) => {
-    const i = statements.findIndex((s) => keyOf({ start: s.start, end: s.end }) === key || `add-${s.end.toFixed(3)}` === key)
-    document.getElementById(`line-${i}`)?.scrollIntoView({ behavior: prefersReducedMotion() ? 'auto' : 'smooth', block: 'center' })
-    return i >= 0 ? clock(statements[i].start) : ''
-  }
-  const timeOf = (key: LineKey) => {
-    const i = statements.findIndex((s) => keyOf({ start: s.start, end: s.end }) === key || `add-${s.end.toFixed(3)}` === key)
-    return i >= 0 ? clock(statements[i].start) : key
-  }
+  // What is waiting on you, line by line, for the rail's badge.
+  const needsYou = planItems.filter((i) => i.status === 'needs-you')
   // UX-7b: the monitor's timeline and caption. Times follow the version that
   // plays: an insert in the edited render pushes everything after it later.
   const toRender = (t: number) => (showEdited ? renderTimeFrom(t, pieces) : t)
@@ -1233,13 +891,9 @@ export default function App() {
   ]
   // A take in hand, not yet kept, is captioned with its words too: the picture
   // shows what you are about to hear.
-  const takesInHand: CaptionPending[] = [
-    ...Object.values(lines).flatMap((l) => {
-      const take = l.takes[l.takes.length - 1]
-      return take ? [{ selection: take.plan.selection, text: take.plan.new_text, mix: take.plan.mix }] : []
-    }),
-    ...(candidate ? [{ selection: candidate.plan.selection, text: candidate.plan.new_text, mix: candidate.plan.mix }] : []),
-  ]
+  const takesInHand: CaptionPending[] = readyItems.flatMap((i) => (
+    i.candidate ? [{ selection: i.candidate.plan.selection, text: i.candidate.plan.new_text, mix: i.candidate.plan.mix }] : []
+  ))
   const captionRuns = captionAt(sourceClock, statements, approved, [...pendingLines, ...takesInHand], transcript, rendered !== null && view === 'original')
   // A take playing in place with word times (the polish pass): its words, lit as they are said.
   const spoken = playingTake && playingCandidate.current?.candidate_id === playingTake && playingCandidate.current.words?.length
@@ -1281,7 +935,7 @@ export default function App() {
         <ExportBar segments={segments} inserts={inserts} pieces={pieces} onExport={() => void runExport()} download={download} busy={exporting} />
       </header>
 
-      <main id="main" className="flex min-h-0 flex-col gap-4 overflow-y-auto px-6 pt-4 pb-8 max-[960px]:overflow-visible max-[960px]:px-4 max-[960px]:pb-6 [&>*]:shrink-0" aria-busy={planBusy || undefined}>
+      <main id="main" className="flex min-h-0 flex-col gap-4 overflow-y-auto px-6 pt-4 pb-8 max-[960px]:overflow-visible max-[960px]:px-4 max-[960px]:pb-6 [&>*]:shrink-0" aria-busy={turnBusy || undefined}>
         <Player
           src={showEdited ? rendered.url : artifactUrl(project.project_id, project.media.sha256)}
           duration={showEdited ? rendered.duration : project.duration}
@@ -1344,28 +998,22 @@ export default function App() {
           selection={selection}
           currentTime={sourceClock}
           pendingLines={pendingLines}
-          lines={lines}
-          longLines={longLines}
-          disabled={planBusy}
+          items={planItems}
+          disabled={turnBusy}
           usdPerChar={usdPerChar}
           playing={playingTake}
-          readouts={readouts}
           onSeek={seekToStatement}
           onHear={hearLine}
-          onKeep={(key, c) => keepTake(key, c)}
-          onAnother={anotherTake}
-          onAnswer={answerLine}
+          onKeep={(item) => keepItem(item)}
+          onAnother={(item) => redoTheItem(item)}
           onUndo={(id) => void revert(id)}
           onRemove={(s) => void removeStatement(s)}
           onShift={(s, to) => void shiftStatement(s, to)}
           onPlayTake={playTake}
-          onDismiss={(key) => setLine(key, null)}
-          onMove={(key, c, start) => void moveTake(key, c, start)}
+          onMove={(item, c, start) => void moveTake(item, c, start)}
           onMoveKept={(id, start) => void moveKept(id, start)}
           placing={placing}
           onPlacing={setPlacing}
-          onReword={reword}
-          onLongLinesChange={(v) => void rememberLongLines(v)}
           onEditingChange={setEditingLine}
           duration={project.duration}
           filter={reviewable && plan ? { count: reviewCount, on: review, onChange: setReview } : undefined}
@@ -1393,11 +1041,11 @@ export default function App() {
           <Button variant="ghost" size="icon" onClick={showPanel} aria-label={`Show Voltage. ${stateWord[0].toUpperCase()}${stateWord.slice(1)}`}>
             <Presence size={18} working={busy} />
           </Button>
-          {(needsYou.length > 0 || readyLines.length > 0) && (
+          {(needsYou.length > 0 || readyItems.length > 0) && (
             <span
               className={cn('flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-xs font-semibold text-background', needsYou.length > 0 ? 'bg-needs' : 'bg-changed')}
               aria-hidden="true"
-            >{needsYou.length > 0 ? needsYou.length : readyLines.length}</span>
+            >{needsYou.length > 0 ? needsYou.length : readyItems.length}</span>
           )}
           <span className="rotate-180 whitespace-nowrap text-sm leading-none text-muted-foreground [writing-mode:vertical-rl] max-[960px]:hidden" aria-hidden="true">{stateWord}</span>
           <span className="flex-1 max-[960px]:hidden" />
@@ -1445,7 +1093,6 @@ export default function App() {
             : selection && precise ? `Talking about the words at ${clock(selection.start)}.`
             : (project.statements?.length ?? 0) === 0 ? 'For the whole video: what it should say, a brief, or ask me to look at it and help.'
             : 'For the whole video: a goal, or a change to the plan. To change one line, click it.'}
-          toolbar={agent ? null : <VoicePicker voices={voices} value={voiceId} onChange={setVoiceId} />}
           header={
             <div className="flex flex-none items-center gap-2.5 border-b px-5 py-3">
               <Presence size={16} working={busy} />
@@ -1453,6 +1100,10 @@ export default function App() {
               <span className="text-sm text-muted-foreground" role="status">{stateWord}</span>
               <span className="flex-1" />
               <AutonomySwitch value={autonomy} onChange={(v) => void rememberAutonomy(v)} />
+              <Button variant="ghost" size="sm" onClick={() => setMayDoOpen(true)} aria-label="What Voltage may do: the turn's spend cap and the effort" title="What Voltage may do">
+                <SlidersHorizontal aria-hidden="true" />
+              </Button>
+              <WhatVoltageMayDo open={mayDoOpen} value={mayDo} onChange={(c) => void changeMayDo(c)} onClose={() => setMayDoOpen(false)} />
               <Button variant="ghost" size="sm" onClick={() => setPanelHidden(true)} aria-label="Hide Voltage. Press backslash to show it again">
                 Hide <kbd className="pointer-events-none inline-flex h-5 min-w-5 items-center justify-center rounded border bg-muted px-1 font-sans text-xs text-muted-foreground" aria-hidden="true">\</kbd>
                 <ChevronRight aria-hidden="true" />
@@ -1460,7 +1111,7 @@ export default function App() {
             </div>
           }
         >
-          {!plan && messages.length === 0 && !generating && (
+          {!plan && messages.length === 0 && (
             <ReadingCard
               project={project}
               reading={readingBusy ? null : (reading ?? undefined)}
@@ -1483,9 +1134,9 @@ export default function App() {
               </div>
             </div>
           )}
-          {editingLine && !planBusy && (
+          {editingLine && !turnBusy && (
             <div className="text-base leading-relaxed text-muted-foreground">
-              You're on {clock(editingLine.start)}. I'll stay out of the way while you write; ask for wording and I'll offer a couple of tighter lines.
+              You're on {clock(editingLine.start)}. I'll stay out of the way while you write; Hear it brings the line to me.
             </div>
           )}
           {plan && editingLine && plan.status === 'done' && !showPlanWhileEditing && (
@@ -1496,84 +1147,17 @@ export default function App() {
           {plan && (review || plan.status === 'done') && !(editingLine && plan.status === 'done' && !showPlanWhileEditing) && (
             <ActivityLog plan={plan} />
           )}
-          {(needsYou.length > 0 || readyLines.length > 0) && !generating && (
-            <div className="flex items-center gap-3 rounded-lg border bg-background p-3 shadow-xs" data-testid="line-action">
-              <span className="flex-1 text-sm">
-                {needsYou.length > 0
-                  ? `${needsYou.length === 1 ? 'One line needs' : `${needsYou.length} lines need`} you, at ${timeOf(needsYou[0][0])}.`
-                  : `${readyLines.length === 1 ? 'One line is' : `${readyLines.length} lines are`} ready to hear.`}
-              </span>
-              <Button size="sm" onClick={() => atLine((needsYou[0] ?? readyLines[0])[0])}>
-                {needsYou.length > 0 ? 'Go to it' : readyLines.length === 1 ? 'Go to it' : 'Go to the first'}
-              </Button>
-            </div>
-          )}
           {plan && !clarifying && !(editingLine && plan.status === 'done' && !showPlanWhileEditing) && (
             <PlanCard
               plan={plan}
               speakers={speakers}
               voices={voices}
               projectId={project.project_id}
-              busy={planBusy}
-              onToggle={(item, enabled) => changeItem(item, { enabled })}
-              onReword={(item, text) => changeItem(item, { new_text: text })}
-              onInclude={(item, include) => changeItem(item, { include })}
-              onRun={() => runThePlan()}
+              busy={turnBusy}
               onAdjust={() => composerRef.current?.focus()}
-              onAnswer={(item, option) => answerTheItem(item, option)}
               onRedo={(item) => redoTheItem(item)}
-              onDelivery={(item, delivery) => changeItem(item, { delivery: delivery ?? '' })}
-              onMix={(item, mix) => changeItem(item, { mix })}
-              onStop={() => stop()}
               onVoice={(id) => pickPlanVoice(id)}
             />
-          )}
-          {planBusy && (
-            <div className="flex flex-col gap-1.5 text-sm text-muted-foreground" data-testid="plan-progress" role="status">
-              <div className="flex items-center gap-2.5">
-                <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-muted" role="progressbar" aria-label="Voicing the plan" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round((planProgress?.value ?? 0) * 100)}>
-                  <div className="h-full w-full origin-left bg-primary transition-transform duration-300" style={{ transform: `scaleX(${Math.min(1, Math.max(0, planProgress?.value ?? 0))})` }} />
-                </div>
-                <span className="tnum whitespace-nowrap text-sm text-muted-foreground">about {secondsLeft} s left</span>
-              </div>
-            </div>
-          )}
-
-          {generating && (
-            <div className="flex flex-col gap-1.5 text-sm text-muted-foreground" data-testid="generating">
-              <div className="flex items-center gap-2 text-foreground" role="status">
-                <Loader2 className="size-3.5 shrink-0 animate-spin text-muted-foreground" aria-hidden="true" />
-                {progress?.step ?? 'Queued'}
-              </div>
-              <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-muted" role="progressbar" aria-label="Making the take" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round((progress?.value ?? 0) * 100)}>
-                <div
-                  data-testid="progress-bar"
-                  className="h-full w-full origin-left bg-primary transition-transform duration-300"
-                  style={{ transform: `scaleX(${Math.min(1, Math.max(0, progress?.value ?? 0))})` }}
-                />
-              </div>
-            </div>
-          )}
-          {question && <QuestionCard question={question.question} onChoose={answer} />}
-          {candidate && (
-            <>
-              {ranOn && longLines === 'pause' && (
-                <div className="text-sm leading-normal text-muted-foreground">
-                  Longer lines run into the pause after them in this project.{' '}
-                  <Button variant="link" size="sm" className="h-auto p-0" onClick={() => void rememberLongLines('ask')}>Ask me each time instead</Button>
-                </div>
-              )}
-              <CandidateCard
-                candidate={candidate}
-                onApprove={() => approve()}
-                onApproveAnyway={() => approve(true)}
-                onTryAgain={() => { setCandidate(null); setAsked(null) }}
-                projectId={project.project_id}
-                label={`The change at ${clock(candidate.plan.selection.start)}${takeVoice ? `, ${takeVoice}'s voice` : ''}`}
-                speaker={takeSpeaker ? { name: takeSpeaker.name, slot: speakerSlot(speakers, takeSpeaker.label) } : null}
-                note={ranOn ? `Ran ${overrun.toFixed(1)} s into the pause after it` : null}
-              />
-            </>
           )}
           {turnBusy && (
             <div className="flex items-center gap-2.5 text-sm text-muted-foreground" role="status" data-testid="turn-working">
@@ -1581,7 +1165,7 @@ export default function App() {
               <span>{turnStep ?? 'Working…'}</span>
             </div>
           )}
-          {plan && readyItems.length > 0 && !planBusy && !generating && !clarifying && (
+          {plan && readyItems.length > 0 && !turnBusy && !clarifying && (
             <ShipCard
               ready={readyItems}
               kept={keptItems}

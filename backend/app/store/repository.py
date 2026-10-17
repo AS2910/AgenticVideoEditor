@@ -286,7 +286,7 @@ class ProjectRepository:
     # ── settings ──
 
     def settings(self, project_id: str) -> dict:
-        """Per-project preferences, e.g. how a long line is placed."""
+        """Per-project preferences: the autonomy, what a turn may spend, the effort."""
         with self.db.tx() as c:
             row = c.execute("SELECT settings FROM projects WHERE id = ?", (project_id,)).fetchone()
         return json.loads(row["settings"] or "{}") if row else {}

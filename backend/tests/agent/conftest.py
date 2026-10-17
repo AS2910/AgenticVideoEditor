@@ -74,7 +74,7 @@ def world():
     made: list[dict] = []
     shipped: list[list[str]] = []
 
-    def generate(project_id, rec, candidate_id, selection, text_, voice_id, fit, mix, on_long, report, delivery=None, voice_notes=(),
+    def generate(project_id, rec, candidate_id, selection, text_, voice_id, fit, mix, report, delivery=None, voice_notes=(),
                  voice_settings=None, model=None, flex_max=None, max_regenerations=None):
         made.append({"candidate_id": candidate_id, "selection": selection, "text": text_, "voice_id": voice_id, "mix": mix,
                      "delivery": delivery, "voice_settings": voice_settings, "model": model, "fit": fit, "flex_max": flex_max,

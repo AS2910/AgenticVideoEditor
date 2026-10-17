@@ -175,3 +175,28 @@ def test_without_speakers_everyone_is_context():
     from app.domain.models import Selection, Transcript, Word
     t = Transcript(words=(Word("Hi", 0.0, 0.5), Word("Sure", 1.2, 1.5), Word("ok", 2.0, 2.4)))
     assert context_spans(t, Selection(1.2, 1.5)) == [(0.0, 0.5), (2.0, 2.4)]
+
+
+# --- 20d: the pitch register is a check on a replacement, not on an added line ---
+
+def _tone_hz(seconds, hz, level=0.1):
+    t = np.arange(int(RATE * seconds)) / RATE
+    return (level * np.sin(2 * np.pi * hz * t)).astype(np.float32)
+
+
+def _high_line(tmp_path, store):
+    """A line an octave above the room's 'words' (200 → 400 Hz: +12 semitones)."""
+    m._write_wav(tmp_path / "high.wav", np.concatenate([_tone_hz(0.3, 400), np.zeros(int(0.3 * RATE), np.float32)]), RATE)
+    return store.put_file("p1", tmp_path / "high.wav", kind="audio", container="wav", duration=0.6)
+
+
+@needs_ffmpeg
+def test_a_replacement_an_octave_off_is_flagged_but_an_added_line_in_another_voice_is_not(store, tmp_path):
+    source, words = _room_source(tmp_path, room_level=0.003)
+    replaced = m.MeasuredContinuityEngine(store).assess(source, words, EditPlan(Selection(1.2, 1.8), "new", "v"), _high_line(tmp_path, store))
+    assert any("semitones off" in w for w in replaced.report.warnings) and replaced.report.prosody is not None
+    added = m.MeasuredContinuityEngine(store).assess(source, words, EditPlan(Selection(1.2, 1.8), "new", "v", mix="layer"), _high_line(tmp_path, store))
+    assert not any("semitones" in w for w in added.report.warnings)
+    assert added.report.prosody is None
+    held = m.MeasuredContinuityEngine(store).assess(source, words, EditPlan(Selection(1.2, 1.2), "new", "v", mix="concatenate"), _high_line(tmp_path, store))
+    assert not any("semitones" in w for w in held.report.warnings)

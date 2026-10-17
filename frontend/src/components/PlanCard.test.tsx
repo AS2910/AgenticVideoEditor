@@ -2,7 +2,6 @@ import { describe, it, expect, vi } from 'vitest'
 import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { PlanCard } from './PlanCard'
-import { estimateText } from '../transcript/planText'
 import type { Plan, PlanItem } from '../types'
 
 const SPEAKERS = [
@@ -32,37 +31,21 @@ const plan = (over: Partial<Plan> = {}): Plan => ({
   findings: [], question: null, spend_usd: 0, log: [], items: [item()], ...over,
 })
 
-const handlers = () => ({
-  onToggle: vi.fn(), onReword: vi.fn(), onInclude: vi.fn(), onRun: vi.fn(), onAnswer: vi.fn(), onRedo: vi.fn(),
-})
+const handlers = () => ({ onRedo: vi.fn() })
 
 describe('PlanCard, proposed', () => {
-  it('lists each change ticked and editable, with the estimate and Run', async () => {
-    const h = handlers()
-    render(<PlanCard plan={plan()} speakers={SPEAKERS} voices={VOICES} projectId="p1" {...h} />)
+  it('lists each change in words, with who says it and why — nothing to tick, type or run', () => {
+    render(<PlanCard plan={plan()} speakers={SPEAKERS} voices={VOICES} projectId="p1" {...handlers()} onAdjust={() => {}} />)
     expect(screen.getByText('1 change')).toBeInTheDocument()
     expect(screen.getByText('Customer, 0:07')).toBeInTheDocument()
+    expect(screen.getByText('Say “Start a live Bhaji Cam session.” at 0:07')).toBeInTheDocument()
     expect(screen.getByText('Brand name')).toBeInTheDocument()
-    expect(screen.getByText('≈ 31 voice characters · under $0.01 · ready in about 12 s')).toBeInTheDocument()
-
-    await userEvent.click(screen.getByRole('checkbox', { name: 'Include the change at 0:07' }))
-    expect(h.onToggle).toHaveBeenCalledWith(expect.objectContaining({ item_id: 'i1' }), false)
-
-    const box = screen.getByRole('textbox', { name: 'New wording at 0:07' })
-    await userEvent.clear(box)
-    await userEvent.type(box, 'Start a Bhaji Cam session.{Enter}')
-    expect(h.onReword).toHaveBeenCalledWith(expect.objectContaining({ item_id: 'i1' }), 'Start a Bhaji Cam session.')
-
-    await userEvent.click(screen.getByRole('button', { name: 'Go ahead' }))
-    expect(h.onRun).toHaveBeenCalled()
-  })
-
-  it('disables Go ahead with nothing ticked, and while a question is open', () => {
-    const { unmount } = render(<PlanCard plan={plan({ items: [item({ enabled: false })] })} speakers={SPEAKERS} voices={VOICES} projectId="p1" {...handlers()} />)
-    expect(screen.getByRole('button', { name: 'Go ahead' })).toBeDisabled()
-    unmount()
-    render(<PlanCard plan={plan({ status: 'clarifying' })} speakers={SPEAKERS} voices={VOICES} projectId="p1" {...handlers()} />)
-    expect(screen.getByRole('button', { name: 'Go ahead' })).toBeDisabled()
+    // Every change to the plan is said to Voltage; the card has no form.
+    expect(screen.queryByRole('checkbox')).toBeNull()
+    expect(screen.queryByRole('textbox')).toBeNull()
+    expect(screen.queryByRole('button', { name: /go ahead|run|stop|voice the change/i })).toBeNull()
+    expect(screen.queryByText(/voice characters/)).toBeNull()
+    expect(screen.getByRole('button', { name: 'Adjust' })).toBeInTheDocument()
   })
 
   it('mentions a suggestion in a sentence until the plan has run', () => {
@@ -73,25 +56,21 @@ describe('PlanCard, proposed', () => {
     expect(screen.queryByTestId('suggestion')).not.toBeInTheDocument()
   })
 
-  it('offers a suggestion to add or leave', async () => {
-    const h = handlers()
+  it('puts a suggestion after the plan has run, as a question for the box — no buttons', () => {
     const noticed = item({ item_id: 'i2', kind: 'suggestion', enabled: false, status: 'suggested',
       selection: { start: 23.4, end: 24.8 }, speaker: 'B', old_text: 'These are regular ones.',
       new_text: 'These are everyday ones.', reason: 'Reads oddly in a sale ad' })
-    render(<PlanCard plan={plan({ status: 'done', items: [item({ status: 'ready', candidate: CANDIDATE }), noticed] })} speakers={SPEAKERS} voices={VOICES} projectId="p1" {...h} />)
+    render(<PlanCard plan={plan({ status: 'done', items: [item({ status: 'ready', candidate: CANDIDATE }), noticed] })} speakers={SPEAKERS} voices={VOICES} projectId="p1" {...handlers()} />)
     const box = screen.getByTestId('suggestion')
     const wrap = screen.getByTestId('plan').parentElement as HTMLElement
     expect(Array.from(wrap.children).map((c) => c.getAttribute('data-testid'))).toEqual(['plan', 'suggestion'])
     expect(box).toHaveTextContent('Noticed: at 0:23 Shopkeeper says “These are regular ones.”, reads oddly in a sale ad. Change it to “These are everyday ones.”?')
-    await userEvent.click(within(box).getByRole('button', { name: 'Add to plan' }))
-    expect(h.onInclude).toHaveBeenCalledWith(expect.objectContaining({ item_id: 'i2' }), true)
-    await userEvent.click(within(box).getByRole('button', { name: 'Leave it' }))
-    expect(h.onInclude).toHaveBeenLastCalledWith(expect.objectContaining({ item_id: 'i2' }), false)
+    expect(within(box).queryByRole('button')).toBeNull()
   })
 })
 
-describe('PlanCard, running', () => {
-  it('shows progress, a ready take with its score, and Approve', async () => {
+describe('PlanCard, running and done', () => {
+  it('shows a ready take with its score and Another take; what you do next is not the plan\'s', async () => {
     const h = handlers()
     const items = [item({ status: 'ready', candidate: CANDIDATE }), item({ item_id: 'i2', status: 'working', selection: { start: 9.38, end: 9.88 }, speaker: 'B' })]
     render(<PlanCard plan={plan({ status: 'running', items })} speakers={SPEAKERS} voices={VOICES} projectId="p1" {...h} />)
@@ -101,7 +80,10 @@ describe('PlanCard, running', () => {
     expect(screen.getByText('0.96')).toBeInTheDocument()
     expect(screen.getByLabelText('Play take')).toHaveAttribute('src', `/api/projects/p1/artifacts/${'a'.repeat(64)}`)
     expect(screen.getByText('Starting…')).toBeInTheDocument()
-    // What you do next (review, ship) is the panel's own last card now (ShipCard), not the plan's.
+    expect(screen.queryByRole('progressbar')).toBeNull()
+    await userEvent.click(screen.getByRole('button', { name: 'Another take' }))
+    expect(h.onRedo).toHaveBeenCalledWith(expect.objectContaining({ item_id: 'i1' }))
+    // What you do next (review, ship) is the panel's own last card (ShipCard), not the plan's.
     expect(screen.queryByTestId('next-action')).toBeNull()
   })
 
@@ -111,8 +93,7 @@ describe('PlanCard, running', () => {
     expect(screen.getByTestId('narration')).toHaveTextContent('Take 1: pitch is -6.3 semitones off')
   })
 
-  it("puts the agent's own fix first when a line needs you", async () => {
-    const h = handlers()
+  it('says what a line needs you for, in words; the answer goes in the box', () => {
     const needs = item({ status: 'needs-you', question: {
       type: 'question', question: "The new line runs 1.1 s long and there's no pause after it to run into.",
       text: 'x', mix: 'replace',
@@ -121,65 +102,28 @@ describe('PlanCard, running', () => {
         { label: 'Speed it up to fit (1.3× speed)', fit: 'stretch', mix: null, warning: 'It will sound rushed.' },
       ],
     } })
-    render(<PlanCard plan={plan({ status: 'done', items: [needs] })} speakers={SPEAKERS} voices={VOICES} projectId="p1" {...h} />)
-    expect(screen.getByText(/runs 1.1 s long/)).toBeInTheDocument()
-    const box = screen.getByTestId('needs-you')
-    expect(box).toHaveTextContent('Voltage recommends')
-    const buttons = within(box).getAllByRole('button')
-    expect(buttons[0]).toHaveTextContent('Use a shorter line')
-    expect(buttons[0]).toHaveTextContent('Keeps the meaning, fits the gap')
-    await userEvent.click(buttons[0])
-    expect(h.onAnswer).toHaveBeenCalledWith(expect.objectContaining({ item_id: 'i1' }), expect.objectContaining({ text: 'Two kinds, both on sale.' }))
+    render(<PlanCard plan={plan({ status: 'done', items: [needs] })} speakers={SPEAKERS} voices={VOICES} projectId="p1" {...handlers()} />)
+    expect(screen.getByTestId('needs-you')).toHaveTextContent('runs 1.1 s long')
+    expect(screen.queryByRole('button', { name: /shorter line|speed it up/i })).toBeNull()
   })
 
   it('offers Redo for a failed line', async () => {
     const h = handlers()
     render(<PlanCard plan={plan({ status: 'done', items: [item({ status: 'failed', error: 'Generation failed after several attempts. Redo to try again.' })] })} speakers={SPEAKERS} voices={VOICES} projectId="p1" {...h} />)
     await userEvent.click(screen.getByRole('button', { name: 'Redo' }))
-    expect(h.onRedo).toHaveBeenCalled()
+    expect(h.onRedo).toHaveBeenCalledWith(expect.objectContaining({ item_id: 'i1' }))
   })
 })
 
-describe('PlanCard, the panel does one job (UX-2)', () => {
-  it('gives each planned item the delivery and sound-meets-picture controls', async () => {
-    const h = { ...handlers(), onDelivery: vi.fn(), onMix: vi.fn() }
-    const added = item({ item_id: 'i2', mix: 'over', selection: { start: 9.38, end: 9.88 }, speaker: 'B', new_text: 'Thirty off.' })
-    render(<PlanCard plan={plan({ items: [item(), added] })} speakers={SPEAKERS} voices={VOICES} projectId="p1" {...h} />)
-    expect(screen.getByText('Added after the line, over the picture')).toBeInTheDocument()
-    await userEvent.click(within(screen.getByRole('group', { name: 'Delivery at 0:07' })).getByRole('button', { name: 'warmer' }))
-    expect(h.onDelivery).toHaveBeenCalledWith(expect.objectContaining({ item_id: 'i1' }), 'warmer')
-    // A replaced line has no picture control; an added one does.
-    expect(screen.queryByRole('group', { name: 'Sound meets picture at 0:07' })).not.toBeInTheDocument()
-    await userEvent.click(within(screen.getByRole('group', { name: 'Sound meets picture at 0:09' })).getByRole('button', { name: 'Hold the picture' }))
-    expect(h.onMix).toHaveBeenCalledWith(expect.objectContaining({ item_id: 'i2' }), 'concatenate')
-    // In your words.
-    await userEvent.click(within(screen.getByRole('group', { name: 'Delivery at 0:09' })).getByRole('button', { name: 'in your words…' }))
-    await userEvent.type(screen.getByRole('textbox', { name: 'Delivery at 0:09, in your words' }), 'like a secret{Enter}')
-    expect(h.onDelivery).toHaveBeenLastCalledWith(expect.objectContaining({ item_id: 'i2' }), 'like a secret')
-  })
-
-  it('shows a voiced item with its take when the plan is proposed again, and voices only the rest', async () => {
-    const h = handlers()
+describe('PlanCard, proposed again after a take', () => {
+  it('shows a voiced item with its take and says it keeps it', () => {
     const voiced = item({ status: 'ready', candidate: CANDIDATE })
     const reworded = item({ item_id: 'i2', selection: { start: 9.38, end: 9.88 }, speaker: 'B', new_text: 'Thirty off.', note: 'Reworded as you asked' })
-    render(<PlanCard plan={plan({ items: [voiced, reworded] })} speakers={SPEAKERS} voices={VOICES} projectId="p1" {...h} />)
+    render(<PlanCard plan={plan({ items: [voiced, reworded] })} speakers={SPEAKERS} voices={VOICES} projectId="p1" {...handlers()} />)
     expect(screen.getByText('2 changes · 2 speakers · 1 voiced')).toBeInTheDocument()
     expect(screen.getByText(/Already voiced; it keeps this take/)).toBeInTheDocument()
     expect(screen.getByLabelText('Play take')).toBeInTheDocument()
     expect(screen.getByText('Reworded as you asked')).toBeInTheDocument()
-    await userEvent.click(screen.getByRole('button', { name: 'Voice the change' }))
-    expect(h.onRun).toHaveBeenCalled()
-  })
-
-  it('offers Stop while the plan runs, and says it is stopping', async () => {
-    const h = { ...handlers(), onStop: vi.fn() }
-    const items = [item({ status: 'ready', candidate: CANDIDATE }), item({ item_id: 'i2', status: 'working', selection: { start: 9.38, end: 9.88 } })]
-    const { rerender } = render(<PlanCard plan={plan({ status: 'running', items })} speakers={SPEAKERS} voices={VOICES} projectId="p1" busy {...h} />)
-    await userEvent.click(screen.getByRole('button', { name: 'Stop' }))
-    expect(h.onStop).toHaveBeenCalled()
-    rerender(<PlanCard plan={plan({ status: 'stopping', items })} speakers={SPEAKERS} voices={VOICES} projectId="p1" busy {...h} />)
-    expect(screen.getByText('Stopping after this line…')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Stopping…' })).toBeDisabled()
   })
 })
 
@@ -187,18 +131,8 @@ describe('PlanCard, empty (UX-4)', () => {
   it('says when a goal changes nothing, instead of an empty list', () => {
     render(<PlanCard plan={plan({ items: [], summary: 'No line mentions the offer.' })} speakers={SPEAKERS} voices={VOICES} projectId="p1" {...handlers()} />)
     expect(screen.getByTestId('plan-empty')).toHaveTextContent('Nothing to change for that. No line mentions the offer.')
-    expect(screen.getByRole('button', { name: 'Go ahead' })).toBeDisabled()
   })
 })
-
-describe('estimateText', () => {
-  it('reads the estimate in words', () => {
-    expect(estimateText({ items: 3, voice_characters: 110, usd: 0.033, seconds: 36 })).toBe('≈ 110 voice characters · about $0.03 · ready in about 36 s')
-    expect(estimateText({ items: 6, voice_characters: 400, usd: 0.12, seconds: 72 })).toBe('≈ 400 voice characters · about $0.12 · ready in about 1 minute')
-    expect(estimateText({ items: 1, voice_characters: 0, usd: 0, seconds: 12 })).toBe('no paid voice · ready in about 12 s')
-  })
-})
-
 
 describe('the plan\'s voice (15e)', () => {
   const VOICES2 = [

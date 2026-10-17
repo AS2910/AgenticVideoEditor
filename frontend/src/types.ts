@@ -6,16 +6,16 @@ export interface Statement { text: string; start: number; end: number; speaker?:
  *  as inline tracked changes. `edit_id` is what Revert names. */
 export interface Revision { edit_id?: string; start: number; end: number; text: string; mix: Mix; /** The other half of a shifted line. */ partner?: string | null }
 
-/** What happens when a new line runs longer than the words it replaces:
- *  run into the pause after them (when there is room), speed it up, or ask. */
-export type LongLines = 'pause' | 'shorten' | 'stretch' | 'ask'
-
-/** How much Voltage does on its own: show the plan and wait for Run (the
+/** How much Voltage does on its own: show the plan and wait for your go (the
  *  controlled default), or voice it straight away. */
 export type Autonomy = 'ask' | 'draft'
 
+/** How hard Voltage thinks on a turn; the sheet "What Voltage may do" sets it. */
+export type Effort = 'medium' | 'high' | 'xhigh'
+
 /** Per-project preferences, remembered on the server. */
-export interface ProjectSettings { long_lines: LongLines; autonomy: Autonomy }
+/** What Voltage may do on a project (20d): the autonomy, what one turn may spend, how hard it thinks; the ceiling is read-only. */
+export interface ProjectSettings { autonomy: Autonomy; turn_usd?: number; effort?: Effort; ceiling_usd?: number }
 
 /** Where a plan item stands. */
 export type ItemStatus =
@@ -65,8 +65,6 @@ export interface Plan {
   findings: string[]
   question: PlanQuestion | null
   /** UX-5: the brief so far, and how many questions may still come. */
-  answers?: [string, string][]
-  questions_left?: number
   voice?: string | null
   /** 15e: the goal asked for a kind of voice and `voice` answers it — it then
    *  speaks every line not yet voiced; and one plain sentence on the choice. */
@@ -81,9 +79,6 @@ export interface Plan {
   /** Under "draft": the job already voicing the plan. */
   job_id?: string
 }
-
-/** Where a line stands while the editor works on it. */
-export type LineStatus = 'working' | 'ready' | 'needs-you'
 
 /** A diarized speaker: what to call them, and the voice their new lines are
  *  spoken in (null = the chat's voice). */
@@ -158,8 +153,6 @@ export interface Candidate {
 export interface ConsentRecord { granted_at: string }
 
 export interface Project {
-  /** Phase 20: the composer talks to Voltage with tools. */
-  agent?: boolean
   project_id: string
   filename: string
   /** Measured server-side by ffprobe — the client never asserts this. */
@@ -251,15 +244,6 @@ export interface ProjectDetail extends Project {
   messages: ChatMessage[]
 }
 
-export interface ApprovedResult {
-  edit_id: string
-  candidate_id: string
-  continuity: ContinuityReport
-}
-
-/** A wording Claude suggests for a line; nothing is spoken yet. */
-export interface Rewording { text: string; selection: Selection }
-
 export interface Segment {
   start: number
   end: number
@@ -295,25 +279,6 @@ export interface ChatMessage {
   data?: { description: string; previews: VoicePreview[] }
 }
 
-export interface EditRequest {
-  prompt: string
-  start: number
-  end: number
-  voice_profile_id: string
-  /** Set when answering a question: the line already read from the prompt. */
-  text?: string
-  fit?: Fit
-  mix?: Mix
-  /** How it is said (UX-1). */
-  delivery?: string
-  /** What the chat shows for this turn when it isn't the prompt — the label
-   *  of an option picked in answer to a question. */
-  display?: string
-  /** For this edit only: how a line that runs long is placed. Unset = the
-   *  project's setting. */
-  on_long?: LongLines
-}
-
 export interface QuestionOption {
   label: string
   fit: Fit | null
@@ -324,7 +289,8 @@ export interface QuestionOption {
   warning: string | null
 }
 
-/** Asked instead of refusing an edit: how to mix, or how to fit the line. */
+/** What a plan item needs you for instead of being voiced: how to mix, or
+ *  how to fit the line. Answered in words, as the next turn. */
 export interface Question {
   type: 'question'
   question: string
@@ -333,13 +299,14 @@ export interface Question {
   options: QuestionOption[]
 }
 
-/** A chat answer instead of an edit — e.g. a request the editor can't do. */
-export interface Reply { type: 'reply'; text: string }
+/** Phase 20: what a turn of Voltage leaves behind — the plan as it stands,
+ *  its closing line, and the one thing it asks. */
+export interface TurnResult { type: 'turn'; plan: Plan | null; reply: string; question: PlanQuestion | null }
 
 export type JobStatus = 'queued' | 'running' | 'succeeded' | 'failed'
 
-/** Generation runs server-side and is polled; it takes minutes once lip-sync
- *  is a real vendor. */
+/** A turn runs server-side and is polled; it takes minutes once lip-sync is a
+ *  real vendor. */
 export interface Job {
   job_id: string
   kind: string
@@ -348,6 +315,6 @@ export interface Job {
   progress: number   // 0–1
   step: string       // human-readable, shown while waiting
   attempts: number
-  result: Candidate | Question | Reply | Plan | null
+  result: Plan | TurnResult | null
   error: string | null
 }

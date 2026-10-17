@@ -280,3 +280,28 @@ The user's word: *"do it"*, after 20b's report named 20c next.
 Five turns, about $0.81 ($0.39 voice, $0.19 of it the pipeline's retries that are gone now). The "done when" of 20c holds: the Diwali goal ran end to end through the agent on a speech clip — read, looked, listened, chose, voiced, failed on length and fixed its own wording, asked about the clone, cloned, retook, dropped the dead item, reported text seen on screen without acting on it.
 
 **Left for 20d:** the plan card's Run/Answer go through turns and the runner (`_run_plan`, `/run`, `/answer`, `/redo`, `/stop`, the item PUT) retires; the settings sheet; context editing and compaction over long threads; the eval; the pitch check for a voice-over in a chosen different voice; the previews card's position.
+
+## As built · 20d, nothing non-agentic (2026-10-17/18, on `main`)
+
+The user's words, mid-build: *"Also remove or archive any old code, so if we are using any old code or the references the app fails → and we can fix it; I don't want any non agentic behavior to exist."* So 20d is wider than the plan's "settings, evals, cost": every path that voiced a line or changed the plan outside a turn is deleted, not kept behind a flag, so a leftover reference fails loudly.
+
+### Deleted
+
+- **The selection-preview path**: `POST /edits/preview`, the intent interpreter (`orchestrator/intent.py`: `RuleInterpreter`, `Interpreter`, `EditContext`, `Turn`; `adapters/claude_intent.py`: `ClaudeInterpreter`), the placement questions (`orchestrator/questions.py`), the `Intent` model, and `/health`'s "intent" label. Typed words with a selection now go to Voltage as a turn (*"At 0:04: …"*).
+- **The long-line policy**: `_long_line_fit`, `_shorter_line`, `BORROW_BEFORE`, `on_long`, the `long_lines` setting and its UI. `_generate` raises `SpanMismatch` to its caller; Voltage hears "too long for the slot" and decides (it shortened its own line on Bhaji Cam).
+- **Wording suggestions**: `POST /lines/reword` and the editor's offers. Ask Voltage in words.
+- **The plan runner**: `_run_plan`, `_agent_fix`, `_placement_note`, `_stops`, `PUT /plans/{id}/items/{item_id}`, `/run`, `/answer`, `/redo`, `/stop`, their request models, `_status_after_edit`. The plan card keeps the record (items, states, takes, Hear it, Another take → a turn, the Voice row → a turn) and loses its form (ticks, inline rewording, suggestions, Go ahead, Stop, delivery and mix pills, the estimate).
+- **The offline stand-ins**: `OfflinePlanner`, `select_interpreter`; `select_planner` is Claude or `None`, and `/reading` and the first look answer 503 *"Voltage needs Claude for this"* without a key or under `AVE_DRY_RUN`. `Meter` lives in `orchestrator/meter.py`; `MODEL`, `PlannerError`, `PlannerConfigError` in `adapters/claude_planner.py`.
+- **The line editor's own voicing**: `hearLine` → `/edits/preview` is gone; the editor (wording, delivery, mix, voice) composes one sentence and sends it as a turn: *Replace the line at 0:04 (“…”) with “…”, said warmer, in Riya's voice* / *Add “…” after the line at 0:04, over the picture* / *Add “…” at 0:00–0:07, over the picture*. Keep a take = ship that item (`/plans/{id}/approve` with the item); Another take = a turn.
+
+### Kept (the user's own hands on the timeline, and shipping)
+
+Keep, Undo, Remove a line, Shift a line, Move a take or a kept line, play; the review panel and the ship card; reading, consent, speakers, variants, export; the chat panel. The first look at a clip (`look`, `read`) stays a single Claude call outside the loop: it is Voltage speaking, not a second way of editing.
+
+### Built (the plan's 20d)
+
+- **"What Voltage may do"**: per-project `turn_usd` (clamped to a cent … the project's ceiling) and `effort` (medium / high / xhigh) in `PUT /settings`, read by every turn (`TurnBudget`, `output_config.effort`); `GET` carries the ceiling read-only. The front end's sheet is off the autonomy switch.
+- **Consent at the yes**: under Check with me the paid gate's "go" is refused with 403 until consent is recorded, as Just do it was before the turn; the front end opens the consent sheet and retries the same turn.
+- **Compaction**: the `compact-2026-01-12` beta with a `compact_20260112` edit past 100k input tokens, beside the frame-clearing edit; the loop already persists and replays each response's content whole, compaction block included.
+- **The pitch register** is checked on a replacement against the same speaker's speech and no longer on an added line (over the picture or held), which is often another voice on purpose; the score comes back `None` there. (On Bhaji Cam this cost two retries.)
+- **The previews card** is handed back by the tool as `ToolResult.card` and written by the loop after its step, so it reads: the step, the players, Voltage's sentence.

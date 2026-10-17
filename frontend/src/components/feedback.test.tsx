@@ -8,9 +8,8 @@ import { render, screen, within, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { ChatPanel } from './ChatPanel'
 import { LineDoc } from './LineDoc'
-import { CandidateCard } from './CandidateCard'
 import { clock } from '../transcript/format'
-import type { Candidate, Statement } from '../types'
+import type { Candidate, PlanItem, Statement } from '../types'
 
 const STATEMENTS: Statement[] = [
   { text: 'Hi, I want to buy groceries.', start: 5.0, end: 6.9, speaker: 'A' },
@@ -23,9 +22,14 @@ const CANDIDATE: Candidate = {
   frames: { kind: 'video', sha256: 'f'.repeat(64), duration: 1.5, container: 'mp4' },
   continuity: { voice_match: null, prosody: 0.96, audio_integration: 0.99, lip_sync: null, passed: true, warnings: [], measured: ['prosody', 'audio_integration'] },
 }
+const ITEM: PlanItem = {
+  item_id: 'i1', selection: { start: 7.5, end: 9.0 }, old_text: 'Start a live Bajicam session.', new_text: 'Start a live Bhaji Cam session.',
+  speaker: 'B', mix: 'replace', reason: '', kind: 'planned', enabled: true, status: 'ready', fit: null, candidate: CANDIDATE,
+  edit_id: null, question: null, error: null, note: null, progress: null,
+}
 const handlers = () => ({
-  onSeek: vi.fn(), onHear: vi.fn(), onKeep: vi.fn(), onAnother: vi.fn(), onAnswer: vi.fn(), onUndo: vi.fn(),
-  onRemove: vi.fn(), onPlayTake: vi.fn(), onDismiss: vi.fn(),
+  onSeek: vi.fn(), onHear: vi.fn(), onKeep: vi.fn(), onAnother: vi.fn(), onUndo: vi.fn(),
+  onRemove: vi.fn(), onPlayTake: vi.fn(),
 })
 
 describe('a control that waits says so', () => {
@@ -33,8 +37,7 @@ describe('a control that waits says so', () => {
     let finish: () => void = () => {}
     const onKeep = vi.fn(() => new Promise<void>((resolve) => { finish = resolve }))
     render(
-      <LineDoc statements={STATEMENTS} currentTime={0} {...handlers()} onKeep={onKeep}
-        lines={{ '7.500-9.000': { status: 'ready', takes: [CANDIDATE] } }} />,
+      <LineDoc statements={STATEMENTS} currentTime={0} {...handlers()} onKeep={onKeep} items={[ITEM]} />,
     )
     const keep = screen.getByRole('button', { name: 'Keep' })
     await userEvent.click(keep)
@@ -42,16 +45,6 @@ describe('a control that waits says so', () => {
     expect(screen.getByRole('button', { name: 'Keeping…' })).toHaveAttribute('aria-busy', 'true')
     finish()
     await waitFor(() => expect(screen.getByRole('button', { name: 'Keep' })).toBeEnabled())
-  })
-
-  it('Approve reads Approving… while the approval runs', async () => {
-    let finish: () => void = () => {}
-    const onApprove = vi.fn(() => new Promise<void>((resolve) => { finish = resolve }))
-    render(<CandidateCard candidate={CANDIDATE} onApprove={onApprove} onTryAgain={() => {}} projectId="p1" />)
-    await userEvent.click(screen.getByRole('button', { name: 'Approve' }))
-    expect(screen.getByRole('button', { name: 'Approving…' })).toBeDisabled()
-    finish()
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Approve' })).toBeEnabled())
   })
 })
 

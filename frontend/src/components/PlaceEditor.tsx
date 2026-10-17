@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import type { LongLines, Selection, Voice } from '../types'
+import type { Selection, Voice } from '../types'
 import { parseTime, timecode } from '../transcript/time'
 import type { LineRequest } from './LineDoc'
 import { Button } from '@/components/ui/button'
@@ -12,7 +12,6 @@ interface PlaceEditorProps {
   duration: number
   voices?: Voice[]
   usdPerChar?: number | null
-  longLines?: LongLines
   disabled?: boolean
   /** The block on the monitor's bar while the span is chosen; dragging it moves the start. */
   placing?: { id: string; start: number; duration: number } | null
@@ -24,12 +23,6 @@ interface PlaceEditorProps {
 }
 
 const DELIVERIES = ['warmer', 'more excited', 'calmer', 'slower', 'firmer']
-const LONG_OPTIONS: { value: LongLines; label: string }[] = [
-  { value: 'pause', label: 'Let Voltage fit it' },
-  { value: 'shorten', label: 'Prefer a shorter wording' },
-  { value: 'stretch', label: 'Speed it up' },
-  { value: 'ask', label: 'Ask me' },
-]
 const PLACING_ID = 'voice-over'
 const voiceLabel = (v: Voice) => (v.gender ? `${v.name} (${v.gender})` : v.name)
 const round2 = (t: number) => Math.round(t * 100) / 100
@@ -40,7 +33,7 @@ const round2 = (t: number) => Math.round(t * 100) / 100
  *  words, and the same choices a line's editor offers. Dragging is never the
  *  only way: the start and end can be typed and nudged. */
 export function PlaceEditor({
-  duration, voices = [], usdPerChar, longLines = 'pause', disabled, placing, onPlacing, onHear, onCancel, initialStart = 0.5,
+  duration, voices = [], usdPerChar, disabled, placing, onPlacing, onHear, onCancel, initialStart = 0.5,
 }: PlaceEditorProps) {
   const defaultStart = Math.min(initialStart, Math.max(0, duration - 1))
   const [startText, setStartText] = useState(timecode(defaultStart))
@@ -50,7 +43,6 @@ export function PlaceEditor({
   const [delivery, setDelivery] = useState<string | null>(null)
   const [ownWords, setOwnWords] = useState<string | null>(null)
   const [mix, setMix] = useState<'layer' | 'concatenate'>('layer')
-  const [onLong, setOnLong] = useState<LongLines>(longLines)
 
   const start = parseTime(startText)
   const end = parseTime(endText)
@@ -90,7 +82,7 @@ export function PlaceEditor({
   const hear = () => {
     if (!canHear || !span) return
     onHear(span, {
-      selection: span, text: draft.trim(), voiceId: voiceId || null, onLong,
+      selection: span, text: draft.trim(), voiceId: voiceId || null,
       delivery: (ownWords?.trim() || delivery) ?? null, mix,
     })
   }
@@ -144,11 +136,6 @@ export function PlaceEditor({
         <Chip on={mix === 'layer'} onClick={() => setMix('layer')}>Over the picture</Chip>
         <Chip on={mix === 'concatenate'} onClick={() => setMix('concatenate')}>Hold the picture</Chip>
         <span>{mix === 'layer' ? 'The picture keeps moving under the line.' : 'The picture waits while the line plays.'}</span>
-      </ControlRow>
-      <ControlRow label="If it runs long">
-        <select className={selectClass} aria-label="If it runs long" value={onLong} onChange={(e) => setOnLong(e.target.value as LongLines)}>
-          {LONG_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-        </select>
       </ControlRow>
       <div className="flex flex-wrap items-center gap-2 border-t pt-3">
         <span className="tnum text-sm text-muted-foreground">≈ {chars} characters{cost} · ready in about 10 s</span>

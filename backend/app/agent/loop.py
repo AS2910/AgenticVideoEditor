@@ -28,10 +28,14 @@ MAX_TOKENS = 16000
 # long (20b: only `look_at_frames` results, the one tool whose results are
 # images; the last three looks stay). Clearing counts as no edit for the
 # thinking-block check, where a client-side cut would.
-BETAS = ("server-side-fallback-2026-07-01", "context-management-2025-06-27")
+BETAS = ("server-side-fallback-2026-07-01", "context-management-2025-06-27", "compact-2026-01-12")
+# Past 100k input tokens the server summarises the older thread into a
+# `compaction` block (20d); the loop appends every response's content as it
+# came, so the block is persisted and replayed like any other.
 CONTEXT_MANAGEMENT = {"edits": [{"type": "clear_tool_uses_20250919", "trigger": {"type": "input_tokens", "value": 40000},
                                  "keep": {"type": "tool_uses", "value": 3},
-                                 "exclude_tools": [n for n in BY_NAME if n != "look_at_frames"]}]}
+                                 "exclude_tools": [n for n in BY_NAME if n != "look_at_frames"]},
+                                {"type": "compact_20260112", "trigger": {"type": "input_tokens", "value": 100000}}]}
 
 # (model, input, output, cache_read, cache_write) tokens of one request.
 Meter = Callable[[str, int, int, int, int], None]
@@ -150,9 +154,9 @@ class Agent:
     def model(self) -> str:
         return self._model
 
-    def _create(self, system: list[dict], messages: list[dict]) -> Any:
+    def _create(self, system: list[dict], messages: list[dict], effort: str | None = None) -> Any:
         params: dict = dict(model=self._model, max_tokens=MAX_TOKENS, system=system, messages=with_cache_point(list(messages)),
-                            tools=[t.definition() for t in self._tools], output_config={"effort": self._effort})
+                            tools=[t.definition() for t in self._tools], output_config={"effort": effort or self._effort})
         if self._extras:
             params.update(betas=list(BETAS), fallbacks="default", context_management=CONTEXT_MANAGEMENT)
         try:
@@ -161,12 +165,12 @@ class Agent:
             if self._extras and any(w in str(exc) for w in ("fallbacks", "beta", "context_management", "anthropic-beta")):
                 log.warning("agent extras refused (%s); running without them", str(exc)[:160])
                 self._extras = False
-                return self._create(system, messages)
+                return self._create(system, messages, effort)
             raise
 
     def run(self, wb: Workbench, turn: Turn, history: list[dict], user_content: list[dict] | str, *,
-            meter: Meter | None = None, on_step: OnStep | None = None,
-            persist: Callable[[str, Any], None] | None = None) -> Outcome:
+            meter: Meter | None = None, on_step: OnStep | None = None, on_card: Callable[[str, dict], None] | None = None,
+            persist: Callable[[str, Any], None] | None = None, effort: str | None = None) -> Outcome:
         """One turn. `history` is the thread as the model saw it (dicts);
         `persist(role, content)` is called for every message appended."""
         out = Outcome()
@@ -187,7 +191,7 @@ class Agent:
         append("user", user_content)
         started = wb.ledger.spent_usd(turn.project_id)
         while True:
-            response = self._create(system, messages)
+            response = self._create(system, messages, effort)
             usage = getattr(response, "usage", None)
             if usage is not None:
                 read = getattr(usage, "cache_read_input_tokens", 0) or 0
@@ -246,6 +250,8 @@ class Agent:
                     out.steps.append(result.step)
                     if on_step:
                         on_step(result.step, result.cost_usd)
+                if result.card and on_card:
+                    on_card(result.card["text"], result.card["data"])
             append("user", results)
             if isinstance(ended, WaitingForUser):
                 out.question = {"text": ended.question, "options": list(ended.options), "guess": ended.guess, "gate": ended.gate}

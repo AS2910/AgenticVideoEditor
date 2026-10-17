@@ -7,8 +7,7 @@ label `/health` reports.
 """
 from __future__ import annotations
 
-from app.adapters.claude_intent import MODEL as CLAUDE_MODEL, ClaudeInterpreter
-from app.adapters.claude_planner import ClaudePlanner
+from app.adapters.claude_planner import MODEL as CLAUDE_MODEL, ClaudePlanner
 from app.adapters.elevenlabs import ElevenLabsVoiceAdapter
 from app.adapters.mock import MockTranscriptionAdapter, MockVoiceAdapter
 from app.adapters.openai_whisper import MODEL as WHISPER_MODEL, WhisperTranscriptionAdapter
@@ -16,8 +15,6 @@ from app.budget import VoiceBudget
 from app.config import Settings
 from app.continuity.engine import ContinuityEngine
 from app.continuity.measured import MeasuredContinuityEngine
-from app.orchestrator.intent import RuleInterpreter
-from app.orchestrator.planner import OfflinePlanner
 from app.store.artifacts import ArtifactStore
 from app.chaos import Chaos
 
@@ -76,21 +73,12 @@ def anthropic_client(settings: Settings, chaos: Chaos | None = None):
 ANTHROPIC_TIMEOUT = 60.0
 
 
-def select_interpreter(settings: Settings, chaos: Chaos | None = None):
-    if settings.dry_run:
-        return RuleInterpreter(), "dry-run"
-    if settings.has_anthropic:
-        interpreter = ClaudeInterpreter(settings.anthropic_api_key, settings.anthropic_workspace_id,
-                                        client=anthropic_client(settings, chaos))
-        return interpreter, f"anthropic:{CLAUDE_MODEL}"
-    return RuleInterpreter(), "rules"
-
-
 def select_planner(settings: Settings, chaos: Chaos | None = None):
-    if settings.dry_run:
-        return OfflinePlanner(), "dry-run"
-    if settings.has_anthropic:
+    """Voltage's reads outside the loop (look, read, shorten): Claude, or
+    nothing — there is no offline stand-in; without a key the routes that
+    need it say so (20d: no non-agentic behaviour)."""
+    if settings.has_anthropic and not settings.dry_run:
         planner = ClaudePlanner(settings.anthropic_api_key, settings.anthropic_workspace_id,
                                 client=anthropic_client(settings, chaos))
         return planner, f"anthropic:{CLAUDE_MODEL}"
-    return OfflinePlanner(), "offline"
+    return None, "none"

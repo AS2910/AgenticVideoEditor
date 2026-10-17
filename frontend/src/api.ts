@@ -1,6 +1,6 @@
 import type {
-  Project, ApprovedResult, ExportManifest, EditRequest, Job, ProjectSummary, ProjectDetail, Usage, Voice, Speaker,
-  ProjectSettings, LongLines, Rewording, Autonomy, Plan, Fit, Mix, Selection, Candidate, Reading, Sight, ChatMessage,
+  Project, ExportManifest, Job, ProjectSummary, ProjectDetail, Usage, Voice, Speaker,
+  ProjectSettings, Autonomy, Effort, Plan, Mix, Selection, Candidate, Reading, Sight, ChatMessage,
 } from './types'
 
 const BASE = '/api'
@@ -123,10 +123,6 @@ export async function deleteProject(id: string): Promise<void> {
 export const artifactUrl = (projectId: string, sha256: string) =>
   `${BASE}/projects/${projectId}/artifacts/${sha256}`
 
-/** Starts generation. Returns the accepted job; poll it for the candidate. */
-export const previewEdit = (id: string, req: EditRequest) =>
-  post<Job>(`/projects/${id}/edits/preview`, req)
-
 export async function getJob(jobId: string): Promise<Job> {
   const res = await fetch(`${BASE}/jobs/${jobId}`)
   if (!res.ok) return failure(res)
@@ -159,18 +155,6 @@ export async function pollJob(
   }
 }
 
-/**
- * Approves one previously previewed candidate by id. The backend commits the
- * exact media that preview produced rather than regenerating it — which real
- * vendors would not reproduce byte-for-byte.
- */
-export const approveEdit = (id: string, candidateId: string, override = false) =>
-  post<ApprovedResult>(
-    `/projects/${id}/edits`,
-    // `override` approves a candidate that failed continuity, for trials.
-    override ? { candidate_id: candidateId, override: true } : { candidate_id: candidateId },
-  )
-
 export const exportProject = (id: string) =>
   post<ExportManifest>(`/projects/${id}/export`)
 
@@ -178,10 +162,10 @@ export const exportProject = (id: string) =>
 export const revertEdit = (id: string, editId: string) =>
   post<{ edit_id: string; reverted: boolean }>(`/projects/${id}/edits/${editId}/revert`)
 
-/** Remembers how this project places a line that runs long, and how much
- *  Voltage does on its own. */
+/** Remembers what Voltage may do in this project: how much on its own, how
+ *  much a turn may spend, and how hard it thinks. */
 export async function updateSettings(
-  id: string, change: { long_lines?: LongLines; autonomy?: Autonomy },
+  id: string, change: { autonomy?: Autonomy; turn_usd?: number; effort?: Effort },
 ): Promise<ProjectSettings> {
   const res = await fetch(`${BASE}/projects/${id}/settings`, {
     method: 'PUT',
@@ -204,10 +188,6 @@ export const moveEdit = (id: string, editId: string, req: { start: number; mix?:
 export const removeLine = (id: string, span: { start: number; end: number }) =>
   post<{ edit_id: string; candidate_id: string; selection: Selection; mix: Mix }>(`/projects/${id}/lines/remove`, span)
 
-/** Asks Claude for a new wording of the line in a span, given the draft so far. */
-export const rewordLine = (id: string, req: { start: number; end: number; draft?: string; instruction?: string }) =>
-  post<Rewording>(`/projects/${id}/lines/reword`, req)
-
 async function put<T>(path: string, body: unknown): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
     method: 'PUT',
@@ -226,24 +206,6 @@ export const confirmPlace = (id: string, place: string) => put<Sight>(`/projects
 /** A frame of the picture (UX-5), for a clip with no speech. */
 export const frameUrl = (projectId: string, index: number) => `${BASE}/projects/${projectId}/frames/${index}`
 
-/** Untick, reword, or add / leave a suggestion. */
-export const updateItem = (
-  id: string, planId: string, itemId: string,
-  change: { enabled?: boolean; new_text?: string; include?: boolean; delivery?: string; mix?: Mix },
-) => put<Plan>(`/projects/${id}/plans/${planId}/items/${itemId}`, change)
-
-/** Voices the ticked items; returns the job to poll. */
-export const runPlan = (id: string, planId: string, items?: string[]) =>
-  post<Job>(`/projects/${id}/plans/${planId}/run`, items ? { items } : {})
-
-/** Answers a needs-you item and voices it again. */
-export const answerItem = (
-  id: string, planId: string, itemId: string, answer: { fit?: Fit; mix?: Mix; text?: string },
-) => post<Job>(`/projects/${id}/plans/${planId}/items/${itemId}/answer`, answer)
-
-export const redoItem = (id: string, planId: string, itemId: string) =>
-  post<Job>(`/projects/${id}/plans/${planId}/items/${itemId}/redo`)
-
 export interface PlanApproval {
   approved: { item_id: string; edit_id: string; overridden: boolean }[]
   skipped: { item_id: string; reason: string }[]
@@ -251,7 +213,8 @@ export interface PlanApproval {
   plan: Plan
 }
 
-/** Approves every ready item and renders. */
+/** Approves the ready items named (every one, by default) and renders: Ship,
+ *  and Keep on one line. */
 export const approvePlan = (id: string, planId: string, req: { items?: string[]; override?: boolean } = {}) =>
   post<PlanApproval>(`/projects/${id}/plans/${planId}/approve`, req)
 
@@ -267,9 +230,6 @@ export const postTurn = (id: string, text: string, approve = false) =>
 
 /** The thread after a message (by seq): what Voltage said and did. */
 export const getMessages = (id: string, after = 0) => get<ChatMessage[]>(`/projects/${id}/messages?after=${after}`)
-
-/** Stops a running plan after the line it is on. */
-export const stopPlan = (id: string, planId: string) => post<Plan>(`/projects/${id}/plans/${planId}/stop`)
 
 /** Confirms the rights for a project uploaded without them — asked once, the
  *  first time a voice is about to be made (UX-3). */

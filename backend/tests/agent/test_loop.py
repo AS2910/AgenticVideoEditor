@@ -114,7 +114,7 @@ def test_the_thread_is_cached_at_its_last_block_and_cache_tokens_are_metered(wor
 
 def test_context_editing_clears_only_old_frames():
     from app.agent.loop import CONTEXT_MANAGEMENT
-    [edit] = CONTEXT_MANAGEMENT["edits"]
+    edit = CONTEXT_MANAGEMENT["edits"][0]
     assert edit["trigger"] == {"type": "input_tokens", "value": 40000} and edit["keep"] == {"type": "tool_uses", "value": 3}
     assert "look_at_frames" not in edit["exclude_tools"] and "synthesize_take" in edit["exclude_tools"]
 
@@ -153,3 +153,19 @@ def test_a_lost_step_buried_by_later_messages_is_answered_where_it_happened(worl
     client = ScriptedClient([reply(text("Carrying on."))])
     out = Agent(client).run(world.wb, world.turn(), history, "go")
     assert out.reply == "Carrying on." and client.calls[0]["messages"][2]["content"][0]["tool_use_id"] == "lost"
+
+
+def test_a_card_follows_its_step_and_the_turns_effort_goes_in_the_request(world):
+    client = ScriptedClient([
+        reply(use("design_voice", "d", description="an older woman", sample_text=""), stop="tool_use"),
+        reply(text("Which one?")),
+    ])
+    shown: list[tuple] = []
+    out = Agent(client).run(world.wb, world.turn(), [], "design a voice",
+                            on_step=lambda s, c: shown.append(("step", s)), on_card=lambda t, d: shown.append(("card", t, len(d["previews"]))),
+                            effort="xhigh")
+    assert out.reply == "Which one?"
+    assert shown == [("step", "Designed a voice from “an older woman” — 3 previews to hear"), ("card", "3 voices designed from “an older woman”", 3)]
+    assert all(c["output_config"] == {"effort": "xhigh"} for c in client.calls)
+    from app.agent.loop import BETAS, CONTEXT_MANAGEMENT
+    assert "compact-2026-01-12" in BETAS and CONTEXT_MANAGEMENT["edits"][1] == {"type": "compact_20260112", "trigger": {"type": "input_tokens", "value": 100000}}

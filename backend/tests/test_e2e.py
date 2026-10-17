@@ -1,10 +1,14 @@
+"""The whole journey, offline: upload, a turn of Voltage that voices the line
+through its tools, approve, export."""
 import time
 from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
 
+import app.api.main as main
 from app.api.main import app, repo, jobs
+from tests.api.test_endpoints import _agent_on, take
 
 
 @pytest.fixture(autouse=True)
@@ -14,7 +18,8 @@ def reset_state():
     yield
 
 
-def test_full_journey_ingest_preview_approve_export(sample_video):
+def test_full_journey_ingest_turn_approve_export(sample_video, monkeypatch):
+    from tests.agent.conftest import reply, text
     client = TestClient(app)
 
     # 1. Ingest a real file; its duration is measured, not claimed
@@ -32,12 +37,13 @@ def test_full_journey_ingest_preview_approve_export(sample_video):
     media = client.get(f"/projects/{project_id}/artifacts/{created['media']['sha256']}")
     assert media.status_code == 200
 
-    # 2. Preview an edit (change the offer)
-    payload = {
-        "prompt": 'change "20% off" to "30% off"',
-        "start": 0.5, "end": 1.0, "voice_profile_id": "speaker-1",
-    }
-    accepted = client.post(f"/projects/{project_id}/edits/preview", json=payload)
+    # 2. Say what you want; Voltage voices the line through its tools (Just do it)
+    client.put(f"/projects/{project_id}/settings", json={"autonomy": "draft"})
+    _agent_on(monkeypatch, main, [
+        reply(take(text="Get 30% off today only."), stop="tool_use"),
+        reply(text("Line 1 now says 30% off. Hear it; say ship when you're happy.")),
+    ])
+    accepted = client.post(f"/projects/{project_id}/turns", json={"text": 'change "20% off" to "30% off"'})
     assert accepted.status_code == 202
     job_id = accepted.json()["job_id"]
 
@@ -50,21 +56,24 @@ def test_full_journey_ingest_preview_approve_export(sample_video):
         time.sleep(0.01)
     assert job["status"] == "succeeded", job
 
-    preview = job["result"]
-    assert preview["plan"]["new_text"] == "30% off"
-    assert preview["continuity"]["passed"] is True
+    result = job["result"]
+    assert result["type"] == "turn" and result["reply"].startswith("Line 1 now says 30% off")
+    [item] = result["plan"]["items"]
+    candidate = item["candidate"]
+    assert item["status"] == "ready" and candidate["plan"]["new_text"] == "Get 30% off today only."
+    assert candidate["continuity"]["passed"] is True
 
-    # 3. Approve that exact candidate
+    # 3. Approve that exact take
     approved = client.post(
-        f"/projects/{project_id}/edits", json={"candidate_id": preview["candidate_id"]},
+        f"/projects/{project_id}/edits", json={"candidate_id": candidate["candidate_id"]},
     ).json()
     assert approved["edit_id"] == "e1"
 
-    # 4. Export shows the edited span composited between original footage
+    # 4. Export shows the edited span; the line is the whole clip, so it is the whole output
     segments = client.post(f"/projects/{project_id}/export").json()["segments"]
     edited = [s for s in segments if s["kind"] == "edited"]
     assert len(edited) == 1
-    assert edited[0]["start"] == 0.4 and edited[0]["end"] == 1.3
+    assert edited[0]["start"] == 0.0 and edited[0]["end"] == 2.3
 
     # 5. The edited span resolves to media that actually exists on disk
     committed = repo.list_edits(project_id)[0]

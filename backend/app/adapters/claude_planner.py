@@ -15,11 +15,21 @@ from typing import Literal, Sequence
 import anthropic
 from pydantic import BaseModel, Field
 
-from app.adapters.claude_intent import IntentConfigError, IntentError, MODEL
-from app.orchestrator.intent import Meter
+from app.adapters.base import VendorError
+from app.errors import NonRetryableError
+from app.orchestrator.meter import Meter
 from app.orchestrator.planner import Frame, Line, Reading, Role, Sight
 
+MODEL = "claude-opus-5"
 MAX_TOKENS = 4000
+
+
+class PlannerError(VendorError):
+    """Claude could not be reached or is overloaded; worth retrying."""
+
+
+class PlannerConfigError(NonRetryableError):
+    """Claude refused the request itself: key, workspace, or a bad parameter."""
 
 LOOK_SYSTEM = """\
 You look at a few frames of a short video that has no speech, and describe \
@@ -157,9 +167,9 @@ class ClaudePlanner:
                 output_format=output_format,
             )
         except (anthropic.RateLimitError, anthropic.InternalServerError, anthropic.APIConnectionError) as exc:
-            raise IntentError(f"Claude is unavailable right now ({type(exc).__name__}).") from None
+            raise PlannerError(f"Claude is unavailable right now ({type(exc).__name__}).") from None
         except anthropic.APIStatusError as exc:
-            raise IntentConfigError(
+            raise PlannerConfigError(
                 f"Claude refused the request ({exc.status_code}). "
                 "Check ANTHROPIC_API_KEY and ANTHROPIC_WORKSPACE_ID."
             ) from None

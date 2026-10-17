@@ -7,7 +7,7 @@ import { cn } from '@/lib/utils'
  *  and a text-link button. Native elements on purpose: a chip stays a button
  *  with aria-pressed, a select stays a combobox. */
 
-/** One labelled row of the editor: "Delivery", "Voice", "If it runs long". */
+/** One labelled row of the editor: "Delivery", "Voice", "Starts at". */
 export function ControlRow({ label, children, className, ...rest }: { label: string; children: ReactNode } & ComponentProps<'div'>) {
   return (
     <div className={cn('flex flex-wrap items-center gap-2 text-sm text-muted-foreground', className)} {...rest}>

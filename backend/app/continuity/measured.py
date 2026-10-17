@@ -255,11 +255,18 @@ class MeasuredContinuityEngine:
 
         final = signals.load(fixed.path)
         final_f0, context_f0 = signals.median_f0(final), signals.median_f0(context)
+        # The pitch register is a check on a replaced line against the same
+        # speaker's speech around it. An added line (over the picture, or the
+        # picture held) is often another voice on purpose, so its register is
+        # measured but not held against it (20d).
+        added = plan.mix in ("layer", "concatenate")
         prosody = pitch_score(final_f0, context_f0)
-        if prosody is not None and prosody < self.thresholds.prosody:
+        if prosody is not None and prosody < self.thresholds.prosody and not added:
             warnings.append(
                 f"Pitch is {semitones(final_f0, context_f0):+.1f} semitones off the surrounding speech."
             )
+        if added:
+            prosody = None
 
         final_level = signals.speech_level_db(final)
         level = level_score(

@@ -2,8 +2,7 @@
 outside the agent loop: a first look at a silent clip (`look`), a first
 reading of a speech clip (`read`), a shorter wording for a line that runs
 long (`shorten`). `ClaudePlanner` (app/adapters) does them for real;
-`OfflinePlanner` is the stand-in without a key, under AVE_DRY_RUN and in
-tests, and says in one line that Voltage needs Claude for the rest.
+there is no stand-in: without a key the routes that need these say so.
 
 Phase 20c: the form-filling planner (`plan`, `revise`, Proposal, Revision,
 the question budget) is gone; Voltage plans by conversation, through its
@@ -14,7 +13,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Protocol, Sequence
 
-from app.orchestrator.intent import Meter
+from app.orchestrator.meter import Meter
 
 
 @dataclass(frozen=True)
@@ -86,24 +85,3 @@ class Planner(Protocol):
     def read(self, lines: Sequence[Line], meter: Meter | None = None) -> Reading:
         """A first look at the clip: an opening line and each speaker's role."""
         ...
-
-
-class OfflinePlanner:
-    """No model: sees nothing, offers no shorter line, reads only the count.
-    Planning itself needs Claude (the agent)."""
-
-    identity = "offline"
-
-    def look(self, frames: Sequence[Frame], duration: float, meter: Meter | None = None) -> Sight:
-        n = len(frames)
-        return Sight(opening=f"No one speaks. {duration:.1f} s of picture, {n} {'frame' if n == 1 else 'frames'}.")
-
-    def shorten(self, text: str, share: float, line: Line, meter: Meter | None = None) -> str | None:
-        return None
-
-    def read(self, lines: Sequence[Line], meter: Meter | None = None) -> Reading:
-        speakers = {line.speaker for line in lines if line.speaker}
-        n = len(lines)
-        who = (f"{len(speakers)} people speak" if len(speakers) > 1 else "one person speaks") if speakers else ""
-        opening = f"{n} {'line' if n == 1 else 'lines'}" + (f", {who}." if who else ".")
-        return Reading(opening=opening)

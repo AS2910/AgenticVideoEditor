@@ -3,7 +3,7 @@ import { act, fireEvent, render, screen, within, waitFor } from '@testing-librar
 import userEvent from '@testing-library/user-event'
 import { LineDoc } from './LineDoc'
 import { keyOf, addKeyOf } from '../transcript/keys'
-import type { Candidate } from '../types'
+import type { Candidate, PlanItem } from '../types'
 
 const STATEMENTS = [
   { text: 'Hi, I want to buy groceries.', start: 5.2, end: 6.94, speaker: 'A' },
@@ -27,9 +27,15 @@ const take = (over: Partial<Candidate> = {}): Candidate => ({
   fit_notes: ['trimmed 120 ms of pauses'],
   ...over,
 })
+/** The plan's change to the second line, with its take ready. */
+const item = (over: Partial<PlanItem> = {}): PlanItem => ({
+  item_id: 'i1', selection: { start: 7.54, end: 9.02 }, old_text: 'Start a live Bajicam session.', new_text: 'Start a live Bhaji Cam session.',
+  speaker: 'A', mix: 'replace', reason: '', kind: 'planned', enabled: true, status: 'ready', fit: null, candidate: take(),
+  edit_id: null, question: null, error: null, note: null, progress: null, ...over,
+})
 const handlers = () => ({
-  onSeek: vi.fn(), onHear: vi.fn(), onKeep: vi.fn(), onAnother: vi.fn(), onAnswer: vi.fn(), onUndo: vi.fn(),
-  onRemove: vi.fn(), onPlayTake: vi.fn(), onDismiss: vi.fn(),
+  onSeek: vi.fn(), onHear: vi.fn(), onKeep: vi.fn(), onAnother: vi.fn(), onUndo: vi.fn(),
+  onRemove: vi.fn(), onPlayTake: vi.fn(),
 })
 const doc = (props: Partial<Parameters<typeof LineDoc>[0]> = {}) => {
   const h = handlers()
@@ -71,7 +77,7 @@ describe('LineDoc: the line is the unit', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Hear it' }))
     expect(h.onHear).toHaveBeenCalledWith(KEY, {
       selection: { start: 7.54, end: 9.02 }, text: 'Start a live Bhaji Cam session.', voiceId: 'nPczCjzI2devNBz1zQrb',
-      onLong: 'pause', delivery: 'warmer', mix: 'replace',
+      delivery: 'warmer', mix: 'replace',
     })
     expect(screen.queryByTestId('editor')).not.toBeInTheDocument()
   })
@@ -105,49 +111,40 @@ describe('LineDoc: the line is the unit', () => {
     expect(h.onHear).toHaveBeenCalledWith(addKeyOf(STATEMENTS[2]), expect.objectContaining({ mix: 'concatenate' }))
   })
 
-  it('shows the take under its line, with a verdict in words, Keep and Another take', async () => {
-    const h = doc({ lines: { [KEY]: { status: 'ready', takes: [take()] } } })
+  it("shows the plan's take under its line, with a verdict in words, Keep and Another take", async () => {
+    const h = doc({ items: [item()] })
     const card = screen.getByTestId('take')
-    expect(card).toHaveTextContent("Take 1 · Brian's voice")
+    expect(card).toHaveTextContent("Take · Brian's voice")
     expect(card).toHaveTextContent('Sounds like the Customer, and sits in the room. Trimmed 120 ms of pauses.')
     expect(card).toHaveTextContent('0.96')
-    await userEvent.click(within(card).getByRole('button', { name: 'Play take 1 in the video' }))
-    expect(h.onPlayTake).toHaveBeenCalled()
+    await userEvent.click(within(card).getByRole('button', { name: 'Play the take in the video' }))
+    expect(h.onPlayTake).toHaveBeenCalledWith(expect.objectContaining({ candidate_id: 'c1' }))
     await userEvent.click(within(card).getByRole('button', { name: 'Keep' }))
-    expect(h.onKeep).toHaveBeenCalledWith(KEY, expect.objectContaining({ candidate_id: 'c1' }))
+    expect(h.onKeep).toHaveBeenCalledWith(expect.objectContaining({ item_id: 'i1' }))
     await userEvent.click(within(card).getByRole('button', { name: 'Another take' }))
-    expect(h.onAnother).toHaveBeenCalledWith(KEY)
+    expect(h.onAnother).toHaveBeenCalledWith(expect.objectContaining({ item_id: 'i1' }))
   })
 
-  it('puts two takes side by side as a choice', async () => {
-    const second = take({ candidate_id: 'c2', continuity: { voice_match: null, prosody: 0.7, audio_integration: 0.9, lip_sync: null, passed: false, warnings: ['Pitch is -6.3 semitones off the surrounding speech.'], measured: ['prosody'] }, fit_notes: [] })
-    const h = doc({ lines: { [KEY]: { status: 'ready', takes: [take(), second] } } })
-    const cards = screen.getAllByTestId('take')
-    expect(cards).toHaveLength(2)
-    expect(cards[1]).toHaveTextContent('Sounds 6 semitones low for the Customer.')
-    await userEvent.click(screen.getByRole('button', { name: 'Keep take 1' }))
-    expect(h.onKeep).toHaveBeenCalledWith(KEY, expect.objectContaining({ candidate_id: 'c1' }))
-    expect(screen.getByRole('button', { name: /neither/i })).toBeInTheDocument()
-  })
-
-  it('shows what is happening, a question with the recommended answer first, and an error with Try again', async () => {
-    const request = { selection: { start: 7.54, end: 9.02 }, text: 'x', voiceId: null, onLong: 'pause' as const, delivery: null, mix: 'replace' as const }
-    const h = doc({ lines: {
-      [keyOf({ start: 5.2, end: 6.94 })]: { status: 'working', takes: [], progress: 'Take 1: pitch is 6 semitones off. Trying again (take 2 of 3)' },
-      [KEY]: { status: 'needs-you', takes: [], request, question: { type: 'question', question: 'The new line runs 1.1 s long.', text: 'x', mix: 'replace',
-        options: [{ label: 'Use a shorter line: “Two kinds.”', fit: null, mix: null, warning: null, text: 'Two kinds.' }, { label: 'Speed it up', fit: 'stretch', mix: null, warning: null }] } },
-      [keyOf({ start: 9.38, end: 9.88 })]: { status: 'failed', takes: [], request, error: 'The voice service was busy. Nothing was charged.' },
-    } })
+  it('shows what is happening to a line, and the state of one that needs you or failed — nothing to answer here', () => {
+    doc({
+      items: [
+        item({ item_id: 'w', selection: { start: 5.2, end: 6.94 }, status: 'working', candidate: null, progress: 'Take 1: pitch is 6 semitones off. Trying again (take 2 of 3)' }),
+        item({ item_id: 'n', status: 'needs-you', candidate: null }),
+        item({ item_id: 'f', selection: { start: 9.38, end: 9.88 }, status: 'failed', candidate: null, error: 'The voice service was busy. Nothing was charged.' }),
+      ],
+      pendingLines: [
+        { selection: { start: 5.2, end: 6.94 }, status: 'working' },
+        { selection: { start: 7.54, end: 9.02 }, status: 'needs-you' },
+        { selection: { start: 9.38, end: 9.88 }, status: 'failed' },
+      ],
+    })
     expect(screen.getByTestId('line-working')).toHaveTextContent('Trying again')
     expect(screen.getByText('Voicing…')).toBeInTheDocument()
-    const q = screen.getByTestId('line-needs-you')
-    expect(within(q).getAllByRole('button')[0]).toHaveTextContent('Use a shorter line')
-    await userEvent.click(within(q).getAllByRole('button')[0])
-    expect(h.onAnswer).toHaveBeenCalledWith(KEY, expect.objectContaining({ text: 'Two kinds.' }))
-    const err = screen.getByTestId('line-error')
-    expect(err).toHaveTextContent('busy')
-    await userEvent.click(within(err).getByRole('button', { name: 'Try again' }))
-    expect(h.onHear).toHaveBeenCalledWith(keyOf({ start: 9.38, end: 9.88 }), request)
+    expect(screen.getByText('Needs you')).toBeInTheDocument()
+    expect(screen.getByText("Couldn't voice it")).toBeInTheDocument()
+    // What a line needs is said to Voltage in the box; the row has no answers or retries of its own.
+    expect(screen.queryByTestId('line-needs-you')).toBeNull()
+    expect(screen.queryByRole('button', { name: /try again|dismiss|shorter line/i })).toBeNull()
   })
 
   it('shows a kept change inline with Undo, and a removed line struck through', async () => {
@@ -177,32 +174,25 @@ describe('LineDoc: the line is the unit', () => {
     expect(screen.getByText('Reading')).toBeInTheDocument()
   })
 
-  it('offers tighter wordings, remembers "if it runs long", and tells the panel what is open', async () => {
-    const onReword = vi.fn(async () => ['Sure, right away.', 'Of course, sir.'])
-    const onLongLinesChange = vi.fn()
+  it('tells the panel what is open, and has no wording or long-line controls of its own', async () => {
     const onEditingChange = vi.fn()
-    doc({ onReword, onLongLinesChange, onEditingChange, readouts: [{ selection: { start: 9.38, end: 9.88 }, tags: ['voice at natural speed'] }] })
+    doc({ onEditingChange })
     await userEvent.click(screen.getByText('Sure, sir.'))
     expect(onEditingChange).toHaveBeenLastCalledWith(STATEMENTS[2])
-    expect(screen.getByTestId('readout')).toHaveTextContent('voice at natural speed')
-    await userEvent.selectOptions(screen.getByRole('combobox', { name: /runs long/i }), 'shorten')
-    expect(onLongLinesChange).toHaveBeenCalledWith('shorten')
-    await userEvent.click(screen.getByRole('button', { name: /ask voltage for wording/i }))
-    const offers = await screen.findByTestId('offers')
-    await userEvent.click(within(offers).getByRole('button', { name: 'Of course, sir.' }))
-    expect(screen.getByRole('textbox', { name: /new wording/i })).toHaveValue('Of course, sir.')
+    expect(screen.queryByRole('combobox', { name: /runs long/i })).toBeNull()
+    expect(screen.queryByRole('button', { name: /ask voltage/i })).toBeNull()
+    await userEvent.keyboard('{Escape}')
+    expect(onEditingChange).toHaveBeenLastCalledWith(null)
   })
 })
 
 describe('LineDoc: editing starts from where the line stands', () => {
-  const request = { selection: { start: 7.54, end: 9.02 }, text: 'Start a Bhaji Cam session now.', voiceId: 'EXAVITQu4vr4xnSDxMaL', onLong: 'shorten' as const, delivery: 'warmer', mix: 'replace' as const }
-
-  it('reopens with the last wording you tried, and the choices you made', async () => {
-    doc({ lines: { [KEY]: { status: 'ready', takes: [take()], request } } })
+  it('reopens with the last wording Voltage tried, and the choices you made', async () => {
+    const tried = item({ new_text: 'Start a Bhaji Cam session now.', delivery: 'warmer', candidate: take({ plan: { ...take().plan, voice_profile_id: 'EXAVITQu4vr4xnSDxMaL' } }) })
+    doc({ items: [tried] })
     await userEvent.click(within(screen.getByRole('group', { name: 'Actions for 0:07' })).getByRole('button', { name: 'Change the words' }))
     expect(screen.getByRole('textbox', { name: /new wording/i })).toHaveValue('Start a Bhaji Cam session now.')
     expect(screen.getByRole('combobox', { name: 'Voice' })).toHaveValue('EXAVITQu4vr4xnSDxMaL')
-    expect(screen.getByRole('combobox', { name: /runs long/i })).toHaveValue('shorten')
     expect(screen.getByRole('button', { name: 'Warmer' })).toHaveAttribute('aria-pressed', 'true')
     expect(screen.getByRole('button', { name: 'Hear it' })).toBeEnabled()   // it differs from the line as it stands
   })
@@ -219,10 +209,12 @@ describe('LineDoc: editing starts from where the line stands', () => {
   })
 
   it('reopens an added line with what you wrote for it', async () => {
-    const added = { ...request, mix: 'over' as const, text: 'Everything is 30% off.', delivery: null }
-    doc({ lines: { [addKeyOf(STATEMENTS[2])]: { status: 'failed', takes: [], request: added, error: 'busy' } } })
+    const added = item({ item_id: 'i2', selection: { start: 9.38, end: 9.88 }, mix: 'over', status: 'failed', candidate: null, new_text: 'Everything is 30% off.', error: 'busy' })
+    doc({ items: [added] })
+    expect(screen.getByRole('listitem', { name: 'New line after 0:09' })).toHaveTextContent('Everything is 30% off.')
     await userEvent.click(within(screen.getByRole('group', { name: 'Actions for 0:09' })).getByRole('button', { name: 'Add a line after' }))
     expect(screen.getByRole('textbox', { name: /words for the new line/i })).toHaveValue('Everything is 30% off.')
+    expect(within(screen.getByRole('group', { name: 'Sound meets picture' })).getByRole('button', { name: 'Over the picture' })).toHaveAttribute('aria-pressed', 'true')
   })
 })
 
@@ -230,7 +222,7 @@ describe('LineDoc: a take can go anywhere on the timeline', () => {
   it('shows where a take starts and lets you move it: drag on the bar, or type a time', async () => {
     const onPlacing = vi.fn()
     const onMove = vi.fn()
-    const first = doc({ lines: { [KEY]: { status: 'ready', takes: [take()] } }, onPlacing, onMove })
+    const first = doc({ items: [item()], onPlacing, onMove })
     const place = screen.getByTestId('place')
     expect(place).toHaveTextContent('Starts at 0:07.54')
     await userEvent.click(within(place).getByRole('button', { name: 'Move' }))
@@ -241,7 +233,7 @@ describe('LineDoc: a take can go anywhere on the timeline', () => {
   it('applies the placed start to the take', async () => {
     const onMove = vi.fn()
     const onPlacing = vi.fn()
-    doc({ lines: { [KEY]: { status: 'ready', takes: [take()] } }, onMove, onPlacing, placing: { id: 'c1', start: 9.2, duration: 1.5 } })
+    doc({ items: [item()], onMove, onPlacing, placing: { id: 'c1', start: 9.2, duration: 1.5 } })
     const place = screen.getByTestId('place')
     await userEvent.click(within(place).getByRole('button', { name: 'Nudge later' }))
     expect(onPlacing).toHaveBeenCalledWith({ id: 'c1', start: 9.3, duration: 1.5 })
@@ -250,7 +242,7 @@ describe('LineDoc: a take can go anywhere on the timeline', () => {
     await userEvent.type(field, '0:10.00')
     expect(onPlacing).toHaveBeenLastCalledWith({ id: 'c1', start: 10, duration: 1.5 })
     await userEvent.click(within(place).getByRole('button', { name: 'Put it here' }))
-    expect(onMove).toHaveBeenCalledWith(KEY, expect.objectContaining({ candidate_id: 'c1' }), 9.2)   // the prop's start wins until re-rendered
+    expect(onMove).toHaveBeenCalledWith(expect.objectContaining({ item_id: 'i1' }), expect.objectContaining({ candidate_id: 'c1' }), 9.2)   // the prop's start wins until re-rendered
     expect(onPlacing).toHaveBeenLastCalledWith(null)
   })
 
@@ -276,7 +268,7 @@ describe('LineDoc: keyboard (UX-4)', () => {
   it('moves between lines, opens and closes the editor, plays, keeps, undoes and removes from the keys', async () => {
     const user = userEvent.setup()
     const h = doc({
-      lines: { [KEY]: { status: 'ready', takes: [take()] } },
+      items: [item()],
       revisions: [{ edit_id: 'e1', start: 9.38, end: 9.88, text: 'Sure, boss.', mix: 'replace' }],
     })
     const row = (i: number) => document.getElementById(`line-${i}`) as HTMLElement
@@ -287,7 +279,7 @@ describe('LineDoc: keyboard (UX-4)', () => {
     await user.keyboard(' ')
     expect(h.onSeek).toHaveBeenCalledWith(STATEMENTS[1])
     await user.keyboard('k')
-    expect(h.onKeep).toHaveBeenCalledWith(KEY, expect.objectContaining({ candidate_id: 'c1' }))
+    expect(h.onKeep).toHaveBeenCalledWith(expect.objectContaining({ item_id: 'i1' }))
     await user.keyboard('{Enter}')
     expect(screen.getByRole('textbox', { name: 'New wording' })).toHaveFocus()
     await user.keyboard('{Escape}')

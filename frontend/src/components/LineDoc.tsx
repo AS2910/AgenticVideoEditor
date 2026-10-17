@@ -2,7 +2,7 @@ import { Fragment, useEffect, useRef, useState } from 'react'
 import type React from 'react'
 import type { ReactNode } from 'react'
 import type {
-  Candidate, ItemStatus, LineStatus, LongLines, Mix, Question, QuestionOption, Revision, Selection, Speaker, Statement, Voice, Word,
+  Candidate, ItemStatus, Mix, PlanItem, Revision, Selection, Speaker, Statement, Voice, Word,
 } from '../types'
 import { diffWords, lineAfter, trackedChanges } from '../transcript/changes'
 import { clock } from '../transcript/format'
@@ -23,33 +23,20 @@ import { editorClass, riseClass, selectClass } from './editorStyles'
 import { addKeyOf, keyOf } from '../transcript/keys'
 import type { LineKey } from '../transcript/keys'
 
-/** What was asked for a line, so Another take asks the same again. */
+/** What the editor asks for a line: the words and the choices. App says it
+ *  to Voltage in one sentence; nothing is voiced outside a turn. */
 export interface LineRequest {
   selection: Selection
   text: string
   voiceId: string | null
-  onLong: LongLines
   delivery: string | null
   mix: 'replace' | 'over' | 'concatenate' | 'layer'
   /** For an added line: a chosen start on the timeline instead of "after this line". */
   at?: number | null
 }
 
-/** Where a line stands while Voltage works on it, and the takes to choose from. */
-export interface LineState {
-  status: 'working' | 'ready' | 'needs-you' | 'failed'
-  takes: Candidate[]
-  question?: Question | null
-  error?: string | null
-  progress?: string | null
-  request?: LineRequest
-}
-
 /** A line the agent's plan is working on: where it stands, and the new words. */
-export interface PendingLine { selection: Selection; status: LineStatus | ItemStatus | 'reading'; text?: string; mix?: Mix }
-
-/** How the last take of a line was made to fit, for the readout under the editor. */
-export interface FitReadout { selection: Selection; tags: string[] }
+export interface PendingLine { selection: Selection; status: ItemStatus | 'reading'; text?: string; mix?: Mix }
 
 interface LineDocProps {
   statements: Statement[]
@@ -60,37 +47,34 @@ interface LineDocProps {
   revisions?: Revision[]
   selection?: Selection | null
   currentTime: number
-  /** The agent's plan, line by line. */
+  /** The agent's plan, line by line: where each line stands. */
   pendingLines?: PendingLine[]
-  /** Lines being worked on by hand, keyed by `keyOf` / `addKeyOf`. */
-  lines?: Record<LineKey, LineState>
-  longLines?: LongLines
+  /** The plan's items (planned and on), so a line carries its take, its progress, or its state. */
+  items?: PlanItem[]
   disabled?: boolean
   /** The ElevenLabs rate, for the cost line; unknown = no cost shown. */
   usdPerChar?: number | null
   /** The take playing in the video right now, if any. */
   playing?: string | null
-  readouts?: FitReadout[]
   onSeek: (statement: Statement) => void
+  /** Hear it: what the editor asks for; App says it to Voltage as one turn. */
   onHear: (key: LineKey, request: LineRequest) => void
-  onKeep: (key: LineKey, candidate: Candidate) => void | Promise<unknown>
-  onAnother: (key: LineKey) => void | Promise<unknown>
-  onAnswer: (key: LineKey, option: QuestionOption) => void | Promise<unknown>
+  /** Keep the take under a line: its plan item is approved and rendered. */
+  onKeep: (item: PlanItem) => void | Promise<unknown>
+  /** Another take of the line: asked of Voltage in words. */
+  onAnother: (item: PlanItem) => void | Promise<unknown>
   onUndo: (editId: string) => void
   onRemove: (statement: Statement) => void
   /** UX-1c: move this line of the original speech to start at `to`. */
   onShift?: (s: Statement, to: number) => void
   onPlayTake: (candidate: Candidate) => void
-  onDismiss: (key: LineKey) => void
   /** A take dragged to a new start; the moved take replaces it under the line. */
-  onMove?: (key: LineKey, candidate: Candidate, start: number) => void
+  onMove?: (item: PlanItem, candidate: Candidate, start: number) => void
   /** A kept line dragged to a new start. */
   onMoveKept?: (editId: string, start: number) => void
   /** While a take or kept line is being placed: its start, for the bar. */
   placing?: { id: string; start: number; duration: number } | null
   onPlacing?: (placing: { id: string; start: number; duration: number } | null) => void
-  onReword?: (statement: Statement, draft: string) => Promise<string[]>
-  onLongLinesChange?: (value: LongLines) => void
   onEditingChange?: (statement: Statement | null) => void
   /** UX-5: the clip's length, so a voice-over can be placed on a clip with no speech. */
   duration?: number
@@ -147,12 +131,6 @@ const StatusBadge = ({ status, children, role }: { status: string; children: Rea
   <Badge variant="secondary" className={cn('px-2.5', TONE[status])} role={role}>{children}</Badge>
 )
 const DELIVERIES = ['warmer', 'more excited', 'calmer', 'slower', 'firmer']
-const LONG_OPTIONS: { value: LongLines; label: string }[] = [
-  { value: 'pause', label: 'Let Voltage fit it' },
-  { value: 'shorten', label: 'Prefer a shorter wording' },
-  { value: 'stretch', label: 'Speed it up' },
-  { value: 'ask', label: 'Ask me' },
-]
 const MIX_NOTE: Record<string, string | null> = {
   replace: null, layer: 'plays over the picture', over: 'plays over the picture', concatenate: 'the picture makes room while it plays', remove: null,
 }
@@ -165,21 +143,18 @@ const PlayIcon = () => <Play size={14} aria-hidden="true" fill="currentColor" />
  *  actions, editor and takes. Nothing about a line happens anywhere else. */
 export function LineDoc({
   statements, words = [], speakers = [], voices = [], revisions = [], selection, currentTime, filter, review,
-  pendingLines = [], lines = {}, longLines = 'pause', disabled, usdPerChar, playing, readouts = [],
-  onSeek, onHear, onKeep, onAnother, onAnswer, onUndo, onRemove, onPlayTake, onDismiss, onReword,
-  onLongLinesChange, onEditingChange, onMove, onMoveKept, placing, onPlacing, onShift, duration,
+  pendingLines = [], items = [], disabled, usdPerChar, playing,
+  onSeek, onHear, onKeep, onAnother, onUndo, onRemove, onPlayTake,
+  onEditingChange, onMove, onMoveKept, placing, onPlacing, onShift, duration,
 }: LineDocProps) {
   const [at, setAt] = useState<string>('')          // the add editor's "starts at", as typed
   const [placeText, setPlaceText] = useState('')     // the placing control's time, as typed
   const [editing, setEditing] = useState<{ index: number; mode: 'edit' | 'add' } | null>(null)
   const [draft, setDraft] = useState('')
   const [voiceId, setVoiceId] = useState('')
-  const [onLong, setOnLong] = useState<LongLines>(longLines)
   const [delivery, setDelivery] = useState<string | null>(null)
   const [ownWords, setOwnWords] = useState<string | null>(null)
   const [mix, setMix] = useState<'over' | 'concatenate'>('over')
-  const [asking, setAsking] = useState(false)
-  const [offers, setOffers] = useState<string[]>([])
   // A row has keyboard focus: the heading shows the keys.
   const [focusedRow, setFocusedRow] = useState<number | null>(null)
   // On a touch screen the row's actions open from a "…" button (UX-6).
@@ -238,7 +213,7 @@ export function LineDoc({
             <span className={hint}>No one speaks in this clip. Place a line where you want it, and say what it should say.</span>
           </div>
           <PlaceEditor
-            duration={duration} voices={voices} usdPerChar={usdPerChar} longLines={longLines} disabled={disabled}
+            duration={duration} voices={voices} usdPerChar={usdPerChar} disabled={disabled}
             placing={placing} onPlacing={onPlacing}
             onHear={(span, request) => onHear(keyOf(span), request)}
           />
@@ -260,27 +235,32 @@ export function LineDoc({
     return revision && revision.mix !== 'remove' ? lineAfter(s, revision, words) : s.text
   }
 
-  /** Where to start editing from: the last wording tried on this line (a take
-   *  waiting, a question, an error), else the line as it stands. Never the
-   *  original when you have already moved past it. */
+  /** The plan's change to the line itself (a replacement, a voice-over on a
+   *  placed span, a removal), and the line it adds after it. An added line
+   *  already kept lives on as a revision, not here. */
+  const isAdd = (i: { mix: Mix }) => i.mix === 'over' || i.mix === 'concatenate'
+  const ownItem = (s: Statement) => items.find((i) => overlaps(i.selection, s) && !isAdd(i)) ?? null
+  const addedItem = (s: Statement) => items.find((i) => overlaps(i.selection, s) && isAdd(i) && i.status !== 'approved') ?? null
+
+  /** Where to start editing from: the last wording Voltage tried on this line
+   *  (a take waiting, a line being voiced, one that needs you), else the line
+   *  as it stands. Never the original when you have already moved past it. */
   const startingPoint = (s: Statement) => {
-    const last = lines[keyOf({ start: s.start, end: s.end })]?.request
-    return last && last.mix === 'replace' ? last : null
+    const own = ownItem(s)
+    return own && own.mix !== 'remove' ? own : null
   }
 
   const open = (index: number, mode: 'edit' | 'add', focusDelivery = false) => {
     const s = statements[index]
-    const last = mode === 'edit' ? startingPoint(s) : lines[addKeyOf(s)]?.request ?? null
+    const last = mode === 'edit' ? startingPoint(s) : addedItem(s)
     setEditing({ index, mode })
-    setDraft(mode === 'edit' ? (last?.text ?? standing(s)) : (last?.text ?? ''))
-    setOffers([])
-    setVoiceId(last?.voiceId ?? speakers.find((sp) => sp.label === s.speaker)?.voice_id ?? '')
-    setOnLong(last?.onLong ?? longLines)
+    setDraft(mode === 'edit' ? (last?.new_text ?? standing(s)) : (last?.new_text ?? ''))
+    setVoiceId(last?.candidate?.plan.voice_profile_id ?? speakers.find((sp) => sp.label === s.speaker)?.voice_id ?? '')
     const known = last?.delivery && DELIVERIES.includes(last.delivery) ? last.delivery : null
     setDelivery(known)
     setOwnWords(focusDelivery && !last?.delivery ? '' : last?.delivery && !known ? last.delivery : null)
     setMix(last?.mix === 'concatenate' ? 'concatenate' : 'over')
-    setAt(last?.at != null ? timecode(last.at) : '')
+    setAt('')
   }
   const close = () => {
     if (editing) returnTo.current = editing.index
@@ -313,9 +293,8 @@ export function LineDoc({
         break
       }
       case 'k': case 'K': {
-        const state = lines[keyOf(s)]
-        const latest = state?.takes[state.takes.length - 1]
-        if (latest && state?.status === 'ready' && !disabled) { e.preventDefault(); onKeep(keyOf(s), latest) }
+        const own = ownItem(s)
+        if (own?.status === 'ready' && own.candidate && !disabled) { e.preventDefault(); onKeep(own) }
         break
       }
       case 'u': case 'U': {
@@ -350,25 +329,12 @@ export function LineDoc({
     const chosen = editing.mode === 'add' && at.trim() ? parseTime(at) : null
     if (editing.mode === 'add' && at.trim() && chosen === null) return   // an unreadable time is never dropped silently
     onHear(key, {
-      selection: { start: s.start, end: s.end }, text, voiceId: voiceId || null, onLong,
+      selection: { start: s.start, end: s.end }, text, voiceId: voiceId || null,
       delivery: (ownWords?.trim() || delivery) ?? null, mix: editing.mode === 'edit' ? (s.placed ? 'layer' : 'replace') : mix,
       ...(chosen !== null ? { at: chosen } : {}),
     })
     close()
   }
-  const ask = async (s: Statement) => {
-    if (!onReword) return
-    setAsking(true)
-    try {
-      const texts = await onReword(s, draft.trim())
-      if (texts.length === 1) setDraft(texts[0])
-      else setOffers(texts)
-    } finally {
-      setAsking(false)
-    }
-  }
-  const chooseLong = (v: LongLines) => { setOnLong(v); onLongLinesChange?.(v) }
-
   const editor = (s: Statement, mode: 'edit' | 'add') => {
     const chars = draft.trim().length
     const cost = usdPerChar ? ` · about ${Math.max(1, Math.round(chars * usdPerChar * 100))}¢` : ''
@@ -432,19 +398,9 @@ export function LineDoc({
             <span>{mix === 'over' ? 'The picture keeps moving under the line.' : 'The picture waits while the line plays.'}</span>
           </ControlRow>
         )}
-        <ControlRow label="If it runs long">
-          <select className={selectClass} aria-label="If it runs long" value={onLong} onChange={(e) => chooseLong(e.target.value as LongLines)}>
-            {LONG_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-          </select>
-        </ControlRow>
         <div className="flex flex-wrap items-center gap-2 border-t pt-3">
           <span className={cn(faint, 'tnum')}>≈ {chars} characters{cost} · ready in about 10 s</span>
           <span className="flex-1" />
-          {onReword && mode === 'edit' && (
-            <LinkButton disabled={asking} onClick={() => void ask(s)}>
-              {asking ? 'Asking Voltage…' : 'Ask Voltage for wording'}
-            </LinkButton>
-          )}
           <Button type="button" variant="outline" onClick={close}>Cancel</Button>
           <Button
             type="button"
@@ -455,20 +411,6 @@ export function LineDoc({
             Hear it
           </Button>
         </div>
-        {offers.length > 0 && (
-          <div className="flex flex-col gap-1.5 border-t pt-3" data-testid="offers">
-            <span className={faint}>Tighter wordings that fit the gap as it is</span>
-            {offers.map((o) => <Button key={o} type="button" variant="outline" className="h-auto justify-start whitespace-normal py-2 text-left" onClick={() => { setDraft(o); setOffers([]) }}>{o}</Button>)}
-          </div>
-        )}
-        {(() => {
-          const r = readouts.find((x) => overlaps(x.selection, s))
-          return r && r.tags.length > 0 ? (
-            <div className="flex flex-wrap items-center gap-2 border-t pt-3 text-sm text-muted-foreground" data-testid="readout">
-              <span>Last take fit by:</span>{r.tags.map((t) => <Badge key={t} variant="secondary" className="bg-ok-soft px-2.5 text-ok">{t}</Badge>)}
-            </div>
-          ) : null
-        })()}
       </div>
     )
   }
@@ -504,93 +446,44 @@ export function LineDoc({
     )
   }
 
-  const takeCard = (key: LineKey, c: Candidate, s: Statement, n: number, total: number, state: LineState) => {
+  /** The take under a line: play it in place, where it starts, Keep, Another take. */
+  const takeCard = (item: PlanItem, c: Candidate, s: Statement) => {
     const v = verdict(c, name(s.speaker))
     const voice = voices.find((x) => x.voice_id === c.plan.voice_profile_id)?.name
-    const held = state.request?.mix === 'over' && c.plan.mix === 'concatenate'
+    const held = item.mix === 'over' && c.plan.mix === 'concatenate'
     return (
-      <div
-        key={c.candidate_id}
-        className={cn('flex flex-col gap-2 rounded-lg border bg-card p-3 text-card-foreground shadow-xs', riseClass, total > 1 && n === total && 'border-l-2 border-l-primary')}
-        data-testid="take"
-        data-chosen={total > 1 && n === total ? 'true' : undefined}
-      >
+      <div className={cn('flex flex-col gap-2 rounded-lg border bg-card p-3 text-card-foreground shadow-xs', riseClass)} data-testid="take">
         <div className="flex items-center gap-2.5">
           <Button
             variant={playing === c.candidate_id ? 'default' : 'outline'}
             size="icon-sm"
             className="rounded-full"
-            aria-label={`Play take ${n} in the video`}
+            aria-label="Play the take in the video"
             aria-pressed={playing === c.candidate_id}
             onClick={() => onPlayTake(c)}
           ><PlayIcon /></Button>
-          <span className="min-w-0 text-sm font-medium">Take {n}{voice ? ` · ${voice}'s voice` : ''}</span>
+          <span className="min-w-0 text-sm font-medium">Take{voice ? ` · ${voice}'s voice` : ''}</span>
           <span className="flex-1" />
           {v.score !== null && <span className="tnum text-sm text-muted-foreground">{v.score.toFixed(2)}</span>}
         </div>
         <div className="text-sm leading-normal">{v.text}{held ? ' Held the picture: no room to play over it.' : ''}</div>
-        {onMove && placeControl(c.candidate_id, c.plan.selection.start, c.audio.duration, (t) => onMove(key, c, t))}
-        {total === 1 && (
-          <div className="flex flex-wrap gap-2">
-            <Button onClick={() => void run(`keep-${c.candidate_id}`, () => onKeep(key, c))} disabled={disabled || pending !== null} aria-busy={pending === `keep-${c.candidate_id}` || undefined}>{pending === `keep-${c.candidate_id}` ? 'Keeping…' : 'Keep'}</Button>
-            <Button variant="outline" onClick={() => void run(`another-${key}`, () => onAnother(key))} disabled={disabled || pending !== null} aria-busy={pending === `another-${key}` || undefined}>{pending === `another-${key}` ? 'Asking…' : 'Another take'}</Button>
-          </div>
-        )}
+        {onMove && placeControl(c.candidate_id, c.plan.selection.start, c.audio.duration, (t) => onMove(item, c, t))}
+        <div className="flex flex-wrap gap-2">
+          <Button onClick={() => void run(`keep-${item.item_id}`, () => onKeep(item))} disabled={disabled || pending !== null} aria-busy={pending === `keep-${item.item_id}` || undefined}>{pending === `keep-${item.item_id}` ? 'Keeping…' : 'Keep'}</Button>
+          <Button variant="outline" onClick={() => void run(`another-${item.item_id}`, () => onAnother(item))} disabled={disabled || pending !== null} aria-busy={pending === `another-${item.item_id}` || undefined}>{pending === `another-${item.item_id}` ? 'Asking…' : 'Another take'}</Button>
+        </div>
       </div>
     )
   }
 
-  const lineBlock = (key: LineKey, s: Statement, index: number) => {
-    const state = lines[key]
-    if (!state) return null
-    if (state.status === 'working') {
-      return <div className={cn('flex items-center gap-2 text-sm text-muted-foreground', riseClass)} data-testid="line-working" role="status"><Spinner /><span>{state.progress ?? 'Voicing the line…'}</span></div>
+  /** What stands under a line: Voltage voicing it, or the take to hear and keep. */
+  const lineBlock = (item: PlanItem | null, s: Statement) => {
+    if (!item) return null
+    if (item.status === 'working') {
+      return <div className={cn('flex items-center gap-2 text-sm text-muted-foreground', riseClass)} data-testid="line-working" role="status"><Spinner /><span>{item.progress ?? 'Voicing the line…'}</span></div>
     }
-    if (state.status === 'failed') {
-      return (
-        <div className={cn('flex flex-wrap items-center gap-2.5 rounded-lg border border-needs/40 bg-needs-soft p-2.5 text-sm text-foreground', riseClass)} data-testid="line-error" role="alert">
-          <span className="min-w-0 flex-1">{state.error ?? "Couldn't voice it."}</span>
-          {state.request && <Button variant="outline" size="sm" onClick={() => onHear(key, state.request!)} disabled={disabled}>Try again</Button>}
-          <Button variant="ghost" size="sm" onClick={() => onDismiss(key)}>Dismiss</Button>
-        </div>
-      )
-    }
-    if (state.status === 'needs-you' && state.question) {
-      const q = state.question
-      return (
-        <div className={cn('flex flex-col gap-2 rounded-lg border border-needs/40 bg-needs-soft p-3 text-sm leading-normal text-foreground', riseClass)} data-testid="line-needs-you" role="status">
-          <div>{q.question}</div>
-          <div className="flex flex-wrap gap-2">
-            {q.options.map((o, k) => (
-              <Button key={k} variant={k === 0 ? 'default' : 'outline'} onClick={() => void run(`answer-${key}`, () => onAnswer(key, o))} disabled={disabled || pending !== null} aria-busy={pending === `answer-${key}` || undefined}>
-                {o.label}{o.warning && <span className="font-normal opacity-80"> {o.warning}</span>}
-              </Button>
-            ))}
-            <Button variant="ghost" onClick={() => { onDismiss(key); open(index, 'edit') }}>Change the words instead</Button>
-          </div>
-        </div>
-      )
-    }
-    const takes = state.takes.slice(-2)
-    const total = state.takes.length
-    return (
-      <div className="flex flex-col gap-2">
-        <div className={takes.length > 1 ? 'flex gap-2 *:min-w-0 *:flex-1 max-sm:flex-col' : undefined}>
-          {takes.map((c, i) => takeCard(key, c, s, total - takes.length + i + 1, total, state))}
-        </div>
-        {takes.length > 1 && (
-          <div className="flex flex-wrap gap-2">
-            {takes.map((c, i) => (
-              <Button key={c.candidate_id} variant={i === takes.length - 1 ? 'default' : 'outline'} onClick={() => void run(`keep-${c.candidate_id}`, () => onKeep(key, c))} disabled={disabled || pending !== null} aria-busy={pending === `keep-${c.candidate_id}` || undefined}>
-                {pending === `keep-${c.candidate_id}` ? 'Keeping…' : `Keep take ${total - takes.length + i + 1}`}
-              </Button>
-            ))}
-            <Button variant="outline" onClick={() => void run(`another-${key}`, () => onAnother(key))} disabled={disabled || pending !== null}>{pending === `another-${key}` ? 'Asking…' : 'Another take'}</Button>
-            <Button variant="ghost" onClick={() => { onDismiss(key); open(index, 'edit') }}>Neither — change the words</Button>
-          </div>
-        )}
-      </div>
-    )
+    if (item.status === 'ready' && item.candidate) return takeCard(item, item.candidate, s)
+    return null
   }
 
   /** The rows in time order: every line of the transcript, and for a line
@@ -737,10 +630,10 @@ export function LineDoc({
   /** One line of the transcript, as a row with everything about it inside. */
   const lineRow = (s: Statement, i: number, order: number) => {
     const key = keyOf({ start: s.start, end: s.end })
-    const addKey = addKeyOf(s)
     const current = currentTime >= s.start && currentTime < s.end
     const selected = !!selection && overlaps(selection, s)
-    const pending = pendingLines.find((p) => overlaps(p.selection, s) && STATUS[p.status])
+    // The line's own change; a line added after it has its own row below.
+    const pending = pendingLines.find((p) => overlaps(p.selection, s) && STATUS[p.status] && !isAdd({ mix: p.mix ?? 'replace' }))
     // The placed half of a shifted line belongs to the line it came from, not the one it lands on.
     const live = revisions.filter((r) => overlaps(r, s) && !(r.mix === 'layer' && r.partner))
     const revision = live.length ? live[live.length - 1] : null
@@ -749,13 +642,13 @@ export function LineDoc({
     const shown: Revision | null = pending?.text
       ? { start: pending.selection.start, end: pending.selection.end, text: pending.text, mix: pending.mix ?? 'replace' }
       : revision && !removed ? revision : null
-    const state = lines[key]
-    const status: string | null = state?.status ?? pending?.status ?? (removed ? 'removed' : revision ? 'kept' : null)
+    const own = ownItem(s)
+    const added = addedItem(s)
+    const status: string | null = pending?.status ?? (removed ? 'removed' : revision ? 'kept' : null)
     const label = name(s.speaker)
     const newSpeaker = !!label && s.speaker !== statements[i - 1]?.speaker
     const isEditing = editing?.index === i && editing.mode === 'edit'
     const isAdding = editing?.index === i && editing.mode === 'add'
-    const added = lines[addKey]
     // UX-7e: an untouched line shifts; a kept line moves with its take; the rest stay put.
     const mover: { id: string; start: number; duration: number; apply: (to: number) => void } | null =
       !revision && onShift ? { id: `shift-${key}`, start: s.start, duration: Math.max(0.05, s.end - s.start), apply: (t) => onShift(s, t) }
@@ -816,7 +709,7 @@ export function LineDoc({
                 {pending && !revision && pending.text && MIX_NOTE[pending.mix ?? 'replace'] && (
                   <div className={metaClass}>Added · {MIX_NOTE[pending.mix ?? 'replace']}</div>
                 )}
-                {!isEditing && <div className={unfold}>{lineBlock(key, s, i)}</div>}
+                {!isEditing && <div className={unfold}>{lineBlock(own, s)}</div>}
               </div>
             )}
           </div>
@@ -865,8 +758,11 @@ export function LineDoc({
             <span className="tnum text-sm text-muted-foreground">{clock(s.end)}</span>
             <span />
             <div className="min-w-0">
-              <div className={metaClass}>New line after {clock(s.start)}{added.request ? ` · ${added.request.mix === 'over' ? 'plays over the picture' : 'the picture makes room'}` : ''}</div>
-              {lineBlock(addKey, s, i)}
+              <div className="flex flex-col gap-1.5">
+                <span className="block text-base leading-normal"><ins className={INS}>{added.new_text}</ins></span>
+                <div className={metaClass}>New line after {clock(s.start)} · {added.mix === 'concatenate' ? 'the picture makes room' : 'plays over the picture'}</div>
+                <div className={unfold}>{lineBlock(added, s)}</div>
+              </div>
             </div>
             <span className={sideClass}>{STATUS[added.status] && <StatusBadge status={added.status} role="status">{STATUS[added.status]}</StatusBadge>}</span>
           </div>
@@ -883,7 +779,7 @@ export function LineDoc({
             <span />
             <div className="min-w-0">
               <PlaceEditor
-                duration={duration} voices={voices} usdPerChar={usdPerChar} longLines={longLines} disabled={disabled}
+                duration={duration} voices={voices} usdPerChar={usdPerChar} disabled={disabled}
                 placing={placing} onPlacing={onPlacing} initialStart={Math.min(duration - 1, s.end + 0.3)}
                 onHear={(span, request) => { setPlacingAnother(false); onHear(keyOf(span), request) }}
                 onCancel={() => setPlacingAnother(false)}

@@ -24,9 +24,7 @@ const plan = (over: Partial<Plan> = {}): Plan => ({
   created_at: '2026-10-02T10:00:00Z', estimate: { items: 1, voice_characters: 31, usd: 0.0093, seconds: 12 },
   findings: [], question: null, spend_usd: 0, log: [], items: [item()], ...over,
 })
-const handlers = () => ({
-  onToggle: vi.fn(), onReword: vi.fn(), onInclude: vi.fn(), onRun: vi.fn(), onAnswer: vi.fn(), onRedo: vi.fn(),
-})
+const handlers = () => ({ onRedo: vi.fn() })
 
 describe('a sheet is a real modal', () => {
   it('moves focus to its title when it opens, closes on Escape, and gives focus back', async () => {
@@ -83,11 +81,9 @@ describe('what is announced', () => {
     expect(screen.getByRole('status')).toHaveTextContent('near the cap')
   })
 
-  it('exposes the plan\'s progress as a progressbar with a value, and narration as status', () => {
+  it('reads what is happening to a line as status', () => {
     const p = plan({ status: 'running', items: [item({ status: 'working', progress: 'Take 1: fitting it' }), item({ item_id: 'i2', status: 'ready' })] })
     render(<PlanCard plan={p} speakers={[]} voices={[]} projectId="p1" {...handlers()} />)
-    const bar = screen.getByRole('progressbar', { name: 'Voicing the plan' })
-    expect(bar).toHaveAttribute('aria-valuenow', '50')
     expect(screen.getByRole('status')).toHaveTextContent('Take 1: fitting it')
   })
 

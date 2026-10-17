@@ -24,6 +24,7 @@ class ToolResult:
     blocks: list[dict] | None = None            # instead of text: text + image blocks
     step: str | None = None                     # the line the thread shows; None = silent
     cost_usd: float = 0.0
+    card: dict | None = None                    # {text, data}: a card the thread shows after the step (voice previews)
 
 
 @dataclass
@@ -429,7 +430,7 @@ def _synthesize_take(wb: Workbench, turn: Turn, args: dict) -> ToolResult:
         # fails the sound check comes back with its report, and the retry — with
         # a different direction, voice or wording — is Voltage's own call.
         candidate = wb.generate(turn.project_id, record, candidate_id, selection, text, voice_id,
-                                fit, mix, None, step, delivery=delivery, voice_notes=voice_notes,
+                                fit, mix, step, delivery=delivery, voice_notes=voice_notes,
                                 voice_settings=settings, model=model, flex_max=flex_max, max_regenerations=0)
     except Exception as exc:  # noqa: BLE001 — the model hears why and decides; nothing crashes the turn
         reason = str(exc) or type(exc).__name__
@@ -527,8 +528,7 @@ def _design_voice(wb: Workbench, turn: Turn, args: dict) -> ToolResult:
         rows.append({"n": n, "generated_voice_id": pv["generated_voice_id"], "sha256": art.sha256,
                      "duration": round(float(pv.get("duration") or 0.0), 1)})
     wb.repo.set_settings(turn.project_id, designs=designs)
-    wb.repo.add_message(turn.project_id, "assistant", f"{len(rows)} voices designed from “{description}”", kind="previews",
-                        data={"description": description, "previews": rows})
+    card = {"text": f"{len(rows)} voices designed from “{description}”", "data": {"description": description, "previews": rows}}
     sample_len = len(previews[0].get("text") or "")
     ids = "; ".join(f"preview {r['n']}: {r['generated_voice_id']} ({r['duration']:.0f} s)" for r in rows)
     text_out = (f"{len(rows)} previews of a voice for “{description}”, each reading the same sample"
@@ -537,7 +537,7 @@ def _design_voice(wb: Workbench, turn: Turn, args: dict) -> ToolResult:
                 "with save_voice and say that you picked without hearing. A kept voice is named for the clip (two words at most) "
                 f"and takes a voice slot.{_slots_line(wb)} Cost ${cost:.2f}.")
     return ToolResult(text_out, step=f"Designed a voice from “{description[:56]}{'…' if len(description) > 56 else ''}” — {len(rows)} previews to hear",
-                      cost_usd=cost)
+                      cost_usd=cost, card=card)
 
 
 def _save_voice(wb: Workbench, turn: Turn, args: dict) -> ToolResult:
