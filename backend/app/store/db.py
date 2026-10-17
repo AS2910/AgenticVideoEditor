@@ -49,6 +49,14 @@ CREATE TABLE IF NOT EXISTS messages (
     at         TEXT NOT NULL,
     PRIMARY KEY (project_id, seq)
 );
+CREATE TABLE IF NOT EXISTS turns (
+    project_id TEXT NOT NULL,
+    seq        INTEGER NOT NULL,
+    role       TEXT NOT NULL,          -- "user" | "assistant"
+    content    TEXT NOT NULL,          -- JSON: the content blocks as the model saw them (Phase 20)
+    at         TEXT NOT NULL,
+    PRIMARY KEY (project_id, seq)
+);
 CREATE TABLE IF NOT EXISTS plans (
     project_id TEXT NOT NULL,
     plan_id    TEXT NOT NULL,
@@ -69,13 +77,15 @@ CREATE TABLE IF NOT EXISTS usage (
 CREATE INDEX IF NOT EXISTS usage_by_project ON usage (project_id);
 """
 
-PROJECT_TABLES = ("candidates", "edits", "messages", "usage", "plans")
+PROJECT_TABLES = ("candidates", "edits", "messages", "usage", "plans", "turns")
 
 # Columns added after a table first shipped: (table, column, definition).
 # Applied to databases created before them; new databases get them from SCHEMA.
 MIGRATIONS = (
     ("projects", "speakers", "TEXT NOT NULL DEFAULT '{}'"),   # Phase 11
     ("projects", "settings", "TEXT NOT NULL DEFAULT '{}'"),   # Phase 12
+    ("messages", "kind", "TEXT NOT NULL DEFAULT 'say'"),      # Phase 20: "say" | "step"
+    ("messages", "cost", "REAL"),                             # Phase 20: what a step cost, in dollars
 )
 
 

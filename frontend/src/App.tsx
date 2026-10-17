@@ -37,11 +37,7 @@ import { SpeakersBar } from './components/SpeakersBar'
 import { clock } from './transcript/format'
 import { speakerSlot } from './transcript/speakers'
 import {
-  createProject, confirmPlace, previewEdit, approveEdit, exportProject, artifactUrl,
-  pollJob, PollCancelled, ApiError, listProjects, getProject, deleteProject, getUsage, listVoices, updateSpeaker, detectSpeakers,
-  revertEdit, updateSettings, rewordLine, removeLine, moveCandidate, moveEdit, shiftLine,
-  createPlan, getPlan, updateItem, runPlan, answerItem, redoItem, approvePlan, setPlanVoice, clarifyPlan,
-  readProject, revisePlan, stopPlan, grantConsent, createVariant, getMe, logout,
+  createProject, confirmPlace, previewEdit, approveEdit, exportProject, artifactUrl, pollJob, PollCancelled, ApiError, listProjects, getProject, deleteProject, getUsage, listVoices, updateSpeaker, detectSpeakers, revertEdit, updateSettings, rewordLine, removeLine, moveCandidate, moveEdit, shiftLine, createPlan, getPlan, updateItem, runPlan, answerItem, redoItem, approvePlan, setPlanVoice, clarifyPlan, readProject, revisePlan, stopPlan, grantConsent, createVariant, getMe, logout, postTurn, getMessages,
 } from './api'
 import type { Me } from './api'
 import type {
@@ -148,6 +144,10 @@ export default function App() {
   const [planBusy, setPlanBusy] = useState(false)
   const [planProgress, setPlanProgress] = useState<{ value: number; step: string } | null>(null)
   const [review, setReview] = useState(false)
+  // Phase 20: a turn of Voltage with tools is running; its latest step.
+  const [turnBusy, setTurnBusy] = useState(false)
+  const [turnStep, setTurnStep] = useState<string | null>(null)
+  const seenSeq = useRef(0)
   // UX-7d: Keep or Hold per change, decided in the script; a take that failed its sound check starts held.
   const [decisions, setDecisions] = useState<Record<string, 'keep' | 'hold'>>({})
   // While Voltage reads, the transcript line it is "on" is lit in turn.
@@ -302,6 +302,8 @@ export default function App() {
   }, [planning, project?.statements?.length])
 
   const projectId = project?.project_id ?? null
+  // Phase 20: the composer talks to Voltage with tools.
+  const agent = project?.agent === true
 
   /** Re-reads what the project has spent; after anything that may have paid. */
   const refreshUsage = useCallback(async (id: string | null) => {
@@ -769,6 +771,7 @@ export default function App() {
   const clarify = async (answer?: string, allGuesses = false) => {
     if (!projectId || !plan?.question) return
     const said_ = answer ?? (allGuesses ? 'Go with your guesses' : plan.question.guess ?? plan.question.options[0])
+    if (agent) return void takeTurn(said_)
     say({ role: 'user', text: said_ })
     setError(null)
     setPlanning(true)
@@ -819,11 +822,77 @@ export default function App() {
   /** The box is for the whole video: a goal, or a change to the plan. A
    *  selection on the Precise timeline still previews through it. */
   const submitComposer = (text: string) => {
+    if (agent && !selection) return void takeTurn(text)
     if (plan?.status === 'clarifying') return void clarify(GO.test(text.trim()) ? undefined : text)
     if (selection) return void runPreview(text)
     if (plan && SHIP.test(text.trim())) return void shipFromChat(text.trim())
     if (plan && plan.status !== 'running' && plan.status !== 'stopping') return void revise(text)
     return void makePlan(text)
+  }
+
+  /** Phase 20: one turn of Voltage with tools. The steps arrive as messages
+   *  while it works; the result is the plan and Voltage's closing line. */
+  const takeTurn = async (text: string) => {
+    if (!projectId) return
+    if (autonomy === 'draft' && !consentGiven.current) return withConsent(null, () => void takeTurn(text))
+    say({ role: 'user', text })
+    setError(null)
+    setReview(false)
+    setTurnBusy(true)
+    setTurnStep('Thinking…')
+    try {
+      const job = await postTurn(projectId, text)
+      await followTurn(job.job_id)
+    } catch (e) {
+      tell(e instanceof ApiError ? e.message : "I couldn't take that in. Try saying it another way.")
+      setTurnBusy(false)
+      setTurnStep(null)
+    }
+  }
+
+  // One pull at a time, and nothing appended twice: a step's seq is claimed before it is shown.
+  const pulling = useRef<Promise<void> | null>(null)
+  const pullMessages = () => {
+    if (!projectId) return Promise.resolve()
+    if (pulling.current) return pulling.current
+    pulling.current = (async () => {
+      try {
+        const fresh = await getMessages(projectId, seenSeq.current)
+        for (const m of fresh) {
+          if ((m.seq ?? 0) <= seenSeq.current) continue
+          seenSeq.current = m.seq ?? seenSeq.current
+          if (m.role === 'assistant') say(m)
+        }
+      } catch {
+        // the next tick pulls again
+      } finally {
+        pulling.current = null
+      }
+    })()
+    return pulling.current
+  }
+
+  const followTurn = async (jobId: string) => {
+    if (!projectId) return
+    try {
+      const finished = await pollJob(jobId, {
+        onUpdate: (j) => { setTurnStep(j.step || 'Working…'); void pullMessages() },
+      })
+      await pullMessages()
+      if (finished.status === 'failed') tell(finished.error ?? "Something went wrong on my side. Say it again and I'll retry.")
+      const result = finished.result as { type?: string; plan?: Plan } | null
+      if (result && result.type === 'turn' && result.plan) setPlan(result.plan)
+      else {
+        const latest = await getProject(projectId).catch(() => null)
+        if (latest?.plan) setPlan(latest.plan)
+      }
+    } catch (e) {
+      if (!(e instanceof PollCancelled)) tell('I lost track of that turn. Say it again.')
+    } finally {
+      setTurnBusy(false)
+      setTurnStep(null)
+      void refreshUsage(projectId)
+    }
   }
 
   /** "Ship it" in the composer (15e): the lines kept ship, as the button would. */
@@ -1118,6 +1187,7 @@ export default function App() {
       const live = opened.edits.filter((e) => !e.reverted)
       takeIn(opened, live.length > 0 || opened.messages.length > 0)
       setMessages(opened.messages)
+      seenSeq.current = Math.max(0, ...opened.messages.map((m) => m.seq ?? 0))
       setApproved(live.map((e) => ({
         edit_id: e.edit_id, start: e.selection.start, end: e.selection.end, text: e.new_text, mix: e.mix, partner: e.partner ?? null,
       })))
@@ -1194,7 +1264,7 @@ export default function App() {
   const isHeld = (item: PlanItem) => (decisions[item.item_id] ? decisions[item.item_id] === 'hold' : !(item.candidate?.continuity.passed ?? true))
   const readyItems = plan?.items.filter((i) => i.kind === 'planned' && i.status === 'ready') ?? []
   const keptItems = readyItems.filter((i) => !isHeld(i))
-  const busy = generating || planBusy || planning
+  const busy = generating || planBusy || planning || turnBusy
   const clarifying = plan?.status === 'clarifying'
   const planned = plan?.items.filter((i) => i.kind === 'planned' && i.enabled) ?? []
   const doneCount = planned.filter((i) => ['ready', 'approved', 'needs-you', 'failed'].includes(i.status)).length
@@ -1468,7 +1538,7 @@ export default function App() {
             : selection && precise ? `Talking about the words at ${clock(selection.start)}.`
             : (project.statements?.length ?? 0) === 0 ? 'For the whole video: what it should say, a brief, or ask me to look at it and help.'
             : 'For the whole video: a goal, or a change to the plan. To change one line, click it.'}
-          toolbar={<VoicePicker voices={voices} value={voiceId} onChange={setVoiceId} />}
+          toolbar={agent ? null : <VoicePicker voices={voices} value={voiceId} onChange={setVoiceId} />}
           header={
             <div className="flex flex-none items-center gap-2.5 border-b px-5 py-3">
               <Presence size={16} working={busy} />
@@ -1516,17 +1586,18 @@ export default function App() {
           )}
           {clarifying && plan?.question && !planning && (
             <div className="flex flex-col gap-3 rounded-lg border bg-background p-4 shadow-xs" data-testid="clarify">
-              <div className="text-base leading-relaxed">One thing before I plan. <strong>{plan.question.text}</strong></div>
+              <div className="text-chat">{agent ? <strong>{plan.question.text}</strong> : <>One thing before I plan. <strong>{plan.question.text}</strong></>}</div>
               <div className="flex flex-wrap gap-2">
                 {plan.question.options.map((o) => (
                   <Button key={o} variant={o === plan.question?.guess ? 'default' : 'outline'} size="sm" className="rounded-full" onClick={() => void clarify(o)}>{o}</Button>
                 ))}
               </div>
               <div className="text-sm leading-normal text-muted-foreground" role="status">
-                {(plan.questions_left ?? 0) > 0 && (project.statements?.length ?? 0) === 0 ? `Question ${(plan.answers?.length ?? 0) + 1} of up to 3. ` : ''}
-                {plan.question.guess ? `My guess is ${plan.question.guess}. ` : ''}Pick one, or just say "go" and I'll use that.
+                {!agent && (plan.questions_left ?? 0) > 0 && (project.statements?.length ?? 0) === 0 ? `Question ${(plan.answers?.length ?? 0) + 1} of up to 3. ` : ''}
+                {agent ? (plan.question.gate ? 'Say go, or pick one.' : `${plan.question.guess ? `My guess is ${plan.question.guess}. ` : ''}Pick one, or answer in your own words.`)
+                  : `${plan.question.guess ? `My guess is ${plan.question.guess}. ` : ''}Pick one, or just say "go" and I'll use that.`}
               </div>
-              {(project.statements?.length ?? 0) === 0 && (plan.questions_left ?? 0) > 1 && (
+              {!agent && (project.statements?.length ?? 0) === 0 && (plan.questions_left ?? 0) > 1 && (
                 <div className="flex flex-wrap gap-2">
                   <Button variant="outline" size="sm" className="rounded-full" onClick={() => void clarify(undefined, true)}>Go with your guesses</Button>
                 </div>
@@ -1624,6 +1695,12 @@ export default function App() {
                 note={ranOn ? `Ran ${overrun.toFixed(1)} s into the pause after it` : null}
               />
             </>
+          )}
+          {turnBusy && (
+            <div className="flex items-center gap-2.5 text-sm text-muted-foreground" role="status" data-testid="turn-working">
+              <Loader2 className="size-4 shrink-0 animate-spin" aria-hidden="true" />
+              <span>{turnStep ?? 'Working…'}</span>
+            </div>
           )}
           {plan && readyItems.length > 0 && !planBusy && !generating && !clarifying && (
             <ShipCard

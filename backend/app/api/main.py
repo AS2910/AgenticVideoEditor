@@ -50,6 +50,9 @@ from app.render.compose import compose
 from app.render import retime
 from app.jobs.store import JobStore, Job
 from app.jobs.runner import JobRunner, with_retries
+from app.agent import loop as agent_loop
+from app.agent.guards import TurnBudget, is_go
+from app.agent.tools import Turn as AgentTurn, Workbench
 
 app = FastAPI(title="Agentic Video Editor")
 log = logging.getLogger(__name__)
@@ -108,6 +111,8 @@ def health() -> dict:
         "continuity": continuity_label,
         "intent": interpreter_label,
         "planner": planner_label,
+        # Phase 20: Voltage as an agent with tools (AVE_AGENT=1 and an Anthropic key).
+        "agent": _agent_on(),
         "auth": settings.auth_mode,
         # The chaos pass: is the worker pool alive and busy, and are faults being injected.
         "jobs": runner.snapshot(),
@@ -576,7 +581,9 @@ def get_project(project_id: str, owner: str = Depends(current_owner)) -> dict:
             }
             for e in repo.list_edits(project_id)
         ],
-        "messages": [{"role": m.role, "text": m.text} for m in repo.messages(project_id)],
+        "messages": [_message_dict(m) for m in repo.messages(project_id)],
+        # Phase 20: the composer talks to Voltage with tools when this is on.
+        "agent": _agent_on(),
     }
 
 
@@ -1978,17 +1985,24 @@ def approve_plan(
     """Approve every ready item (or the ones named) and render. An item whose
     take failed continuity is skipped unless `override` is set."""
     record = _owned(project_id, owner)
-    plan = _plan_or_404(project_id, plan_id)
+    _plan_or_404(project_id, plan_id)
+    return _ship(project_id, record, plan_id, req.items, req.override)
+
+
+def _ship(project_id: str, record: ProjectRecord, plan_id: str, item_ids: list[str] | None,
+          override: bool = False) -> dict:
+    """Approve the ready items (or the ones named) and render."""
+    plan = repo.get_plan(project_id, plan_id)
     approved, skipped = [], []
     for item in plan.items:
-        if item.status != "ready" or (req.items and item.item_id not in req.items):
+        if item.status != "ready" or (item_ids and item.item_id not in item_ids):
             continue
         candidate = repo.get_candidate(project_id, item.candidate_id or "")
         if candidate is None:
             skipped.append({"item_id": item.item_id, "reason": "no take to approve"})
             continue
         overridden = not candidate.continuity.passed
-        if overridden and not req.override:
+        if overridden and not override:
             skipped.append({"item_id": item.item_id, "reason": "continuity check failed"})
             continue
         edit_id = _approve_candidate(project_id, candidate, overridden)
@@ -2201,3 +2215,179 @@ def move_edit(
     if edit.partner:
         repo.relink_edit(project_id, edit.partner, new_id)
     return {"edit_id": new_id, "reverted": edit_id, "candidate": _candidate_dict(moved)}
+
+
+# ── Phase 20: Voltage with tools ──────────────────────────────────────────────
+
+def _message_dict(m) -> dict:
+    out = {"role": m.role, "text": m.text, "kind": m.kind, "seq": m.seq}
+    if m.cost is not None:
+        out["cost"] = round(m.cost, 4)
+    return out
+
+
+def _agent_on() -> bool:
+    return bool(settings.agent and settings.anthropic_api_key)
+
+
+_agent_instance: agent_loop.Agent | None = None
+
+
+def _agent() -> agent_loop.Agent:
+    """The agent over one Anthropic client, made on first use (tests swap it)."""
+    global _agent_instance
+    if _agent_instance is None:
+        import anthropic
+        headers = {"anthropic-workspace-id": settings.anthropic_workspace_id} if settings.anthropic_workspace_id else None
+        client = anthropic.Anthropic(api_key=settings.anthropic_api_key, default_headers=headers, timeout=600.0, max_retries=1)
+        _agent_instance = agent_loop.Agent(client, model=settings.agent_model, effort=settings.agent_effort)
+    return _agent_instance
+
+
+def _hear_levels(record: ProjectRecord, start: float, end: float) -> dict:
+    from app.continuity import signals
+    x = signals.load(record.source.media.path, start, end)
+    return {"noise_db": float(signals.noise_floor_db(x)) if len(x) else None,
+            "speech_db": signals.speech_level_db(x) if len(x) else None}
+
+
+def _sight_text(project_id: str) -> str:
+    saved = repo.settings(project_id).get("sight") or {}
+    bits = [saved.get("opening", ""), saved.get("setting", ""), saved.get("mood", "")]
+    place = saved.get("place_confirmed") or saved.get("place_guess")
+    if place:
+        bits.append(f"Place: {place}" + ("" if saved.get("place_confirmed") else f" ({saved.get('confidence', 'a')} guess)"))
+    return " ".join(b.strip() for b in bits if b and b.strip())
+
+
+def _workbench() -> Workbench:
+    def estimate_usd(text: str) -> tuple[int, float]:
+        chars = voice.cost_of(EditPlan(Selection(0.0, 1.0), text, getattr(voice, "default_voice", "speaker-1")))
+        return chars, round(chars * budget.usd_per_1k / 1000, 4)
+
+    return Workbench(
+        repo=repo, ledger=ledger, frames=_frames, lines=_lines, room_after=room_after,
+        voices=_catalogue, library=getattr(voice, "library", lambda accent, language="en": []),
+        estimate_usd=estimate_usd, generate=_generate, ensure_spend=_ensure_spend, ship=_ship,
+        default_voice=lambda: getattr(voice, "default_voice", "speaker-1"),
+        hear=_hear_levels, sight_text=_sight_text, now=_now,
+    )
+
+
+class TurnRequest(BaseModel):
+    text: str
+    # The user's yes to the paid or committing step Voltage asked about last turn.
+    approve: bool = False
+
+
+def _turn_plan(project_id: str, text: str) -> Plan:
+    """The plan a turn works on: the latest one still open, else a new one."""
+    plan = repo.latest_plan(project_id)
+    if plan is not None and plan.status != "done":
+        return plan
+    plan = Plan(plan_id=repo.next_plan_id(project_id), project_id=project_id, goal=text, summary="", items=(),
+                mode=_settings(project_id)["autonomy"], status="proposed", created_at=_now())
+    repo.save_plan(plan)
+    return plan
+
+
+@app.post("/projects/{project_id}/turns", status_code=202)
+def take_turn(project_id: str, req: TurnRequest, owner: str = Depends(current_owner)) -> dict:
+    """One turn of Voltage with tools (Phase 20): the user's words go in, the
+    agent looks, listens, voices and asks through its tools, and the job's
+    result is the plan and Voltage's closing line. Steps appear as messages
+    while it runs (`GET /projects/{id}/messages?after=`)."""
+    record = _owned(project_id, owner)
+    if not _agent_on():
+        raise HTTPException(status_code=503, detail="Voltage needs Claude for this (set AVE_AGENT=1 and an Anthropic key).")
+    text = req.text.strip()
+    if not text:
+        raise HTTPException(status_code=422, detail="Say what you want.")
+    if any(j.kind == "turn" and j.project_id == project_id and not j.done for j in jobs.all()):
+        raise HTTPException(status_code=409, detail="Voltage is still on the last thing you said.")
+    autonomy = _settings(project_id)["autonomy"]
+    if autonomy == "draft" and record.consent is None:
+        raise HTTPException(status_code=403, detail=CONSENT_REQUIRED)
+    plan = _turn_plan(project_id, text)
+    # A yes to a gate question (a paid or committing step that waited): a go word, or its first option.
+    gate = plan.question if plan.question and plan.question.get("gate") else None
+    approve = req.approve or bool(gate and (is_go(text) or text.strip().lower() == str(gate["options"][0]).lower()))
+    repo.add_message(project_id, "user", text)
+    repo.update_plan(project_id, plan.plan_id, status="running", question=None)
+    job = jobs.create("turn", project_id)
+    started_at = _now()
+
+    def work(report) -> dict:
+        try:
+            _ensure_spend(project_id)
+        except SpendCeilingReached as exc:
+            repo.update_plan(project_id, plan.plan_id, status="proposed")
+            repo.add_message(project_id, "assistant", str(exc))
+            return {"plan": _plan_dict(repo.get_plan(project_id, plan.plan_id)), "reply": str(exc), "question": None}
+        budget_ = TurnBudget(usd=settings.agent_turn_usd)
+        turn = AgentTurn(project_id=project_id, record=record, plan_id=plan.plan_id, autonomy=autonomy,
+                         spend_approved=approve or autonomy == "draft", budget=budget_, started_at=started_at,
+                         report=report, commit_approved=approve)
+        lines = _lines(record)
+        names = [s.name for s in repo.speakers(project_id)]
+        from app.agent.context import opening
+        head = opening(repo.get_plan(project_id, plan.plan_id), duration=record.source.duration,
+                       filename=record.source.filename, speakers=names, lines=len(lines), autonomy=autonomy,
+                       spent_usd=ledger.spent_usd(project_id), ceiling_usd=ledger.ceiling_usd,
+                       turn_usd=settings.agent_turn_usd, sight=_sight_text(project_id) if not lines else "")
+        content = [{"type": "text", "text": head}, {"type": "text", "text": f"The user says: {text}"
+                   + (" (They are answering yes to what you asked.)" if approve else "")}]
+        history = repo.turns(project_id)
+
+        def on_step(step: str, cost: float) -> None:
+            repo.add_message(project_id, "assistant", step, kind="step", cost=cost or None)
+            repo.append_log(project_id, plan.plan_id, step, f"${cost:.2f}" if cost else "")
+            report(min(0.95, 0.05 + 0.9 * turn.budget.calls_made / turn.budget.calls), step)
+
+        try:
+            outcome = _agent().run(_workbench(), turn, history, content, meter=_meter(project_id, "agent"),
+                                   on_step=on_step, persist=lambda role, c: repo.append_turn(project_id, role, c))
+        except Exception as exc:  # noqa: BLE001 — the user hears a sentence; the log has the rest
+            logging.getLogger(__name__).exception("turn failed")
+            why = str(exc)[:200] or type(exc).__name__
+            sentence = f"Something went wrong on my side ({why}). Say it again and I'll retry."
+            repo.add_message(project_id, "assistant", sentence)
+            repo.update_plan(project_id, plan.plan_id, status="proposed")
+            return {"type": "turn", "plan": _plan_dict(repo.get_plan(project_id, plan.plan_id)), "reply": sentence,
+                    "question": None, "spent_usd": 0.0, "calls": 0, "stopped": "error", "error": why}
+        question = outcome.question
+        status = "clarifying" if question else "done"
+        if outcome.reply:
+            repo.add_message(project_id, "assistant", outcome.reply)
+        if question:
+            repo.add_message(project_id, "assistant", question["text"])
+            repo.append_log(project_id, plan.plan_id, f"Asked: {question['text']}")
+        updated = repo.get_plan(project_id, plan.plan_id)
+        repo.update_plan(project_id, plan.plan_id, status=status, question=question, summary=outcome.reply or updated.summary,
+                         estimate=_estimate(project_id, updated.items))
+        return {"type": "turn", "plan": _plan_dict(repo.get_plan(project_id, plan.plan_id)), "reply": outcome.reply,
+                "question": question, "spent_usd": round(outcome.spent_usd, 4), "calls": outcome.calls,
+                "stopped": outcome.stopped}
+
+    def failed_turn() -> None:
+        repo.update_plan(project_id, plan.plan_id, status="proposed")
+
+    submitted = runner.submit(job, _guarded(work, failed_turn))
+    return _job_dict(submitted)
+
+
+def _guarded(work, on_fail):
+    def run(report):
+        try:
+            return work(report)
+        except Exception:
+            on_fail()
+            raise
+    return run
+
+
+@app.get("/projects/{project_id}/messages")
+def list_messages(project_id: str, after: int = 0, owner: str = Depends(current_owner)) -> list[dict]:
+    """The thread after a message (by `seq`): what Voltage said and did."""
+    _owned(project_id, owner)
+    return [_message_dict(m) for m in repo.messages(project_id, after)]

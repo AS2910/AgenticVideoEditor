@@ -1202,6 +1202,75 @@ describe('App panel order', () => {
   })
 })
 
+describe('App with Voltage as an agent (Phase 20a)', () => {
+  const STEPS = [
+    { role: 'assistant', text: 'Listened — no one speaks', kind: 'step', seq: 2 },
+    { role: 'assistant', text: 'Looked through 25 voices', kind: 'step', seq: 3 },
+    { role: 'assistant', text: 'Voiced “Welcome to Goa.” with Varsha — warm and unhurried', kind: 'step', cost: 0.03, seq: 4 },
+    { role: 'assistant', text: 'One line over the opening shot, in Varsha\'s voice. Hear it below.', kind: 'say', seq: 5 },
+  ]
+
+  function agentRoutes() {
+    const base = routeFetch()
+    const calls: { url: string; body: unknown }[] = []
+    const f = vi.fn(async (url: string, init?: RequestInit) => {
+      const body = typeof init?.body === 'string' ? JSON.parse(init.body) : undefined
+      if (url.endsWith('/projects/p1') || (url.endsWith('/projects') && init?.method === 'POST')) return ok({ ...PROJECT, agent: true, edits: [], messages: [] })
+      if (url.endsWith('/turns') && init?.method === 'POST') { calls.push({ url, body }); return ok({ ...JOB_ACCEPTED, kind: 'turn' }) }
+      if (url.includes('/jobs/')) return ok({ ...JOB_DONE, kind: 'turn', result: { type: 'turn', plan: PLAN_DONE, reply: STEPS[3].text, question: null } })
+      if (url.includes('/messages?after=')) {
+        const after = Number(url.split('after=')[1])
+        return ok(STEPS.filter((m) => m.seq > after))
+      }
+      return base(url, init)
+    })
+    vi.stubGlobal('fetch', f)
+    return calls
+  }
+
+  it('sends the composer to a turn, shows each step as it comes, then the take and the ship card — and no voice picker', async () => {
+    const calls = agentRoutes()
+    const user = userEvent.setup()
+    render(<App />)
+    await reachGoal(user)
+    expect(screen.queryByRole('combobox', { name: /default voice/i })).toBeNull()
+    expect(screen.queryByText('Default voice')).toBeNull()
+
+    await user.type(screen.getByRole('textbox', { name: /describe a change/i }), 'Describe the place in an Indian voice{Enter}')
+    expect(calls).toEqual([{ url: '/api/projects/p1/turns', body: { text: 'Describe the place in an Indian voice' } }])
+    expect(screen.getByText('Describe the place in an Indian voice')).toBeInTheDocument()
+
+    const list = await screen.findByRole('list', { name: 'What Voltage did' })
+    expect(within(list).getAllByRole('listitem').map((li) => li.textContent)).toEqual([
+      '·Listened — no one speaks', '·Looked through 25 voices', '·Voiced “Welcome to Goa.” with Varsha — warm and unhurried$0.03', '$0.03 this turn',
+    ])
+    expect(await screen.findByText("One line over the opening shot, in Varsha's voice. Hear it below.")).toBeInTheDocument()
+    await waitFor(() => expect(screen.getByText('Ready to hear')).toBeInTheDocument())
+    const card = screen.getByRole('group', { name: 'Ready to ship' })
+    expect(screen.getByRole('log', { name: 'The conversation' }).lastElementChild).toBe(card)
+    expect(screen.queryByTestId('turn-working')).toBeNull()
+  })
+
+  it('answers Voltage\'s question with another turn', async () => {
+    const calls = agentRoutes()
+    const asked = { ...PLAN, status: 'clarifying', question: { text: 'Voice “Welcome to Goa.” with Varsha\'s voice, about $0.03?', options: ['Go ahead', 'Not yet'], guess: 'Go ahead', gate: true } }
+    const f = vi.mocked(fetch as unknown as ReturnType<typeof vi.fn>)
+    const inner = f.getMockImplementation()! as (url: string, init?: RequestInit) => Promise<Response>
+    f.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (url.includes('/jobs/') && calls.length === 1) return ok({ ...JOB_DONE, kind: 'turn', result: { type: 'turn', plan: asked, reply: '', question: asked.question } })
+      return inner(url, init)
+    })
+    const user = userEvent.setup()
+    render(<App />)
+    await reachGoal(user)
+    await user.type(screen.getByRole('textbox', { name: /describe a change/i }), 'Describe the place{Enter}')
+    const go = await screen.findByRole('button', { name: 'Go ahead' })
+    expect(screen.getByTestId('clarify')).toHaveTextContent('Say go, or pick one.')
+    await user.click(go)
+    expect(calls.map((c) => (c.body as { text: string }).text)).toEqual(['Describe the place', 'Go ahead'])
+  })
+})
+
 describe('App keyboard (UX-4)', () => {
   it('puts the cursor in the box on "/" from the transcript, and leaves a typed "/" alone', async () => {
     vi.stubGlobal('fetch', routeFetch())

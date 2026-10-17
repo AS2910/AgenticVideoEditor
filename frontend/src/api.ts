@@ -1,6 +1,6 @@
 import type {
   Project, ApprovedResult, ExportManifest, EditRequest, Job, ProjectSummary, ProjectDetail, Usage, Voice, Speaker,
-  ProjectSettings, LongLines, Rewording, Autonomy, Plan, Fit, Mix, Selection, Candidate, Reading, Sight,
+  ProjectSettings, LongLines, Rewording, Autonomy, Plan, Fit, Mix, Selection, Candidate, Reading, Sight, ChatMessage,
 } from './types'
 
 const BASE = '/api'
@@ -277,6 +277,14 @@ export const revisePlan = (id: string, planId: string, instruction: string) =>
 /** 15e: the voice the plan speaks in; lines not yet voiced use it. */
 export const setPlanVoice = (id: string, planId: string, voiceId: string) =>
   put<Plan>(`/projects/${id}/plans/${planId}/voice`, { voice_profile_id: voiceId })
+
+/** Phase 20: one turn of Voltage with tools. Returns the job; its result is
+ *  `{plan, reply, question}`. `approve` is the user's yes to what it asked. */
+export const postTurn = (id: string, text: string, approve = false) =>
+  post<Job>(`/projects/${id}/turns`, approve ? { text, approve } : { text })
+
+/** The thread after a message (by seq): what Voltage said and did. */
+export const getMessages = (id: string, after = 0) => get<ChatMessage[]>(`/projects/${id}/messages?after=${after}`)
 
 /** Stops a running plan after the line it is on. */
 export const stopPlan = (id: string, planId: string) => post<Plan>(`/projects/${id}/plans/${planId}/stop`)

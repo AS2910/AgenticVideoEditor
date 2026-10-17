@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { ChatPanel } from './ChatPanel'
 
@@ -54,4 +54,29 @@ describe('ChatPanel', () => {
     )
     expect(screen.getByText('candidate slot')).toBeInTheDocument()
   })
+})
+
+it('folds what Voltage did into one small list with the money on the right (Phase 20)', () => {
+  render(
+    <ChatPanel
+      messages={[
+        { role: 'user', text: 'Describe the place in an Indian voice' },
+        { role: 'assistant', text: 'Looked at 6 frames', kind: 'step', seq: 2 },
+        { role: 'assistant', text: 'Voiced “Welcome to Goa.” with Varsha — warm', kind: 'step', cost: 0.03, seq: 3 },
+        { role: 'assistant', text: 'Voiced it again, slower', kind: 'step', cost: 0.04, seq: 4 },
+        { role: 'assistant', text: 'One line over the opening shot. Hear it below.' },
+      ]}
+      canSubmit
+      onSubmit={() => {}}
+    />,
+  )
+  const list = screen.getByRole('list', { name: 'What Voltage did' })
+  const items = within(list).getAllByRole('listitem')
+  expect(items.map((li) => li.textContent)).toEqual([
+    '·Looked at 6 frames',
+    '·Voiced “Welcome to Goa.” with Varsha — warm$0.03',
+    '·Voiced it again, slower$0.04',
+    '$0.07 this turn',
+  ])
+  expect(screen.getByText('One line over the opening shot. Hear it below.')).toBeInTheDocument()
 })
