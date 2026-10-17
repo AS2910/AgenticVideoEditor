@@ -411,6 +411,11 @@ class ElevenLabsVoiceAdapter:
     def default_voice(self) -> str:
         return self._voice_id
 
+    @property
+    def takes_per_line(self) -> int:
+        """How many takes one line costs (Phase 14: takes by duration)."""
+        return self._takes
+
     def voices(self) -> list[dict]:
         """The voices a user may pick — ElevenLabs' own and those added from
         the library — fetched once. Listing is free."""

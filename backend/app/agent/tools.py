@@ -269,8 +269,18 @@ def _synthesize_take(wb: Workbench, turn: Turn, args: dict) -> ToolResult:
     plan = _plan(wb, turn)
     existing = plan.item(item_id) if item_id else None
 
+    moved = False
     if existing is not None:
         selection, old_text, mix, speaker = existing.selection, existing.old_text, existing.mix, existing.speaker
+        # A placed line voiced again with a new span moves to it.
+        if old_text == "" and args.get("start") is not None and args.get("end") is not None:
+            start, end = max(0.0, float(args["start"])), min(duration, float(args["end"]))
+            if end <= start:
+                return ToolResult(f"That span is empty; the clip is {duration:.1f} s long.")
+            moved = (round(start, 2), round(end, 2)) != (selection.start, selection.end)
+            selection = Selection(round(start, 2), round(end, 2))
+            if args.get("mix") in ("layer", "concatenate"):
+                mix = args["mix"]
     elif line_no:
         line = next((ln for ln in lines if ln.index == int(line_no)), None)
         if line is None:
@@ -308,7 +318,7 @@ def _synthesize_take(wb: Workbench, turn: Turn, args: dict) -> ToolResult:
     else:
         item = existing
         wb.repo.update_item(turn.project_id, turn.plan_id, item.item_id, status="working", new_text=text,
-                            delivery=delivery, error=None)
+                            delivery=delivery, error=None, selection=selection, mix=mix)
 
     def step(progress: float, what: str) -> None:
         turn.report(turn.progress, what)
@@ -335,10 +345,13 @@ def _synthesize_take(wb: Workbench, turn: Turn, args: dict) -> ToolResult:
     wps = ""
     if candidate.words:
         secs = max(0.1, candidate.words[-1].end - candidate.words[0].start)
-        wps = f" {len(candidate.words) / secs:.1f} words a second."
-    text_out = (f"Take {candidate.candidate_id} on {item.item_id}, {name}'s voice, at {took.start:.2f}–{took.end:.2f} s "
-                f"({took.end - took.start:.2f} s). It {verdict}.{notes}{wps} Cost ${cost:.2f}. "
-                f"The user can hear it now; voice it again (same item_id) to try another direction or wording.")
+        wps = f" The take itself runs {secs:.1f} s, {len(candidate.words) / secs:.1f} words a second."
+    where = (f"placed at {took.start:.2f} s, over the picture" if item.old_text == "" and mix == "layer"
+             else f"at {took.start:.2f}–{took.end:.2f} s ({took.end - took.start:.2f} s slot)")
+    text_out = (f"Take {candidate.candidate_id} on {item.item_id}, {name}'s voice, {where}. It {verdict}.{notes}{wps} "
+                f"Cost ${cost:.2f}.{' The item moved to the new span.' if moved else ''} "
+                f"The user can hear it now; voice it again (same item_id) to try another direction or wording, "
+                f"or with a new start and end to move it.")
     how = f" — {direction}" if direction else ""
     return ToolResult(text_out, step=f"Voiced “{text[:48]}{'…' if len(text) > 48 else ''}” with {name}{how}", cost_usd=cost)
 

@@ -39,7 +39,7 @@ def test_a_take_is_placed_by_time_as_a_ready_item_and_costs_what_the_ledger_says
     })
     assert out.step == "Voiced “Welcome to Goa.” with Varsha — warm and unhurried, a half-smile"
     assert out.cost_usd == pytest.approx(0.03)
-    assert "Take c1 on i1, Varsha's voice, at 0.40–2.40 s (2.00 s). It sounds right. Fit: nearest of 3 takes. 3.0 words a second. Cost $0.03." in out.text
+    assert "Take c1 on i1, Varsha's voice, placed at 0.40 s, over the picture. It sounds right. Fit: nearest of 3 takes. The take itself runs 1.0 s, 3.0 words a second. Cost $0.03." in out.text
     assert world.made[0]["mix"] == "layer" and world.made[0]["delivery"] == "calmer"   # "unhurried" wins
     [item] = world.repo.get_plan("p1", "plan1").items
     assert (item.status, item.candidate_id, item.new_text, item.old_text, item.mix) == ("ready", "c1", "Welcome to Goa.", "", "layer")
@@ -114,3 +114,15 @@ def test_direction_words_map_to_the_deliveries_the_adapter_knows():
     assert delivery_of("brisk, confident") == "firmer"
     assert delivery_of("like a secret") == "like a secret"
     assert delivery_of(None) is None
+
+
+def test_voicing_a_placed_item_again_with_a_new_span_moves_it(world):
+    t = world.turn()
+    BY_NAME["synthesize_take"].run(world.wb, t, {"text": "Welcome.", "voice_id": "kL06KYMvPY56NluIQ72m", "start": 4.96, "end": 5.6,
+                                                 "direction": None, "mix": None, "line": None, "item_id": None})
+    out = BY_NAME["synthesize_take"].run(world.wb, t, {"text": "Welcome to Goa.", "voice_id": "kL06KYMvPY56NluIQ72m", "start": 0.4, "end": 7.3,
+                                                       "direction": "slow", "mix": None, "line": None, "item_id": "i1"})
+    assert "The item moved to the new span." in out.text
+    [item] = world.repo.get_plan("p1", "plan1").items
+    assert (item.selection.start, item.selection.end, item.candidate_id, item.new_text) == (0.4, 7.3, "c2", "Welcome to Goa.")
+    assert (world.made[1]["selection"].start, world.made[1]["selection"].end) == (0.4, 7.3)

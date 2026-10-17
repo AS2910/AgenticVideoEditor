@@ -2262,7 +2262,9 @@ def _sight_text(project_id: str) -> str:
 
 def _workbench() -> Workbench:
     def estimate_usd(text: str) -> tuple[int, float]:
-        chars = voice.cost_of(EditPlan(Selection(0.0, 1.0), text, getattr(voice, "default_voice", "speaker-1")))
+        # A line is voiced as several takes by duration (Phase 14); each is billed.
+        takes = max(1, int(getattr(voice, "takes_per_line", 1)))
+        chars = voice.cost_of(EditPlan(Selection(0.0, 1.0), text, getattr(voice, "default_voice", "speaker-1"))) * takes
         return chars, round(chars * budget.usd_per_1k / 1000, 4)
 
     return Workbench(
