@@ -601,7 +601,7 @@ def test_the_chat_is_kept_with_the_project(client, project, monkeypatch):
 
     messages = client.get("/projects/p1").json()["messages"]
 
-    assert messages == [
+    assert [{"role": m["role"], "text": m["text"]} for m in messages] == [
         {"role": "user", "text": "make it white"}, {"role": "assistant", "text": "Speech only."},
         {"role": "user", "text": "Layer it"}, {"role": "assistant", "text": "Speech only."},
     ]
@@ -2250,7 +2250,7 @@ def test_a_voice_the_goal_asks_for_becomes_the_plans_voice_and_is_said_in_the_ch
     assert plan["summary"] == "Here's my plan. Mock's voice, as you asked."
     assert any(e["text"] == 'Chose Test tone\'s voice for "an Indian voice"' for e in plan["log"])
     messages = client.get("/projects/p1").json()["messages"]
-    assert messages[-1] == {"role": "assistant", "text": "Here's my plan. Mock's voice, as you asked."}
+    assert (messages[-1]["role"], messages[-1]["text"]) == ("assistant", "Here's my plan. Mock's voice, as you asked.")
 
 
 def test_a_voice_id_the_planner_made_up_counts_as_nothing_fitting(client, project, monkeypatch):
@@ -2292,3 +2292,98 @@ def test_an_asked_voice_speaks_every_line_ahead_of_the_speakers_own(client, proj
     run_plan(client, plan["plan_id"])
     plan = client.get("/projects/p1/plans/plan1").json()
     assert plan["items"][0]["candidate"]["plan"]["voice_profile_id"] == "mock"
+
+
+# ── Phase 20a: a turn of Voltage with tools ───────────────────────────────────
+
+def _agent_on(monkeypatch, main, responses):
+    from dataclasses import replace
+    from app.agent.loop import Agent
+    from tests.agent.conftest import ScriptedClient
+    monkeypatch.setattr(main, "settings", replace(main.settings, agent=True, anthropic_api_key="k"))
+    client = ScriptedClient(responses)
+    monkeypatch.setattr(main, "_agent_instance", Agent(client))
+    return client
+
+
+def test_without_the_flag_a_turn_says_voltage_needs_claude(client, project):
+    resp = client.post("/projects/p1/turns", json={"text": "make it 30% off"})
+    assert resp.status_code == 503 and "AVE_AGENT" in resp.json()["detail"]
+
+
+def test_a_turn_voices_a_line_through_the_tools_and_the_thread_shows_each_step(client, project, monkeypatch):
+    import app.api.main as main
+    from tests.agent.conftest import reply, text, use
+    _agent_on(monkeypatch, main, [
+        reply(use("read_transcript", "a"), use("list_voices", "b"), stop="tool_use"),
+        reply(use("synthesize_take", "c", text="Get 30% off today only.", voice_id="mock", line=1, start=None, end=None,
+                  direction="brisk and confident", mix=None, item_id=None), stop="tool_use"),
+        reply(text("Line 1 now says 30% off, brisk. Hear it; say ship when you're happy.")),
+    ])
+    assert client.get("/projects/p1").json()["agent"] is True
+    client.put("/projects/p1/settings", json={"autonomy": "draft"})
+    resp = client.post("/projects/p1/turns", json={"text": "make it 30% off"})
+    assert resp.status_code == 202, resp.text
+    job = await_job(client, resp.json()["job_id"])
+    result = job["result"]
+    assert result["type"] == "turn" and result["reply"].startswith("Line 1 now says 30% off")
+    assert result["question"] is None and result["calls"] == 3
+    plan = result["plan"]
+    assert plan["status"] == "done" and plan["summary"] == result["reply"]
+    [item] = plan["items"]
+    assert (item["status"], item["new_text"], item["old_text"], item["delivery"]) == ("ready", "Get 30% off today only.", "Get 20% off today only.", "firmer")
+    assert item["candidate"]["plan"]["voice_profile_id"] == "mock"
+    messages = client.get("/projects/p1/messages").json()
+    kinds = [(m["role"], m["kind"], m["text"]) for m in messages]
+    assert kinds[0] == ("user", "say", "make it 30% off")
+    assert ("assistant", "step", "Read all 1 line") in kinds and ("assistant", "step", "Looked through 1 voices") in kinds
+    voiced = next(m for m in messages if m["kind"] == "step" and m["text"].startswith("Voiced “Get 30% off"))
+    assert voiced["text"] == "Voiced “Get 30% off today only.” with Test tone — brisk and confident"
+    assert kinds[-1] == ("assistant", "say", result["reply"])
+    later = client.get("/projects/p1/messages", params={"after": messages[-2]["seq"]}).json()
+    assert [m["text"] for m in later] == [result["reply"]]
+    # The model's thread is kept as it saw it, append-only.
+    turns = main.repo.turns("p1")
+    assert [t["role"] for t in turns] == ["user", "assistant", "user", "assistant", "user", "assistant"]
+    assert turns[0]["content"][0]["text"].startswith("The clip: ad.mp4, 2.3 s, no speech") or "one speaker" in turns[0]["content"][0]["text"]
+    assert any(e["text"].startswith("Voiced “Get 30% off") for e in plan["log"])
+
+
+def test_under_check_with_me_the_turn_ends_with_a_question_and_go_resumes_it(client, project, monkeypatch):
+    import app.api.main as main
+    from tests.agent.conftest import reply, text, use
+    client.put("/projects/p1/settings", json={"autonomy": "ask"})
+    take = use("synthesize_take", "c", text="Get 30% off today only.", voice_id="mock", line=1, start=None, end=None,
+               direction=None, mix=None, item_id=None)
+    scripted = _agent_on(monkeypatch, main, [
+        reply(take, stop="tool_use"),
+        reply(text("Voicing it now."), use("synthesize_take", "d", text="Get 30% off today only.", voice_id="mock", line=1, start=None, end=None,
+                                             direction=None, mix=None, item_id=None), stop="tool_use"),
+        reply(text("Done. Hear it below.")),
+    ])
+    resp = client.post("/projects/p1/turns", json={"text": "make it 30% off"})
+    job = await_job(client, resp.json()["job_id"])
+    result = job["result"]
+    assert result["question"]["text"] == "Voice “Get 30% off today only.” with Test tone's voice, about $0.00?"
+    assert result["plan"]["status"] == "clarifying" and result["plan"]["question"]["options"] == ["Go ahead", "Not yet"]
+    assert result["plan"]["items"] == []
+    # A second turn while the first is still open is refused; "go" resumes with the same thread.
+    resp = client.post("/projects/p1/turns", json={"text": "go"})
+    job = await_job(client, resp.json()["job_id"])
+    result = job["result"]
+    assert result["reply"] == "Done. Hear it below." and result["plan"]["status"] == "done"
+    assert [i["status"] for i in result["plan"]["items"]] == ["ready"]
+    second = scripted.calls[1]["messages"]
+    assert second[-1]["content"][-1]["text"] == "The user says: go (They are answering yes to what you asked.)"
+    assert len(second) == 4   # the first turn's three messages, then this one
+
+
+def test_a_turn_refused_at_the_ceiling_or_while_another_runs(client, project, monkeypatch):
+    import app.api.main as main
+    from tests.agent.conftest import reply, text
+    _agent_on(monkeypatch, main, [reply(text("Nothing to do."))])
+    main.ledger.record("p1", "elevenlabs", "take", 1, "characters", 5.0)
+    resp = client.post("/projects/p1/turns", json={"text": "anything"})
+    job = await_job(client, resp.json()["job_id"])
+    assert "ceiling" in job["result"]["reply"].lower() or "spend" in job["result"]["reply"].lower()
+    assert job["result"]["plan"]["status"] == "proposed"

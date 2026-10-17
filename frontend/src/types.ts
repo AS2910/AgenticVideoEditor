@@ -47,7 +47,7 @@ export interface PlanItem {
 }
 
 /** One thing the planner wants to know first, with its own guess. */
-export interface PlanQuestion { text: string; options: string[]; guess: string | null }
+export interface PlanQuestion { text: string; options: string[]; guess: string | null; /** Phase 20: a paid or committing step waits; the first option is the yes. */ gate?: boolean }
 
 export interface PlanLogEntry { at: string; text: string; detail: string }
 
@@ -158,6 +158,8 @@ export interface Candidate {
 export interface ConsentRecord { granted_at: string }
 
 export interface Project {
+  /** Phase 20: the composer talks to Voltage with tools. */
+  agent?: boolean
   project_id: string
   filename: string
   /** Measured server-side by ffprobe — the client never asserts this. */
@@ -280,7 +282,8 @@ export interface Piece { start: number; end: number; out_start: number; out_end:
 /** `render` is the finished MP4, stored like any other artifact. */
 export interface ExportManifest { segments: Segment[]; render: MediaArtifact; inserts?: Insert[]; pieces?: Piece[] }
 
-export interface ChatMessage { role: 'user' | 'assistant'; text: string }
+/** A message in the thread. `step` is one thing Voltage did (Phase 20), with what it cost. */
+export interface ChatMessage { role: 'user' | 'assistant'; text: string; kind?: 'say' | 'step'; cost?: number; seq?: number }
 
 export interface EditRequest {
   prompt: string

@@ -49,6 +49,9 @@ class Message:
     role: str   # "user" | "assistant"
     text: str
     at: str
+    kind: str = "say"          # "say" (a message) | "step" (one thing Voltage did, Phase 20)
+    cost: float | None = None  # what a step cost, in dollars
+    seq: int = 0
 
 
 def _record(row) -> ProjectRecord:
@@ -299,21 +302,38 @@ class ProjectRepository:
 
     # ── chat ──
 
-    def add_message(self, project_id: str, role: str, text: str) -> None:
+    def add_message(self, project_id: str, role: str, text: str, kind: str = "say", cost: float | None = None) -> int:
         with self.db.tx() as c:
             c.execute(
-                "INSERT INTO messages (project_id, seq, role, text, at) VALUES (?, "
-                "(SELECT COALESCE(MAX(seq), 0) + 1 FROM messages WHERE project_id = ?), ?, ?, ?)",
-                (project_id, project_id, role, text, _now()),
+                "INSERT INTO messages (project_id, seq, role, text, at, kind, cost) VALUES (?, "
+                "(SELECT COALESCE(MAX(seq), 0) + 1 FROM messages WHERE project_id = ?), ?, ?, ?, ?, ?)",
+                (project_id, project_id, role, text, _now(), kind, cost),
             )
+            return int(c.execute("SELECT MAX(seq) FROM messages WHERE project_id = ?", (project_id,)).fetchone()[0])
 
-    def messages(self, project_id: str) -> list[Message]:
+    def messages(self, project_id: str, after: int = 0) -> list[Message]:
         with self.db.tx() as c:
             rows = c.execute(
-                "SELECT role, text, at FROM messages WHERE project_id = ? ORDER BY seq",
-                (project_id,),
+                "SELECT role, text, at, kind, cost, seq FROM messages WHERE project_id = ? AND seq > ? ORDER BY seq",
+                (project_id, after),
             ).fetchall()
-        return [Message(r["role"], r["text"], r["at"]) for r in rows]
+        return [Message(r["role"], r["text"], r["at"], r["kind"] or "say", r["cost"], r["seq"]) for r in rows]
+
+    # ── the model's own thread (Phase 20) ──
+
+    def append_turn(self, project_id: str, role: str, content) -> None:
+        """One message as the model saw it: a string or content blocks. Append-only."""
+        with self.db.tx() as c:
+            c.execute(
+                "INSERT INTO turns (project_id, seq, role, content, at) VALUES (?, "
+                "(SELECT COALESCE(MAX(seq), 0) + 1 FROM turns WHERE project_id = ?), ?, ?, ?)",
+                (project_id, project_id, role, json.dumps(content), _now()),
+            )
+
+    def turns(self, project_id: str) -> list[dict]:
+        with self.db.tx() as c:
+            rows = c.execute("SELECT role, content FROM turns WHERE project_id = ? ORDER BY seq", (project_id,)).fetchall()
+        return [{"role": r["role"], "content": json.loads(r["content"])} for r in rows]
 
     # ── plans (Phase 13) ──
 
