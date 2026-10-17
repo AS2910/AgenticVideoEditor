@@ -56,16 +56,17 @@ describe('placing a voice-over', () => {
     expect(screen.getByRole('textbox', { name: 'Ends at' })).toHaveValue('0:05.00')
   })
 
-  it('shows a placed voice-over as its own row, with Voltage voicing it, and offers another', () => {
+  it('shows a voice-over being voiced as its own row, and offers another (20f)', () => {
     const h = handlers()
     const voicing = {
       item_id: 'i1', selection: { start: 0.5, end: 3.5 }, old_text: '', new_text: 'Welcome to Goa', speaker: null, mix: 'layer' as const,
       reason: '', kind: 'planned' as const, enabled: true, status: 'working' as const, fit: null, candidate: null,
       edit_id: null, question: null, error: null, note: null, progress: null,
     }
-    render(<LineDoc statements={[{ text: '', start: 0.5, end: 3.5, speaker: null, placed: true }]} currentTime={0} duration={7.5} {...h}
+    render(<LineDoc statements={[]} currentTime={0} duration={7.5} {...h}
       items={[voicing]} pendingLines={[{ selection: { start: 0.5, end: 3.5 }, status: 'working' }]} />)
-    expect(screen.getByRole('listitem', { name: 'Line at 0:00' })).toHaveTextContent('Voice-over, 0:00.50–0:03.50')
+    const row = screen.getByRole('listitem', { name: 'Proposed line at 0:00' })
+    expect(row).toHaveTextContent('Welcome to Goa')
     expect(screen.getAllByRole('status').some((el) => el.textContent?.includes('Voicing…'))).toBe(true)
     expect(screen.getByRole('button', { name: /add another voice-over/i })).toBeInTheDocument()
   })

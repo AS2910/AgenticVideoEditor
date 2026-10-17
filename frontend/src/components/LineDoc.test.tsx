@@ -250,13 +250,51 @@ describe('LineDoc: editing starts from where the line stands', () => {
     expect(within(screen.getByText(/you'd be changing/i)).getByText('Now.').tagName).toBe('INS')
   })
 
-  it('reopens an added line with what you wrote for it', async () => {
-    const added = item({ item_id: 'i2', selection: { start: 9.38, end: 9.88 }, mix: 'over', status: 'failed', candidate: null, new_text: 'Everything is 30% off.', error: 'busy' })
-    doc({ items: [added] })
-    expect(screen.getByRole('listitem', { name: 'New line after 0:09' })).toHaveTextContent('Everything is 30% off.')
-    await userEvent.click(within(screen.getByRole('group', { name: 'Actions for 0:09' })).getByRole('button', { name: 'Add a line after' }))
-    expect(screen.getByRole('textbox', { name: /words for the new line/i })).toHaveValue('Everything is 30% off.')
-    expect(within(screen.getByRole('group', { name: 'Sound meets picture' })).getByRole('button', { name: 'Over the picture' })).toHaveAttribute('aria-pressed', 'true')
+  it('shows a failed added line as its own row, with its reason and Discard (20f)', () => {
+    const added = item({ item_id: 'i2', selection: { start: 9.38, end: 9.88 }, mix: 'over', status: 'failed', candidate: null, new_text: 'Everything is 30% off.', error: 'The voice service was busy.' })
+    const h = doc({ items: [added] })
+    const row = screen.getByRole('listitem', { name: 'Proposed line at 0:09' })
+    expect(row).toHaveTextContent('Everything is 30% off.')
+    expect(row).toHaveTextContent('The voice service was busy.')
+    expect(within(row).getByText("Couldn't voice it")).toBeInTheDocument()
+    within(row).getByRole('button', { name: 'Discard' }).click()
+    expect(h.onDiscard).toHaveBeenCalledWith(expect.objectContaining({ item_id: 'i2' }))
+  })
+
+  it('gives every audio line its own row, however many play at once (20f)', async () => {
+    // Two added lines in the video at the same moment, and a proposal over them: three rows, each with its own words.
+    const h = doc({
+      revisions: [
+        { edit_id: 'e1', start: 0.4, end: 6.9, text: 'Golden sands, endless sunsets.', mix: 'layer' },
+        { edit_id: 'e2', start: 0.4, end: 1.8, text: 'Woohoo!', mix: 'layer' },
+      ],
+      items: [item({ item_id: 'i3', selection: { start: 0.4, end: 1.8 }, mix: 'layer', old_text: '', new_text: 'Yeahhh!',
+        candidate: take({ candidate_id: 'c3', plan: { ...take().plan, selection: { start: 0.4, end: 1.8 }, new_text: 'Yeahhh!', mix: 'layer' } }) })],
+    })
+    const rows = screen.getAllByRole('listitem', { name: /added line at 0:00|proposed line at 0:00/i })
+    expect(rows.map((r) => r.getAttribute('aria-label'))).toEqual(['Added line at 0:00', 'Added line at 0:00', 'Proposed line at 0:00'])
+    expect(rows[0]).toHaveTextContent('Golden sands, endless sunsets.')
+    expect(rows[0]).toHaveTextContent('with 3 other lines at this moment')   // the other layer, the proposal, and the spoken line it runs under
+    expect(rows[1]).toHaveTextContent('Woohoo!')
+    expect(rows[2]).toHaveTextContent('Yeahhh!')
+    expect(screen.getAllByText('Added')).toHaveLength(2)
+    expect(screen.getByText('Proposed')).toBeInTheDocument()
+    // The spoken lines keep their own words: a layer over them is not a change to them.
+    expect(screen.getByText('Hi, I want to buy groceries.')).toBeInTheDocument()
+    // Take it out on the second layer; Edit it on the first asks for a redo that swaps the edit.
+    const second = within(rows[1]).getByRole('group', { name: 'Added line at 0:00' })
+    await userEvent.click(within(second).getByRole('button', { name: 'Take it out' }))
+    expect(h.onUndo).toHaveBeenCalledWith('e2')
+    await userEvent.click(within(within(rows[0]).getByRole('group', { name: 'Added line at 0:00' })).getByRole('button', { name: 'Edit it' }))
+    const box = screen.getByRole('textbox', { name: /new wording/i })
+    expect(box).toHaveValue('Golden sands, endless sunsets.')
+    await userEvent.clear(box)
+    await userEvent.type(box, 'Golden sands.{Enter}')
+    expect(h.onHear).toHaveBeenCalledWith(keyOf({ start: 0.4, end: 6.9 }), expect.objectContaining({ text: 'Golden sands.', mix: 'layer', editId: 'e1', before: 'Golden sands, endless sunsets.' }))
+    // Edit it on the proposal voices that item again.
+    await userEvent.click(within(screen.getByRole('group', { name: 'Proposal at 0:00' })).getByRole('button', { name: 'Edit it' }))
+    await userEvent.type(screen.getByRole('textbox', { name: /new wording/i }), ' Woo!{Enter}')
+    expect(h.onHear).toHaveBeenLastCalledWith(keyOf({ start: 0.4, end: 1.9 }), expect.objectContaining({ text: 'Yeahhh! Woo!', mix: 'layer', itemId: 'i3' }))   // the row spans the take's own length
   })
 })
 

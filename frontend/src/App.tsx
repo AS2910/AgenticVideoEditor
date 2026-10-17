@@ -15,7 +15,6 @@ import { ProjectList } from './components/ProjectList'
 import { SpendMeter } from './components/SpendMeter'
 import { LineDoc } from './components/LineDoc'
 import type { LineRequest, PendingLine } from './components/LineDoc'
-import { keyOf } from './transcript/keys'
 import type { LineKey } from './transcript/keys'
 import { PlanCard } from './components/PlanCard'
 import { ActivityLog } from './components/ActivityLog'
@@ -350,14 +349,14 @@ export default function App() {
     const picture = request.mix === 'concatenate' ? 'holding the picture' : 'over the picture'
     const { start, end } = request.selection
     const line = (project?.statements ?? []).find((st) => st.start === start && st.end === end)
+    // 20f: Edit it on a proposal voices that item again; on an added line, the new take swaps the old edit out.
+    if (request.itemId) return takeTurn(`Voice ${request.itemId} again as ${words}${how}`)
+    if (request.editId) {
+      return takeTurn(`Redo the added line at ${clock(start)} (“${request.before ?? ''}”, ${request.editId}) as ${words}${how}: voice it at ${clock(start)}–${clock(end)}, ${picture}, ship it and take ${request.editId} out`)
+    }
     if (request.mix === 'replace' && line) return takeTurn(`Replace the line at ${clock(start)} (“${line.text}”) with ${words}${how}`)
     if (request.at != null) return takeTurn(`Add ${words} at ${clock(request.at)}, ${picture}${how}`)
-    if (!line || request.mix === 'layer') {
-      // UX-5: a voice-over placed by time on a clip with no speech — the chosen
-      // span stands where a line would, so the row's machinery applies.
-      setPlaced((p) => (p.some((x) => x.start === start && x.end === end) ? p : [...p, request.selection]))
-      return takeTurn(`Add ${words} at ${clock(start)}–${clock(end)}, ${picture}${how}`)
-    }
+    if (!line || request.mix === 'layer') return takeTurn(`Add ${words} at ${clock(start)}–${clock(end)}, ${picture}${how}`)
     return takeTurn(`Add ${words} after the line at ${clock(start)}, ${picture}${how}`)
   }
   /** A take dragged to a new start: the same audio, placed again, stands under the line. */
@@ -388,18 +387,6 @@ export default function App() {
       setError(e instanceof ApiError ? e.message : 'Could not move the line.')
     }
   }
-  // UX-5: on a clip with no speech, the voice-overs placed by hand or by the
-  // plan stand where the lines would be, so every row's machinery applies.
-  const [placed, setPlaced] = useState<Selection[]>([])
-  const placedStatements = (): Statement[] => {
-    if (project?.statements?.length) return []
-    const spans = [...placed, ...(plan?.items ?? []).filter((i) => i.kind === 'planned' && i.old_text === '').map((i) => i.selection)]
-    const seen = new Set<string>()
-    return spans.filter((s) => { const k = keyOf(s); if (seen.has(k)) return false; seen.add(k); return true })
-      .sort((a, b) => a.start - b.start)
-      .map((s) => ({ text: '', start: s.start, end: s.end, speaker: null, placed: true }))
-  }
-  const statementsNow = (): Statement[] => (project?.statements?.length ? project.statements : placedStatements())
 
   /** Add it (20e): the proposal under a line goes into the video — its plan
    *  item is approved and rendered. A take that failed its sound check is
@@ -877,7 +864,8 @@ export default function App() {
     )
   }
   const speakers = project.speakers ?? []
-  const statements = statementsNow()
+  // 20f: the spoken lines only; added lines and proposals are rows of their own in LineDoc.
+  const statements: Statement[] = project.statements ?? []
   const leave = () => {
     clearEditor()
     window.location.hash = ''

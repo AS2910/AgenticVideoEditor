@@ -856,6 +856,41 @@ describe('App: a fresh upload after another project', () => {
   })
 })
 
+describe('App: audio lines coexist (20f)', () => {
+  it('shows an added line and a proposal at the same moment as two rows, and Edit it on either is a redo turn', async () => {
+    const detail = { ...PROJECT, statements: [], transcript: [], created_at: '2026-10-02T08:00:00Z', settings: { autonomy: 'draft' }, messages: [],
+      edits: [{ edit_id: 'e1', candidate_id: 'c1', selection: { start: 0.4, end: 6.9 }, new_text: 'Golden sands, endless sunsets.', mix: 'layer', old_text: '', reverted: false }],
+      plan: { ...PLAN, status: 'done', items: [{ ...PLAN_ITEM, item_id: 'i2', selection: { start: 0.4, end: 1.8 }, old_text: '', new_text: 'Woohoo!', mix: 'layer', status: 'ready',
+        candidate: { ...BRIAN_TAKE, candidate_id: 'c2', plan: { ...BRIAN_TAKE.plan, selection: { start: 0.4, end: 1.8 }, new_text: 'Woohoo!', mix: 'layer' } } }] } }
+    const calls = agent(detail.plan)
+    const base = fetch as unknown as (url: string, init?: RequestInit) => Promise<Response>
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.endsWith('/projects/p1') && !init?.method) return ok(detail)
+      return base(url, init)
+    }))
+    window.location.hash = 'p1'
+    const user = userEvent.setup()
+    render(<App />)
+    const added = await screen.findByRole('listitem', { name: 'Added line at 0:00' })
+    const proposed = screen.getByRole('listitem', { name: 'Proposed line at 0:00' })
+    expect(added).toHaveTextContent('Golden sands, endless sunsets.')
+    expect(proposed).toHaveTextContent('Woohoo!')
+    expect(added).toHaveTextContent('with 1 other line at this moment')
+
+    await user.click(within(proposed).getByRole('button', { name: 'Edit it' }))
+    const box = screen.getByRole('textbox', { name: /new wording/i })
+    await user.clear(box)
+    await user.type(box, 'Woohoo! Yeah!{Enter}')
+    await waitFor(() => expect(saidTo(calls)).toEqual(["Voice i2 again as “Woohoo! Yeah!”, in Brian's voice"]))   // the editor opens on the take's own voice
+
+    await user.click(within(screen.getByRole('listitem', { name: 'Added line at 0:00' })).getByRole('button', { name: 'Edit it' }))
+    const box2 = screen.getByRole('textbox', { name: /new wording/i })
+    await user.clear(box2)
+    await user.type(box2, 'Golden sands.{Enter}')
+    await waitFor(() => expect(saidTo(calls).at(-1)).toBe('Redo the added line at 0:00 (“Golden sands, endless sunsets.”, e1) as “Golden sands.”: voice it at 0:00–0:06, over the picture, ship it and take e1 out'))
+  })
+})
+
 describe('App panel order', () => {
   it('puts the receipt above the plan; the action on a proposal is on its row (20e)', async () => {
     const base = routeFetch()
