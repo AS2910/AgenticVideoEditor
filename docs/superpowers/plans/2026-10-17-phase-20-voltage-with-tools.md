@@ -366,3 +366,19 @@ The user's words, on a screenshot of three identical "Woohoo!" rows where there 
 - Nothing changed in the backend: the composer already mixed layers; the agent already sees them in its opening view since 20e.
 
 **Tests.** `LineDoc.test.tsx`: two layers and a proposal at one moment are three rows with their own words and the overlap note; Take it out on one; Edit it on an added line and on a proposal send the redo requests; a failed added line is its own row with its reason. `PlaceEditor.test.tsx`: a voice-over being voiced is its own row. `App.test.tsx`: an added line and a proposal at the same moment from a loaded project, and the two redo sentences. 240 front-end tests.
+
+
+## As built · 20g, levels — two audios coexist and both are heard (2026-10-18, on `main`)
+
+The user's words, on the cheers now running the whole clip: *"The cheering lasted the entire clip but the advertising audio for Goa was removed. Why is the AI taking actions it wasn't asked to do? The background could have been the wohoo wohoo, at the same time the ad could have been worded."*
+
+**What had happened.** The Goa narration (e1) was never removed; the record shows it live throughout. Asked to stretch the cheers over the whole clip, Voltage voiced three full-length cheers, shipped them, and undid the three short ones (the 20e redo rule, applied after the ship rather than before). Three `[shouting]` layers at full level then ran under and over the narration for 7.5 s and buried it. Two things made it worse: the transcript still showed the undone rows (the panel took in new edits after a turn but never dropped ones Voltage undid), and there was no notion of **level** anywhere — not in the plan, the mixer, the tool or the prompt.
+
+**Built.**
+- `EditPlan.level_db` (None or 0 = foreground; `BACKGROUND_DB` = −12). The mixer applies the gain to a layer in `splice` and to every piece's audio in `assemble`, so the preview and the final both honour it.
+- `synthesize_take` gains `level: foreground | background`. A new `set_level` tool mixes a proposal (by item, the item follows the releveled take) or a line in the video (by edit: reverted and re-approved at the new level, gated under Check with me) without voicing again. `POST /candidates/{id}/level` and `POST /edits/{id}/level` do the same by hand; a shifted spoken line keeps its level (422).
+- The prompt: a line that carries words is foreground; anything meant to play under other words — cheers, a crowd, laughter, ambience, a "background" anything — is voiced as background; when a layer buries a line, `set_level` fixes it; never let a background layer remove or drown the words it sits under. And on a redo: undo the old edit first, then ship, so the one render is right.
+- The transcript: an added line's row and a proposal's facts show "background (−12 dB) · Make it foreground" or "Make it background" (added lines only; a replacement inside speech is speech). After every turn the panel takes the edits as the server has them (`syncEdits`), so a row Voltage undid disappears and the render follows.
+- On the user's project the three full-length cheers were releveled to background by hand (e5–e7 → e8–e10) and the final rendered again, so the narration is heard with the cheers under it.
+
+**Tests.** `tests/render/test_compose.py` (a −12 dB layer mixes at 0.25 gain), `tests/agent/test_tools.py` (background takes, `set_level` on an item and on an edit, the gate), `tests/api/test_endpoints.py` (relevel a proposal → the item follows; relevel an added line → revert + re-approve; 404), `LineDoc.test.tsx` (the control on added lines and proposals, not on speech), `App.test.tsx` (a row Voltage undid drops after the turn and the render follows; Make it background swaps the row to the new edit). 645 backend / 243 front end.

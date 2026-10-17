@@ -4,7 +4,7 @@ export interface Statement { text: string; start: number; end: number; speaker?:
 
 /** An approved edit as the transcript shows it: the new words over a span,
  *  as inline tracked changes. `edit_id` is what Revert names. */
-export interface Revision { edit_id?: string; start: number; end: number; text: string; mix: Mix; /** The other half of a shifted line. */ partner?: string | null }
+export interface Revision { edit_id?: string; start: number; end: number; text: string; mix: Mix; /** The other half of a shifted line. */ partner?: string | null; /** 20g: the level it is mixed at, dB; null or 0 is the foreground. */ level_db?: number | null }
 
 /** How much Voltage does on its own: show the plan and wait for your go (the
  *  controlled default), or voice it straight away. */
@@ -126,6 +126,8 @@ export interface EditPlan {
   /** Phase 16: the picture's factor over the selection for a replaced line —
    *  1.08 is the picture 8% slower so the take fits at natural speech; null or 1 is none. */
   flex?: number | null
+  /** 20g: how loud the line is mixed, in dB against the take as voiced; null or 0 is the foreground, -12 a layer under the words. */
+  level_db?: number | null
 }
 
 /** A real media file held by the backend, addressed by the hash of its bytes. */
@@ -236,6 +238,8 @@ export interface ApprovedEditSummary {
   reverted?: boolean
   /** The other half of a shifted line (UX-1c). */
   partner?: string | null
+  /** 20g: the level it is mixed at. */
+  level_db?: number | null
 }
 
 /** A reopened project: the upload plus what has been done to it. */

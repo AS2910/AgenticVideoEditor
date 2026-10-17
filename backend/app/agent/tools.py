@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any, Callable, Sequence
 
 from app.agent.guards import Guard, TurnBudget, WaitingForUser
-from app.domain.models import Selection
+from app.domain.models import BACKGROUND_DB, Selection
 from app.domain.plan import Plan, PlanItem
 
 
@@ -63,6 +63,9 @@ class Workbench:
     # 20e: what is in the video already, and taking one edit back out.
     edits: Callable[[str], Sequence[Any]] = lambda project_id: []         # -> live ApprovedEdit (not reverted)
     revert: Callable[[str, str], bool] | None = None                      # (project_id, edit_id) -> undone
+    # 20g: a line mixed louder or softer, nothing voiced again.
+    relevel_take: Callable[[str, Any, float], Any] | None = None          # (project_id, candidate, level_db) -> candidate
+    relevel_edit: Callable[[str, str, float], dict | None] | None = None  # (project_id, edit_id, level_db) -> {edit_id, reverted, candidate}
 
 
 @dataclass
@@ -436,6 +439,7 @@ def _synthesize_take(wb: Workbench, turn: Turn, args: dict) -> ToolResult:
     delivery = delivery_of(direction)
     settings = voice_settings_of(args)
     model = model_for(text, args.get("model"))
+    level_db = BACKGROUND_DB if args.get("level") == "background" else None
     if existing is None:
         item = PlanItem(item_id=f"i{len(plan.items) + 1}", selection=selection, old_text=old_text, new_text=text,
                         speaker=speaker, mix=mix, delivery=delivery, reason=direction or "", kind="planned",
@@ -458,7 +462,8 @@ def _synthesize_take(wb: Workbench, turn: Turn, args: dict) -> ToolResult:
         # a different direction, voice or wording — is Voltage's own call.
         candidate = wb.generate(turn.project_id, record, candidate_id, selection, text, voice_id,
                                 fit, mix, step, delivery=delivery, voice_notes=voice_notes,
-                                voice_settings=settings, model=model, flex_max=flex_max, max_regenerations=0)
+                                voice_settings=settings, model=model, flex_max=flex_max, max_regenerations=0,
+                                level_db=level_db)
     except Exception as exc:  # noqa: BLE001 — the model hears why and decides; nothing crashes the turn
         reason = str(exc) or type(exc).__name__
         wb.repo.update_item(turn.project_id, turn.plan_id, item.item_id, status="failed", error=reason, progress=None)
@@ -718,6 +723,40 @@ def _move_item(wb: Workbench, turn: Turn, args: dict) -> ToolResult:
                       step=f"Moved {item.item_id} to {sel.start:.2f} s")
 
 
+def _set_level(wb: Workbench, turn: Turn, args: dict) -> ToolResult:
+    """20g: a line mixed under the words (background) or at full level (foreground), nothing voiced again."""
+    level_db = BACKGROUND_DB if args.get("level") == "background" else 0.0
+    word = "background" if level_db else "foreground"
+    item_id, edit_id = (args.get("item_id") or "").strip(), (args.get("edit_id") or "").strip()
+    if item_id:
+        if wb.relevel_take is None:
+            return ToolResult("Levels cannot be set in this setup.")
+        plan = _plan(wb, turn)
+        item = plan.item(item_id)
+        if item is None or not item.candidate_id:
+            return ToolResult(f"There is no voiced item {item_id}.")
+        if item.status == "approved":
+            return ToolResult(f"{item_id} is in the video; name its edit (edit_id) instead — project_state lists them.")
+        candidate = wb.repo.get_candidate(turn.project_id, item.candidate_id)
+        if candidate is None:
+            return ToolResult(f"The take {item.candidate_id} is gone.")
+        out = wb.relevel_take(turn.project_id, candidate, level_db)
+        wb.repo.update_item(turn.project_id, turn.plan_id, item.item_id, candidate_id=out.candidate_id)
+        return ToolResult(f"{item_id} is {word} now ({level_db:+.0f} dB), as take {out.candidate_id}; the same audio, not voiced again.",
+                          step=f"Set {item_id} to {word}")
+    if edit_id:
+        if wb.relevel_edit is None:
+            return ToolResult("Levels cannot be set in this setup.")
+        if turn.autonomy == "ask" and not turn.commit_approved:
+            raise WaitingForUser(f"Mix {edit_id} as {word} ({level_db:+.0f} dB)?", ("Yes", "Not yet"), "Yes")
+        out = wb.relevel_edit(turn.project_id, edit_id, level_db)
+        if out is None:
+            return ToolResult(f"There is no live edit {edit_id}; project_state lists what is in the video.")
+        return ToolResult(f"{edit_id} is {word} now ({level_db:+.0f} dB) as edit {out['edit_id']}; the video is rendered again when something ships next.",
+                          step=f"Set {edit_id} to {word}")
+    return ToolResult("Name an item_id (a proposal) or an edit_id (a line in the video).")
+
+
 def _measure(wb: Workbench, turn: Turn, args: dict) -> ToolResult:
     c = wb.repo.get_candidate(turn.project_id, (args.get("candidate_id") or "").strip())
     if c is None:
@@ -835,6 +874,7 @@ TOOLS: tuple[Tool, ...] = (
                   "mix": {"type": "string", "enum": ["layer", "concatenate"], "description": "When placing: layer = over the picture and sound (the usual), concatenate = the picture waits."},
                   "fit": {"type": "string", "enum": ["fit", "natural", "stretch"], "description": "How the take meets its slot: fit = pauses first, then tempo (the usual); natural = as spoken from the slot's start, running into the pause; stretch = tempo only."},
                   "picture": {"type": "string", "enum": ["default", "as shot", "may flex"], "description": "Whether the picture under the take may run a little slower or faster to fit it. default = as shot for a placed line, may flex for a replacement."},
+                  "level": {"type": "string", "enum": ["foreground", "background"], "description": "foreground = full level (words). background = mixed 12 dB under, for cheers, a crowd, ambience, anything that plays under other words so both are heard."},
                   "item_id": {"type": "string", "description": "An existing item to voice again; empty for a new one."}}), Guard.SPEND, _synthesize_take, strict=True),
     Tool("keep_take", "Put an earlier take back on an item (after voicing it again and preferring the first).",
          _schema({"item_id": {"type": "string"}, "candidate_id": {"type": "string"}}), Guard.FREE, _keep_take),
@@ -864,6 +904,10 @@ TOOLS: tuple[Tool, ...] = (
          _schema({"line": {"type": "integer"}, "to": {"type": "number", "description": "Where the words should start, in seconds."}}), Guard.COMMIT, _shift_line, strict=True),
     Tool("move_item", "Place a voiced item's take at another time, the same audio, nothing voiced again.",
          _schema({"item_id": {"type": "string"}, "start": {"type": "number", "description": "Seconds."}}), Guard.FREE, _move_item),
+    Tool("set_level", "Mix a line louder or softer without voicing it again: background (12 dB under the words) or foreground. A proposal by item_id, or a line in the video by edit_id.",
+         _schema({"item_id": {"type": "string", "description": "A proposal; empty when naming an edit."},
+                  "edit_id": {"type": "string", "description": "A line in the video; empty when naming an item."},
+                  "level": {"type": "string", "enum": ["foreground", "background"]}}), Guard.COMMIT, _set_level),
     Tool("measure", "The full sound check of a take: its scores, what was done to fit it, how it was spoken.",
          _schema({"candidate_id": {"type": "string"}}), Guard.FREE, _measure),
     Tool("ship", "Make the voiced lines part of the video and render it. Only when the user asks for it, or said just do it and the work is done.",

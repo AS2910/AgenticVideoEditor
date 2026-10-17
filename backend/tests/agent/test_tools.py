@@ -145,6 +145,30 @@ def test_project_state_lists_what_is_in_the_video_and_undo_edit_takes_one_out(wo
     assert BY_NAME["undo_edit"].run(world.wb, world.turn(), {"edit_id": "e1"}).text.startswith("There is no live edit e1")
 
 
+def test_a_background_layer_is_voiced_under_the_words_and_levels_change_without_voicing_again(world):
+    """20g: `level: background` mixes a layer 12 dB under; set_level moves a proposal or a shipped line between the two."""
+    t = world.turn()
+    out = BY_NAME["synthesize_take"].run(world.wb, t, {"text": "[shouting] Woohoo!", "voice_id": "kL06KYMvPY56NluIQ72m", "start": 0, "end": 7,
+                                                       "direction": None, "mix": "layer", "line": None, "item_id": None, "level": "background"})
+    assert world.made[-1]["level_db"] == -12.0 and out.step.startswith("Voiced")
+    plain = BY_NAME["synthesize_take"].run(world.wb, t, {"text": "Welcome.", "voice_id": "kL06KYMvPY56NluIQ72m", "start": 0, "end": 2,
+                                                         "direction": None, "mix": "layer", "line": None, "item_id": None})
+    assert world.made[-1]["level_db"] is None and plain.step.startswith("Voiced")
+    # A proposal: the item follows the releveled take.
+    out = BY_NAME["set_level"].run(world.wb, t, {"item_id": "i2", "edit_id": "", "level": "background"})
+    assert out.step == "Set i2 to background" and world.leveled[-1][1] == -12.0
+    assert world.repo.get_plan("p1", "plan1").item("i2").candidate_id.endswith("L")
+    # A line in the video: gated under Check with me, then releveled by its edit.
+    world.live_edits.append(_live_edit("e9", "Woohoo!", start=0.0, end=7.0))
+    with pytest.raises(WaitingForUser) as w:
+        BY_NAME["set_level"].run(world.wb, world.turn(autonomy="ask"), {"item_id": "", "edit_id": "e9", "level": "foreground"})
+    assert w.value.question == "Mix e9 as foreground (+0 dB)?"
+    out = BY_NAME["set_level"].run(world.wb, t, {"item_id": "", "edit_id": "e9", "level": "foreground"})
+    assert out.text.startswith("e9 is foreground now (+0 dB) as edit e9L")
+    assert BY_NAME["set_level"].run(world.wb, t, {"item_id": "", "edit_id": "nope", "level": "background"}).text.startswith("There is no live edit nope")
+    assert BY_NAME["set_level"].run(world.wb, t, {"item_id": "", "edit_id": "", "level": "background"}).text.startswith("Name an item_id")
+
+
 def test_ask_ends_the_turn_with_options_and_a_guess(world):
     with pytest.raises(WaitingForUser) as w:
         BY_NAME["ask"].run(world.wb, world.turn(), {"question": "Name the beach?", "options": ["Yes, Cavelossim", "Stay general"], "guess": "Stay general"})

@@ -31,13 +31,13 @@ import { SpeakersBar } from './components/SpeakersBar'
 import { clock } from './transcript/format'
 import { speakerSlot } from './transcript/speakers'
 import {
-  createProject, confirmPlace, exportProject, artifactUrl, pollJob, PollCancelled, ApiError, listProjects, getProject, deleteProject, getUsage, listVoices, updateSpeaker, detectSpeakers, revertEdit, updateSettings, removeLine, dismissItem, moveCandidate, moveEdit, shiftLine, getPlan, approvePlan, readProject, grantConsent, createVariant, getMe, logout, postTurn, getMessages,
+  createProject, confirmPlace, exportProject, artifactUrl, pollJob, PollCancelled, ApiError, listProjects, getProject, deleteProject, getUsage, listVoices, updateSpeaker, detectSpeakers, revertEdit, updateSettings, removeLine, dismissItem, setEditLevel, setCandidateLevel, BACKGROUND_DB, moveCandidate, moveEdit, shiftLine, getPlan, approvePlan, readProject, grantConsent, createVariant, getMe, logout, postTurn, getMessages,
 } from './api'
 import type { Me, PlanApproval } from './api'
 import type {
   Word, Selection, Candidate, Segment, Project, ChatMessage,
   Insert, ProjectSummary, Usage, Statement, Voice, Revision,
-  Plan, PlanItem, Autonomy, Reading, Piece, ProjectDetail,
+  Plan, PlanItem, Autonomy, Reading, Piece, ProjectDetail, ApprovedEditSummary,
 } from './types'
 import { piecesFromInserts, renderTimeFrom, sourceTimeFrom } from './timeline/selection'
 
@@ -601,6 +601,54 @@ export default function App() {
   /** Another take of a line, or a failed one again: asked of Voltage in words (20c). */
   const redoTheItem = (item: PlanItem) => takeTurn(`Another take of “${item.new_text}” (${item.item_id})`)
 
+  /** An approved edit as the transcript shows it (20g: with its level). */
+  const asRevision = (e: ApprovedEditSummary): Revision => ({
+    edit_id: e.edit_id, start: e.selection.start, end: e.selection.end, text: e.new_text, mix: e.mix, partner: e.partner ?? null, level_db: e.level_db ?? null,
+  })
+  /** The plan item just approved, as a revision. */
+  const itemRevision = (i: PlanItem): Revision => ({
+    edit_id: i.edit_id!, start: i.candidate?.plan.selection.start ?? i.selection.start,
+    end: i.candidate?.plan.selection.end ?? i.selection.end, text: i.new_text, mix: i.mix, level_db: i.candidate?.plan.level_db ?? null,
+  })
+
+  /** 20g: after a turn, the edits as the server has them — Voltage may have undone or releveled a line — so the transcript never shows a stale row. */
+  const syncEdits = async (): Promise<{ changed: boolean; render: { download: { url: string; filename: string }; duration: number } | null }> => {
+    if (!projectId) return { changed: false, render: null }
+    const latest = await getProject(projectId).catch(() => null)
+    if (!latest) return { changed: false, render: null }
+    const live = latest.edits.filter((e) => !e.reverted).map(asRevision)
+    const before = approved.map((r) => r.edit_id).sort().join(',')
+    const after = live.map((r) => r.edit_id).sort().join(',')
+    setApproved(live)
+    if (before === after) return { changed: false, render: null }
+    setPreview(null)
+    if (live.length === 0) { setRendered(null); setDownload(null); setSegments([]); setInserts([]); setPieces([]); setView('original'); return { changed: true, render: null } }
+    const render = await runExport()
+    if (render) setView('final')
+    return { changed: true, render }
+  }
+
+  /** 20g: a line mixed under the words or at full level, nothing voiced again. */
+  const changeLevel = async (target: { editId?: string; candidate?: Candidate; item?: PlanItem }, levelDb: number) => {
+    if (!projectId) return
+    setError(null)
+    try {
+      if (target.editId) {
+        const r = await setEditLevel(projectId, target.editId, levelDb)
+        setApproved((all) => all.map((rev) => (rev.edit_id === target.editId ? { ...rev, edit_id: r.edit_id, level_db: r.candidate.plan.level_db ?? null } : rev)))
+        setPreview(null)
+        if (await runExport()) setView('final')
+      } else if (target.candidate && target.item) {
+        const c = await setCandidateLevel(projectId, target.candidate.candidate_id, levelDb)
+        const id = target.item.item_id
+        setPlan((p) => (p ? { ...p, items: p.items.map((i) => (i.item_id === id ? { ...i, candidate: c } : i)) } : p))
+        setPreview(null)
+      }
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : 'Could not change the level.')
+    }
+  }
+
   /** The plan after an approval: its items as they stand, the new edits as
    *  revisions on their lines, and the render, which the player switches to.
    *  Returns the download when there is a render. */
@@ -609,10 +657,7 @@ export default function App() {
     setPreview(null)
     const fresh = result.plan.items.filter((i) => i.status === 'approved' && i.edit_id
       && !approved.some((r) => r.edit_id === i.edit_id))
-    setApproved((a) => [...a, ...fresh.map((i) => ({
-      edit_id: i.edit_id!, start: i.candidate?.plan.selection.start ?? i.selection.start,
-      end: i.candidate?.plan.selection.end ?? i.selection.end, text: i.new_text, mix: i.mix,
-    }))])
+    setApproved((a) => [...a, ...fresh.map(itemRevision)])
     if (!result.export || !projectId) return null
     setSegments(result.export.segments)
     setInserts(result.export.inserts ?? [])
@@ -635,14 +680,8 @@ export default function App() {
     if (!projectId) return
     const went = fresh.items.filter((i) => i.status === 'approved' && i.edit_id
       && !approved.some((r) => r.edit_id === i.edit_id))
-    if (went.length === 0) return
-    setApproved((a) => [...a, ...went.map((i) => ({
-      edit_id: i.edit_id!, start: i.candidate?.plan.selection.start ?? i.selection.start,
-      end: i.candidate?.plan.selection.end ?? i.selection.end, text: i.new_text, mix: i.mix,
-    }))])
-    const render = await runExport()
-    if (!render) return
-    setView('final')
+    const { changed, render } = await syncEdits()
+    if (went.length === 0 || !changed || !render) return
     setShipped({
       items: went,
       held: fresh.items.filter((i) => i.status === 'ready').length,
@@ -814,9 +853,7 @@ export default function App() {
       takeIn(opened, live.length > 0 || opened.messages.length > 0)
       setMessages(opened.messages)
       seenSeq.current = Math.max(0, ...opened.messages.map((m) => m.seq ?? 0))
-      setApproved(live.map((e) => ({
-        edit_id: e.edit_id, start: e.selection.start, end: e.selection.end, text: e.new_text, mix: e.mix, partner: e.partner ?? null,
-      })))
+      setApproved(live.map(asRevision))
       // Approved edits are rendered again, so Play hears them straight away.
       if (live.length > 0 && await runExport(opened.project_id, opened.filename)) {
         setView('final')
@@ -1038,6 +1075,8 @@ export default function App() {
           onDiscard={(item) => discardItem(item)}
           onAddAll={(items) => approveAll(items)}
           onHearTake={(_item, c) => playTake(c)}
+          onLevel={(target, levelDb) => void changeLevel(target, levelDb)}
+          backgroundDb={BACKGROUND_DB}
           onUndo={(id) => void revert(id)}
           onRemove={(s) => void removeStatement(s)}
           onShift={(s, to) => void shiftStatement(s, to)}

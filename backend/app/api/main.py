@@ -170,6 +170,7 @@ def _candidate_dict(candidate: EditCandidate) -> dict:
             "voice_settings": candidate.plan.voice_settings,
             "model": candidate.plan.model,
             "flex_max": candidate.plan.flex_max,
+            "level_db": candidate.plan.level_db,
         },
         "audio": _artifact_dict(candidate.audio),
         "frames": _artifact_dict(candidate.frames),
@@ -551,6 +552,7 @@ def get_project(project_id: str, owner: str = Depends(current_owner)) -> dict:
                 "mix": e.plan.mix,
                 "delivery": e.plan.delivery,
                 "flex": e.plan.flex,
+                "level_db": e.plan.level_db,
                 "overridden": e.overridden,
                 "reverted": e.reverted,
                 "partner": e.partner,
@@ -832,7 +834,7 @@ def _generate(
     text: str, voice_id: str, fit: str | None, mix: str, report,
     delivery: str | None = None, voice_notes: tuple[str, ...] = (),
     voice_settings: dict | None = None, model: str | None = None, flex_max: float | None = None,
-    max_regenerations: int | None = None,
+    max_regenerations: int | None = None, level_db: float | None = None,
 ) -> EditCandidate:
     """One line through generation and continuity, saved as a candidate.
     A take that does not fit its slot raises SpanMismatch to the caller
@@ -849,7 +851,7 @@ def _generate(
             try:
                 candidate = _generate(project_id, record, candidate_id, window, text, voice_id,
                                       None, "layer", report, delivery, voice_notes, voice_settings, model, flex_max,
-                                      max_regenerations)
+                                      max_regenerations, level_db)
             except SpanMismatch:
                 candidate = None
             if candidate is not None:
@@ -857,9 +859,10 @@ def _generate(
             report(0.1, "No room to play over the picture; holding it instead")
         return _generate(project_id, record, candidate_id, selection, text, voice_id,
                          fit, "concatenate", report, delivery, voice_notes, voice_settings, model, flex_max,
-                         max_regenerations)
+                         max_regenerations, level_db)
     plan = EditPlan(selection, text, voice_id, fit=fit, mix=mix, delivery=delivery,
-                    voice_settings=voice_settings or None, model=model or None, flex_max=flex_max)
+                    voice_settings=voice_settings or None, model=model or None, flex_max=flex_max,
+                    level_db=level_db or None)
     cost = voice.cost_of(plan)
     if not budget.can_afford(project_id, cost):
         raise BudgetExceeded(cost, budget.remaining(project_id))
@@ -1412,6 +1415,69 @@ def _moved(project_id: str, record: ProjectRecord, source: EditCandidate, start:
     return moved
 
 
+class LevelRequest(BaseModel):
+    # dB against the take as voiced: 0 foreground, BACKGROUND_DB (-12) under the words.
+    level_db: float
+
+
+def _releveled(project_id: str, source: EditCandidate, level_db: float) -> EditCandidate:
+    """The same take at another level (20g): nothing is voiced again."""
+    level = round(max(-40.0, min(6.0, level_db)), 1) or None
+    candidate = EditCandidate(
+        candidate_id=repo.next_candidate_id(project_id),
+        plan=replace(source.plan, level_db=level),
+        audio=source.audio, frames=source.frames, continuity=source.continuity,
+        fit_notes=tuple(n for n in source.fit_notes if not n.startswith("level")) + ((f"level {level:+.0f} dB",) if level else ()),
+    )
+    repo.save_candidate(project_id, candidate)
+    return candidate
+
+
+@app.post("/projects/{project_id}/candidates/{candidate_id}/level")
+def level_candidate(project_id: str, candidate_id: str, req: LevelRequest, owner: str = Depends(current_owner)) -> dict:
+    """A proposed take mixed louder or softer (20g); the plan item follows it."""
+    _owned(project_id, owner)
+    source = repo.get_candidate(project_id, candidate_id)
+    if source is None:
+        raise HTTPException(status_code=404, detail="candidate not found")
+    if source.plan.mix == "remove":
+        raise HTTPException(status_code=422, detail="A removal has no audio to level.")
+    out = _releveled(project_id, source, req.level_db)
+    plan = repo.latest_plan(project_id)
+    if plan is not None:
+        for item in plan.items:
+            if item.candidate_id == candidate_id and item.status == "ready":
+                repo.update_item(project_id, plan.plan_id, item.item_id, candidate_id=out.candidate_id)
+    return _candidate_dict(out)
+
+
+@app.post("/projects/{project_id}/edits/{edit_id}/level")
+def level_edit(project_id: str, edit_id: str, req: LevelRequest, owner: str = Depends(current_owner)) -> dict:
+    """An added line in the video mixed louder or softer (20g): the old edit
+    is reverted and the same take approved at the new level, in one step."""
+    _owned(project_id, owner)
+    out = _relevel_edit(project_id, edit_id, req.level_db)
+    if out is None:
+        raise HTTPException(status_code=404, detail="edit not found")
+    return out
+
+
+def _relevel_edit(project_id: str, edit_id: str, level_db: float) -> dict | None:
+    edit = next((e for e in repo.list_edits(project_id) if e.edit_id == edit_id and not e.reverted), None)
+    if edit is None or edit.plan.mix == "remove":
+        return None
+    source = repo.get_candidate(project_id, edit.candidate_id) or EditCandidate(
+        edit.candidate_id, edit.plan, edit.audio, edit.frames, ContinuityReport(None, None, None, None, True, (), ()),
+    )
+    if edit.partner:
+        # A shifted spoken line is speech moved in time, not a layer to mix under the words.
+        raise HTTPException(status_code=422, detail="A moved line keeps its own level.")
+    out = _releveled(project_id, source, level_db)
+    repo.revert_edit(project_id, edit_id)
+    new_id = _approve_candidate(project_id, out, overridden=edit.overridden)
+    return {"edit_id": new_id, "reverted": edit_id, "candidate": _candidate_dict(out)}
+
+
 @app.post("/projects/{project_id}/candidates/{candidate_id}/move")
 def move_candidate(
     project_id: str, candidate_id: str, req: MoveRequest, owner: str = Depends(current_owner),
@@ -1524,6 +1590,8 @@ def _workbench() -> Workbench:
         estimate_usd=estimate_usd, generate=_generate, ensure_spend=_ensure_spend, ship=_ship,
         edits=lambda pid: [e for e in repo.list_edits(pid) if not e.reverted],
         revert=lambda pid, edit_id: _revert(pid, edit_id, by="Voltage"),
+        relevel_take=lambda pid, candidate, level_db: _releveled(pid, candidate, level_db),
+        relevel_edit=lambda pid, edit_id, level_db: _relevel_edit(pid, edit_id, level_db),
         default_voice=lambda: getattr(voice, "default_voice", "speaker-1"),
         hear=_hear_levels, sight_text=_sight_text, now=_now,
         design=voice.design_voice if can_design else None, design_cost=design_cost,

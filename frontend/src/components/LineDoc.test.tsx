@@ -104,6 +104,29 @@ describe('LineDoc: the line is the unit', () => {
     expect(h.onAdd).toHaveBeenCalledWith(expect.objectContaining({ item_id: 'r' }))
   })
 
+  it('mixes a line under the words or back to the front, without voicing it again (20g)', async () => {
+    const onLevel = vi.fn()
+    doc({
+      onLevel,
+      revisions: [
+        { edit_id: 'e1', start: 0.4, end: 6.9, text: 'Golden sands.', mix: 'layer' },
+        { edit_id: 'e2', start: 0.4, end: 1.8, text: 'Woohoo!', mix: 'layer', level_db: -12 },
+      ],
+      items: [item({ item_id: 'i3', selection: { start: 0.4, end: 1.8 }, mix: 'layer', old_text: '', new_text: 'Yeahhh!',
+        candidate: take({ candidate_id: 'c3', plan: { ...take().plan, selection: { start: 0.4, end: 1.8 }, new_text: 'Yeahhh!', mix: 'layer' } }) })],
+    })
+    const rows = screen.getAllByRole('listitem', { name: /added line at 0:00|proposed line at 0:00/i })
+    expect(rows[1]).toHaveTextContent('background (-12 dB)')
+    await userEvent.click(within(rows[1]).getByRole('button', { name: 'Make it foreground' }))
+    expect(onLevel).toHaveBeenLastCalledWith({ editId: 'e2' }, 0)
+    await userEvent.click(within(rows[0]).getByRole('button', { name: 'Make it background' }))
+    expect(onLevel).toHaveBeenLastCalledWith({ editId: 'e1' }, -12)
+    await userEvent.click(within(rows[2]).getByRole('button', { name: 'Make it background' }))
+    expect(onLevel).toHaveBeenLastCalledWith({ candidate: expect.objectContaining({ candidate_id: 'c3' }), item: expect.objectContaining({ item_id: 'i3' }) }, -12)
+    // Only added lines carry a level: two controls for the two foreground layers, none on the spoken lines.
+    expect(screen.getAllByRole('button', { name: /make it background/i })).toHaveLength(2)
+  })
+
   it('numbers an unnamed speaker in order of appearance (20e)', () => {
     doc({ speakers: [{ label: 'A', name: '', voice_id: null }, { label: 'B', name: '', voice_id: null }] })
     expect(screen.getByRole('listitem', { name: 'Line at 0:05, Speaker 1' })).toBeInTheDocument()

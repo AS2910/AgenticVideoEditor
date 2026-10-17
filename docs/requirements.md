@@ -1,6 +1,6 @@
 # Voltage — what is built, as user and functional requirements
 
-*As of 2026-10-18, main at the 20f merge. This is the product as it stands, not a plan. Each requirement says how it is met and where; a gap is marked as one. The phase history behind it lives in `docs/superpowers/plans/`.*
+*As of 2026-10-18, main at the 20g merge. This is the product as it stands, not a plan. Each requirement says how it is met and where; a gap is marked as one. The phase history behind it lives in `docs/superpowers/plans/`.*
 
 ## 1. Purpose and scope
 
@@ -90,7 +90,7 @@ The stories were agreed on 2026-10-03 (`docs/superpowers/plans/2026-10-03-ux-pla
 - **One transcript.** Four kinds of row, in time order: a **spoken line**; a **moved line** where it now plays; an **added line in the video** (every live layered edit); a **proposed or working added line** (every plan item with an added mix). Lines at the same moment are separate rows and play together; a layer over a spoken line never changes that line's words.
 - **State words** beside their colour: nothing (as shot), **Proposed**, **Added**, **Voicing…**, **Needs you**, **Couldn't voice it**, **Removed**, **Moved** / **Moved away**, **Planned**, **Reading**.
 - **Four verbs.** On a proposal: **Hear it · Add it · Edit it · Discard** (always visible; "Remove it" on a proposed removal). On a spoken line: Hear it · Edit it · Discard (proposes removal) · Add a line after · Move up / Move down / Shift to a time (on hover/focus, "…" on touch). On an added line: Hear it · **Take it out** · Edit it. On a removed line: **Put it back**. **Add all N** in the heading when more than one line is proposed.
-- **A proposal's facts** on its own line: whose voice, the verdict in words (a flagged take says why and "Add it anyway if it sounds right to you"), Starts at · Move.
+- **A proposal's facts** on its own line: whose voice, the verdict in words (a flagged take says why and "Add it anyway if it sounds right to you"), Starts at · Move, and for an added line its **level** ("background (−12 dB) · Make it foreground" / "Make it background").
 - **The in-place editor**: the words (with "You'd be changing" as tracked changes), Delivery (chips or your own words), Voice (the catalogue, grouped by accent), for an added line Starts at and Sound meets picture; the cost estimate; **Voice it** sends one sentence to Voltage and the take comes back proposed. On a proposal, Voice it voices that item again; on an added line, the new take swaps the old edit out.
 - **Moving things**: a grip on every movable row (drag up/down, a drop line with the time), Starts at · Move (drag on the monitor bar, type a time, nudge), Shift a spoken line as spoken (two paired edits, undone together).
 - **Keyboard**: see H3. Roving focus: only the focused row exposes its controls to Tab.
@@ -103,6 +103,7 @@ The stories were agreed on 2026-10-03 (`docs/superpowers/plans/2026-10-03-ux-pla
 - **Fit**: every line carries a syllable budget; a take is fitted pauses-first (trim or open silence before speeding or slowing speech, within 0.8×–1.25×); a long line may start up to 150 ms early; the agent chooses `fit` (fit / natural / stretch) and `picture` (as shot / may flex) per take. One take per tool call; retries are the agent's decision.
 - **The sound check** (`continuity/measured.py`): prosody (pitch register against the surrounding speech; skipped for an added line in another voice on purpose), audio integration (level and clarity after automatic level and room-tone correction), voice match (SIM-o, wants 0.75) when the speaker's own voice was wanted, naturalness (UTMOS, wants 3.0). A failing take is **flagged, not blocked**: it is shown, not shipped, until the user says.
 - **Room**: stems (Demucs, optional) so a line sits over the original's own bed; room tone from the recording's own quiet fills a removal.
+- **Levels** (20g): every added line has a level, foreground (as voiced) or background (12 dB under the words), so two audios coexist and both are heard. The agent voices cheers, crowds, ambience and anything "background" at background, fixes a layer that buries a line with `set_level` without voicing again, and never lets a background layer drown the words under it. By hand: Make it background / Make it foreground on the row.
 
 ### 4.5 Proposals and commit
 
@@ -114,7 +115,7 @@ The stories were agreed on 2026-10-03 (`docs/superpowers/plans/2026-10-03-ux-pla
 ### 4.6 Playback and render
 
 - **Three versions in the player**: **Final** (the added lines), **With proposals** (a preview render with the plan's proposed takes mixed in as preview edits — `POST /export` with `{"with_proposals": true}` — made on demand, keyed by the takes it carries, remade when they change, a status line while it renders), **Original**. Hear it on a proposal plays its take over the final render when the render's clock is the source's, else over the original; the original's words are muted under a replacement.
-- **The render** (`render/renderer.py`, `render/compose.py`, `render/retime.py`): the source's audio everywhere outside an edit; a replacement spliced with 20 ms equal-power crossfades; **layers mixed over the span** (two audios coexist); an added line with the picture holding gets a living hold (the picture's own motion steers where time is added) or, rarely, a frozen frame; a flexed line may retime the picture up to `AVE_MAX_FLEX` (1.12) with `minterpolate` in-betweens; H.264 sources are stream-copied where untouched. The manifest lists segments, inserts and pieces; the front end maps clocks between source and render.
+- **The render** (`render/renderer.py`, `render/compose.py`, `render/retime.py`): the source's audio everywhere outside an edit; a replacement spliced with 20 ms equal-power crossfades; **layers mixed over the span at their level** (two audios coexist, a background layer 12 dB under); an added line with the picture holding gets a living hold (the picture's own motion steers where time is added) or, rarely, a frozen frame; a flexed line may retime the picture up to `AVE_MAX_FLEX` (1.12) with `minterpolate` in-betweens; H.264 sources are stream-copied where untouched. The manifest lists segments, inserts and pieces; the front end maps clocks between source and render.
 - **Export** (`POST /export`): synchronous, seconds for a short clip, content-addressed; **Download MP4**, **Export again**, **Make a variant** in the header. The export bar shows the edited stretches and what flexed or held.
 - **Captions and timeline**: the line being said is captioned over the picture (a playing take's words light as they are said); the timeline shows lines by speaker and changed spans.
 
@@ -133,7 +134,7 @@ Google OIDC with PKCE (`/auth/login`, `/auth/callback`, `/auth/me`, `/auth/logou
 
 ## 5. Non-functional requirements, as met
 
-- **Tests are offline and deterministic**: 641 backend (pytest; ffmpeg-dependent tests skip without it; vendor responses replayed from recorded fixtures) and 240 front end (vitest). A bench (`python -m app.bench gate`) runs a labelled corpus against a baseline. The agent eval is the one paid test and is run by hand.
+- **Tests are offline and deterministic**: 645 backend (pytest; ffmpeg-dependent tests skip without it; vendor responses replayed from recorded fixtures) and 243 front end (vitest). A bench (`python -m app.bench gate`) runs a labelled corpus against a baseline. The agent eval is the one paid test and is run by hand.
 - **Latency**: a turn is typically 20–45 s and $0.10–0.20; a take about 10 s; a render seconds for a short clip (longer when the picture flexes or holds).
 - **Persistence**: everything but jobs survives a restart; an interrupted job is lost and said so.
 - **Accessibility and design** (`design-system/voltage/MASTER.md`): shadcn/ui on Tailwind v4, light and dark, Inter; every state has a word beside its colour; everything reachable from the keyboard with a visible focus ring; waits spoken through `role="status"`; sheets are real modals; 44 px targets on coarse pointers; no raw colours (guarded by a test).
@@ -151,7 +152,7 @@ Google OIDC with PKCE (`/auth/login`, `/auth/callback`, `/auth/me`, `/auth/logou
 | `search_voice_library` | free | The vendor's library by accent and gender. |
 | `estimate` | free | What voicing these words costs and what the turn has left. |
 | `project_state` | free | The plan's items and states, what is in the video already, the money. |
-| `synthesize_take` | spend | Voice a line and place it: words, voice (empty = the speaker's own or the default), direction, model, dials, line or start/end, mix, fit, picture, item to voice again. One take per call. |
+| `synthesize_take` | spend | Voice a line and place it: words, voice (empty = the speaker's own or the default), direction, model, dials, line or start/end, mix, fit, picture, level (foreground / background), item to voice again. One take per call. |
 | `keep_take` | free | Put an earlier take back on an item. |
 | `drop_item` | free | Drop a planned or voiced line from the plan. |
 | `design_voice` | spend | Three previews from a description, for the user to hear in the thread. |
@@ -162,6 +163,7 @@ Google OIDC with PKCE (`/auth/login`, `/auth/callback`, `/auth/me`, `/auth/logou
 | `remove_line` | free | Proposes taking a spoken line out, the room's sound in its place. |
 | `shift_line` | commit | Move a spoken line in time, as spoken. |
 | `move_item` | free | Place a voiced item's take at another time. |
+| `set_level` | commit | Mix a proposal (by item) or a line in the video (by edit) as background or foreground, nothing voiced again. |
 | `measure` | free | The full sound check of a take. |
 | `ship` | commit | Make the voiced lines part of the video and render; `anyway` carries the user's word past the check. |
 | `undo_edit` | commit | Take a shipped edit back out of the video. |
@@ -184,6 +186,7 @@ Limits the API taught us: at most 8 union-typed parameters across strict tools (
 | `GET /projects/{id}/plans/{plan_id}` · `POST …/approve` · `POST …/items/{item_id}/dismiss` | The plan; Add it / Add all (with `override`); Discard. |
 | `POST /projects/{id}/lines/remove` · `POST /projects/{id}/lines/shift` | Propose a removal; shift a line. |
 | `POST /projects/{id}/candidates/{cid}/move` · `POST /projects/{id}/edits/{eid}/move` · `POST /projects/{id}/edits/{eid}/revert` | Move a take; move an added line; undo. |
+| `POST /projects/{id}/candidates/{cid}/level` · `POST /projects/{id}/edits/{eid}/level` | Mix a proposal or an added line louder or softer (`level_db`; −12 is background). |
 | `POST /projects/{id}/edits` | Commit a candidate directly (`override` for a flagged one). |
 | `POST /projects/{id}/export` | Render: the final, or with `{"with_proposals": true}` the preview. |
 | `POST /projects/{id}/variants` | A variant project. |

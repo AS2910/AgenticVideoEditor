@@ -83,6 +83,13 @@ class EditPlan:
     # 20c: how far the picture over this take may flex to fit it (1.0 = as
     # shot); None = the project's setting.
     flex_max: float | None = None
+    # 20g: how loud this line is mixed, in dB against the take as voiced.
+    # None or 0 = foreground; BACKGROUND_DB for a layer that plays under the
+    # words (cheers, a crowd, ambience), so two audios coexist and both are heard.
+    level_db: float | None = None
+
+
+BACKGROUND_DB = -12.0
 
 
 @dataclass(frozen=True)

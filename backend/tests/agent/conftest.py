@@ -75,9 +75,10 @@ def world():
     shipped: list[list[str]] = []
 
     def generate(project_id, rec, candidate_id, selection, text_, voice_id, fit, mix, report, delivery=None, voice_notes=(),
-                 voice_settings=None, model=None, flex_max=None, max_regenerations=None):
+                 voice_settings=None, model=None, flex_max=None, max_regenerations=None, level_db=None):
         made.append({"candidate_id": candidate_id, "selection": selection, "text": text_, "voice_id": voice_id, "mix": mix,
                      "delivery": delivery, "voice_settings": voice_settings, "model": model, "fit": fit, "flex_max": flex_max,
+                     "level_db": level_db,
                      "voice_notes": tuple(voice_notes), "max_regenerations": max_regenerations})
         ledger.record(project_id, "elevenlabs", "take", len(text_), "characters", 0.03)
         report(0.5, "Synthesizing the new line")
@@ -144,6 +145,19 @@ def world():
 
     live_edits: list = []
     undone: list[str] = []
+    leveled: list[tuple[str, float]] = []
+
+    def relevel_take(project_id, candidate, level_db):
+        leveled.append((candidate.candidate_id, level_db))
+        c = FakeCandidate(candidate.candidate_id + "L", candidate.plan.selection, candidate.plan.new_text)
+        repo_candidates[c.candidate_id] = c
+        return c
+
+    def relevel_edit(project_id, edit_id, level_db):
+        if not any(e.edit_id == edit_id and not e.reverted for e in live_edits):
+            return None
+        leveled.append((edit_id, level_db))
+        return {"edit_id": edit_id + "L", "reverted": edit_id, "candidate": {}}
 
     def revert(project_id, edit_id):
         for e in live_edits:
@@ -182,6 +196,7 @@ def world():
         move_take=move_take,
         edits=lambda project_id: [e for e in live_edits if not e.reverted],
         revert=revert,
+        relevel_take=relevel_take, relevel_edit=relevel_edit,
     )
     # The repo's candidate store is what `measure` reads; the fake pipeline fills it.
     repo.get_candidate = lambda project_id, candidate_id: repo_candidates.get(candidate_id)
@@ -193,4 +208,4 @@ def world():
     return SimpleNamespace(repo=repo, ledger=ledger, record=record, wb=wb, turn=turn, made=made, shipped=shipped,
                            designed=designed, saved=saved, added=added, deleted=deleted, audio=audio,
                            lines=lines, speakers=speakers, cloned=cloned, removed=removed, shifted=shifted, moved=moved,
-                           live_edits=live_edits, undone=undone)
+                           live_edits=live_edits, undone=undone, leveled=leveled)

@@ -62,9 +62,14 @@ ship with `anyway` and say the check flagged it; the editor never refuses \
 their word.
 - The lines already in the video are listed at the top as shipped edits, and \
 layers stack: two over the same span both play. A redo of a line that is in \
-the video is a new take, shipped, then `undo_edit` of the old one, so lines \
-never pile up. An overlay the user asks for on top of what is there is a new \
-layer and nothing is undone.
+the video is a new take: `undo_edit` the old one first, then ship the new, so \
+the one render is right and lines never pile up. An overlay the user asks for \
+on top of what is there is a new layer and nothing is undone.
+- Levels: a line that carries words is foreground. Anything meant to play \
+under other words — cheers, a crowd, laughter, ambience, a "background" \
+anything — is voiced with `level: background` (12 dB under), so both are \
+heard. When a layer buries a line, `set_level` fixes it without voicing \
+again. Never let a background layer remove or drown the words it sits under.
 
 How you speak
 - Plain sentences, to the person, present tense for what you are doing now. \

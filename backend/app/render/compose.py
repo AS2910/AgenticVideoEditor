@@ -105,6 +105,12 @@ class Room:
         return roommod.spectral_match(wet, self.context, OUT_RATE).astype(np.float32)
 
 
+def gain_of(edit) -> float:
+    """The linear gain for an edit's level (20g): 1.0 for the foreground, less for a line mixed under the words."""
+    level = getattr(edit.plan, "level_db", None)
+    return float(10 ** (level / 20)) if level else 1.0
+
+
 def splice(
     base: np.ndarray, segments: Sequence[RenderSegment], room: Room | None = None,
 ) -> np.ndarray:
@@ -136,6 +142,8 @@ def splice(
         piece = audio[offset:offset + length]
         if len(piece) < length:
             piece = np.pad(piece, ((0, length - len(piece)), (0, 0)))
+        if gain_of(edit) != 1.0:
+            piece = piece * gain_of(edit)
 
         if room is not None and edit.plan.mix != "layer":
             piece = room.take(piece)
@@ -341,7 +349,7 @@ def assemble(base: np.ndarray, pieces: Sequence[retime.Piece]) -> np.ndarray:
     def audio_of(edit) -> np.ndarray:
         if edit.audio.sha256 not in cache:
             cache[edit.audio.sha256] = decode(edit.audio.path, channels=channels)
-        return cache[edit.audio.sha256]
+        return cache[edit.audio.sha256] * gain_of(edit) if gain_of(edit) != 1.0 else cache[edit.audio.sha256]
 
     parts = []
     for p in pieces:

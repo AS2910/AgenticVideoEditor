@@ -159,6 +159,13 @@ export async function pollJob(
 export const exportProject = (id: string, withProposals = false) =>
   post<ExportManifest>(`/projects/${id}/export`, withProposals ? { with_proposals: true } : undefined)
 
+/** 20g: a line mixed louder or softer, nothing voiced again. BACKGROUND_DB is the level under the words. */
+export const BACKGROUND_DB = -12
+export const setEditLevel = (id: string, editId: string, levelDb: number) =>
+  post<{ edit_id: string; reverted: string; candidate: Candidate }>(`/projects/${id}/edits/${editId}/level`, { level_db: levelDb })
+export const setCandidateLevel = (id: string, candidateId: string, levelDb: number) =>
+  post<Candidate>(`/projects/${id}/candidates/${candidateId}/level`, { level_db: levelDb })
+
 /** Discard a proposal (20e): it leaves the plan. */
 export const dismissItem = (id: string, planId: string, itemId: string) =>
   post<Plan>(`/projects/${id}/plans/${planId}/items/${itemId}/dismiss`)

@@ -1202,6 +1202,29 @@ def test_a_removal_cannot_be_moved(client, project):
     assert client.post(f"/projects/p1/edits/{shipped['approved'][0]['edit_id']}/move", json={"start": 1.0}).status_code == 422
 
 
+def test_a_line_can_be_mixed_as_background_before_and_after_it_is_added(client, project, monkeypatch):
+    """20g: /candidates/{id}/level relevels a proposal (the item follows); /edits/{id}/level relevels a line in the video (revert + re-approve)."""
+    from tests.agent.conftest import reply, text as said
+    result = turn(client, monkeypatch, [reply(take("c", text="Woohoo!", line=None, start=0.0, end=2.0, level="background"), stop="tool_use"),
+                                        reply(said("A cheer, under the words."))])
+    item = result["plan"]["items"][0]
+    assert item["status"] == "ready" and item["candidate"]["plan"]["level_db"] == -12.0
+    plan_id = result["plan"]["plan_id"]
+    # Louder as a proposal: a new take, the item follows it.
+    up = client.post(f"/projects/p1/candidates/{item['candidate']['candidate_id']}/level", json={"level_db": 0}).json()
+    assert up["plan"]["level_db"] is None and up["candidate_id"] != item["candidate"]["candidate_id"]
+    assert client.get(f"/projects/p1/plans/{plan_id}").json()["items"][0]["candidate"]["candidate_id"] == up["candidate_id"]
+    # Added, then softer in the video: the old edit reverted, the same take approved at -12.
+    shipped = client.post(f"/projects/p1/plans/{plan_id}/approve", json={"items": ["i1"]}).json()
+    edit_id = shipped["approved"][0]["edit_id"]
+    down = client.post(f"/projects/p1/edits/{edit_id}/level", json={"level_db": -12}).json()
+    assert down["reverted"] == edit_id and down["candidate"]["plan"]["level_db"] == -12.0
+    edits = client.get("/projects/p1").json()["edits"]
+    live = [x for x in edits if not x["reverted"]]
+    assert [x["edit_id"] for x in live] == [down["edit_id"]] and live[0]["level_db"] == -12.0
+    assert client.post("/projects/p1/edits/nope/level", json={"level_db": -12}).status_code == 404
+
+
 def test_a_proposal_can_be_discarded_but_a_shipped_line_cannot(client, project):
     rm = client.post("/projects/p1/lines/remove", json={"start": 0.5, "end": 1.0}).json()
     plan_id = rm["plan"]["plan_id"]

@@ -41,6 +41,7 @@ def plan(d: dict) -> EditPlan:
         voice_profile_id=d["voice_profile_id"], fit=d.get("fit"), mix=d.get("mix", "replace"),
         delivery=d.get("delivery"), flex=d.get("flex"),
         voice_settings=d.get("voice_settings"), model=d.get("model"), flex_max=d.get("flex_max"),
+        level_db=d.get("level_db"),
     )
 
 

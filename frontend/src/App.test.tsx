@@ -155,6 +155,14 @@ function agent(initial: unknown = PLAN, onTurn: (text: string) => unknown = () =
       return ok({ ...JOB_TURN, result: { type: 'turn', plan: current, reply: '', question: p.question ?? null } })
     }
     if (/\/plans\/plan1$/.test(url)) return ok(current)
+    // The project as the server has it: the plan's approved items are its live edits (20g: the panel syncs edits after a turn).
+    if (url.endsWith('/projects/p1') && !init?.method) {
+      const p = current as { items?: { status: string; edit_id: string | null; selection: { start: number; end: number }; new_text: string; mix: string; candidate: { candidate_id: string } | null }[] } | null
+      const edits = (p?.items ?? []).filter((i) => i.status === 'approved' && i.edit_id).map((i) => ({
+        edit_id: i.edit_id, candidate_id: i.candidate?.candidate_id ?? 'c1', selection: i.selection, new_text: i.new_text, mix: i.mix, old_text: '', reverted: false,
+      }))
+      return ok({ ...PROJECT, created_at: '2026-09-26T08:00:00Z', edits, messages: [] })
+    }
     if (url.endsWith('/approve')) { calls.push({ url, body }); current = PLAN_APPROVED }
     if (url.endsWith('/settings')) calls.push({ url, body })
     return base(url, init)
@@ -888,6 +896,54 @@ describe('App: audio lines coexist (20f)', () => {
     await user.clear(box2)
     await user.type(box2, 'Golden sands.{Enter}')
     await waitFor(() => expect(saidTo(calls).at(-1)).toBe('Redo the added line at 0:00 (“Golden sands, endless sunsets.”, e1) as “Golden sands.”: voice it at 0:00–0:06, over the picture, ship it and take e1 out'))
+  })
+})
+
+describe('App: the server\'s edits win after a turn, and a line can be mixed under the words (20g)', () => {
+  const e1 = { edit_id: 'e1', candidate_id: 'c1', selection: { start: 0.4, end: 6.9 }, new_text: 'Golden sands.', mix: 'layer', old_text: '', reverted: false }
+  const e2 = { edit_id: 'e2', candidate_id: 'c2', selection: { start: 0.4, end: 1.8 }, new_text: 'Woohoo!', mix: 'layer', old_text: '', reverted: false }
+  const silent = { ...PROJECT, statements: [], transcript: [], created_at: '2026-10-02T08:00:00Z', settings: { autonomy: 'draft' }, messages: [], plan: null }
+
+  it('drops a row Voltage undid during the turn, and renders again', async () => {
+    let edits = [e1, e2]
+    const calls = agent({ ...PLAN, status: 'done', items: [] }, () => { edits = [e1, { ...e2, reverted: true }]; return { ...PLAN, status: 'done', items: [] } })
+    const base = fetch as unknown as (url: string, init?: RequestInit) => Promise<Response>
+    const f = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.endsWith('/projects/p1') && !init?.method) return ok({ ...silent, edits })
+      if (url.endsWith('/export')) { calls.push({ url, body: null }); return ok({ segments: SEGMENTS, render: RENDER }) }
+      return base(url, init)
+    })
+    vi.stubGlobal('fetch', f)
+    window.location.hash = 'p1'
+    const user = userEvent.setup()
+    render(<App />)
+    expect(await screen.findAllByRole('listitem', { name: 'Added line at 0:00' })).toHaveLength(2)
+    const exports = () => calls.filter((c) => c.url.endsWith('/export')).length
+    const before = exports()
+    await user.type(screen.getByRole('textbox', TEXTBOX), 'take the cheer out{Enter}')
+    await waitFor(() => expect(screen.getAllByRole('listitem', { name: 'Added line at 0:00' })).toHaveLength(1))
+    expect(screen.queryByText('Woohoo!')).toBeNull()
+    expect(exports()).toBe(before + 1)   // the render follows the edits
+  })
+
+  it('Make it background relevels an added line: the row swaps to the new edit and the video renders again', async () => {
+    const base = routeFetch()
+    const f = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.endsWith('/projects/p1') && !init?.method) return ok({ ...silent, edits: [e1, e2] })
+      if (url.endsWith('/edits/e2/level')) {
+        expect(JSON.parse(String(init?.body))).toEqual({ level_db: -12 })
+        return ok({ edit_id: 'e3', reverted: 'e2', candidate: { ...CANDIDATE, candidate_id: 'c3', plan: { ...CANDIDATE.plan, selection: { start: 0.4, end: 1.8 }, new_text: 'Woohoo!', mix: 'layer', level_db: -12 } } })
+      }
+      return base(url, init)
+    })
+    vi.stubGlobal('fetch', f)
+    window.location.hash = 'p1'
+    const user = userEvent.setup()
+    render(<App />)
+    const rows = await screen.findAllByRole('listitem', { name: 'Added line at 0:00' })
+    await user.click(within(rows[1]).getByRole('button', { name: 'Make it background' }))
+    await waitFor(() => expect(within(screen.getAllByRole('listitem', { name: 'Added line at 0:00' })[1]).getByText(/background \(-12 dB\)/)).toBeInTheDocument())
+    expect(f.mock.calls.filter(([url]) => String(url).endsWith('/export')).length).toBeGreaterThanOrEqual(2)
   })
 })
 

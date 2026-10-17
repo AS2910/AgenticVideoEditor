@@ -77,6 +77,9 @@ interface LineDocProps {
   onRemove: (statement: Statement) => void
   /** Hear it on a proposal: the take in place. */
   onHearTake: (item: PlanItem, candidate: Candidate) => void
+  /** 20g: a line mixed under the words (background) or at full level, nothing voiced again. */
+  onLevel?: (target: { editId?: string; candidate?: Candidate; item?: PlanItem }, levelDb: number) => void
+  backgroundDb?: number
   /** UX-1c: move this line of the original speech to start at `to`. */
   onShift?: (s: Statement, to: number) => void
   /** A take dragged to a new start; the moved take replaces it under the line. */
@@ -152,7 +155,7 @@ const PlayIcon = () => <Play size={14} aria-hidden="true" fill="currentColor" />
 export function LineDoc({
   statements, words = [], speakers = [], voices = [], revisions = [], selection, currentTime,
   pendingLines = [], items = [], disabled, usdPerChar, playing,
-  onSeek, onHear, onAdd, onDiscard, onAddAll, onUndo, onRemove, onHearTake,
+  onSeek, onHear, onAdd, onDiscard, onAddAll, onUndo, onRemove, onHearTake, onLevel, backgroundDb = -12,
   onEditingChange, onMove, onMoveKept, placing, onPlacing, onShift, duration,
 }: LineDocProps) {
   const [at, setAt] = useState<string>('')          // the add editor's "starts at", as typed
@@ -519,6 +522,18 @@ export function LineDoc({
     )
   }
 
+  /** 20g: "background (−12 dB) · Make it foreground", or "Make it background". */
+  const levelControl = (levelDb: number | null | undefined, target: { editId?: string; candidate?: Candidate; item?: PlanItem }) => {
+    if (!onLevel) return null
+    const background = (levelDb ?? 0) < 0
+    return (
+      <span className="tnum" data-testid="level">
+        {background ? `background (${Math.round(levelDb!)} dB) · ` : ''}
+        <LinkButton onClick={() => onLevel(target, background ? 0 : backgroundDb)}>{background ? 'Make it foreground' : 'Make it background'}</LinkButton>
+      </span>
+    )
+  }
+
   /** A proposal's own line of facts (20e): whose voice, the verdict in words, where it starts. */
   const takeMeta = (item: PlanItem, c: Candidate, speaker: string | null | undefined) => {
     const v = verdict(c, name(speaker))
@@ -530,7 +545,10 @@ export function LineDoc({
           {voice ? `${voice}'s voice · ` : ''}{v.text}{held ? ' Held the picture: no room to play over it.' : ''}
           {!v.passed && ' Add it anyway if it sounds right to you.'}
         </div>
-        {onMove && placeControl(c.candidate_id, c.plan.selection.start, c.audio.duration, (t) => onMove(item, c, t))}
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+          {onMove && placeControl(c.candidate_id, c.plan.selection.start, c.audio.duration, (t) => onMove(item, c, t))}
+          {isAdd(item) && levelControl(c.plan.level_db, { candidate: c, item })}
+        </div>
       </div>
     )
   }
@@ -716,7 +734,10 @@ export function LineDoc({
               <div className="flex flex-col gap-1.5">
                 <span className="block text-base leading-normal"><ins className={INS}>{rev.text}</ins></span>
                 <div className={metaClass}>In the video · {MIX_NOTE[rev.mix] ?? 'plays over the picture'}{others > 0 ? ` · with ${others} other ${others === 1 ? 'line' : 'lines'} at this moment` : ''}.</div>
-                {rev.edit_id && onMoveKept && placeControl(`edit-${rev.edit_id}`, rev.start, Math.max(0.05, rev.end - rev.start), (t) => onMoveKept(rev.edit_id!, t))}
+                <div className={cn(metaClass, 'flex flex-wrap items-center gap-x-3 gap-y-1')}>
+                  {rev.edit_id && onMoveKept && placeControl(`edit-${rev.edit_id}`, rev.start, Math.max(0.05, rev.end - rev.start), (t) => onMoveKept(rev.edit_id!, t))}
+                  {rev.edit_id && levelControl(rev.level_db, { editId: rev.edit_id })}
+                </div>
               </div>
             )}
           </div>
