@@ -7,15 +7,19 @@ from app.agent.guards import TurnBudget, WaitingForUser
 from app.agent.tools import BY_NAME, definitions, delivery_of
 
 
-def test_every_tool_has_a_strict_schema_with_every_property_required():
+def test_every_tool_schema_requires_every_property_and_only_the_complex_ones_are_strict():
     from app.agent.tools import MAX_STRICT, MAX_UNIONS, strict_count, union_count
     for d in definitions():
         schema = d["input_schema"]
-        assert d["strict"] is bool(schema["properties"])      # strict wherever there is an argument to get wrong
+        assert d["strict"] is False or bool(schema["properties"])   # a tool with no arguments is never strict
         assert schema["additionalProperties"] is False
         assert set(schema["required"]) == set(schema["properties"]), d["name"]
-    # The API refused 18 union-typed parameters across the tools, and 22 strict tools (live, 2026-10-17).
+    # The API refused 18 union-typed parameters across the tools, 22 strict tools, and 19 strict tools as "the compiled grammar is too large" (live, 2026-10-17/18).
     assert union_count() <= MAX_UNIONS and strict_count() <= MAX_STRICT
+    # 20e: the strict ones are the tools with enums, dials or arrays; a one-id tool is plain.
+    from app.agent.tools import BY_NAME as by_name
+    assert by_name["synthesize_take"].definition()["strict"] and by_name["ask"].definition()["strict"] and by_name["ship"].definition()["strict"]
+    assert not by_name["undo_edit"].definition()["strict"] and not by_name["drop_item"].definition()["strict"] and not by_name["read_transcript"].definition()["strict"]
 
 
 def test_a_silent_clip_reads_as_no_speech_and_the_whole_clip_as_room(world):

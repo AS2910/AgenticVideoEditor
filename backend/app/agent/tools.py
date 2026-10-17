@@ -87,12 +87,16 @@ class Tool:
     schema: dict
     guard: Guard
     run: Callable[[Workbench, Turn, dict], ToolResult]
+    # Strict only where an argument can be got wrong in a way that matters
+    # (enums, dials, arrays). The API compiles every strict schema into one
+    # grammar and refuses when it grows too large ("The compiled grammar is
+    # too large", seen live with 19 strict tools), so the simple ones — one
+    # id, one number — are left plain.
+    strict: bool = False
 
     def definition(self) -> dict:
-        # Strict schemas where an argument can be got wrong; a tool with no
-        # arguments needs none (the API allows MAX_STRICT strict tools).
         return {"name": self.name, "description": self.description, "input_schema": self.schema,
-                "strict": bool(self.schema.get("properties"))}
+                "strict": self.strict and bool(self.schema.get("properties"))}
 
 
 def _schema(properties: dict, required: Sequence[str] | None = None) -> dict:
@@ -109,7 +113,7 @@ def _opt(t: str, description: str, **extra) -> dict:
 
 
 MAX_UNIONS = 8   # what the schemas may use between them; the API refused 18
-MAX_STRICT = 20  # strict tools per request; the API refused 22
+MAX_STRICT = 8   # strict tools per request; the API refused 22 outright, and 19 as a grammar too large
 
 
 # ── free: look and listen ─────────────────────────────────────────────────────
@@ -802,7 +806,8 @@ TOOLS: tuple[Tool, ...] = (
     Tool("search_voice_library", "Look beyond the catalogue in the vendor's voice library, by accent (required) and gender; add one with add_voice_from_library.",
          _schema({"description": {"type": "string", "description": "The kind of voice wanted, in words."},
                   "accent": {"type": "string", "description": "indian, british, american, australian, …"},
-                  "gender": {"type": "string", "description": "female, male, or empty for either."}}), Guard.FREE, _search_library),
+                  "gender": {"type": "string", "description": "female, male, or empty for either."}}), Guard.FREE, _search_library, strict=True),
+
     Tool("estimate", "What voicing these words would cost, and what this turn has left.",
          _schema({"text": {"type": "string", "description": "The words."}}), Guard.FREE, _estimate),
     Tool("project_state", "Where things stand: the plan's items and their states, and the money.",
@@ -830,7 +835,7 @@ TOOLS: tuple[Tool, ...] = (
                   "mix": {"type": "string", "enum": ["layer", "concatenate"], "description": "When placing: layer = over the picture and sound (the usual), concatenate = the picture waits."},
                   "fit": {"type": "string", "enum": ["fit", "natural", "stretch"], "description": "How the take meets its slot: fit = pauses first, then tempo (the usual); natural = as spoken from the slot's start, running into the pause; stretch = tempo only."},
                   "picture": {"type": "string", "enum": ["default", "as shot", "may flex"], "description": "Whether the picture under the take may run a little slower or faster to fit it. default = as shot for a placed line, may flex for a replacement."},
-                  "item_id": {"type": "string", "description": "An existing item to voice again; empty for a new one."}}), Guard.SPEND, _synthesize_take),
+                  "item_id": {"type": "string", "description": "An existing item to voice again; empty for a new one."}}), Guard.SPEND, _synthesize_take, strict=True),
     Tool("keep_take", "Put an earlier take back on an item (after voicing it again and preferring the first).",
          _schema({"item_id": {"type": "string"}, "candidate_id": {"type": "string"}}), Guard.FREE, _keep_take),
     Tool("drop_item", "Drop a planned or voiced line from the plan (not one that has shipped).",
@@ -840,7 +845,8 @@ TOOLS: tuple[Tool, ...] = (
          "for the price of the sample text (the vendor's own is about 350 characters). Keep one with save_voice. Costs money.",
          _schema({"description": {"type": "string", "description": "Who is speaking: age, gender, accent, texture, manner — e.g. an Indian woman near fifty, unhurried, a smile in the voice, slight rasp."},
                   "sample_text": {"type": "string", "description": "What the previews read, 100 characters or more; empty lets the vendor write one."}}),
-         Guard.SPEND, _design_voice),
+
+         Guard.SPEND, _design_voice, strict=True),
     Tool("save_voice", "Keep one preview from design_voice as a voice of the catalogue, named for the clip. Takes a voice slot, no credits.",
          _schema({"generated_voice_id": {"type": "string", "description": "A preview id from design_voice."},
                   "name": {"type": "string", "description": "A name for the clip, two words at most."}}), Guard.COMMIT, _save_voice),
@@ -851,11 +857,11 @@ TOOLS: tuple[Tool, ...] = (
          _schema({"voice_id": {"type": "string"}}), Guard.COMMIT, _delete_voice),
     Tool("clone_speaker", "Make a speaker's own voice from their speech in this clip, so their lines can be replaced in it. Takes a slot; asks first under Check with me. "
          "A replacement with an empty voice_id does this on its own.",
-         _schema({"speaker": {"type": "string", "description": "The speaker's name or label, from read_transcript."}}), Guard.COMMIT, _clone_speaker),
+         _schema({"speaker": {"type": "string", "description": "The speaker's name or label, from read_transcript."}}), Guard.COMMIT, _clone_speaker, strict=True),
     Tool("remove_line", "Propose taking a spoken line out: the words go, the room's own sound stays, the picture is untouched. A proposal like a take; ship makes it part of the video.",
          _schema({"line": {"type": "integer", "description": "The transcript line."}}), Guard.FREE, _remove_line),
     Tool("shift_line", "Move a spoken line to another time, as it was spoken: nothing is voiced. Part of the video at once (undo from the review).",
-         _schema({"line": {"type": "integer"}, "to": {"type": "number", "description": "Where the words should start, in seconds."}}), Guard.COMMIT, _shift_line),
+         _schema({"line": {"type": "integer"}, "to": {"type": "number", "description": "Where the words should start, in seconds."}}), Guard.COMMIT, _shift_line, strict=True),
     Tool("move_item", "Place a voiced item's take at another time, the same audio, nothing voiced again.",
          _schema({"item_id": {"type": "string"}, "start": {"type": "number", "description": "Seconds."}}), Guard.FREE, _move_item),
     Tool("measure", "The full sound check of a take: its scores, what was done to fit it, how it was spoken.",
@@ -863,12 +869,14 @@ TOOLS: tuple[Tool, ...] = (
     Tool("ship", "Make the voiced lines part of the video and render it. Only when the user asks for it, or said just do it and the work is done.",
          _schema({"item_ids": {"type": "array", "items": {"type": "string"}, "description": "Which items; empty for every voiced line."},
                   "anyway": {"type": "boolean", "description": "Ship a take that did not pass its check. Only when the user said to ship it as it is."}}),
-         Guard.COMMIT, _ship),
+
+         Guard.COMMIT, _ship, strict=True),
     Tool("undo_edit", "Take a shipped edit back out of the video (project_state lists them). A redo of a line that is in the video already: voice the new take, ship it, then undo the old edit, so lines do not pile up.",
          _schema({"edit_id": {"type": "string"}}), Guard.COMMIT, _undo_edit),
     Tool("ask", "Stop and ask the user one thing, with two or three options and your own guess. The turn ends; their answer starts the next.",
          _schema({"question": {"type": "string"}, "options": {"type": "array", "items": {"type": "string"}},
-                  "guess": {"type": "string", "description": "The option you would take; empty for none."}}), Guard.FREE, _ask),
+                  "guess": {"type": "string", "description": "The option you would take; empty for none."}}), Guard.FREE, _ask, strict=True),
+
 )
 
 BY_NAME = {t.name: t for t in TOOLS}

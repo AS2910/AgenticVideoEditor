@@ -33,7 +33,9 @@ def test_a_turn_looks_voices_and_closes_with_a_sentence(world):
     # The request: the system prompt is cached, the tools are strict, extras on.
     first = client.calls[0]
     assert first["system"][0]["cache_control"] == {"type": "ephemeral"}
-    assert all(t["strict"] is bool(t["input_schema"]["properties"]) for t in first["tools"]) and first["fallbacks"] == "default"
+    # Strict on the tools with enums, dials or arrays; a one-id tool is plain (the API's grammar limit, 20e).
+    assert {t["name"] for t in first["tools"] if t["strict"]} == {"search_voice_library", "synthesize_take", "design_voice", "clone_speaker", "shift_line", "ship", "ask"}
+    assert first["fallbacks"] == "default"
     assert first["output_config"] == {"effort": "high"} and first["model"] == "claude-opus-5-5"
     assert len(client.calls[2]["messages"]) == 5
 

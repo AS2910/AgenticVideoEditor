@@ -23,6 +23,10 @@ os.environ["OPENAI_API_KEY"] = ""
 os.environ["ELEVENLABS_API_KEY"] = ""
 os.environ["ANTHROPIC_API_KEY"] = ""
 os.environ["AVE_DRY_RUN"] = ""
+# The budgets the tests reason about are the defaults, whatever backend/.env raises them to.
+os.environ["AVE_PROJECT_BUDGET_USD"] = "2.0"
+os.environ["AVE_USER_BUDGET_USD"] = "10.0"
+os.environ["AVE_VOICE_BUDGET_CHARS"] = "2000"
 # The measure extra (WavLM, UTMOS) stays off: no model downloads in the suite;
 # its tests inject fakes. tests/continuity/test_similarity_live.py opts in.
 os.environ["AVE_MEASURE"] = "0"

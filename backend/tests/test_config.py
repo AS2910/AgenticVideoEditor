@@ -82,6 +82,7 @@ def test_elevenlabs_model_and_voice_can_be_overridden(monkeypatch):
 
 def test_voice_budget_defaults_to_2000_characters(monkeypatch):
     monkeypatch.delenv("AVE_VOICE_BUDGET_CHARS", raising=False)
+    monkeypatch.setattr(config, "load_dotenv", lambda *a, **k: None)   # the developer's own .env may raise it
     assert config.load_settings().voice_budget_chars == 2000
 
 

@@ -106,7 +106,7 @@ export function PlaceEditor({
         value={draft}
         rows={2}
         aria-label="Words for the voice-over"
-        placeholder="What should be said here?"
+        placeholder="The exact words to say, e.g. Welcome to Goa. (A brief goes to Voltage in the box on the right.)"
         onChange={(e) => setDraft(e.target.value)}
         onKeyDown={(e) => {
           if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); hear() }

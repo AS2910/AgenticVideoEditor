@@ -831,6 +831,31 @@ describe('App fit notes (Phase 14)', () => {
   })
 })
 
+describe('App: a fresh upload after another project', () => {
+  it('shows the first reply of the new project (the thread\'s high-water mark is per project)', async () => {
+    // Open p1, which already holds five messages; then upload again and send a turn: its reply is seq 2 of the new project.
+    const calls = agent(PLAN_DONE)
+    const base = fetch as unknown as (url: string, init?: RequestInit) => Promise<Response>
+    const f = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.endsWith('/projects/p1') && !init?.method) {
+        return ok({ ...PROJECT, created_at: '2026-10-02T08:00:00Z', edits: [], settings: { autonomy: 'ask' },
+          messages: [1, 2, 3, 4, 5].map((seq) => ({ role: seq % 2 ? 'user' : 'assistant', text: `earlier ${seq}`, kind: 'say', seq })) })
+      }
+      return base(url, init)
+    })
+    vi.stubGlobal('fetch', f)
+    window.location.hash = 'p1'
+    const user = userEvent.setup()
+    render(<App />)
+    await screen.findByText('earlier 5')
+    await user.click(screen.getByRole('button', { name: /projects/i }))
+    await reachGoal(user)
+    await user.type(screen.getByRole('textbox', TEXTBOX), 'make it 30% off{Enter}')
+    await waitFor(() => expect(saidTo(calls)).toEqual(['make it 30% off']))
+    expect(await screen.findByText('I read 1 line. One change does it.')).toBeInTheDocument()
+  })
+})
+
 describe('App panel order', () => {
   it('puts the receipt above the plan; the action on a proposal is on its row (20e)', async () => {
     const base = routeFetch()

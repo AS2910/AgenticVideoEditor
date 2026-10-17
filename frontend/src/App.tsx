@@ -38,7 +38,7 @@ import type { Me, PlanApproval } from './api'
 import type {
   Word, Selection, Candidate, Segment, Project, ChatMessage,
   Insert, ProjectSummary, Usage, Statement, Voice, Revision,
-  Plan, PlanItem, Autonomy, Reading, Piece,
+  Plan, PlanItem, Autonomy, Reading, Piece, ProjectDetail,
 } from './types'
 import { piecesFromInserts, renderTimeFrom, sourceTimeFrom } from './timeline/selection'
 
@@ -274,6 +274,9 @@ export default function App() {
       effort: loaded.settings?.effort ?? MAY_DO.effort, ceiling_usd: loaded.settings?.ceiling_usd ?? MAY_DO.ceiling_usd })
     setPlan(loaded.plan ?? null)
     setReading(loaded.reading ?? null)
+    // The thread's high-water mark belongs to this project: a fresh upload after
+    // another project starts at zero, or its first replies would be skipped.
+    seenSeq.current = Math.max(0, ...((loaded as Partial<ProjectDetail>).messages ?? []).map((m) => m.seq ?? 0))
     // UX-7c: one workspace. A fresh project is read on arrival (a clip with
     // no speech is looked at); one with a plan or edits opens as it was.
     wantReading.current = !loaded.plan && !edited
