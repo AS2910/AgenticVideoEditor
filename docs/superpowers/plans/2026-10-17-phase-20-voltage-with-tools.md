@@ -241,3 +241,20 @@ The user's ask after 20a's report: gaps 2 and 3 — voice design, the library to
 Five turns, about $0.47 in all, $0.12 of it voice (plus the lost design). Claude per request is now $0.016–0.025 on an 18–20k-token thread, against $0.045–0.055 on a 9k thread before the cache breakpoint — the same turn costs about a quarter per token. The "done when" of 20b holds: *"a woman closer to fifty, more wistful"* produced a designed voice and a take the user hears, costs recorded. The voice is in the catalogue (the plan card's Voice row lists it) and is deleted with the project.
 
 **Left for 20c/20d:** `voice_changer` (needs the speech-clip tools), `flex`/placement as take arguments (gap 1), the `model` default once an ear has compared v2/v3/v4 on the same line, the previews card's position (it is written by the tool, so it lands above its own step line), the design's $0.06-vs-"about 350 characters" quote when the model writes its own sample.
+
+## As built · 20c, speech clips and the old planner retires (2026-10-17, on `main`)
+
+The user's word: *"do it"*, after 20b's report named 20c next.
+
+### Speech-clip tools (`app/agent/tools.py`)
+
+- `synthesize_take` on a transcript line with an empty `voice_id` speaks in **the speaker's own voice**: the voice picked for them, else their clone made now from their own speech (`clones.resolve`, Phase 15a), else the default with the reason in the take's report ("Stock voice: only 3.0 s of Mute's voice…"). Under Check with me the gate says *"in Priya's own voice"* and nothing is cloned before the yes. New arguments: `fit` (fit / natural / stretch) and `picture` (as shot / may flex) — a placed line leaves the picture as shot by default (the 20a slowdown), a replacement may flex; `EditPlan.flex_max` carries it to the fitter.
+- `clone_speaker(speaker)` (asks under Check with me; a slot), `remove_line(line)` and `shift_line(line, to)` (the UX-1 cuts, factored into `_remove_words` / `_shift_words`; gated commits, part of the video at once, undo from the review), `move_item(item_id, start)` (the same take elsewhere, free). `read_transcript` names the speakers with their labels and whose own voice is made.
+- Not built: `voice_changer` as a tool — the Phase 15b route runs inside the pipeline when `AVE_VOICE_ROUTE` is `auto`/`changer` and the take is in a clone; nothing for the agent to call.
+
+### The form planner retires
+
+- Gone from the API: `POST /plans`, `/plans/{id}/clarify`, `/plans/{id}/revise`, `PUT /plans/{id}/voice` and their helpers (`_new_plan`, `_items_of`, `_take_proposal`, `_voice_ask`, `_voice_log`, `_apply_revision`, `_set_plan_voice`, `_line_index`). A plan begins with a turn (`_turn_plan`). Still there: `GET /plans/{id}`, the item PUT, `/run`, `/answer`, `/redo`, `/stop`, `/approve` (the plan card's controls and `_ship`) — the runner stays until the card's Run/Answer go through turns too (20d).
+- `orchestrator/planner.py` keeps `Line`, `Frame`, `Sight`, `Role`, `Reading`, a three-method `Planner` (look, read, shorten) and `OfflinePlanner` (identity "offline"); `Proposal`, `Question`, `VoiceAsk`, `Revision`, `ItemView`, `ItemChange`, `Change`, `MAX_QUESTIONS` and `RulePlanner` are deleted. `adapters/claude_planner.py` keeps look/read/shorten; the plan and revise prompts, models, renderers and the catalogue hook are deleted. `select_planner` answers "dry-run" / "offline".
+- `settings.agent` defaults on (`AVE_AGENT=0` turns it off): with an Anthropic key, Voltage is the agent; without one, a turn says *"Voltage needs Claude for this"* (decision 5 of the plan).
+- Front end: every composer path is a turn — a goal, an answer to a question (a pick or "go"), a change to the plan, "ship it" (the agent's `ship` tool, with its gate), the plan card's Voice row (*"Use Riya's voice for the lines"*) and another take of a voiced item (*"Another take of “…” (i4)"*). The send button says Send; the placeholder under a plan says *"Say what to change, or ask for another take; "ship it" when it sounds right"*. Gone: `createPlan`, `clarifyPlan`, `revisePlan`, `setPlanVoice`, the "planning" skeleton and findings list, the `GO`/`SHIP` regexes, the question counter.

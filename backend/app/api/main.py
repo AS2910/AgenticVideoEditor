@@ -35,7 +35,7 @@ from app.errors import NonRetryableError
 from app import chaos as chaos_module
 from app.budget import VoiceBudget, BudgetExceeded
 from app.orchestrator.intent import Turn, edit_context
-from app.orchestrator.planner import ItemView, Line, Proposal, Question, Revision, MAX_QUESTIONS, Frame, Sight, VoiceAsk
+from app.orchestrator.planner import Line, Frame, Sight
 from app.orchestrator.questions import fit_question, mix_question
 from app.media.ffmpeg import SpanMismatch
 from app.orchestrator.clones import CloneService, VoiceChoice
@@ -84,9 +84,6 @@ clones = CloneService(repo, artifacts, voice, enabled=settings.clone and not set
                       min_seconds=settings.clone_min_seconds)
 interpreter, interpreter_label = select_interpreter(settings, chaos)
 planner, planner_label = select_planner(settings, chaos)
-# The planner reads the voice catalogue when a goal asks for a kind of voice.
-if hasattr(planner, "catalogue"):
-    planner.catalogue = voice.voices
 jobs = JobStore()
 runner = JobRunner(jobs)
 # Phase 9c: who signs people in. None while AVE_AUTH=off.
@@ -1248,14 +1245,6 @@ def _export(record: ProjectRecord) -> dict:
 
 # ── Phase 13: the agent ──────────────────────────────────────────────────────
 
-class PlanRequest(BaseModel):
-    goal: str
-    # Overrides the project's autonomy setting for this plan.
-    mode: Literal["ask", "draft"] | None = None
-    # UX-5: the voice a line placed on a silent clip is spoken in (the chat's default voice).
-    voice_profile_id: str | None = None
-
-
 class ItemUpdate(BaseModel):
     enabled: bool | None = None
     new_text: str | None = None
@@ -1321,7 +1310,7 @@ def _plan_dict(plan: Plan | None) -> dict | None:
         "question": plan.question,
         # UX-5: the brief so far, and how many questions may still come.
         "answers": [list(a) for a in plan.answers],
-        "questions_left": max(0, MAX_QUESTIONS - len(plan.answers)) if plan.question else 0,
+        "questions_left": 0,
         "voice": plan.voice,
         "voice_asked": plan.voice_asked,
         "voice_note": plan.voice_note,
@@ -1362,99 +1351,6 @@ def _estimate(project_id: str, items: tuple[PlanItem, ...]) -> dict:
     }
 
 
-def _items_of(proposal: Proposal, statements, names: dict[str, str] | None = None,
-              duration: float | None = None) -> tuple[PlanItem, ...]:
-    """`names` maps a speaker's display name (lower-cased) to their label, so a
-    change that names who says it lands on the right person. A change placed
-    by time (UX-5) becomes an item on its own span, with nothing to replace."""
-    names = names or {}
-    items: list[PlanItem] = []
-    for kind, changes in (("planned", proposal.edits), ("suggestion", proposal.suggestions)):
-        for change in changes:
-            if change.placed:
-                end = min(change.end, duration) if duration else change.end
-                if end <= change.start:
-                    continue
-                items.append(PlanItem(
-                    item_id=f"i{len(items) + 1}", selection=Selection(round(change.start, 2), round(end, 2)),
-                    old_text="", new_text=change.new_text, speaker=None,
-                    mix="concatenate" if change.mix == "concatenate" else "layer",
-                    reason=change.reason, kind=kind,
-                    enabled=kind == "planned", status="planned" if kind == "planned" else "suggested",
-                ))
-                continue
-            if not 1 <= change.line <= len(statements):
-                continue
-            st = statements[change.line - 1]
-            speaker = names.get((change.speaker or "").lower(), st.speaker)
-            items.append(PlanItem(
-                item_id=f"i{len(items) + 1}", selection=Selection(st.start, st.end),
-                old_text=st.text, new_text=change.new_text, speaker=speaker,
-                mix=change.mix, reason=change.reason, kind=kind,
-                enabled=kind == "planned", status="planned" if kind == "planned" else "suggested",
-            ))
-    return tuple(items)
-
-
-@app.post("/projects/{project_id}/plans")
-def create_plan(project_id: str, req: PlanRequest, owner: str = Depends(current_owner)) -> dict:
-    """Plan edits across the whole video from a goal. Under "draft" the plan
-    is voiced straight away and the job to poll is returned with it; under
-    "ask" nothing is voiced or charged until Run."""
-    record = _owned(project_id, owner)
-    goal = req.goal.strip()
-    if not goal:
-        raise HTTPException(status_code=422, detail="Say what the video should say.")
-    return _new_plan(project_id, record, goal, req.mode, req.voice_profile_id)
-
-
-def _new_plan(project_id: str, record: ProjectRecord, goal: str, mode: str | None,
-              voice_id: str | None = None) -> dict:
-    lines = _lines(record)
-    # UX-5: a clip with no speech is planned from what the picture shows.
-    silent = not lines
-    try:
-        _ensure_spend(project_id)
-        sight = _sight(project_id, record) if silent else None
-    except SpendCeilingReached as exc:
-        raise HTTPException(status_code=402, detail=str(exc)) from exc
-    except NonRetryableError as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
-    except VendorError as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
-    mode = mode or _settings(project_id)["autonomy"]
-    if mode == "draft" and record.consent is None:
-        raise HTTPException(status_code=403, detail=CONSENT_REQUIRED)
-    earlier = repo.latest_plan(project_id)
-    history = [earlier.goal] if earlier else []
-    repo.add_message(project_id, "user", goal)
-    try:
-        if silent:
-            proposal = planner.plan(goal, [], history, meter=_meter(project_id, "planning"),
-                                    sight=sight, duration=record.source.duration)
-        else:
-            proposal = planner.plan(goal, lines, history, meter=_meter(project_id, "planning"))
-    except NonRetryableError as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
-    except VendorError as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
-    asked = _voice_ask(proposal.voice)
-    plan = Plan(
-        plan_id=repo.next_plan_id(project_id), project_id=project_id, goal=goal,
-        summary=proposal.summary, items=(), mode=mode, status="proposed", created_at=_now(),
-        voice=asked.voice_id if asked and asked.voice_id else voice_id,
-        voice_asked=bool(asked and asked.voice_id), voice_note=asked.note if asked else None,
-    )
-    repo.save_plan(plan)
-    repo.append_log(project_id, plan.plan_id,
-                    "Looked at the picture and read your goal" if silent else f"Read your goal and all {len(lines)} lines",
-                    "Claude" if planner_label.startswith("anthropic") else "")
-    if asked:
-        repo.append_log(project_id, plan.plan_id, _voice_log(asked))
-        proposal = replace(proposal, summary=f"{proposal.summary} {asked.note}".strip())
-    return _take_proposal(project_id, record, plan.plan_id, proposal, mode)
-
-
 def _voice_name(voice_id: str | None) -> str | None:
     if not voice_id:
         return None
@@ -1466,110 +1362,6 @@ def _catalogue() -> list[dict]:
         return list(voice.voices())
     except VendorError:
         return []
-
-
-def _voice_ask(ask: VoiceAsk | None) -> VoiceAsk | None:
-    """The planner's voice choice, checked against the catalogue: an id it
-    made up counts as nothing fitting, and the note says so."""
-    if ask is None:
-        return None
-    if ask.voice_id and _voice_name(ask.voice_id) is None:
-        return VoiceAsk(ask.wanted, None, f"No voice on the list fits \"{ask.wanted}\", so I kept the default voice.")
-    return ask
-
-
-def _voice_log(ask: VoiceAsk) -> str:
-    name = _voice_name(ask.voice_id)
-    return (f"Chose {name}'s voice for \"{ask.wanted}\"" if name
-            else f"No voice fits \"{ask.wanted}\"; kept the default")
-
-
-def _take_proposal(project_id: str, record: ProjectRecord, plan_id: str, proposal: Proposal, mode: str) -> dict:
-    """Store what the planner proposed. With a question open, the plan waits
-    as "clarifying" (the items are kept, built on the planner's guess); else it
-    is proposed, and under "draft" it starts running."""
-    names = {s.name.lower(): s.label for s in repo.speakers(project_id)}
-    items = _items_of(proposal, statements_of(record.transcript), names, record.source.duration)
-    planned = [i for i in items if i.kind == "planned"]
-    speakers = {i.speaker for i in planned if i.speaker}
-    question = ({"text": proposal.question.text, "options": list(proposal.question.options),
-                 "guess": proposal.question.guess} if proposal.question else None)
-    plan = repo.update_plan(
-        project_id, plan_id, summary=proposal.summary, items=items, findings=proposal.findings,
-        question=question, status="clarifying" if question else "proposed",
-        estimate=_estimate(project_id, items),
-    )
-    if question:
-        repo.append_log(project_id, plan_id, f"Asked: {question['text']}")
-        repo.add_message(project_id, "assistant", question["text"])
-        return _plan_dict(repo.get_plan(project_id, plan_id))
-    repo.append_log(project_id, plan_id,
-                    f"Planned {len(planned)} {'change' if len(planned) == 1 else 'changes'}"
-                    + (f" across {len(speakers)} speakers" if len(speakers) > 1 else ""))
-    repo.add_message(project_id, "assistant", proposal.summary)
-    out = _plan_dict(repo.get_plan(project_id, plan_id))
-    if mode == "draft" and plan.runnable:
-        job = _run_plan(project_id, record, plan_id, [i.item_id for i in plan.runnable])
-        out["job_id"] = job.job_id
-        out["status"] = "running"
-    return out
-
-
-class ClarifyRequest(BaseModel):
-    # One of the question's options, or the user's own words. Empty = the guess.
-    answer: str | None = None
-    # UX-5: take the planner's guess for this and every further question.
-    all_guesses: bool = False
-
-
-@app.post("/projects/{project_id}/plans/{plan_id}/clarify")
-def clarify_plan(
-    project_id: str, plan_id: str, req: ClarifyRequest, owner: str = Depends(current_owner),
-) -> dict:
-    """Answer the planner's question; it plans again with the answer."""
-    record = _owned(project_id, owner)
-    plan = _plan_or_404(project_id, plan_id)
-    if not plan.question:
-        raise HTTPException(status_code=409, detail="This plan has no open question.")
-    answer = (req.answer or "").strip() or plan.question.get("guess") or plan.question["options"][0]
-    repo.add_message(project_id, "user", answer)
-    repo.append_log(project_id, plan_id, f"You said: {answer}")
-    lines = _lines(record)
-    silent = not lines
-    answers = plan.answers + ((plan.question["text"], answer),)
-    try:
-        _ensure_spend(project_id)
-        if silent:
-            # UX-5, the brief: the planner may ask again, one question at a
-            # time, up to MAX_QUESTIONS; "Go with your guesses" answers the
-            # rest with its own guesses.
-            sight = _sight(project_id, record)
-            while True:
-                proposal = planner.plan(plan.goal, [], [], meter=_meter(project_id, "planning"),
-                                        answer=answers[-1], sight=sight, duration=record.source.duration,
-                                        answers=answers)
-                if proposal.question is None or len(answers) >= MAX_QUESTIONS:
-                    break
-                if not req.all_guesses:
-                    break
-                guess = proposal.question.guess or (proposal.question.options[0] if proposal.question.options else "")
-                repo.append_log(project_id, plan_id, f"Asked: {proposal.question.text} — went with its guess: {guess}")
-                answers = answers + ((proposal.question.text, guess),)
-            if proposal.question is not None and len(answers) >= MAX_QUESTIONS:
-                proposal = replace(proposal, question=None)
-        else:
-            proposal = planner.plan(plan.goal, lines, [], meter=_meter(project_id, "planning"),
-                                    answer=(plan.question["text"], answer))
-            # On a clip with speech, asking twice is not allowed: a second question is dropped, the guess stands.
-            proposal = replace(proposal, question=None) if proposal.question else proposal
-    except SpendCeilingReached as exc:
-        raise HTTPException(status_code=402, detail=str(exc)) from exc
-    except NonRetryableError as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
-    except VendorError as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
-    repo.update_plan(project_id, plan_id, answers=answers)
-    return _take_proposal(project_id, record, plan_id, proposal, plan.mode)
 
 
 @app.get("/projects/{project_id}/plans/{plan_id}")
@@ -1636,154 +1428,6 @@ def _status_after_edit(plan: Plan) -> str:
 
 
 # ── UX-2: revise the plan in words, and stop it ──────────────────────────────
-
-class ReviseRequest(BaseModel):
-    instruction: str
-
-
-@app.post("/projects/{project_id}/plans/{plan_id}/revise")
-def revise_plan(
-    project_id: str, plan_id: str, req: ReviseRequest, owner: str = Depends(current_owner),
-) -> dict:
-    """Change the plan in your own words — "not the second one", "warmer at
-    0:17", "shorter" — applied to the plan in place, so the takes already
-    voiced survive. A new goal altogether makes a new plan instead."""
-    record = _owned(project_id, owner)
-    plan = _plan_or_404(project_id, plan_id)
-    instruction = req.instruction.strip()
-    if not instruction:
-        raise HTTPException(status_code=422, detail="Say what to change about the plan.")
-    if plan.status in ("running", "stopping"):
-        raise HTTPException(status_code=409, detail="Stop the plan first, or wait for it to finish.")
-    lines = _lines(record)
-    statements = statements_of(record.transcript)
-    names = {s.label: s.name for s in repo.speakers(project_id)}
-    views = [
-        ItemView(i.item_id, _line_index(statements, i.selection), i.old_text, i.new_text, i.mix, i.delivery,
-                 i.enabled, i.status, names.get(i.speaker or ""))
-        for i in plan.items if i.kind == "planned" or i.status == "suggested"
-    ]
-    repo.add_message(project_id, "user", instruction)
-    try:
-        _ensure_spend(project_id)
-        revision = planner.revise(instruction, views, lines, plan.goal, meter=_meter(project_id, "planning"))
-    except SpendCeilingReached as exc:
-        raise HTTPException(status_code=402, detail=str(exc)) from exc
-    except NonRetryableError as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
-    except VendorError as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
-    if revision.new_goal:
-        return _new_plan(project_id, record, instruction, plan.mode)
-    repo.append_log(project_id, plan_id, f"You said: {instruction}")
-    touched = _apply_revision(project_id, record, plan, revision)
-    summary = revision.summary
-    asked = _voice_ask(revision.voice)
-    if asked:
-        touched += _set_plan_voice(project_id, plan_id, asked)
-        summary = f"{summary} {asked.note}".strip()
-    repo.add_message(project_id, "assistant", summary)
-    repo.append_log(project_id, plan_id, summary if touched else "Nothing in the plan changed")
-    updated = repo.get_plan(project_id, plan_id)
-    updated = repo.update_plan(project_id, plan_id, summary=summary,
-                               estimate=_estimate(project_id, updated.items),
-                               status=_status_after_edit(updated))
-    return _plan_dict(updated)
-
-
-def _set_plan_voice(project_id: str, plan_id: str, asked: VoiceAsk) -> int:
-    """The plan's voice from an ask: the lines not yet voiced speak in it.
-    Returns 1 when the plan changed."""
-    if not asked.voice_id:
-        repo.update_plan(project_id, plan_id, voice_note=asked.note)
-        repo.append_log(project_id, plan_id, _voice_log(asked))
-        return 0
-    repo.update_plan(project_id, plan_id, voice=asked.voice_id, voice_asked=True, voice_note=asked.note)
-    repo.append_log(project_id, plan_id, _voice_log(asked))
-    return 1
-
-
-class PlanVoiceRequest(BaseModel):
-    voice_profile_id: str
-
-
-@app.put("/projects/{project_id}/plans/{plan_id}/voice")
-def set_plan_voice(
-    project_id: str, plan_id: str, req: PlanVoiceRequest, owner: str = Depends(current_owner),
-) -> dict:
-    """Pick the voice the plan speaks in. Lines not yet voiced use it; a line
-    already voiced keeps its take until it is redone."""
-    _owned(project_id, owner)
-    plan = _plan_or_404(project_id, plan_id)
-    if plan.status in ("running", "stopping"):
-        raise HTTPException(status_code=409, detail="Stop the plan first, or wait for it to finish.")
-    name = _voice_name(req.voice_profile_id)
-    if name is None:
-        raise HTTPException(status_code=422, detail="That voice is not in the list.")
-    repo.update_plan(project_id, plan_id, voice=req.voice_profile_id, voice_asked=True,
-                     voice_note=f"You picked {name}'s voice.")
-    repo.append_log(project_id, plan_id, f"You picked {name}'s voice for the lines not yet voiced")
-    return _plan_dict(repo.get_plan(project_id, plan_id))
-
-
-def _line_index(statements, selection: Selection) -> int:
-    for n, st in enumerate(statements):
-        if abs(st.start - selection.start) < 0.05:
-            return n + 1
-    return 0
-
-
-def _apply_revision(project_id: str, record: ProjectRecord, plan: Plan, revision: Revision) -> int:
-    """Apply a revision to the plan's items in place. Returns how many items
-    changed. An item whose words, placement or delivery change goes back to
-    planned (its take no longer says what it should); one merely left out or
-    put back keeps its take."""
-    touched = 0
-    for change in revision.changes:
-        item = plan.item(change.item_id)
-        if item is None:
-            continue
-        changes: dict = {}
-        revoice = False
-        if change.enabled is not None and change.enabled != item.enabled:
-            changes["enabled"] = change.enabled
-            if item.kind == "suggestion" and change.enabled:
-                changes.update(kind="planned", status="planned")
-        if change.new_text and change.new_text != item.new_text:
-            changes.update(new_text=change.new_text, fit=None, note="Reworded as you asked")
-            revoice = True
-        if change.mix and item.mix != "replace" and change.mix != item.mix:
-            changes["mix"] = change.mix
-            revoice = True
-        if change.clear_delivery and item.delivery:
-            changes["delivery"] = None
-            revoice = True
-        elif change.delivery and change.delivery != item.delivery:
-            changes["delivery"] = change.delivery
-            revoice = True
-        if revoice and item.status in ("ready", "needs-you", "failed"):
-            changes.update(status="planned", candidate_id=None, question=None, error=None)
-        if changes:
-            repo.update_item(project_id, plan.plan_id, item.item_id, **changes)
-            touched += 1
-    if revision.additions:
-        statements = statements_of(record.transcript)
-        by_name = {s.name.lower(): s.label for s in repo.speakers(project_id)}
-        current = repo.get_plan(project_id, plan.plan_id)
-        new_items = list(current.items)
-        for change in revision.additions:
-            if not 1 <= change.line <= len(statements):
-                continue
-            st = statements[change.line - 1]
-            new_items.append(PlanItem(
-                item_id=f"i{len(new_items) + 1}", selection=Selection(st.start, st.end), old_text=st.text,
-                new_text=change.new_text, speaker=by_name.get((change.speaker or "").lower(), st.speaker),
-                mix=change.mix, reason=change.reason, kind="planned", enabled=True, status="planned",
-            ))
-            touched += 1
-        repo.update_plan(project_id, plan.plan_id, items=tuple(new_items))
-    return touched
-
 
 # Plans asked to stop: checked by the running job between lines.
 _stops: set[str] = set()

@@ -25,7 +25,6 @@ import wave
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Sequence
-import math
 
 import numpy as np
 

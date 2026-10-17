@@ -29,15 +29,14 @@ import { AutonomySwitch } from './components/AutonomySwitch'
 import { Presence } from './components/Presence'
 import { ThemeToggle } from './components/ThemeToggle'
 import { Button } from '@/components/ui/button'
-import { Skeleton } from '@/components/ui/skeleton'
 import { cn } from '@/lib/utils'
-import { ArrowUp, ChevronLeft, ChevronRight, CircleCheck, Loader2 } from 'lucide-react'
+import { ArrowUp, ChevronLeft, ChevronRight, Loader2 } from 'lucide-react'
 import { VoicePicker } from './components/VoicePicker'
 import { SpeakersBar } from './components/SpeakersBar'
 import { clock } from './transcript/format'
 import { speakerSlot } from './transcript/speakers'
 import {
-  createProject, confirmPlace, previewEdit, approveEdit, exportProject, artifactUrl, pollJob, PollCancelled, ApiError, listProjects, getProject, deleteProject, getUsage, listVoices, updateSpeaker, detectSpeakers, revertEdit, updateSettings, rewordLine, removeLine, moveCandidate, moveEdit, shiftLine, createPlan, getPlan, updateItem, runPlan, answerItem, redoItem, approvePlan, setPlanVoice, clarifyPlan, readProject, revisePlan, stopPlan, grantConsent, createVariant, getMe, logout, postTurn, getMessages,
+  createProject, confirmPlace, previewEdit, approveEdit, exportProject, artifactUrl, pollJob, PollCancelled, ApiError, listProjects, getProject, deleteProject, getUsage, listVoices, updateSpeaker, detectSpeakers, revertEdit, updateSettings, rewordLine, removeLine, moveCandidate, moveEdit, shiftLine, getPlan, updateItem, runPlan, answerItem, redoItem, approvePlan, readProject, stopPlan, grantConsent, createVariant, getMe, logout, postTurn, getMessages,
 } from './api'
 import type { Me } from './api'
 import type {
@@ -62,9 +61,7 @@ interface Answer { text: string; fit?: Fit; mix?: Mix; on_long?: LongLines; deli
 type Stage = 'load' | 'editor'
 
 /** Words that mean "take your guess" when Voltage has asked something. */
-const GO = /^(go|ok|okay|yes|sure|go ahead|fine|yep|do it)[.!]?$/i
 // 15e: said in the composer, ships the lines kept — the same as the Ship button.
-const SHIP = /^(ship( it| them| all| the rest)?|done|looks good|lgtm|finish( it)?|publish( it)?|export( it)?)[.!]?$/i
 
 /** The chat's voice, or the speaker's own, named for a take. */
 const voiceName = (voices: Voice[], id: string) => voices.find((v) => v.voice_id === id)?.name
@@ -128,7 +125,6 @@ export default function App() {
   // the job voicing that plan.
   const [autonomy, setAutonomy] = useState<Autonomy>('ask')
   const [plan, setPlan] = useState<Plan | null>(null)
-  const [planning, setPlanning] = useState(false)
   // Voltage's first look at the clip (UX-2), for the goal stage.
   const [reading, setReading] = useState<Reading | null>(null)
   const [readingBusy, setReadingBusy] = useState(false)
@@ -151,7 +147,6 @@ export default function App() {
   // UX-7d: Keep or Hold per change, decided in the script; a take that failed its sound check starts held.
   const [decisions, setDecisions] = useState<Record<string, 'keep' | 'hold'>>({})
   // While Voltage reads, the transcript line it is "on" is lit in turn.
-  const [readingAt, setReadingAt] = useState(0)
   // The line open in the hands-on editor, so the panel can stand by.
   const [editingLine, setEditingLine] = useState<Statement | null>(null)
   const [showPlanWhileEditing, setShowPlanWhileEditing] = useState(false)
@@ -244,7 +239,6 @@ export default function App() {
     setPlan(null)
     setReading(null)
     setReadingBusy(false)
-    setPlanning(false)
     setPlanBusy(false)
     setPlanProgress(null)
     setReview(false)
@@ -291,15 +285,6 @@ export default function App() {
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [])
-
-  // Voltage's eye moves down the transcript while it reads.
-  useEffect(() => {
-    if (!planning) return
-    const n = project?.statements?.length ?? 0
-    if (n === 0) return
-    const timer = setInterval(() => setReadingAt((i) => (i + 1) % n), 350)
-    return () => clearInterval(timer)
-  }, [planning, project?.statements?.length])
 
   const projectId = project?.project_id ?? null
   // Phase 20: the composer talks to Voltage with tools.
@@ -743,70 +728,11 @@ export default function App() {
     }
   }
 
-  /** A goal for the whole video: Voltage plans the edits. */
-  const makePlan = async (goal: string) => {
-    if (!projectId) return
-    if (autonomy === 'draft' && !consentGiven.current) {
-      return withConsent(null, () => void makePlan(goal))
-    }
-    say({ role: 'user', text: goal })
-    setError(null)
-    setPlanning(true)
-    setReview(false)
-    try {
-      setStage('editor')
-      const made = await createPlan(projectId, { goal, voice_profile_id: voiceId })
-      setPlan(made)
-      say({ role: 'assistant', text: made.question ? made.question.text : made.summary })
-      if (made.job_id) void followPlanJob(made.job_id, made.plan_id)
-    } catch (e) {
-      tell(e instanceof ApiError ? e.message : "I couldn't plan that. Try saying it another way.")
-    } finally {
-      setPlanning(false)
-      void refreshUsage(projectId)
-    }
-  }
-
-  /** Answer Voltage's question (or take its guess); it plans again. */
-  const clarify = async (answer?: string, allGuesses = false) => {
-    if (!projectId || !plan?.question) return
-    const said_ = answer ?? (allGuesses ? 'Go with your guesses' : plan.question.guess ?? plan.question.options[0])
-    if (agent) return void takeTurn(said_)
-    say({ role: 'user', text: said_ })
-    setError(null)
-    setPlanning(true)
-    try {
-      const made = await clarifyPlan(projectId, plan.plan_id, answer, allGuesses)
-      setPlan(made)
-      say({ role: 'assistant', text: made.summary })
-      if (made.job_id) void followPlanJob(made.job_id, made.plan_id)
-    } catch (e) {
-      tell(e instanceof ApiError ? e.message : "I couldn't plan with that answer. Pick one of the options, or say go.")
-    } finally {
-      setPlanning(false)
-      void refreshUsage(projectId)
-    }
-  }
-
-  /** Change the plan in your words (UX-2): applied in place, so the takes
-   *  already voiced survive. A new goal altogether comes back as a new plan. */
-  const revise = async (instruction: string) => {
-    if (!projectId || !plan) return
-    say({ role: 'user', text: instruction })
-    setError(null)
-    setPlanning(true)
-    setReview(false)
-    try {
-      const revised = await revisePlan(projectId, plan.plan_id, instruction)
-      setPlan(revised)
-      say({ role: 'assistant', text: revised.question ? revised.question.text : revised.summary })
-      if (revised.job_id) void followPlanJob(revised.job_id, revised.plan_id)
-    } catch (e) {
-      tell(e instanceof ApiError ? e.message : "I couldn't change the plan that way. Try saying it another way.")
-    } finally {
-      setPlanning(false)
-      void refreshUsage(projectId)
-    }
+  /** A goal for the whole video, an answer to Voltage's question, or a change
+   *  to the plan: every one is a turn (20c; the form planner is gone). */
+  const clarify = (answer?: string) => {
+    if (!plan?.question) return
+    return takeTurn(answer ?? plan.question.guess ?? plan.question.options[0])
   }
 
   /** Stop a running plan after the line it is on; the rest waits as planned. */
@@ -822,12 +748,8 @@ export default function App() {
   /** The box is for the whole video: a goal, or a change to the plan. A
    *  selection on the Precise timeline still previews through it. */
   const submitComposer = (text: string) => {
-    if (agent && !selection) return void takeTurn(text)
-    if (plan?.status === 'clarifying') return void clarify(GO.test(text.trim()) ? undefined : text)
     if (selection) return void runPreview(text)
-    if (plan && SHIP.test(text.trim())) return void shipFromChat(text.trim())
-    if (plan && plan.status !== 'running' && plan.status !== 'stopping') return void revise(text)
-    return void makePlan(text)
+    return void takeTurn(text)
   }
 
   /** Phase 20: one turn of Voltage with tools. The steps arrive as messages
@@ -897,28 +819,10 @@ export default function App() {
     }
   }
 
-  /** "Ship it" in the composer (15e): the lines kept ship, as the button would. */
-  const shipFromChat = (text: string) => {
-    say({ role: 'user', text })
-    if (!plan) return
-    if (keptItems.length > 0) {
-      tell(`Shipping ${keptItems.length === 1 ? 'the change' : `${keptItems.length} changes`}.`)
-      return void approveAll(keptItems.map((i) => i.item_id))
-    }
-    if (readyItems.length > 0) return tell('Every line is held. Keep at least one, then say ship.')
-    if (plan.status === 'running' || plan.status === 'stopping') return tell("I'm still voicing the plan. Say ship once the lines are ready.")
-    if (plan.items.some((i) => i.status === 'approved') && !plan.items.some((i) => i.kind === 'planned' && i.enabled && i.status === 'planned')) return tell('Everything here has shipped. Download the MP4 from the top bar, or ask for another change.')
-    tell("Nothing is voiced yet. Say go and I'll voice the plan first.")
-  }
-
-  /** 15e: the voice the plan speaks in, picked by hand on the plan card. */
-  const pickPlanVoice = async (voiceIdPicked: string) => {
-    if (!projectId || !plan) return
-    try {
-      setPlan(await setPlanVoice(projectId, plan.plan_id, voiceIdPicked))
-    } catch (e) {
-      tell(e instanceof ApiError ? e.message : "I couldn't change the plan's voice. Try it again.")
-    }
+  /** 15e/20c: the voice picked by hand on the plan card is asked of Voltage in words. */
+  const pickPlanVoice = (voiceIdPicked: string) => {
+    const name = voices.find((v) => v.voice_id === voiceIdPicked)?.name ?? voiceIdPicked
+    return takeTurn(`Use ${name}'s voice for the lines`)
   }
 
   const changeItem = async (item: PlanItem, change: { enabled?: boolean; new_text?: string; include?: boolean; delivery?: string; mix?: Mix }) => {
@@ -946,7 +850,10 @@ export default function App() {
   }
 
   const runThePlan = () => startJob(() => runPlan(projectId!, plan!.plan_id))
-  const redoTheItem = (item: PlanItem) => startJob(() => redoItem(projectId!, plan!.plan_id, item.item_id))
+  // 20c: another take is asked of Voltage in words; the plan runner's redo stays for a plan voiced by Run.
+  const redoTheItem = (item: PlanItem) => item.status === 'planned' && plan
+    ? startJob(() => redoItem(projectId!, plan.plan_id, item.item_id))
+    : takeTurn(`Another take of “${item.new_text}” (${item.item_id})`)
   const answerTheItem = (item: PlanItem, option: QuestionOption) => {
     say({ role: 'user', text: option.label })
     return startJob(() => answerItem(projectId!, plan!.plan_id, item.item_id, {
@@ -1251,7 +1158,6 @@ export default function App() {
   // Where things stand line by line: the plan's items, and the one edit the
   // chat may be working on.
   const pendingLines: PendingLine[] = [
-    ...(planning && statements.length > 0 ? [{ selection: { start: statements[readingAt % statements.length].start, end: statements[readingAt % statements.length].end }, status: 'reading' as const }] : []),
     ...(plan?.items ?? [])
       .filter((i) => i.kind === 'planned' && i.enabled && ['planned', 'working', 'ready', 'needs-you', 'failed'].includes(i.status))
       .map((i) => ({ selection: i.selection, status: i.status, text: i.new_text, mix: i.mix })),
@@ -1266,12 +1172,11 @@ export default function App() {
   const isHeld = (item: PlanItem) => (decisions[item.item_id] ? decisions[item.item_id] === 'hold' : !(item.candidate?.continuity.passed ?? true))
   const readyItems = plan?.items.filter((i) => i.kind === 'planned' && i.status === 'ready') ?? []
   const keptItems = readyItems.filter((i) => !isHeld(i))
-  const busy = generating || planBusy || planning || turnBusy
+  const busy = generating || planBusy || turnBusy
   const clarifying = plan?.status === 'clarifying'
   const planned = plan?.items.filter((i) => i.kind === 'planned' && i.enabled) ?? []
   const doneCount = planned.filter((i) => ['ready', 'approved', 'needs-you', 'failed'].includes(i.status)).length
-  const stateWord = planning ? (plan ? 'changing the plan' : 'reading the clip')
-    : clarifying ? 'has a question'
+  const stateWord = clarifying ? 'has a question'
     : plan?.status === 'stopping' ? 'stopping after this line'
     : planBusy ? `working · ${doneCount} of ${planned.length} done`
     : editingLine ? 'standing by'
@@ -1280,13 +1185,12 @@ export default function App() {
     : 'ready'
   const sendLabel = clarifying ? 'Answer'
     : selection ? 'Preview the change'
-    : plan && plan.status !== 'running' && plan.status !== 'stopping' ? 'Change the plan'
-    : 'Plan it'
+    : 'Send'
   const placeholder = clarifying ? 'Answer, or tell Voltage anything else'
     : review ? "What's off?"
     : selection ? 'Ask for a change, e.g. say "30% off" instead'
     : plan && (plan.status === 'running' || plan.status === 'stopping') ? 'Voicing the plan; Stop it to change it'
-    : plan ? 'Change the plan in your words: "not the second one", "warmer at 0:17"'
+    : plan ? 'Say what to change, or ask for another take; "ship it" when it sounds right'
     : 'What should this video say?'
   const secondsLeft = plan && planBusy ? Math.max(5, Math.round((plan.estimate.seconds || 12) * (1 - (planned.length ? doneCount / planned.length : 0)))) : 0
 
@@ -1442,7 +1346,7 @@ export default function App() {
           pendingLines={pendingLines}
           lines={lines}
           longLines={longLines}
-          disabled={planBusy || planning}
+          disabled={planBusy}
           usdPerChar={usdPerChar}
           playing={playingTake}
           readouts={readouts}
@@ -1556,7 +1460,7 @@ export default function App() {
             </div>
           }
         >
-          {!plan && messages.length === 0 && !generating && !planning && (
+          {!plan && messages.length === 0 && !generating && (
             <ReadingCard
               project={project}
               reading={readingBusy ? null : (reading ?? undefined)}
@@ -1566,45 +1470,17 @@ export default function App() {
               onExample={(text) => setSeed({ text, id: Date.now() })}
             />
           )}
-          {planning && !plan && (
-            <div className="flex flex-col gap-2.5 rounded-lg border p-4" aria-hidden="true" data-testid="skeleton">
-              <Skeleton className="h-3.5 w-full" /><Skeleton className="h-3.5 w-[85%]" /><Skeleton className="h-3.5 w-3/5" />
-            </div>
-          )}
-          {(planning || clarifying) && (
-            <div className="flex flex-col gap-2.5 text-sm leading-normal" data-testid="thinking">
-              {(plan?.findings ?? []).map((f, i) => (
-                <div key={i} className="flex items-start gap-2.5 animate-in fade-in slide-in-from-bottom-1 duration-200 fill-mode-both" style={{ animationDelay: `${i * 220}ms` }}>
-                  <CircleCheck className="mt-0.5 size-4 shrink-0 text-changed" aria-hidden="true" />
-                  <span>{f}</span>
-                </div>
-              ))}
-              {planning && (
-                <div className="flex items-start gap-2.5 text-muted-foreground" data-testid="planning" role="status">
-                  <Loader2 className="mt-0.5 size-4 shrink-0 animate-spin" aria-hidden="true" />
-                  <span>{plan?.question ? 'Planning with your answer…' : 'Reading every line, and who says it…'}<span className="ml-0.5 inline-block h-3.5 w-0.5 translate-y-0.5 animate-pulse bg-changed" aria-hidden="true" /></span>
-                </div>
-              )}
-            </div>
-          )}
-          {clarifying && plan?.question && !planning && (
+          {clarifying && plan?.question && (
             <div className="flex flex-col gap-3 rounded-lg border bg-background p-4 shadow-xs" data-testid="clarify">
-              <div className="text-chat">{agent ? <strong>{plan.question.text}</strong> : <>One thing before I plan. <strong>{plan.question.text}</strong></>}</div>
+              <div className="text-chat"><strong>{plan.question.text}</strong></div>
               <div className="flex flex-wrap gap-2">
                 {plan.question.options.map((o) => (
                   <Button key={o} variant={o === plan.question?.guess ? 'default' : 'outline'} size="sm" className="rounded-full" onClick={() => void clarify(o)}>{o}</Button>
                 ))}
               </div>
               <div className="text-sm leading-normal text-muted-foreground" role="status">
-                {!agent && (plan.questions_left ?? 0) > 0 && (project.statements?.length ?? 0) === 0 ? `Question ${(plan.answers?.length ?? 0) + 1} of up to 3. ` : ''}
-                {agent ? (plan.question.gate ? 'Say go, or pick one.' : `${plan.question.guess ? `My guess is ${plan.question.guess}. ` : ''}Pick one, or answer in your own words.`)
-                  : `${plan.question.guess ? `My guess is ${plan.question.guess}. ` : ''}Pick one, or just say "go" and I'll use that.`}
+                {plan.question.gate ? 'Say go, or pick one.' : `${plan.question.guess ? `My guess is ${plan.question.guess}. ` : ''}Pick one, or answer in your own words.`}
               </div>
-              {!agent && (project.statements?.length ?? 0) === 0 && (plan.questions_left ?? 0) > 1 && (
-                <div className="flex flex-wrap gap-2">
-                  <Button variant="outline" size="sm" className="rounded-full" onClick={() => void clarify(undefined, true)}>Go with your guesses</Button>
-                </div>
-              )}
             </div>
           )}
           {editingLine && !planBusy && (

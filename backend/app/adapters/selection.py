@@ -17,7 +17,7 @@ from app.config import Settings
 from app.continuity.engine import ContinuityEngine
 from app.continuity.measured import MeasuredContinuityEngine
 from app.orchestrator.intent import RuleInterpreter
-from app.orchestrator.planner import RulePlanner
+from app.orchestrator.planner import OfflinePlanner
 from app.store.artifacts import ArtifactStore
 from app.chaos import Chaos
 
@@ -88,9 +88,9 @@ def select_interpreter(settings: Settings, chaos: Chaos | None = None):
 
 def select_planner(settings: Settings, chaos: Chaos | None = None):
     if settings.dry_run:
-        return RulePlanner(), "dry-run"
+        return OfflinePlanner(), "dry-run"
     if settings.has_anthropic:
         planner = ClaudePlanner(settings.anthropic_api_key, settings.anthropic_workspace_id,
                                 client=anthropic_client(settings, chaos))
         return planner, f"anthropic:{CLAUDE_MODEL}"
-    return RulePlanner(), "rules"
+    return OfflinePlanner(), "offline"

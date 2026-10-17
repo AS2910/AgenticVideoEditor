@@ -94,7 +94,7 @@ class Settings:
     clone: bool = True
     # Phase 20: Voltage as an agent with tools (needs an Anthropic key). The
     # per-turn money cap, the model and its effort.
-    agent: bool = False
+    agent: bool = True
     agent_turn_usd: float = 0.50
     agent_model: str = "claude-opus-5-5"
     agent_effort: str = "high"
@@ -179,7 +179,7 @@ def load_settings() -> Settings:
         interpolator=(os.environ.get("AVE_INTERPOLATOR") or DEFAULT_INTERPOLATOR).strip().lower(),
         stems=os.environ.get("AVE_STEMS", "1").strip().lower() not in {"0", "false", "no", "off"},
         clone=os.environ.get("AVE_CLONE", "1").strip().lower() not in {"0", "false", "no", "off"},
-        agent=os.environ.get("AVE_AGENT", "0").strip().lower() in {"1", "true", "yes", "on"},
+        agent=os.environ.get("AVE_AGENT", "1").strip().lower() in {"1", "true", "yes", "on"},
         agent_turn_usd=_amount("AVE_AGENT_TURN_USD", 0.50),
         agent_model=os.environ.get("AVE_AGENT_MODEL", "claude-opus-5-5").strip() or "claude-opus-5-5",
         agent_effort=os.environ.get("AVE_AGENT_EFFORT", "high").strip() or "high",

@@ -17,7 +17,7 @@ import anthropic
 
 from app.agent.context import SYSTEM
 from app.agent.guards import TurnStopped, WaitingForUser
-from app.agent.tools import BY_NAME, Tool, ToolResult, Turn, Workbench, definitions
+from app.agent.tools import BY_NAME, Tool, ToolResult, Turn, Workbench
 
 log = logging.getLogger(__name__)
 

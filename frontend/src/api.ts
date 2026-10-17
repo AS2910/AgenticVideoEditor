@@ -218,16 +218,7 @@ async function put<T>(path: string, body: unknown): Promise<T> {
   return (await res.json()) as T
 }
 
-/** Plans edits across the whole video from a goal. Under "draft" the plan
- *  comes back already running, with its `job_id`. */
-export const createPlan = (id: string, req: { goal: string; mode?: Autonomy; voice_profile_id?: string }) =>
-  post<Plan>(`/projects/${id}/plans`, req)
-
 export const getPlan = (id: string, planId: string) => get<Plan>(`/projects/${id}/plans/${planId}`)
-
-/** Answers the planner's question (empty = take its guess); it plans again. */
-export const clarifyPlan = (id: string, planId: string, answer?: string, allGuesses = false) =>
-  post<Plan>(`/projects/${id}/plans/${planId}/clarify`, { ...(answer ? { answer } : {}), ...(allGuesses ? { all_guesses: true } : {}) })
 
 /** UX-5: confirm the place Voltage guessed, or name the real one; empty clears it. */
 export const confirmPlace = (id: string, place: string) => put<Sight>(`/projects/${id}/sight`, { place })
@@ -268,15 +259,6 @@ export const approvePlan = (id: string, planId: string, req: { items?: string[];
  *  role. Saved with the project; read once unless `again`. */
 export const readProject = (id: string, again = false) =>
   post<Reading>(`/projects/${id}/reading`, again ? { again } : {})
-
-/** Changes the plan in your words, in place: the takes already voiced survive.
- *  A new goal altogether comes back as a new plan. */
-export const revisePlan = (id: string, planId: string, instruction: string) =>
-  post<Plan>(`/projects/${id}/plans/${planId}/revise`, { instruction })
-
-/** 15e: the voice the plan speaks in; lines not yet voiced use it. */
-export const setPlanVoice = (id: string, planId: string, voiceId: string) =>
-  put<Plan>(`/projects/${id}/plans/${planId}/voice`, { voice_profile_id: voiceId })
 
 /** Phase 20: one turn of Voltage with tools. Returns the job; its result is
  *  `{plan, reply, question}`. `approve` is the user's yes to what it asked. */
