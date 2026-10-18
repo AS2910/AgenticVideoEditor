@@ -1,6 +1,6 @@
 # Voltage — what is built, as user and functional requirements
 
-*As of 2026-10-18, main at the 20g merge. This is the product as it stands, not a plan. Each requirement says how it is met and where; a gap is marked as one. The phase history behind it lives in `docs/superpowers/plans/`.*
+*As of 2026-10-18, main at the 20h merge. This is the product as it stands, not a plan. Each requirement says how it is met and where; a gap is marked as one. The phase history behind it lives in `docs/superpowers/plans/`.*
 
 ## 1. Purpose and scope
 
@@ -115,7 +115,7 @@ The stories were agreed on 2026-10-03 (`docs/superpowers/plans/2026-10-03-ux-pla
 ### 4.6 Playback and render
 
 - **Three versions in the player**: **Final** (the added lines), **With proposals** (a preview render with the plan's proposed takes mixed in as preview edits — `POST /export` with `{"with_proposals": true}` — made on demand, keyed by the takes it carries, remade when they change, a status line while it renders), **Original**. Hear it on a proposal plays its take over the final render when the render's clock is the source's, else over the original; the original's words are muted under a replacement.
-- **The render** (`render/renderer.py`, `render/compose.py`, `render/retime.py`): the source's audio everywhere outside an edit; a replacement spliced with 20 ms equal-power crossfades; **layers mixed over the span at their level** (two audios coexist, a background layer 12 dB under); an added line with the picture holding gets a living hold (the picture's own motion steers where time is added) or, rarely, a frozen frame; a flexed line may retime the picture up to `AVE_MAX_FLEX` (1.12) with `minterpolate` in-betweens; H.264 sources are stream-copied where untouched. The manifest lists segments, inserts and pieces; the front end maps clocks between source and render.
+- **The render** (`render/renderer.py`, `render/compose.py`, `render/retime.py`): the source's audio everywhere outside an edit; a replacement spliced with 20 ms equal-power crossfades; **layers claim no span and are mixed additively over whatever plays there, at their level** (any number of audios coexist at one moment; a background layer sits 12 dB under); an added line with the picture holding gets a living hold (the picture's own motion steers where time is added) or, rarely, a frozen frame; a flexed line may retime the picture up to `AVE_MAX_FLEX` (1.12) with `minterpolate` in-betweens; H.264 sources are stream-copied where untouched. The manifest lists segments, inserts and pieces; the front end maps clocks between source and render.
 - **Export** (`POST /export`): synchronous, seconds for a short clip, content-addressed; **Download MP4**, **Export again**, **Make a variant** in the header. The export bar shows the edited stretches and what flexed or held.
 - **Captions and timeline**: the line being said is captioned over the picture (a playing take's words light as they are said); the timeline shows lines by speaker and changed spans.
 
@@ -134,7 +134,7 @@ Google OIDC with PKCE (`/auth/login`, `/auth/callback`, `/auth/me`, `/auth/logou
 
 ## 5. Non-functional requirements, as met
 
-- **Tests are offline and deterministic**: 645 backend (pytest; ffmpeg-dependent tests skip without it; vendor responses replayed from recorded fixtures) and 243 front end (vitest). A bench (`python -m app.bench gate`) runs a labelled corpus against a baseline. The agent eval is the one paid test and is run by hand.
+- **Tests are offline and deterministic**: 646 backend (pytest; ffmpeg-dependent tests skip without it; vendor responses replayed from recorded fixtures) and 243 front end (vitest). A bench (`python -m app.bench gate`) runs a labelled corpus against a baseline. The agent eval is the one paid test and is run by hand.
 - **Latency**: a turn is typically 20–45 s and $0.10–0.20; a take about 10 s; a render seconds for a short clip (longer when the picture flexes or holds).
 - **Persistence**: everything but jobs survives a restart; an interrupted job is lost and said so.
 - **Accessibility and design** (`design-system/voltage/MASTER.md`): shadcn/ui on Tailwind v4, light and dark, Inter; every state has a word beside its colour; everything reachable from the keyboard with a visible focus ring; waits spoken through `role="status"`; sheets are real modals; 44 px targets on coarse pointers; no raw colours (guarded by a test).

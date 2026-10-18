@@ -113,8 +113,11 @@ def gain_of(edit) -> float:
 
 def splice(
     base: np.ndarray, segments: Sequence[RenderSegment], room: Room | None = None,
+    layers: Sequence = (),
 ) -> np.ndarray:
-    """Replace each edited span of `base` with its edit's audio, crossfaded.
+    """Replace each edited span of `base` with its edit's audio, crossfaded,
+    then mix every layer over the result at its own level (20h): layers add
+    to whatever plays there, so any number coexist at one moment.
 
     With a `room`, a replaced span becomes the room-matched take over the
     original's accompaniment: the voice part of the original (what is left of
@@ -154,8 +157,8 @@ def splice(
             new[:fade] = ramp
             new[-fade:] = ramp[::-1]
         if edit.plan.mix == "layer":
-            # The original keeps playing; only the line fades in and out.
-            out[i0:i1] = base[i0:i1] + piece * new[:, None]
+            # A layer that still arrives as a segment (an older manifest): add it, never replace.
+            out[i0:i1] = out[i0:i1] + piece * new[:, None]
         else:
             old = np.sqrt(np.maximum(0.0, 1.0 - new ** 2))  # equal power
             if room is not None:
@@ -163,6 +166,26 @@ def splice(
                 out[i0:i1] = bed + (base[i0:i1] - bed) * old[:, None] + piece * new[:, None]
             else:
                 out[i0:i1] = base[i0:i1] * old[:, None] + piece * new[:, None]
+    for edit in layers:
+        i0 = min(round(edit.plan.selection.start * OUT_RATE), len(out))
+        i1 = min(round(edit.plan.selection.end * OUT_RATE), len(out))
+        length = i1 - i0
+        if length <= 0:
+            continue
+        if edit.audio.sha256 not in cache:
+            cache[edit.audio.sha256] = decode(edit.audio.path, channels=channels)
+        piece = cache[edit.audio.sha256][:length]
+        if len(piece) < length:
+            piece = np.pad(piece, ((0, length - len(piece)), (0, 0)))
+        if gain_of(edit) != 1.0:
+            piece = piece * gain_of(edit)
+        fade = min(round(CROSSFADE * OUT_RATE), length // 2)
+        new = np.ones(length, dtype=np.float32)
+        if fade:
+            ramp = np.sin(np.linspace(0, np.pi / 2, fade, dtype=np.float32))
+            new[:fade] = ramp
+            new[-fade:] = ramp[::-1]
+        out[i0:i1] = out[i0:i1] + piece * new[:, None]
     return out
 
 
@@ -391,6 +414,7 @@ def compose(
     pieces: Sequence[retime.Piece] | None = None,
     interpolator: str = "minterpolate",
     stems: Stems | None = None,
+    layers: Sequence = (),
 ) -> Path:
     """Write the edited video to `dest` (MP4, H.264 + AAC).
 
@@ -422,7 +446,7 @@ def compose(
     flexed = {p.edit.edit_id for p in (pieces or ()) if p.kind == "flex" and p.edit is not None}
     original = decode(source.media.path)
     room = Room.prepare(stems, original.shape[1], len(original))
-    spliced = splice(original, [s for s in segments if not (s.edit and s.edit.edit_id in flexed)], room)
+    spliced = splice(original, [s for s in segments if not (s.edit and s.edit.edit_id in flexed)], room, layers=layers)
     with tempfile.TemporaryDirectory() as tmp:
         audio = Path(tmp) / "audio.wav"
         _write(audio, assemble(spliced, pieces) if not plain else spliced)

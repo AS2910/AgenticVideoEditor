@@ -382,3 +382,14 @@ The user's words, on the cheers now running the whole clip: *"The cheering laste
 - On the user's project the three full-length cheers were releveled to background by hand (e5–e7 → e8–e10) and the final rendered again, so the narration is heard with the cheers under it.
 
 **Tests.** `tests/render/test_compose.py` (a −12 dB layer mixes at 0.25 gain), `tests/agent/test_tools.py` (background takes, `set_level` on an item and on an edit, the gate), `tests/api/test_endpoints.py` (relevel a proposal → the item follows; relevel an added line → revert + re-approve; 404), `LineDoc.test.tsx` (the control on added lines and proposals, not on speech), `App.test.tsx` (a row Voltage undid drops after the turn and the render follows; Make it background swaps the row to the new edit). 645 backend / 243 front end.
+
+
+## As built · 20h, layers really do mix (2026-10-18, on `main`)
+
+The user's words, after 20g: *"I DON'T HEAR BOTH, IT'S EITHER OR. I SEE BOTH ARE LISTED BUT ONLY ONE PLAYS."* They were right, and the 20e/20f notes that said "layers stack" were wrong about the render.
+
+**The gap.** `render()` tiled *every* edit into exclusive spans, last approval wins — the rule for replacements — and layers went through the same tiling. Four layers over the same seconds meant the last one approved owned the span and the other three were never handed to the mixer. The mixer's "layer" branch added one layer to the source, but was only ever given the winner. So the cheers approved last silenced the narration, whatever the level said.
+
+**The fix.** Layered edits claim no span. `render()` returns them apart as `manifest.layers` (segments tile only replacements and removals); `compose.splice(..., layers=)` mixes each layer additively over whatever plays there — the source, a replacement, another layer — with its fades and its level. The API's `segments` still colour the strip edited where a layer plays (`_segments_with_layers`), and the manifest names its `layers`. Checked on the user's project: the narration correlates with the new render at 0.89 and each −12 dB cheer at 0.2–0.27 — all four present; before, only the last.
+
+**Tests.** `tests/render/test_compose.py`: two layers over the same seconds sum; a layer over a replacement plays over the replacement; the manifest keeps layers out of its segments. 646 backend.

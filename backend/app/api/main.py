@@ -1029,6 +1029,29 @@ def _stems(record: ProjectRecord, manifest):
         return stems_module.separate(wav, artifacts.root / record.source.project_id / "stems")
 
 
+def _segments_with_layers(manifest) -> list[dict]:
+    """The export bar's strip: every stretch, edited where a replacement or a
+    layer plays (20h). The manifest keeps layers out of its segments so they
+    can mix; here they only colour the strip."""
+    out = [{"start": s.start, "end": s.end, "kind": s.kind, "ref": s.ref,
+            "artifact": _artifact_dict(s.artifact) if s.artifact else None} for s in manifest.segments]
+    for e in manifest.layers:
+        start, end = e.plan.selection.start, e.plan.selection.end
+        tiled = []
+        for seg in out:
+            if seg["end"] <= start or seg["start"] >= end or seg["kind"] == "edited":
+                tiled.append(seg)
+                continue
+            if seg["start"] < start:
+                tiled.append({**seg, "end": start})
+            tiled.append({"start": max(seg["start"], start), "end": min(seg["end"], end), "kind": "edited",
+                          "ref": e.frames.sha256, "artifact": _artifact_dict(e.frames)})
+            if seg["end"] > end:
+                tiled.append({**seg, "start": end})
+        out = sorted(tiled, key=lambda s: s["start"])
+    return out
+
+
 def _export(record: ProjectRecord, proposals: bool = False) -> dict:
     project_id = record.source.project_id
     edits = [e for e in repo.list_edits(project_id) if not e.reverted]
@@ -1043,7 +1066,7 @@ def _export(record: ProjectRecord, proposals: bool = False) -> dict:
         path = compose(
             record.source, manifest.segments, Path(tmp) / "export.mp4",
             inserts=manifest.inserts, pieces=pieces, interpolator=settings.interpolator,
-            stems=_stems(record, manifest),
+            stems=_stems(record, manifest), layers=manifest.layers,
         )
         rendered = artifacts.put_file(
             project_id, path, kind="video", container="mp4",
@@ -1056,15 +1079,11 @@ def _export(record: ProjectRecord, proposals: bool = False) -> dict:
         "proposals": [item_id for item_id, _ in previewed],
         # Phase 16: every stretch of the output and where it came from.
         "pieces": retime.manifest(pieces),
-        "segments": [
-            {
-                "start": s.start,
-                "end": s.end,
-                "kind": s.kind,
-                "ref": s.ref,
-                "artifact": _artifact_dict(s.artifact) if s.artifact else None,
-            }
-            for s in manifest.segments
+        # The strip's view: a layered span counts as edited too (the manifest keeps layers apart so they mix).
+        "segments": _segments_with_layers(manifest),
+        "layers": [
+            {"edit_id": e.edit_id, "start": e.plan.selection.start, "end": e.plan.selection.end, "level_db": e.plan.level_db}
+            for e in manifest.layers
         ],
         "inserts": [
             {"at": i.at, "duration": i.duration, "artifact": _artifact_dict(i.edit.audio),

@@ -29,6 +29,10 @@ class RenderInsert:
 class RenderManifest:
     segments: tuple[RenderSegment, ...]
     inserts: tuple[RenderInsert, ...] = ()
+    # 20h: layered lines claim no span. Each is mixed over whatever plays
+    # there — the source, a replacement, another layer — so any number of
+    # them coexist at one moment and all are heard.
+    layers: tuple[ApprovedEdit, ...] = ()
 
 
 def render(source: Source, edits: list[ApprovedEdit]) -> RenderManifest:
@@ -42,6 +46,11 @@ def render(source: Source, edits: list[ApprovedEdit]) -> RenderManifest:
     Concatenated edits take no span of the source; they become inserts, in
     time order (approval order at the same point).
 
+    Layered edits (mix "layer") take no span either: they are returned as
+    `layers`, in approval order, for the compositor to mix additively, so two
+    layers over the same seconds both play (20h). Before that they were tiled
+    like replacements and the last one approved silenced the rest.
+
     A reverted edit is skipped entirely: the source plays as shot there.
     """
     edits = [e for e in edits if not e.reverted]
@@ -50,7 +59,8 @@ def render(source: Source, edits: list[ApprovedEdit]) -> RenderManifest:
          for e in edits if e.plan.mix == "concatenate"),
         key=lambda i: i.at,
     )
-    edits = [e for e in edits if e.plan.mix != "concatenate"]
+    layers = tuple(e for e in edits if e.plan.mix == "layer" and e.plan.selection.end > e.plan.selection.start)
+    edits = [e for e in edits if e.plan.mix not in ("concatenate", "layer")]
     # Each piece is (start, end, owning edit or None for original footage).
     pieces: list[tuple[float, float, ApprovedEdit | None]] = [(0.0, source.duration, None)]
     for e in edits:
@@ -78,4 +88,4 @@ def render(source: Source, edits: list[ApprovedEdit]) -> RenderManifest:
             segments.append(
                 RenderSegment(a, b, "edited", owner.frames.sha256, owner.frames, owner)
             )
-    return RenderManifest(segments=tuple(segments), inserts=tuple(inserts))
+    return RenderManifest(segments=tuple(segments), inserts=tuple(inserts), layers=layers)

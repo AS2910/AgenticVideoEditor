@@ -147,7 +147,9 @@ def _rms(x):
 def test_a_layered_edit_keeps_the_original_sound_underneath(source, tmp_path):
     base = compose.decode(source.media.path)
     edit = with_mix(approved(tmp_path, "a", 1.0, 2.0), "layer")
-    out = compose.splice(base, render(source, [edit]).segments)
+    manifest = render(source, [edit])
+    assert all(s.kind == "original" for s in manifest.segments) and [e.edit_id for e in manifest.layers] == ["a"]
+    out = compose.splice(base, manifest.segments, layers=manifest.layers)
     mid = slice(int(1.4 * RATE), int(1.6 * RATE))
     # Replacing would leave only the edit's tone; layering adds it to the source's.
     expected = base[mid] + compose.decode(edit.audio.path, channels=base.shape[1])[
@@ -161,12 +163,32 @@ def test_a_background_layer_is_mixed_under_at_its_level(source, tmp_path):
     base = compose.decode(source.media.path)
     edit = with_mix(approved(tmp_path, "a", 1.0, 2.0), "layer")
     quiet = replace(edit, plan=replace(edit.plan, level_db=-12.0))
-    out = compose.splice(base, render(source, [quiet]).segments)
+    manifest = render(source, [quiet])
+    out = compose.splice(base, manifest.segments, layers=manifest.layers)
     mid = slice(int(1.4 * RATE), int(1.6 * RATE))
     gain = 10 ** (-12 / 20)
     expected = base[mid] + gain * compose.decode(edit.audio.path, channels=base.shape[1])[int(0.4 * RATE):int(0.6 * RATE)]
     assert np.allclose(out[mid], expected, atol=1e-3)
     assert compose.gain_of(quiet) < 0.26 and compose.gain_of(edit) == 1.0
+
+
+def test_two_layers_over_the_same_seconds_both_play(source, tmp_path):
+    """20h: layers claim no span, so a later one never silences an earlier one; the mix is the sum."""
+    base = compose.decode(source.media.path)
+    first = with_mix(approved(tmp_path, "a", 1.0, 2.0), "layer")
+    second = with_mix(approved(tmp_path, "b", 1.0, 2.0), "layer")
+    manifest = render(source, [first, second])
+    assert [e.edit_id for e in manifest.layers] == ["a", "b"] and all(s.kind == "original" for s in manifest.segments)
+    out = compose.splice(base, manifest.segments, layers=manifest.layers)
+    mid = slice(int(1.4 * RATE), int(1.6 * RATE))
+    tone = lambda e: compose.decode(e.audio.path, channels=base.shape[1])[int(0.4 * RATE):int(0.6 * RATE)]  # noqa: E731
+    assert np.allclose(out[mid], base[mid] + tone(first) + tone(second), atol=1e-3)
+    # And a layer over a replacement plays over the replacement, not the source.
+    replaced = approved(tmp_path, "r", 1.0, 2.0)
+    manifest = render(source, [replaced, first])
+    assert [s.kind for s in manifest.segments] == ["original", "edited", "original"] and [e.edit_id for e in manifest.layers] == ["a"]
+    out = compose.splice(base, manifest.segments, layers=manifest.layers)
+    assert np.allclose(out[mid], tone(replaced) + tone(first), atol=1e-3)
 
 
 def test_a_concatenated_edit_takes_no_span_and_becomes_an_insert(source, tmp_path):
