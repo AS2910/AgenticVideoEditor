@@ -15,7 +15,7 @@ export type Effort = 'medium' | 'high' | 'xhigh'
 
 /** Per-project preferences, remembered on the server. */
 /** What Voltage may do on a project (20d): the autonomy, what one turn may spend, how hard it thinks; the ceiling is read-only. */
-export interface ProjectSettings { autonomy: Autonomy; turn_usd?: number; effort?: Effort; ceiling_usd?: number }
+export interface ProjectSettings { autonomy: Autonomy; turn_usd?: number; effort?: Effort; ceiling_usd?: number; /** Volt: which commits still ask under Just do it, and the model Voltage runs on. */ ask_before?: AskBefore; model?: string }
 
 /** Where a plan item stands. */
 export type ItemStatus =
@@ -47,7 +47,7 @@ export interface PlanItem {
 }
 
 /** One thing the planner wants to know first, with its own guess. */
-export interface PlanQuestion { text: string; options: string[]; guess: string | null; /** Phase 20: a paid or committing step waits; the first option is the yes. */ gate?: boolean }
+export interface PlanQuestion { text: string; options: string[]; guess: string | null; /** Phase 20: a paid or committing step waits; the first option is the yes. */ gate?: boolean; /** Volt: what the waiting step would cost, and what the turn has left. */ cost_usd?: number | null; left_usd?: number | null }
 
 export interface PlanLogEntry { at: string; text: string; detail: string }
 
@@ -94,10 +94,12 @@ export interface Voice {
   age: string | null
   /** "premade" (ElevenLabs' own), a library voice added to the account, or "mine" — one you uploaded (20i). */
   category?: string | null
+  /** Volt: the vendor's own sample of a catalogue voice, when it has one. */
+  preview_url?: string | null
 }
 
 /** One of your own voices (20i): uploaded under a name and cloned once. */
-export interface MyVoice { voice_id: string; name: string; seconds: number; at: string }
+export interface MyVoice { voice_id: string; name: string; seconds: number; at: string; /** Volt: how it was made, and a sample to hear. */ kind?: 'recorded' | 'designed' | 'library' | 'cloned'; sample_sha?: string | null; description?: string | null; used_in?: number }
 export interface Selection { start: number; end: number }
 
 /** A score is null when it cannot be measured yet (no voice clone, no real
@@ -329,4 +331,42 @@ export interface Job {
   attempts: number
   result: Plan | TurnResult | null
   error: string | null
+}
+
+// ── Volt (2026-10-18): the account pages and the editor's new facts ──────────
+
+/** Your defaults for new projects, and what still asks under Just do it. */
+export interface AskBefore { ship: boolean; clone: boolean; design: boolean }
+export interface UserSettings { autonomy: Autonomy; turn_usd: number; effort: Effort; ask_before: AskBefore }
+
+/** Spend across your projects for a period (the Usage page). */
+export interface UsageReport {
+  period: 'week' | 'month' | 'all'
+  spent_usd: number
+  /** Your ceiling across projects; the project ceiling is `project_cap_usd`. */
+  ceiling_usd: number
+  project_cap_usd: number
+  turns: number
+  takes: number
+  voices_made: number
+  avg_turn_usd: number
+  by_vendor: { vendor: string; label: string; usd: number }[]
+  by_project: { project_id: string; filename: string; turns: number; voice_characters: number; spent_usd: number; cap_usd: number }[]
+}
+
+/** A voice made inside one of your projects (designed, added from the library, or a speaker's clone); deleted with the project unless kept. */
+export interface MadeVoice { voice_id: string; name: string; kind: 'designed' | 'library' | 'cloned'; project_id: string; filename: string; description?: string | null; seconds?: number | null; kept?: boolean }
+/** A speaker in one of your projects with enough speech to clone. */
+export interface CloneableSpeaker { project_id: string; filename: string; label: string; name: string; seconds: number }
+/** A preview of a voice designed from words, outside any project. */
+export interface DesignedPreview { generated_voice_id: string; sha256: string; duration: number; text: string }
+
+/** What went into the file, for the Export page. */
+export interface Receipt {
+  turns: number
+  takes: number
+  spent_usd: number
+  changes: { edit_id: string; start: number; text: string; kind: 'changed' | 'added' | 'removed'; note: string }[]
+  drafts: number
+  render: { sha256: string; duration: number; filename: string } | null
 }

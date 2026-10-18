@@ -1,5 +1,5 @@
 import type {
-  MyVoice,
+  MyVoice, UserSettings, UsageReport, MadeVoice, CloneableSpeaker, DesignedPreview, Receipt,
   Project, ExportManifest, Job, ProjectSummary, ProjectDetail, Usage, Voice, Speaker,
   ProjectSettings, Autonomy, Effort, Plan, Mix, Selection, Candidate, Reading, Sight, ChatMessage,
 } from './types'
@@ -93,7 +93,7 @@ export const listProjects = async () =>
 /** Everything needed to reopen a project. */
 export const getProject = (id: string) => get<ProjectDetail>(`/projects/${id}`)
 
-export const listVoices = () => get<{ default: string; voices: Voice[]; mine?: MyVoice[] }>('/voices')
+export const listVoices = () => get<{ default: string; voices: Voice[]; mine?: MyVoice[]; slots?: { used: number; limit: number } | null }>('/voices')
 
 /** 20i: your own voice, uploaded under a name; the server clones it once. */
 export async function uploadMyVoice(name: string, file: File): Promise<MyVoice> {
@@ -278,3 +278,30 @@ export const logout = () => post<{ signed_out: boolean }>('/auth/logout')
  *  where it was, the words over the picture from `to`. Two edits, paired. */
 export const shiftLine = (id: string, req: { start: number; end: number; to: number }) =>
   post<{ edit_id: string; removed_edit_id: string; candidate: Candidate; from: Selection; selection: Selection; mix: Mix }>(`/projects/${id}/lines/shift`, req)
+
+// ── Volt (2026-10-18): the account pages ─────────────────────────────────────
+
+/** Your defaults for new projects, and what still asks under Just do it. */
+export const getUserSettings = () => get<UserSettings>('/me/settings')
+export const updateUserSettings = (change: Partial<UserSettings>) => put<UserSettings>('/me/settings', change)
+/** Everything of yours: every project, take and voice, and the consent records. */
+export async function deleteAccount(): Promise<void> {
+  const res = await fetch(`${BASE}/account`, { method: 'DELETE', headers: FROM_VOLTAGE })
+  if (!res.ok) return failure(res)
+}
+/** Spend across your projects for a period. */
+export const getUsageReport = (period: 'week' | 'month' | 'all' = 'month') => get<UsageReport>(`/usage?period=${period}`)
+/** What went into a project's file. */
+export const getReceipt = (id: string) => get<Receipt>(`/projects/${id}/receipt`)
+
+// Voices: made in projects, kept, from a speaker, designed from words.
+export const listMadeVoices = () => get<{ voices: MadeVoice[] }>('/voices/made')
+export const keepVoice = (voiceId: string, name?: string) => post<MyVoice>('/voices/mine/keep', { voice_id: voiceId, ...(name ? { name } : {}) })
+export const listCloneableSpeakers = () => get<{ speakers: CloneableSpeaker[] }>('/voices/speakers')
+export const cloneSpeakerToMine = (projectId: string, label: string, name: string) =>
+  post<MyVoice>('/voices/mine/from-speaker', { project_id: projectId, label, name, consent: true })
+export const designVoicePreviews = (description: string) => post<{ previews: DesignedPreview[] }>('/voices/design', { description })
+export const keepDesignedVoice = (generatedVoiceId: string, name: string, sha256: string, description: string) =>
+  post<MyVoice>('/voices/mine/from-preview', { generated_voice_id: generatedVoiceId, name, sha256, description, consent: true })
+/** A sample of one of your voices, or a designed preview, playable. */
+export const voiceSampleUrl = (sha256: string) => `${BASE}/voices/sample/${sha256}`

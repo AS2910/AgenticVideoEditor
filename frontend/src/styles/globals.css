@@ -1,14 +1,15 @@
-/* Voltage theme — UX-9, the studio (2026-10-18), replacing UX-8's zinc room.
-   Two siblings: slate and cyan in the light, obsidian and cyan in the dark.
-   Flat surfaces, 1px borders, an 8px radius; no gradients, glows or blurs.
-   Colour lives here as semantic tokens (OKLCH); components use the Tailwind
-   utilities they generate (bg-card, text-muted-foreground, ...) and never
-   spell a colour. On top of shadcn's: changed (a proposal, what Voltage
-   wrote), ok (added, in the video), needs (flagged, removed, needs you) and
-   the speaker palette. Geist for words, JetBrains Mono for times, money and
-   counts. See design-system/voltage/MASTER.md. */
+/* Voltage theme — "Volt" (2026-10-18), from the user's voltage-design mocks.
+   Paper and ink with one electric accent: volt (#D7FF3A) as a fill with ink
+   text on it, or as text on the black Voltage pane; never volt text on white.
+   1.5 px ink borders, hard offset shadows on proposal cards, gate cards and
+   primary buttons; no glows, blurs or gradients. Light and dark are siblings
+   (the pane is black in both). Colour lives here as tokens; components use
+   the utilities and the component classes below and never spell a colour.
+   Space Grotesk for display, Geist for UI and body, JetBrains Mono for every
+   timecode, cost, count and uppercase tag. See design-system/voltage/MASTER.md. */
 @import 'tailwindcss';
 @import 'tw-animate-css';
+@import '@fontsource-variable/space-grotesk';
 @import '@fontsource-variable/geist';
 @import '@fontsource-variable/jetbrains-mono';
 
@@ -16,76 +17,108 @@
 
 :root {
   --radius: 0.5rem;
-  --background: oklch(0.968 0.007 247.9);
-  --foreground: oklch(0.208 0.040 265.8);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.208 0.040 265.8);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.208 0.040 265.8);
-  --primary: oklch(0.609 0.111 221.7);
-  --primary-foreground: oklch(1 0 0);
-  --secondary: oklch(0.929 0.013 255.5);
-  --secondary-foreground: oklch(0.208 0.040 265.8);
-  --muted: oklch(0.968 0.007 247.9);
-  --muted-foreground: oklch(0.554 0.041 257.4);
-  --accent: oklch(0.951 0.025 236.8);
-  --accent-foreground: oklch(0.208 0.040 265.8);
-  --destructive: oklch(0.586 0.222 17.6);
-  --border: oklch(0.869 0.020 252.9);
-  --input: oklch(0.929 0.013 255.5);
-  --ring: oklch(0.797 0.134 211.5);
-
-  /* The editor's own meanings */
-  --changed: oklch(0.520 0.094 223.1);
-  --changed-soft: oklch(0.984 0.019 200.9);
-  --ok: oklch(0.508 0.105 165.6);
-  --ok-soft: oklch(0.979 0.021 166.1);
-  --needs: oklch(0.586 0.222 17.6);
-  --needs-soft: oklch(0.969 0.015 12.4);
+  --background: oklch(0.963 0.005 106.5);
+  --foreground: oklch(0.150 0.002 286.1);
+  --card: oklch(1.000 0.000 89.9);
+  --card-foreground: oklch(0.150 0.002 286.1);
+  --popover: oklch(1.000 0.000 89.9);
+  --popover-foreground: oklch(0.150 0.002 286.1);
+  --primary: oklch(0.940 0.210 121.0);
+  --primary-foreground: oklch(0.150 0.002 286.1);
+  --secondary: oklch(0.935 0.008 106.6);
+  --secondary-foreground: oklch(0.150 0.002 286.1);
+  --muted: oklch(0.935 0.008 106.6);
+  --muted-foreground: oklch(0.452 0.011 285.9);
+  --accent: oklch(0.935 0.008 106.6);
+  --accent-foreground: oklch(0.150 0.002 286.1);
+  --destructive: oklch(0.539 0.184 31.0);
+  --border: oklch(0.834 0.011 106.6);
+  --input: oklch(0.834 0.011 106.6);
+  --ring: oklch(0.150 0.002 286.1);
+  /* The editor's own meanings: proposed = volt on ink, added/kept = quiet outline, needs = warn */
+  --changed: oklch(0.150 0.002 286.1);
+  --changed-soft: oklch(0.940 0.210 121.0);
+  --ok: oklch(0.515 0.110 156.8);
+  --ok-soft: oklch(0.935 0.008 106.6);
+  --needs: oklch(0.813 0.165 75.0);
+  --needs-soft: oklch(0.935 0.008 106.6);
   --spk-a: oklch(0.55 0.15 255);
   --spk-b: oklch(0.55 0.17 310);
   --spk-c: oklch(0.58 0.13 85);
   --spk-d: oklch(0.58 0.16 15);
-  --monitor: oklch(0.13 0.02 265);
+  /* Volt (the mocks' tokens) */
+  --volt: oklch(0.940 0.210 121.0);
+  --ink: oklch(0.150 0.002 286.1);
+  --warn: oklch(0.813 0.165 75.0);
+  --sunk: oklch(0.935 0.008 106.6);
+  --line: oklch(0.905 0.009 106.6);
+  --line2: oklch(0.834 0.011 106.6);
+  --faint: oklch(0.513 0.011 286.0);
+  --pic: oklch(0.192 0.004 286.0);
+  --lane: oklch(0.911 0.009 106.6);
+  --lane2: oklch(0.818 0.011 106.6);
+  --pane: oklch(0.150 0.002 286.1);
+  --ptext: oklch(0.960 0.005 106.5);
+  --pmuted: oklch(0.728 0.011 286.1);
+  --pline: oklch(0.271 0.011 285.6);
+  --psunk: oklch(0.206 0.006 285.9);
+  --monitor: oklch(0.192 0.004 286.0);
 }
 
 .dark {
-  --background: oklch(0.187 0.039 250.7);
-  --foreground: oklch(0.914 0.035 256.3);
-  --card: oklch(0.168 0.018 263.9);
-  --card-foreground: oklch(0.914 0.035 256.3);
-  --popover: oklch(0.192 0.026 266.6);
-  --popover-foreground: oklch(0.914 0.035 256.3);
-  --primary: oklch(0.844 0.146 209.3);
-  --primary-foreground: oklch(0.224 0.040 215.0);
-  --secondary: oklch(0.192 0.026 266.6);
-  --secondary-foreground: oklch(0.914 0.035 256.3);
-  --muted: oklch(0.224 0.031 267.2);
-  --muted-foreground: oklch(0.711 0.035 256.8);
-  --accent: oklch(0.263 0.039 267.0);
-  --accent-foreground: oklch(0.914 0.035 256.3);
-  --destructive: oklch(0.719 0.169 13.4);
-  --border: oklch(0.309 0.038 255.0);
-  --input: oklch(0.252 0.034 252.6);
-  --ring: oklch(0.844 0.146 209.3);
-
-  --changed: oklch(0.865 0.115 207.1);
-  --changed-soft: oklch(0.302 0.054 229.7);
-  --ok: oklch(0.845 0.130 165.0);
-  --ok-soft: oklch(0.262 0.049 172.6);
-  --needs: oklch(0.810 0.106 11.6);
-  --needs-soft: oklch(0.271 0.101 12.1);
-  --spk-a: oklch(0.78 0.11 255);
-  --spk-b: oklch(0.78 0.12 310);
-  --spk-c: oklch(0.82 0.11 85);
-  --spk-d: oklch(0.8 0.11 15);
-  --monitor: oklch(0.08 0.01 265);
+  --background: oklch(0.165 0.004 285.9);
+  --foreground: oklch(0.960 0.005 106.5);
+  --card: oklch(0.206 0.008 285.7);
+  --card-foreground: oklch(0.960 0.005 106.5);
+  --popover: oklch(0.206 0.008 285.7);
+  --popover-foreground: oklch(0.960 0.005 106.5);
+  --primary: oklch(0.940 0.210 121.0);
+  --primary-foreground: oklch(0.150 0.002 286.1);
+  --secondary: oklch(0.246 0.009 285.7);
+  --secondary-foreground: oklch(0.960 0.005 106.5);
+  --muted: oklch(0.246 0.009 285.7);
+  --muted-foreground: oklch(0.728 0.011 286.1);
+  --accent: oklch(0.246 0.009 285.7);
+  --accent-foreground: oklch(0.960 0.005 106.5);
+  --destructive: oklch(0.731 0.166 30.3);
+  --border: oklch(0.359 0.014 285.7);
+  --input: oklch(0.359 0.014 285.7);
+  --ring: oklch(0.960 0.005 106.5);
+  /* The editor's own meanings: proposed = volt on ink, added/kept = quiet outline, needs = warn */
+  --changed: oklch(0.150 0.002 286.1);
+  --changed-soft: oklch(0.940 0.210 121.0);
+  --ok: oklch(0.756 0.133 157.3);
+  --ok-soft: oklch(0.246 0.009 285.7);
+  --needs: oklch(0.813 0.165 75.0);
+  --needs-soft: oklch(0.246 0.009 285.7);
+  --spk-a: oklch(0.55 0.15 255);
+  --spk-b: oklch(0.55 0.17 310);
+  --spk-c: oklch(0.58 0.13 85);
+  --spk-d: oklch(0.58 0.16 15);
+  /* Volt (the mocks' tokens) */
+  --volt: oklch(0.940 0.210 121.0);
+  --ink: oklch(0.150 0.002 286.1);
+  --warn: oklch(0.813 0.165 75.0);
+  --sunk: oklch(0.246 0.009 285.7);
+  --line: oklch(0.287 0.011 285.7);
+  --line2: oklch(0.359 0.014 285.7);
+  --faint: oklch(0.653 0.013 286.0);
+  --pic: oklch(0.000 0.000 0.0);
+  --lane: oklch(0.271 0.011 285.6);
+  --lane2: oklch(0.352 0.014 285.7);
+  --pane: oklch(0.116 0.003 285.9);
+  --ptext: oklch(0.960 0.005 106.5);
+  --pmuted: oklch(0.728 0.011 286.1);
+  --pline: oklch(0.241 0.009 285.7);
+  --psunk: oklch(0.179 0.006 285.8);
+  --monitor: oklch(0.000 0.000 0.0);
 }
 
 @theme inline {
   --font-sans: 'Geist Variable', ui-sans-serif, system-ui, sans-serif;
+  --font-display: 'Space Grotesk Variable', 'Geist Variable', system-ui, sans-serif;
   --font-mono: 'JetBrains Mono Variable', ui-monospace, SFMono-Regular, Menlo, monospace;
-  /* Voltage's words in the panel: a step under body, with room between lines. */
+  /* Voltage's words in the panel. */
   --text-chat: 0.9375rem;
   --text-chat--line-height: 1.6;
   --radius-sm: calc(var(--radius) - 4px);
@@ -121,6 +154,21 @@
   --color-spk-c: var(--spk-c);
   --color-spk-d: var(--spk-d);
   --color-monitor: var(--monitor);
+  --color-volt: var(--volt);
+  --color-ink: var(--ink);
+  --color-warn: var(--warn);
+  --color-sunk: var(--sunk);
+  --color-line: var(--line);
+  --color-line2: var(--line2);
+  --color-faint: var(--faint);
+  --color-pic: var(--pic);
+  --color-lane: var(--lane);
+  --color-lane2: var(--lane2);
+  --color-pane: var(--pane);
+  --color-ptext: var(--ptext);
+  --color-pmuted: var(--pmuted);
+  --color-pline: var(--pline);
+  --color-psunk: var(--psunk);
 }
 
 @layer base {
@@ -135,7 +183,7 @@
   }
   body {
     @apply bg-background text-foreground font-sans antialiased;
-    font-size: 16px;
+    font-size: 14px;
     line-height: 1.5;
   }
   /* Times, money and counts: the mono face, tabular. */
@@ -143,6 +191,39 @@
     font-family: var(--font-mono);
     font-variant-numeric: tabular-nums;
   }
+  /* Proposed words wear the volt highlighter and sweep in; removed words are struck. */
+  ins {
+    text-decoration: none;
+    color: var(--ink);
+    border-radius: 2px;
+    padding: 0 3px;
+    -webkit-box-decoration-break: clone;
+    box-decoration-break: clone;
+    background-color: transparent;
+    background-image: linear-gradient(var(--volt), var(--volt));
+    background-repeat: no-repeat;
+    background-size: 100% 100%;
+  }
+  .sweep ins {
+    background-size: 0% 100%;
+    animation: sweep .7s .5s cubic-bezier(.7, 0, .2, 1) forwards;
+  }
+  del {
+    color: var(--faint);
+    text-decoration-thickness: 1.5px;
+  }
+  @keyframes sweep { from { background-size: 0% 100%; } to { background-size: 100% 100%; } }
+  @keyframes wv { 0%, 100% { transform: scaleY(.3); } 50% { transform: scaleY(1); } }
+  @keyframes rise { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+  @keyframes pop { 0% { opacity: 0; transform: translateY(6px) scale(.97); } 60% { opacity: 1; transform: scale(1.01); } 100% { opacity: 1; transform: none; } }
+  @keyframes fill { from { width: 0; } }
+  @keyframes shine { 0%, 70% { left: -50%; } 100% { left: 150%; } }
+  @keyframes nudge { 0%, 100% { box-shadow: 4px 4px 0 var(--volt); } 50% { box-shadow: 8px 8px 0 var(--volt); } }
+  @keyframes scan { from { left: 0; } to { left: 100%; } }
+  @keyframes grow { from { transform: scaleX(0); } to { transform: none; } }
+  @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: .2; } }
+  @keyframes stampin { 0% { opacity: 0; transform: scale(1.6) rotate(-6deg); } 60% { opacity: 1; transform: scale(.94) rotate(-2deg); } 100% { opacity: 1; transform: rotate(-2deg); } }
+  @keyframes ringpulse { 0% { box-shadow: 0 0 0 0 color-mix(in oklch, var(--volt) 60%, transparent); } 100% { box-shadow: 0 0 0 14px color-mix(in oklch, var(--volt) 0%, transparent); } }
   @media (prefers-reduced-motion: reduce) {
     *,
     *::before,
@@ -151,12 +232,108 @@
       animation: none !important;
       scroll-behavior: auto !important;
     }
+    .sweep ins { background-size: 100% 100%; }
   }
 }
 
 @layer components {
   /* "Skip to the transcript": off-screen until it has focus. */
   .skip {
-    @apply sr-only focus:not-sr-only focus:fixed focus:top-3 focus:left-4 focus:z-50 focus:rounded-md focus:bg-primary focus:px-4 focus:py-2 focus:text-sm focus:font-medium focus:text-primary-foreground;
+    @apply sr-only focus:not-sr-only focus:fixed focus:top-3 focus:left-4 focus:z-50 focus:rounded-md focus:bg-ink focus:px-4 focus:py-2 focus:text-sm focus:font-medium focus:text-volt;
   }
+  /* Type */
+  .disp { font-family: var(--font-display); letter-spacing: -0.02em; }
+  .tag { font-family: var(--font-mono); font-size: 12px; font-weight: 500; letter-spacing: .06em; text-transform: uppercase; }
+  .who { font-family: var(--font-mono); font-size: 12px; font-weight: 500; letter-spacing: .05em; text-transform: uppercase; color: var(--faint); }
+  .say { font-size: 16px; line-height: 1.55; }
+  .meta { font-size: 13px; color: var(--muted-foreground); }
+  .kbd { font-family: var(--font-mono); font-size: 12px; line-height: 1; padding: 3px 5px; border-radius: 4px; border: 1px solid currentColor; opacity: .7; }
+  /* Buttons */
+  .btn { font-family: var(--font-display); font-size: 14px; font-weight: 600; height: 38px; padding: 0 14px; border-radius: 8px; border: 1.5px solid var(--foreground); background: transparent; color: var(--foreground); display: inline-flex; align-items: center; justify-content: center; gap: 8px; cursor: pointer; text-decoration: none; white-space: nowrap; transition: transform .15s ease, box-shadow .15s ease, background-color .15s ease; }
+  .btn:hover { background: var(--sunk); }
+  .btn:disabled { opacity: .5; cursor: not-allowed; }
+  .btn:focus-visible { outline: 3px solid color-mix(in oklch, var(--ring) 50%, transparent); outline-offset: 2px; }
+  .btn.volt { background: var(--volt); border-color: var(--ink); color: var(--ink); }
+  .btn.volt:hover { background: var(--volt); transform: translate(-2px, -2px); box-shadow: 4px 4px 0 var(--ink); }
+  .btn.volt:active { transform: translate(1px, 1px); box-shadow: none; }
+  .btn.ink { background: var(--ink); border-color: var(--ink); color: var(--volt); }
+  .btn.ink:hover { background: var(--ink); opacity: .9; }
+  .dark .btn.ink { background: var(--volt); color: var(--ink); }
+  .btn.ghost { border-color: var(--pline); color: var(--ptext); }
+  .btn.ghost:hover { background: var(--psunk); }
+  .btn.sm { height: 32px; padding: 0 11px; font-size: 13px; border-radius: 7px; }
+  .btn.lg { height: 46px; padding: 0 18px; font-size: 15px; border-radius: 9px; gap: 10px; }
+  .act { font: inherit; font-size: 13px; font-weight: 500; background: none; border: 0; height: 32px; padding: 0 9px; border-radius: 7px; color: var(--muted-foreground); cursor: pointer; display: inline-flex; align-items: center; gap: 6px; text-decoration: none; }
+  .act:hover { background: var(--sunk); color: var(--foreground); }
+  .act:disabled { opacity: .5; cursor: not-allowed; }
+  .act:focus-visible { outline: 3px solid color-mix(in oklch, var(--ring) 50%, transparent); outline-offset: 2px; }
+  .pane .act:hover { background: var(--psunk); color: var(--ptext); }
+  /* Segmented control: mono uppercase; the active segment ink-filled with volt text */
+  .segs { display: inline-flex; padding: 3px; gap: 2px; border: 1.5px solid var(--foreground); border-radius: 9px; }
+  .seg { font-family: var(--font-mono); font-size: 12px; font-weight: 500; letter-spacing: .05em; text-transform: uppercase; height: 30px; padding: 0 12px; border: 0; border-radius: 6px; background: transparent; color: var(--muted-foreground); cursor: pointer; white-space: nowrap; }
+  .seg:hover { color: var(--foreground); }
+  .seg.on, .seg[aria-pressed="true"], .seg[aria-selected="true"] { background: var(--ink); color: var(--volt); }
+  .dark .seg.on, .dark .seg[aria-pressed="true"], .dark .seg[aria-selected="true"] { background: var(--volt); color: var(--ink); }
+  .seg:focus-visible { outline: 3px solid color-mix(in oklch, var(--ring) 50%, transparent); outline-offset: 1px; }
+  /* Stamps */
+  .stamp { font-family: var(--font-mono); font-size: 12px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; background: var(--volt); color: var(--ink); padding: 2px 7px; border-radius: 4px; white-space: nowrap; }
+  .stamp.need { background: var(--warn); }
+  .stamp.in { background: transparent; color: var(--muted-foreground); border: 1px solid var(--line2); }
+  .stamp.inkd { background: var(--ink); color: var(--volt); }
+  /* Transcript rows */
+  .row { display: grid; grid-template-columns: 76px minmax(0, 1fr); gap: 12px; padding: 12px 14px; border-radius: 10px; }
+  .row .t { font-size: 12px; color: var(--faint); padding-top: 3px; }
+  .prop { background: var(--card); border: 1.5px solid var(--foreground); box-shadow: 4px 4px 0 var(--foreground); animation: pop .6s .1s cubic-bezier(.2, .8, .2, 1) both; transition: box-shadow .2s ease; }
+  .prop:hover { box-shadow: 7px 7px 0 var(--foreground); }
+  .waiting { background: var(--card); border: 1.5px dashed var(--foreground); }
+  .pill { font: inherit; font-size: 13px; font-weight: 500; height: 32px; padding: 0 12px; border-radius: 999px; border: 1.5px solid var(--line2); background: var(--card); color: var(--muted-foreground); cursor: pointer; transition: all .15s ease; }
+  .pill:hover { border-color: var(--foreground); color: var(--foreground); }
+  .pill.on, .pill[aria-pressed="true"] { border-color: var(--ink); background: var(--volt); color: var(--ink); }
+  /* The black Voltage pane */
+  .pane { background: var(--pane); color: var(--ptext); }
+  .pane .pm { color: var(--pmuted); }
+  .trace { font-family: var(--font-mono); font-size: 12.5px; line-height: 1.5; display: flex; flex-direction: column; gap: 5px; }
+  .trace .ln { display: grid; grid-template-columns: 44px 14px minmax(0, 1fr) auto; gap: 8px; align-items: baseline; animation: rise .45s cubic-bezier(.2, .8, .2, 1) both; }
+  .trace .ln:nth-child(2) { animation-delay: .15s; } .trace .ln:nth-child(3) { animation-delay: .3s; } .trace .ln:nth-child(4) { animation-delay: .45s; } .trace .ln:nth-child(5) { animation-delay: .6s; }
+  .trace .ts { color: var(--pmuted); opacity: .8; }
+  .trace .g { color: var(--pline); filter: brightness(1.8); }
+  .trace .c { color: var(--ptext); }
+  .trace .tool { color: var(--pmuted); opacity: .8; }
+  .gate { border: 1.5px solid var(--volt); border-radius: 12px; padding: 16px; display: flex; flex-direction: column; gap: 14px; box-shadow: 4px 4px 0 var(--volt); animation: rise .6s .2s cubic-bezier(.2, .8, .2, 1) both, nudge 2.4s 1.2s ease-in-out infinite; }
+  .sugg { font: inherit; font-size: 13px; height: 32px; padding: 0 12px; border-radius: 999px; border: 1px solid var(--pline); background: transparent; color: var(--pmuted); cursor: pointer; white-space: nowrap; }
+  .sugg:hover { color: var(--ptext); border-color: var(--volt); }
+  .bubble { align-self: flex-end; max-width: 88%; background: var(--psunk); border: 1px solid var(--pline); padding: 10px 14px; border-radius: 14px 14px 4px 14px; }
+  /* The avatar: slow volt bars idle, fast when working, amber when it needs you */
+  .wave { display: inline-flex; align-items: center; gap: 2px; height: 20px; }
+  .wave i { display: block; width: 3px; height: 20px; border-radius: 2px; background: var(--volt); animation: wv 2.2s ease-in-out infinite; transform-origin: center; }
+  .wave i:nth-child(2) { animation-delay: .2s; } .wave i:nth-child(3) { animation-delay: .4s; } .wave i:nth-child(4) { animation-delay: .6s; } .wave i:nth-child(5) { animation-delay: .8s; } .wave i:nth-child(6) { animation-delay: 1s; } .wave i:nth-child(7) { animation-delay: 1.2s; }
+  .wave.busy i { animation-duration: .6s; }
+  .wave.need i { background: var(--warn); animation-duration: 1.4s; }
+  @media (prefers-reduced-motion: reduce) { .wave i { animation: none; transform: scaleY(.6); } }
+  /* Offset shadows and motion helpers */
+  .shadow-ink { box-shadow: 4px 4px 0 var(--ink); }
+  .shadow-ink-lg { box-shadow: 6px 6px 0 var(--ink); }
+  .shadow-volt { box-shadow: 4px 4px 0 var(--volt); }
+  .shadow-volt-lg { box-shadow: 6px 6px 0 var(--volt); }
+  .shine { position: relative; overflow: hidden; }
+  .shine::after { content: ""; position: absolute; top: -10%; bottom: -10%; width: 28%; left: -50%; background: color-mix(in oklch, white 60%, transparent); transform: skewX(-20deg); animation: shine 3.6s 1s ease-in-out infinite; pointer-events: none; }
+  .rise { animation: rise .5s cubic-bezier(.2, .8, .2, 1) both; }
+  .rise.d1 { animation-delay: .3s; } .rise.d2 { animation-delay: .6s; } .rise.d3 { animation-delay: .9s; }
+  .fillin { animation: fill 1.2s .3s cubic-bezier(.2, .8, .2, 1) both; }
+  .scan { animation: scan 3s linear infinite; }
+  .grow { transform-origin: left center; animation: grow .6s cubic-bezier(.2, .8, .2, 1) both; }
+  .blinkdot { animation: blink 1.6s infinite; }
+  .stampin { display: inline-block; animation: stampin .6s .45s cubic-bezier(.2, .8, .2, 1) both; }
+  .rec { animation: ringpulse 1.6s ease-out infinite; }
+  /* Cards and nav on the account pages */
+  .vcard { background: var(--card); border: 1.5px solid var(--foreground); border-radius: 12px; }
+  .nav a, .nav button { font-family: var(--font-mono); font-size: 12px; font-weight: 500; letter-spacing: .06em; text-transform: uppercase; color: var(--muted-foreground); text-decoration: none; padding: 7px 10px; border-radius: 6px; background: none; border: 0; cursor: pointer; }
+  .nav a:hover, .nav button:hover { color: var(--foreground); background: var(--sunk); }
+  .nav a.on, .nav button.on, .nav [aria-current="page"] { color: var(--volt); background: var(--ink); }
+  .dark .nav a.on, .dark .nav button.on, .dark .nav [aria-current="page"] { color: var(--ink); background: var(--volt); }
+  .meter { height: 6px; border-radius: 2px; background: var(--line); overflow: hidden; }
+  .meter span { display: block; height: 100%; background: var(--foreground); animation: fill 1.2s .3s cubic-bezier(.2, .8, .2, 1) both; }
+  .lane-n { font-family: var(--font-mono); font-size: 12px; letter-spacing: .05em; text-transform: uppercase; color: var(--faint); }
+  .blk { position: absolute; top: 0; height: 22px; border-radius: 4px; font-size: 12px; line-height: 20px; padding: 0 6px; overflow: hidden; white-space: nowrap; color: var(--foreground); font-family: var(--font-mono); background: var(--lane); transform-origin: left center; animation: grow .6s cubic-bezier(.2, .8, .2, 1) both; }
+  .blk.p { background: var(--volt); border: 1.5px solid var(--ink); color: var(--ink); }
 }

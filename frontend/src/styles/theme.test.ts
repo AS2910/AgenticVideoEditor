@@ -17,6 +17,8 @@ const TOKENS = [
   'secondary', 'secondary-foreground', 'muted', 'muted-foreground', 'accent', 'accent-foreground', 'destructive',
   'border', 'input', 'ring', 'changed', 'changed-soft', 'ok', 'ok-soft', 'needs', 'needs-soft',
   'spk-a', 'spk-b', 'spk-c', 'spk-d',
+  // Volt (2026-10-18): the mocks' own tokens
+  'volt', 'ink', 'warn', 'sunk', 'line', 'line2', 'faint', 'pic', 'lane', 'lane2', 'pane', 'ptext', 'pmuted', 'pline', 'psunk',
 ]
 const block = (selector: string) => globals.slice(globals.indexOf(selector)).split('}')[0]
 
@@ -47,7 +49,7 @@ describe('the design system, as the source keeps it', () => {
     expect(offenders).toEqual([])
   })
 
-  it('uses no gradients, glows or blurs — the look is flat', () => {
+  it('uses no gradients, glows or blurs — the look is flat; offset shadows come only from the component classes', () => {
     const offenders = Object.entries(sources).flatMap(([p, src]) =>
       src.split('\n').map((l, i) => ({ p, i, l }))
         .filter(({ l }) => /\bbg-(?:gradient|linear|radial|conic)|\bbackdrop-blur|\bblur-|\bdrop-shadow|shadow-\[/.test(l))
