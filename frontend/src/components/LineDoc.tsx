@@ -118,8 +118,8 @@ const actionBtn = 'whitespace-nowrap'
 // UX-9: every audio line is a card. A proposal wears the accent border; an
 // added line a quiet one; a removed line fades until hovered.
 const rowClass = [
-  'group/row relative grid min-h-11 grid-cols-[24px_44px_24px_minmax(0,1fr)_auto] items-start gap-x-3 rounded-lg border bg-card px-2.5 py-3 shadow-xs outline-none transition-colors',
-  'max-[960px]:grid-cols-[24px_44px_24px_minmax(0,1fr)] max-[960px]:gap-y-1.5',
+  // The words own the width: the state and the verbs run under them (UX-9's 35% pane left them a few characters wide beside the buttons).
+  'group/row relative grid min-h-11 grid-cols-[24px_44px_24px_minmax(0,1fr)] items-start gap-x-3 gap-y-2 rounded-lg border bg-card px-2.5 py-3 shadow-xs outline-none transition-colors',
   'focus-visible:ring-[3px] focus-visible:ring-ring/50',
   'data-[selected=true]:border-primary/60',
   'data-[state=reading]:bg-changed-soft data-[state=ready]:border-primary data-[state=ready]:shadow-sm data-[state=needs-you]:border-needs data-[state=failed]:border-needs',
@@ -133,7 +133,7 @@ const gripClass = [
   'group-hover/row:opacity-100 group-focus-within/row:opacity-100 max-[960px]:opacity-100',
 ].join(' ')
 const lineClass = 'block min-h-0 w-full cursor-pointer rounded-sm p-0 text-left text-base leading-normal text-foreground outline-none hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50'
-const sideClass = 'flex min-h-[22px] flex-col items-end gap-1.5 empty:hidden max-[960px]:col-start-4 max-[960px]:flex-row max-[960px]:flex-wrap max-[960px]:items-center max-[960px]:justify-start'
+const sideClass = 'col-start-4 flex min-h-[22px] flex-row flex-wrap items-center justify-start gap-1.5 empty:hidden'
 const metaClass = 'text-sm text-muted-foreground'
 const unfold = 'grid grid-rows-[1fr] empty:hidden *:min-h-0 ' + riseClass
 const kbd = 'tnum mx-px inline-block min-w-[18px] rounded-sm border border-b-2 bg-muted px-1 text-center text-xs text-muted-foreground'

@@ -985,7 +985,7 @@ export default function App() {
       {/* UX-9: the studio's header — brand, the file, the play switch, the autonomy, the money, the exports. */}
       <header className="relative z-10 flex min-h-13 items-center gap-2.5 border-b bg-card px-3 max-[960px]:flex-wrap max-[960px]:gap-y-2 max-[960px]:py-2">
         <h1 className="m-0 flex items-center gap-2 text-sm font-semibold tracking-tight"><Presence size={16} />Voltage</h1>
-        <span className="flex min-w-0 items-center gap-2 rounded-md border bg-muted px-2 py-1 font-mono text-xs text-muted-foreground max-[960px]:max-w-[50vw]">
+        <span className="flex min-w-0 max-w-[34ch] shrink items-center gap-2 rounded-md border bg-muted px-2 py-1 font-mono text-xs text-muted-foreground max-[960px]:max-w-[50vw]">
           <Film className="size-3.5 shrink-0" aria-hidden="true" />
           <span className="min-w-0 truncate font-medium text-foreground" title={project.filename}>{project.filename}</span>
           <span className="tnum whitespace-nowrap">{project.duration.toFixed(1)} s{speakers.length > 0 ? ` · ${speakers.length} ${speakers.length === 1 ? 'speaker' : 'speakers'}` : ''}</span>
