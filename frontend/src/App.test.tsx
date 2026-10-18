@@ -720,7 +720,7 @@ describe('App the agent (Phase 13, 20c)', () => {
     await user.click(within(sheet).getByRole('button', { name: 'Back to the transcript' }))
     expect(screen.getByRole('link', { name: 'Download MP4' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /^Ship/ })).not.toBeInTheDocument()
-    expect(screen.getAllByRole('status').some((el) => el.textContent === 'ready')).toBe(true)
+    expect(screen.getAllByRole('status').some((el) => el.textContent?.startsWith('ready'))).toBe(true)
   })
 
   it('asks one thing, and the answer — a pick or "go" — is the next turn', async () => {

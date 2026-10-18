@@ -1,86 +1,90 @@
-/* Voltage theme — UX-8 (2026-10-14): stock shadcn/ui, zinc base, light and dark.
-   Neutral surfaces, 1px borders, an 8px radius, no gradients or glows.
+/* Voltage theme — UX-9, the studio (2026-10-18), replacing UX-8's zinc room.
+   Two siblings: slate and cyan in the light, obsidian and cyan in the dark.
+   Flat surfaces, 1px borders, an 8px radius; no gradients, glows or blurs.
    Colour lives here as semantic tokens (OKLCH); components use the Tailwind
    utilities they generate (bg-card, text-muted-foreground, ...) and never
-   spell a colour. The editor adds four semantic families on top of shadcn's:
-   changed (what Voltage wrote), ok (kept), needs (needs you) and the
-   speaker palette.
-   See design-system/voltage/MASTER.md. */
+   spell a colour. On top of shadcn's: changed (a proposal, what Voltage
+   wrote), ok (added, in the video), needs (flagged, removed, needs you) and
+   the speaker palette. Geist for words, JetBrains Mono for times, money and
+   counts. See design-system/voltage/MASTER.md. */
 @import 'tailwindcss';
 @import 'tw-animate-css';
-@import '@fontsource-variable/inter';
+@import '@fontsource-variable/geist';
+@import '@fontsource-variable/jetbrains-mono';
 
 @custom-variant dark (&:is(.dark *));
 
 :root {
   --radius: 0.5rem;
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.141 0.005 285.823);
+  --background: oklch(0.968 0.007 247.9);
+  --foreground: oklch(0.208 0.040 265.8);
   --card: oklch(1 0 0);
-  --card-foreground: oklch(0.141 0.005 285.823);
+  --card-foreground: oklch(0.208 0.040 265.8);
   --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.141 0.005 285.823);
-  --primary: oklch(0.21 0.006 285.885);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.967 0.001 286.375);
-  --secondary-foreground: oklch(0.21 0.006 285.885);
-  --muted: oklch(0.967 0.001 286.375);
-  --muted-foreground: oklch(0.5 0.016 285.938);
-  --accent: oklch(0.967 0.001 286.375);
-  --accent-foreground: oklch(0.21 0.006 285.885);
-  --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.92 0.004 286.32);
-  --input: oklch(0.92 0.004 286.32);
-  --ring: oklch(0.705 0.015 286.067);
+  --popover-foreground: oklch(0.208 0.040 265.8);
+  --primary: oklch(0.609 0.111 221.7);
+  --primary-foreground: oklch(1 0 0);
+  --secondary: oklch(0.929 0.013 255.5);
+  --secondary-foreground: oklch(0.208 0.040 265.8);
+  --muted: oklch(0.968 0.007 247.9);
+  --muted-foreground: oklch(0.554 0.041 257.4);
+  --accent: oklch(0.951 0.025 236.8);
+  --accent-foreground: oklch(0.208 0.040 265.8);
+  --destructive: oklch(0.586 0.222 17.6);
+  --border: oklch(0.869 0.020 252.9);
+  --input: oklch(0.929 0.013 255.5);
+  --ring: oklch(0.797 0.134 211.5);
 
   /* The editor's own meanings */
-  --changed: oklch(0.45 0.09 185);
-  --changed-soft: oklch(0.95 0.04 185);
-  --ok: oklch(0.45 0.11 150);
-  --ok-soft: oklch(0.95 0.05 150);
-  --needs: oklch(0.5 0.16 40);
-  --needs-soft: oklch(0.96 0.04 50);
+  --changed: oklch(0.520 0.094 223.1);
+  --changed-soft: oklch(0.984 0.019 200.9);
+  --ok: oklch(0.508 0.105 165.6);
+  --ok-soft: oklch(0.979 0.021 166.1);
+  --needs: oklch(0.586 0.222 17.6);
+  --needs-soft: oklch(0.969 0.015 12.4);
   --spk-a: oklch(0.55 0.15 255);
   --spk-b: oklch(0.55 0.17 310);
   --spk-c: oklch(0.58 0.13 85);
   --spk-d: oklch(0.58 0.16 15);
-  --monitor: oklch(0 0 0);
+  --monitor: oklch(0.13 0.02 265);
 }
 
 .dark {
-  --background: oklch(0.141 0.005 285.823);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.21 0.006 285.885);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.21 0.006 285.885);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.92 0.004 286.32);
-  --primary-foreground: oklch(0.21 0.006 285.885);
-  --secondary: oklch(0.274 0.006 286.033);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.274 0.006 286.033);
-  --muted-foreground: oklch(0.705 0.015 286.067);
-  --accent: oklch(0.274 0.006 286.033);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.704 0.191 22.216);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.552 0.016 285.938);
+  --background: oklch(0.187 0.039 250.7);
+  --foreground: oklch(0.914 0.035 256.3);
+  --card: oklch(0.168 0.018 263.9);
+  --card-foreground: oklch(0.914 0.035 256.3);
+  --popover: oklch(0.192 0.026 266.6);
+  --popover-foreground: oklch(0.914 0.035 256.3);
+  --primary: oklch(0.844 0.146 209.3);
+  --primary-foreground: oklch(0.224 0.040 215.0);
+  --secondary: oklch(0.192 0.026 266.6);
+  --secondary-foreground: oklch(0.914 0.035 256.3);
+  --muted: oklch(0.224 0.031 267.2);
+  --muted-foreground: oklch(0.711 0.035 256.8);
+  --accent: oklch(0.263 0.039 267.0);
+  --accent-foreground: oklch(0.914 0.035 256.3);
+  --destructive: oklch(0.719 0.169 13.4);
+  --border: oklch(0.309 0.038 255.0);
+  --input: oklch(0.252 0.034 252.6);
+  --ring: oklch(0.844 0.146 209.3);
 
-  --changed: oklch(0.82 0.11 185);
-  --changed-soft: oklch(0.3 0.05 185);
-  --ok: oklch(0.8 0.13 150);
-  --ok-soft: oklch(0.29 0.05 150);
-  --needs: oklch(0.8 0.12 45);
-  --needs-soft: oklch(0.31 0.06 45);
+  --changed: oklch(0.865 0.115 207.1);
+  --changed-soft: oklch(0.302 0.054 229.7);
+  --ok: oklch(0.845 0.130 165.0);
+  --ok-soft: oklch(0.262 0.049 172.6);
+  --needs: oklch(0.810 0.106 11.6);
+  --needs-soft: oklch(0.271 0.101 12.1);
   --spk-a: oklch(0.78 0.11 255);
   --spk-b: oklch(0.78 0.12 310);
   --spk-c: oklch(0.82 0.11 85);
   --spk-d: oklch(0.8 0.11 15);
+  --monitor: oklch(0.08 0.01 265);
 }
 
 @theme inline {
-  --font-sans: 'Inter Variable', ui-sans-serif, system-ui, sans-serif;
+  --font-sans: 'Geist Variable', ui-sans-serif, system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono Variable', ui-monospace, SFMono-Regular, Menlo, monospace;
   /* Voltage's words in the panel: a step under body, with room between lines. */
   --text-chat: 0.9375rem;
   --text-chat--line-height: 1.6;
@@ -134,8 +138,9 @@
     font-size: 16px;
     line-height: 1.5;
   }
-  /* Tabular numerals for times and money */
+  /* Times, money and counts: the mono face, tabular. */
   .tnum {
+    font-family: var(--font-mono);
     font-variant-numeric: tabular-nums;
   }
   @media (prefers-reduced-motion: reduce) {

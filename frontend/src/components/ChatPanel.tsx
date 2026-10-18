@@ -28,6 +28,8 @@ interface ChatPanelProps {
   sendLabel?: string
   /** Words put into the box from outside (an example picked), to send or change. */
   seed?: { text: string; id: number } | null
+  /** UX-9: what one turn may spend, shown over the composer ("Turn cap $0.50"). */
+  cap?: string
 }
 
 // The panel shows the latest exchange; earlier messages open on request.
@@ -54,7 +56,7 @@ function groups(messages: ChatMessage[]): Group[] {
 function Steps({ steps }: { steps: ChatMessage[] }) {
   const spent = steps.reduce((t, s) => t + (s.cost ?? 0), 0)
   return (
-    <ol className="m-0 flex max-w-[92%] list-none flex-col gap-1 self-start p-0 text-sm text-muted-foreground" aria-label="What Voltage did">
+    <ol className="m-0 flex max-w-[92%] list-none flex-col gap-1 self-start rounded-md border bg-muted/40 p-2.5 text-sm text-muted-foreground" aria-label="What Voltage did">
       {steps.map((s, k) => (
         <li key={s.seq ?? k} className="flex items-baseline gap-3">
           <span className="w-1.5 shrink-0 text-center" aria-hidden="true">·</span>
@@ -92,7 +94,7 @@ function VoicePreviews({ projectId, m }: { projectId?: string; m: ChatMessage })
 /** The conversation with Voltage: what you ask for, and what comes back — a
  *  reply, a question, a take. */
 export function ChatPanel({
-  messages, projectId, canSubmit, onSubmit, children, toolbar, header, hint, inputRef, sendLabel = 'Send', seed,
+  messages, projectId, canSubmit, onSubmit, children, toolbar, header, hint, inputRef, sendLabel = 'Send', seed, cap,
   placeholder = 'Ask for a change, e.g. say "30% off" instead',
 }: ChatPanelProps) {
   const [prompt, setPrompt] = useState('')
@@ -126,7 +128,7 @@ export function ChatPanel({
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       {header}
-      <div ref={list} className="flex min-h-0 flex-1 flex-col gap-3.5 overflow-y-auto px-5 py-4" role="log" aria-live="polite" aria-relevant="additions" aria-label="The conversation">
+      <div ref={list} className="flex min-h-0 flex-1 flex-col gap-3.5 overflow-y-auto px-3.5 py-3.5" role="log" aria-live="polite" aria-relevant="additions" aria-label="The conversation">
         {hidden > 0 && (
           <Button variant="link" size="sm" className="self-center text-muted-foreground underline" onClick={() => setShowAll(true)}>
             Show {hidden} earlier {hidden === 1 ? 'message' : 'messages'}
@@ -142,7 +144,7 @@ export function ChatPanel({
             className={cn(
               'text-chat',
               g.m.role === 'user'
-                ? 'max-w-[86%] self-end rounded-lg bg-secondary px-3.5 py-2 text-secondary-foreground'
+                ? 'max-w-[86%] self-end rounded-lg border border-primary/30 bg-accent px-3.5 py-2 text-accent-foreground'
                 : 'max-w-[92%] self-start text-foreground',
             )}
           >
@@ -152,7 +154,11 @@ export function ChatPanel({
         ))}
         {children}
       </div>
-      <div className="flex flex-none flex-col gap-2 border-t bg-background px-5 pt-3 pb-4">
+      <div className="flex flex-none flex-col gap-2 border-t bg-card px-3.5 pt-2.5 pb-3.5">
+        <div className="flex items-center justify-between font-mono text-xs text-muted-foreground">
+          <span>Instruction</span>
+          {cap && <span className="tnum">{cap}</span>}
+        </div>
         <div className="flex items-center gap-2">
           <Input
             ref={inputRef}

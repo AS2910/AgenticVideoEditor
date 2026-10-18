@@ -186,7 +186,7 @@ describe('LineDoc: the line is the unit', () => {
     const facts = screen.getByTestId('take')
     expect(facts).toHaveTextContent("Brian's voice · Sounds like the Customer, and sits in the room. Trimmed 120 ms of pauses.")
     expect(screen.getByText('Proposed')).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: /another take|keep/i })).toBeNull()
+    expect(screen.queryByRole('button', { name: /another take|^keep$/i })).toBeNull()
   })
 
   it('shows what is happening to a line, and the state of one that needs you or failed — nothing to answer here', () => {

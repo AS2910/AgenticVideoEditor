@@ -26,7 +26,8 @@ import { Presence } from './components/Presence'
 import { ThemeToggle } from './components/ThemeToggle'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
-import { ArrowUp, ChevronLeft, ChevronRight, Loader2, SlidersHorizontal } from 'lucide-react'
+import { ArrowUp, AudioLines, ChevronLeft, ChevronRight, Film, FolderOpen, Loader2, ShieldCheck, SlidersHorizontal, Users, Zap } from 'lucide-react'
+import { Lanes } from './components/Lanes'
 import { SpeakersBar } from './components/SpeakersBar'
 import { clock } from './transcript/format'
 import { speakerSlot } from './transcript/speakers'
@@ -968,259 +969,302 @@ export default function App() {
 
   return (
     <div
-      className="grid h-dvh grid-cols-[minmax(0,1fr)_minmax(380px,38%)] grid-rows-[auto_minmax(0,1fr)] bg-background data-[panel=hidden]:grid-cols-[minmax(0,1fr)_64px] max-[960px]:h-auto max-[960px]:grid-cols-1 max-[960px]:grid-rows-[auto_auto_auto] max-[960px]:data-[panel=hidden]:grid-cols-1"
+      className="flex h-dvh flex-col bg-background max-[960px]:h-auto max-[960px]:min-h-dvh"
       data-panel={panelHidden ? 'hidden' : undefined}
     >
       <a className="skip" href="#main">Skip to the transcript</a>
-      <header className="relative z-10 col-span-full flex min-h-14 items-center gap-3 border-b bg-background px-5 max-[960px]:flex-wrap max-[960px]:gap-x-2.5 max-[960px]:gap-y-2 max-[960px]:px-4 max-[960px]:py-2">
-        <Button variant="outline" size="sm" onClick={leave}>← Projects</Button>
-        <h1 className="m-0 flex items-center gap-2 text-base font-semibold tracking-tight"><Presence size={16} />Voltage</h1>
-        <span className="text-border" aria-hidden="true">/</span>
-        <span className="min-w-0 truncate text-sm font-medium max-[960px]:max-w-[40vw]" title={project.filename}>{project.filename}</span>
-        <span className="tnum whitespace-nowrap text-sm text-muted-foreground max-[960px]:hidden">
-          {project.duration.toFixed(1)} s{speakers.length > 0 && `, ${speakers.length} ${speakers.length === 1 ? 'speaker' : 'speakers'}`}
+      {/* UX-9: the studio's header — brand, the file, the play switch, the autonomy, the money, the exports. */}
+      <header className="relative z-10 flex min-h-13 items-center gap-2.5 border-b bg-card px-3 max-[960px]:flex-wrap max-[960px]:gap-y-2 max-[960px]:py-2">
+        <h1 className="m-0 flex items-center gap-2 text-sm font-semibold tracking-tight"><Presence size={16} />Voltage</h1>
+        <span className="flex min-w-0 items-center gap-2 rounded-md border bg-muted px-2 py-1 font-mono text-xs text-muted-foreground max-[960px]:max-w-[50vw]">
+          <Film className="size-3.5 shrink-0" aria-hidden="true" />
+          <span className="min-w-0 truncate font-medium text-foreground" title={project.filename}>{project.filename}</span>
+          <span className="tnum whitespace-nowrap">{project.duration.toFixed(1)} s{speakers.length > 0 ? ` · ${speakers.length} ${speakers.length === 1 ? 'speaker' : 'speakers'}` : ''}</span>
         </span>
-        <span className="flex-1 max-[960px]:hidden" />
+        <span className="flex-1" />
+        {(rendered || readyItems.length > 0) && (
+          <div className="inline-flex gap-0.5 rounded-md border bg-muted p-0.5" role="group" aria-label="Play">
+            {([
+              ...(rendered ? [['final', 'Final'] as const] : []),
+              ...(readyItems.length > 0 ? [['proposals', 'With proposals'] as const] : []),
+              ['original', 'Original'] as const,
+            ]).map(([v, label]) => (
+              <Button
+                key={v}
+                variant="ghost"
+                size="sm"
+                className={cn('h-7 whitespace-nowrap px-2.5 text-xs', view === v ? 'bg-background text-foreground shadow-xs hover:bg-background' : 'text-muted-foreground')}
+                aria-pressed={view === v}
+                onClick={() => { setView(v); setCurrentTime(0); if (v === 'proposals') void ensurePreview() }}
+              >
+                {v === 'proposals' && <span className={cn('size-1.5 rounded-full bg-primary', !previewReady && previewing && 'animate-pulse')} aria-hidden="true" />}
+                {label}
+              </Button>
+            ))}
+          </div>
+        )}
+        <AutonomySwitch value={autonomy} onChange={(v) => void rememberAutonomy(v)} />
+        <span className="flex-1" />
         <SpendMeter usage={usage} />
+        <ExportBar segments={segments} inserts={inserts} pieces={pieces} onExport={() => void runExport()} download={download} busy={exporting} onVariant={() => void makeVariant()} varianting={varianting} />
+        <Button variant="ghost" size="icon" onClick={() => setMayDoOpen(true)} aria-label="What Voltage may do: the autonomy, the turn's spend cap and the effort" title="What Voltage may do">
+          <SlidersHorizontal aria-hidden="true" />
+        </Button>
+        <WhatVoltageMayDo open={mayDoOpen} value={mayDo} onChange={(c) => void changeMayDo(c)} onClose={() => setMayDoOpen(false)} />
         <ThemeToggle />
         {me.user && (
-          <span className="flex items-center gap-2 whitespace-nowrap text-sm text-muted-foreground" data-testid="who">
+          <span className="flex items-center gap-2 border-l pl-2 text-sm">
             {me.user.picture ? <img className="size-6 rounded-full" src={me.user.picture} alt="" referrerPolicy="no-referrer" /> : null}
             <span className="max-w-36 truncate max-[960px]:hidden">{me.user.name ?? me.user.email ?? 'You'}</span>
             <Button variant="ghost" size="sm" onClick={() => void signOut()}>Sign out</Button>
           </span>
         )}
-        <ExportBar segments={segments} inserts={inserts} pieces={pieces} onExport={() => void runExport()} download={download} busy={exporting} onVariant={() => void makeVariant()} varianting={varianting} />
       </header>
 
-      <main id="main" className="flex min-h-0 flex-col gap-4 overflow-y-auto px-6 pt-4 pb-8 max-[960px]:overflow-visible max-[960px]:px-4 max-[960px]:pb-6 [&>*]:shrink-0" aria-busy={turnBusy || undefined}>
-        <Player
-          src={shown ? shown.url : artifactUrl(project.project_id, project.media.sha256)}
-          duration={shown ? shown.duration : project.duration}
-          currentTime={currentTime}
-          onSeek={setCurrentTime}
-          onTimeUpdate={setCurrentTime}
-          seekRequest={seekRequest}
-          blocks={blocks}
-          words={transcript}
-          caption={caption}
-          muted={playingTake !== null && playingMix === 'replace'}
-          placing={placing}
-          onPlace={(start) => setPlacing((p) => (p ? { ...p, start } : p))}
-        >
-          <Button variant={precise ? 'secondary' : 'ghost'} size="sm" aria-pressed={precise} onClick={() => setPrecise((p) => !p)}>Precise</Button>
-          {(rendered || readyItems.length > 0) && (
-            <div className="inline-flex gap-0.5 rounded-md bg-muted p-0.5" role="group" aria-label="Play">
-              {([
-                ...(rendered ? [['final', 'Final'] as const] : []),
-                ...(readyItems.length > 0 ? [['proposals', 'With proposals'] as const] : []),
-                ['original', 'Original'] as const,
-              ]).map(([v, label]) => (
-                <Button
-                  key={v}
-                  variant="ghost"
-                  size="sm"
-                  className={cn('whitespace-nowrap', view === v ? 'bg-background shadow-xs hover:bg-background' : 'text-muted-foreground')}
-                  aria-pressed={view === v}
-                  onClick={() => { setView(v); setCurrentTime(0); if (v === 'proposals') void ensurePreview() }}
-                >
-                  {label}
-                </Button>
-              ))}
-            </div>
-          )}
-          {view === 'proposals' && !previewReady && (
-            <span className="flex items-center gap-2 text-sm text-muted-foreground" role="status" aria-busy={previewing || undefined}>
-              {previewing && <Loader2 className="size-4 shrink-0 animate-spin" aria-hidden="true" />}
-              {previewing ? 'Rendering with the proposals…' : 'The proposals changed; rendering again…'}
-            </span>
-          )}
-        </Player>
-        {error && <div className="rounded-md border border-needs/40 bg-needs-soft px-3 py-2 text-sm text-needs" role="alert">{error}</div>}
-        {precise && (
-          <Timeline
-            key={project.project_id}
-            words={transcript}
-            duration={project.duration}
-            selection={selection}
-            currentTime={sourceClock}
-            onSelect={setSelection}
-          />
-        )}
-        <SpeakersBar
-          speakers={speakers}
-          voices={voices}
-          hasSpeech={transcript.length > 0}
-          detecting={detecting}
-          onDetect={() => void findSpeakers()}
-          onRename={(label, name) => void changeSpeaker(label, { name })}
-          onVoice={(label, id) => void changeSpeaker(label, id ? { voice_id: id } : { clear_voice: true })}
-        />
-        <LineDoc
-          statements={statements}
-          words={transcript}
-          speakers={speakers}
-          voices={voices}
-          revisions={approved}
-          selection={selection}
-          currentTime={sourceClock}
-          pendingLines={pendingLines}
-          items={planItems}
-          disabled={turnBusy}
-          usdPerChar={usdPerChar}
-          playing={playingTake}
-          onSeek={seekToStatement}
-          onHear={hearLine}
-          onAdd={(item) => addItem(item)}
-          onDiscard={(item) => discardItem(item)}
-          onAddAll={(items) => approveAll(items)}
-          onHearTake={(_item, c) => playTake(c)}
-          onLevel={(target, levelDb) => void changeLevel(target, levelDb)}
-          backgroundDb={BACKGROUND_DB}
-          onUndo={(id) => void revert(id)}
-          onRemove={(s) => void removeStatement(s)}
-          onShift={(s, to) => void shiftStatement(s, to)}
-          onMove={(item, c, start) => void moveTake(item, c, start)}
-          onMoveKept={(id, start) => void moveKept(id, start)}
-          placing={placing}
-          onPlacing={setPlacing}
-          onEditingChange={setEditingLine}
-          duration={project.duration}
-        />
-      </main>
+      <div className="flex min-h-0 flex-1 gap-2 p-2 max-[960px]:flex-col">
+        {/* The dock: real destinations only. */}
+        <nav className="flex w-10 shrink-0 flex-col items-center gap-1 rounded-lg border bg-card py-2 max-[960px]:w-auto max-[960px]:flex-row max-[960px]:px-2" aria-label="Dock">
+          <Button variant="ghost" size="icon" onClick={leave} aria-label="Projects" title="Projects"><FolderOpen aria-hidden="true" /></Button>
+          <Button variant="ghost" size="icon" className="bg-accent text-primary" aria-label="Workspace" aria-current="page" title="Workspace"><AudioLines aria-hidden="true" /></Button>
+          <Button variant="ghost" size="icon" onClick={() => document.getElementById('speakers')?.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' })} aria-label="Speakers" title="Speakers"><Users aria-hidden="true" /></Button>
+          <span className="flex-1" />
+          <Button variant="ghost" size="icon" onClick={() => setPanelHidden((h) => !h)} aria-label={panelHidden ? 'Bring Voltage back' : 'Tuck Voltage away'} title={panelHidden ? 'Bring Voltage back' : 'Tuck Voltage away'}><Zap aria-hidden="true" className={cn(panelHidden ? 'text-muted-foreground' : 'text-primary')} /></Button>
+        </nav>
 
-      {panelHidden ? (
-        <aside className="flex min-h-0 flex-col items-center gap-3.5 border-l bg-card py-3.5 max-[960px]:sticky max-[960px]:bottom-0 max-[960px]:z-10 max-[960px]:flex-row max-[960px]:gap-2.5 max-[960px]:border-t max-[960px]:border-l-0 max-[960px]:px-4 max-[960px]:py-2" aria-label="Voltage, tucked away" data-testid="rail">
-          <Button variant="ghost" size="icon" onClick={showPanel} aria-label={`Show Voltage. ${stateWord[0].toUpperCase()}${stateWord.slice(1)}`}>
-            <Presence size={18} working={busy} />
-          </Button>
-          {(needsYou.length > 0 || readyItems.length > 0) && (
-            <span
-              className={cn('flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-xs font-semibold text-background', needsYou.length > 0 ? 'bg-needs' : 'bg-changed')}
-              aria-hidden="true"
-            >{needsYou.length > 0 ? needsYou.length : readyItems.length}</span>
-          )}
-          <span className="rotate-180 whitespace-nowrap text-sm leading-none text-muted-foreground [writing-mode:vertical-rl] max-[960px]:hidden" aria-hidden="true">{stateWord}</span>
-          <span className="flex-1 max-[960px]:hidden" />
-          {/* On a phone the strip carries the composer too (the polish pass): sending brings Voltage back so the reply is seen. */}
-          <form
-            className="hidden min-w-0 flex-1 items-center gap-1.5 rounded-lg border bg-background py-1 pr-1 pl-3 focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/50 max-[960px]:flex"
-            onSubmit={(e) => {
-              e.preventDefault()
-              const text = railText.trim()
-              if (!text) return
-              setRailText('')
-              showPanel()
-              submitComposer(text)
-            }}
+        {/* The player and its lanes. */}
+        <main id="main" className="flex min-h-0 flex-[41_1_0%] flex-col gap-2 overflow-y-auto rounded-lg border bg-card p-2.5 max-[960px]:flex-none max-[960px]:overflow-visible" aria-busy={turnBusy || undefined}>
+          <Player
+            src={shown ? shown.url : artifactUrl(project.project_id, project.media.sha256)}
+            duration={shown ? shown.duration : project.duration}
+            currentTime={currentTime}
+            onSeek={setCurrentTime}
+            onTimeUpdate={setCurrentTime}
+            seekRequest={seekRequest}
+            blocks={blocks}
+            words={transcript}
+            caption={caption}
+            muted={playingTake !== null && playingMix === 'replace'}
           >
-            <input
-              className="min-h-9 min-w-0 flex-1 bg-transparent text-base outline-none placeholder:text-muted-foreground pointer-coarse:min-h-11"
-              type="text"
-              aria-label="Ask Voltage"
-              placeholder={placeholder}
-              value={railText}
-              onChange={(e) => setRailText(e.target.value)}
-            />
-            <Button type="submit" size="icon" className="rounded-full" aria-label={sendLabel} title={sendLabel} disabled={railText.trim() === ''}>
-              <ArrowUp aria-hidden="true" />
-            </Button>
-          </form>
-          <Button variant="outline" size="sm" className="hidden max-[960px]:inline-flex" onClick={showPanel}>Open</Button>
-          <Button variant="ghost" size="icon" className="max-[960px]:hidden" onClick={showPanel} aria-label="Show Voltage">
-            <ChevronLeft aria-hidden="true" />
-          </Button>
-        </aside>
-      ) : (
-      <aside ref={panelRef} className="flex min-h-0 flex-col border-l bg-card max-[960px]:min-h-[60dvh] max-[960px]:border-t max-[960px]:border-l-0" aria-label="Voltage" aria-busy={busy || undefined}>
-        <ChatPanel
-          messages={messages}
-          projectId={projectId ?? undefined}
-          canSubmit
-          onSubmit={submitComposer}
-          inputRef={composerRef}
-          seed={seed}
-          placeholder={placeholder}
-          sendLabel={sendLabel}
-          hint={clarifying ? 'Pick an answer above, or just say "go" and Voltage will use its guess.'
-            : selection && precise ? `Talking about the words at ${clock(selection.start)}.`
-            : (project.statements?.length ?? 0) === 0 ? 'For the whole video: what it should say, a brief, or ask me to look at it and help.'
-            : 'For the whole video: a goal, or a change to the plan. To change one line, click it.'}
-          header={
-            <div className="flex flex-none items-center gap-2.5 border-b px-5 py-3">
-              <Presence size={16} working={busy} />
-              <h2 className="m-0 text-sm font-semibold tracking-tight">Voltage</h2>
-              <span className="text-sm text-muted-foreground" role="status">{stateWord}</span>
-              <span className="flex-1" />
-              <AutonomySwitch value={autonomy} onChange={(v) => void rememberAutonomy(v)} />
-              <Button variant="ghost" size="sm" onClick={() => setMayDoOpen(true)} aria-label="What Voltage may do: the turn's spend cap and the effort" title="What Voltage may do">
-                <SlidersHorizontal aria-hidden="true" />
-              </Button>
-              <WhatVoltageMayDo open={mayDoOpen} value={mayDo} onChange={(c) => void changeMayDo(c)} onClose={() => setMayDoOpen(false)} />
-              <Button variant="ghost" size="sm" onClick={() => setPanelHidden(true)} aria-label="Hide Voltage. Press backslash to show it again">
-                Hide <kbd className="pointer-events-none inline-flex h-5 min-w-5 items-center justify-center rounded border bg-muted px-1 font-sans text-xs text-muted-foreground" aria-hidden="true">\</kbd>
-                <ChevronRight aria-hidden="true" />
-              </Button>
-            </div>
-          }
-        >
-          {!plan && messages.length === 0 && (
-            <ReadingCard
-              project={project}
-              reading={readingBusy ? null : (reading ?? undefined)}
-              speakers={speakers}
-              onName={(label, name) => void changeSpeaker(label, { name })}
-              onPlace={(place) => void confirmThePlace(place)}
-              onExample={(text) => setSeed({ text, id: Date.now() })}
+            <Button variant={precise ? 'secondary' : 'ghost'} size="sm" aria-pressed={precise} onClick={() => setPrecise((p) => !p)}>Precise</Button>
+            <span className="flex-1" />
+            <span className="flex items-center gap-2 font-mono text-xs text-muted-foreground" role="status" aria-busy={previewing || undefined} data-testid="retime">
+              {view === 'proposals' && !previewReady ? (
+                <><Loader2 className="size-3.5 shrink-0 animate-spin" aria-hidden="true" />{previewing ? 'Rendering with the proposals…' : 'The proposals changed; rendering again…'}</>
+              ) : view === 'proposals' ? `Preview mix with ${readyItems.length} proposed ${readyItems.length === 1 ? 'take' : 'takes'}`
+              : view === 'final' && rendered ? 'The final'
+              : 'The original'}
+              {shown && shown.pieces.some((p) => p.kind === 'flex' && p.factor != null && Math.abs(p.factor - 1) > 0.005) && (
+                <span className="text-ok">· picture flexed</span>
+              )}
+            </span>
+          </Player>
+          <Lanes
+            duration={project.duration}
+            currentTime={sourceClock}
+            statements={statements}
+            speakers={speakers}
+            revisions={approved}
+            items={planItems}
+            pieces={shown?.pieces ?? pieces}
+            onSeek={(t) => { const time = shown ? renderTimeFrom(t, shown.pieces) : t; setSeekRequest((r) => ({ time, id: (r?.id ?? 0) + 1 })); setCurrentTime(time) }}
+            placing={placing}
+            onPlace={(start) => setPlacing((p) => (p ? { ...p, start } : p))}
+          />
+          {error && <div className="rounded-md border border-needs/40 bg-needs-soft px-3 py-2 text-sm text-needs" role="alert">{error}</div>}
+          {precise && (
+            <Timeline
+              key={project.project_id}
+              words={transcript}
+              duration={project.duration}
+              selection={selection}
+              currentTime={sourceClock}
+              onSelect={setSelection}
             />
           )}
-          {clarifying && plan?.question && (
-            <div className="flex flex-col gap-3 rounded-lg border bg-background p-4 shadow-xs" data-testid="clarify">
-              <div className="text-chat"><strong>{plan.question.text}</strong></div>
-              <div className="flex flex-wrap gap-2">
-                {plan.question.options.map((o) => (
-                  <Button key={o} variant={o === plan.question?.guess ? 'default' : 'outline'} size="sm" className="rounded-full" onClick={() => void clarify(o)}>{o}</Button>
-                ))}
-              </div>
-              <div className="text-sm leading-normal text-muted-foreground" role="status">
-                {plan.question.gate ? 'Say go, or pick one.' : `${plan.question.guess ? `My guess is ${plan.question.guess}. ` : ''}Pick one, or answer in your own words.`}
-              </div>
-            </div>
-          )}
-          {editingLine && !turnBusy && (
-            <div className="text-base leading-relaxed text-muted-foreground">
-              You're on {clock(editingLine.start)}. I'll stay out of the way while you write; Hear it brings the line to me.
-            </div>
-          )}
-          {plan && editingLine && plan.status === 'done' && !showPlanWhileEditing && (
-            <Button variant="outline" className="h-auto justify-start py-2.5 text-left font-normal text-muted-foreground" onClick={() => setShowPlanWhileEditing(true)}>
-              Earlier: {plan.items.filter((i) => i.status === 'approved').length} changes shipped · Show
-            </Button>
-          )}
-          {plan && plan.status === 'done' && !(editingLine && plan.status === 'done' && !showPlanWhileEditing) && (
-            <ActivityLog plan={plan} />
-          )}
-          {plan && !clarifying && !(editingLine && plan.status === 'done' && !showPlanWhileEditing) && (
-            <PlanCard
-              plan={plan}
+          <div id="speakers">
+            <SpeakersBar
               speakers={speakers}
               voices={voices}
-              projectId={project.project_id}
-              busy={turnBusy}
-              onAdjust={() => composerRef.current?.focus()}
-              onRedo={(item) => redoTheItem(item)}
-              onVoice={(id) => pickPlanVoice(id)}
+              hasSpeech={transcript.length > 0}
+              detecting={detecting}
+              onDetect={() => void findSpeakers()}
+              onRename={(label, name) => void changeSpeaker(label, { name })}
+              onVoice={(label, id) => void changeSpeaker(label, id ? { voice_id: id } : { clear_voice: true })}
             />
-          )}
-          {turnBusy && (
-            <div className="flex items-center gap-2.5 text-sm text-muted-foreground" role="status" data-testid="turn-working">
-              <Loader2 className="size-4 shrink-0 animate-spin" aria-hidden="true" />
-              <span>{turnStep ?? 'Working…'}</span>
-            </div>
-          )}
-        </ChatPanel>
-      </aside>
-      )}
+          </div>
+        </main>
+
+        {/* The transcript and takes. */}
+        <section className="flex min-h-0 flex-[35_1_0%] flex-col overflow-y-auto rounded-lg border bg-card max-[960px]:flex-none max-[960px]:overflow-visible" aria-label="Transcript and takes">
+          <LineDoc
+            statements={statements}
+            words={transcript}
+            speakers={speakers}
+            voices={voices}
+            revisions={approved}
+            selection={selection}
+            currentTime={sourceClock}
+            pendingLines={pendingLines}
+            items={planItems}
+            disabled={turnBusy}
+            usdPerChar={usdPerChar}
+            playing={playingTake}
+            onSeek={seekToStatement}
+            onHear={hearLine}
+            onAdd={(item) => addItem(item)}
+            onDiscard={(item) => discardItem(item)}
+            onAddAll={(items) => approveAll(items)}
+            onHearTake={(_item, c) => playTake(c)}
+            onLevel={(target, levelDb) => void changeLevel(target, levelDb)}
+            backgroundDb={BACKGROUND_DB}
+            onDelivery={(item, delivery) => void takeTurn(`Voice ${item.item_id} again, said ${delivery}`)}
+            onUndo={(id) => void revert(id)}
+            onRemove={(s) => void removeStatement(s)}
+            onShift={(s, to) => void shiftStatement(s, to)}
+            onMove={(item, c, start) => void moveTake(item, c, start)}
+            onMoveKept={(id, start) => void moveKept(id, start)}
+            placing={placing}
+            onPlacing={setPlacing}
+            onEditingChange={setEditingLine}
+            duration={project.duration}
+          />
+        </section>
+
+        {/* Voltage. */}
+        {panelHidden ? (
+          <aside className="flex min-h-0 w-14 shrink-0 flex-col items-center gap-3.5 rounded-lg border bg-card py-3.5 max-[960px]:sticky max-[960px]:bottom-0 max-[960px]:z-10 max-[960px]:w-auto max-[960px]:flex-row max-[960px]:gap-2.5 max-[960px]:px-4 max-[960px]:py-2" aria-label="Voltage, tucked away" data-testid="rail">
+            <Button variant="ghost" size="icon" onClick={showPanel} aria-label={`Show Voltage. ${stateWord[0].toUpperCase()}${stateWord.slice(1)}`}>
+              <Presence size={18} working={busy} />
+            </Button>
+            {(needsYou.length > 0 || readyItems.length > 0) && (
+              <span
+                className={cn('flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 font-mono text-xs font-semibold text-background', needsYou.length > 0 ? 'bg-needs' : 'bg-changed')}
+                aria-hidden="true"
+              >{needsYou.length > 0 ? needsYou.length : readyItems.length}</span>
+            )}
+            <span className="rotate-180 whitespace-nowrap text-sm leading-none text-muted-foreground [writing-mode:vertical-rl] max-[960px]:hidden" aria-hidden="true">{stateWord}</span>
+            <span className="flex-1 max-[960px]:hidden" />
+            {/* On a phone the strip carries the composer too (the polish pass): sending brings Voltage back so the reply is seen. */}
+            <form
+              className="hidden min-w-0 flex-1 items-center gap-1.5 rounded-lg border bg-background py-1 pr-1 pl-3 focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/50 max-[960px]:flex"
+              onSubmit={(e) => {
+                e.preventDefault()
+                const text = railText.trim()
+                if (!text) return
+                setRailText('')
+                showPanel()
+                submitComposer(text)
+              }}
+            >
+              <input
+                className="min-h-9 min-w-0 flex-1 bg-transparent text-base outline-none placeholder:text-muted-foreground pointer-coarse:min-h-11"
+                type="text"
+                aria-label="Ask Voltage"
+                placeholder={placeholder}
+                value={railText}
+                onChange={(e) => setRailText(e.target.value)}
+              />
+              <Button type="submit" size="icon" className="rounded-full" aria-label={sendLabel} title={sendLabel} disabled={railText.trim() === ''}>
+                <ArrowUp aria-hidden="true" />
+              </Button>
+            </form>
+            <Button variant="outline" size="sm" className="hidden max-[960px]:inline-flex" onClick={showPanel}>Open</Button>
+            <Button variant="ghost" size="icon" className="max-[960px]:hidden" onClick={showPanel} aria-label="Show Voltage">
+              <ChevronLeft aria-hidden="true" />
+            </Button>
+          </aside>
+        ) : (
+        <aside ref={panelRef} className="flex min-h-0 flex-[24_1_0%] flex-col rounded-lg border bg-card max-[960px]:min-h-[60dvh] max-[960px]:flex-none" aria-label="Voltage" aria-busy={busy || undefined}>
+          <ChatPanel
+            messages={messages}
+            projectId={projectId ?? undefined}
+            canSubmit
+            onSubmit={submitComposer}
+            inputRef={composerRef}
+            seed={seed}
+            placeholder={placeholder}
+            sendLabel={sendLabel}
+            cap={`Turn cap $${mayDo.turn_usd.toFixed(2)}`}
+            hint={clarifying ? 'Pick an answer above, or just say "go" and Voltage will use its guess.'
+              : selection && precise ? `Talking about the words at ${clock(selection.start)}.`
+              : (project.statements?.length ?? 0) === 0 ? 'For the whole video: what it should say, a brief, or ask me to look at it and help.'
+              : 'For the whole video: a goal, or a change to the plan. To change one line, click it.'}
+            header={
+              <div className="flex flex-none items-center gap-2.5 border-b px-3.5 py-2.5">
+                <Presence size={16} working={busy} />
+                <div className="flex min-w-0 flex-col">
+                  <h2 className="m-0 text-sm font-semibold tracking-tight">Voltage</h2>
+                  <span className="font-mono text-xs text-muted-foreground" role="status">{stateWord} · {autonomy === 'ask' ? 'Check with me' : 'Just do it'}</span>
+                </div>
+                <span className="flex-1" />
+                <Button variant="ghost" size="sm" onClick={() => setPanelHidden(true)} aria-label="Hide Voltage. Press backslash to show it again">
+                  Hide <kbd className="pointer-events-none inline-flex h-5 min-w-5 items-center justify-center rounded border bg-muted px-1 font-mono text-xs text-muted-foreground" aria-hidden="true">\</kbd>
+                  <ChevronRight aria-hidden="true" />
+                </Button>
+              </div>
+            }
+          >
+            {!plan && messages.length === 0 && (
+              <ReadingCard
+                project={project}
+                reading={readingBusy ? null : (reading ?? undefined)}
+                speakers={speakers}
+                onName={(label, name) => void changeSpeaker(label, { name })}
+                onPlace={(place) => void confirmThePlace(place)}
+                onExample={(text) => setSeed({ text, id: Date.now() })}
+              />
+            )}
+            {clarifying && plan?.question && (
+              <div className="flex flex-col gap-2.5 rounded-lg border border-primary/50 bg-card p-3.5 shadow-sm" data-testid="clarify">
+                <div className="flex items-center gap-1.5 font-mono text-xs uppercase tracking-wide text-muted-foreground">
+                  <ShieldCheck className="size-3.5 text-ok" aria-hidden="true" />{plan.question.gate ? 'Your go is needed' : 'One question'}
+                </div>
+                <div className="text-chat"><strong>{plan.question.text}</strong></div>
+                <div className="flex flex-wrap gap-1.5">
+                  {plan.question.options.map((o) => (
+                    <Button key={o} variant={o === plan.question?.guess ? 'default' : 'outline'} size="sm" onClick={() => void clarify(o)}>{o}</Button>
+                  ))}
+                </div>
+                <div className="text-sm leading-normal text-muted-foreground" role="status">
+                  {plan.question.gate ? 'Say go, or pick one.' : `${plan.question.guess ? `My guess is ${plan.question.guess}. ` : ''}Pick one, or answer in your own words.`}
+                </div>
+              </div>
+            )}
+            {editingLine && !turnBusy && (
+              <div className="text-base leading-relaxed text-muted-foreground">
+                You're on {clock(editingLine.start)}. I'll stay out of the way while you write; Voice it brings the line to me.
+              </div>
+            )}
+            {plan && editingLine && plan.status === 'done' && !showPlanWhileEditing && (
+              <Button variant="outline" className="h-auto justify-start py-2.5 text-left font-normal text-muted-foreground" onClick={() => setShowPlanWhileEditing(true)}>
+                Earlier: {plan.items.filter((i) => i.status === 'approved').length} changes shipped · Show
+              </Button>
+            )}
+            {plan && plan.status === 'done' && !(editingLine && plan.status === 'done' && !showPlanWhileEditing) && (
+              <ActivityLog plan={plan} />
+            )}
+            {plan && !clarifying && !(editingLine && plan.status === 'done' && !showPlanWhileEditing) && (
+              <PlanCard
+                plan={plan}
+                speakers={speakers}
+                voices={voices}
+                projectId={project.project_id}
+                busy={turnBusy}
+                onAdjust={() => composerRef.current?.focus()}
+                onRedo={(item) => redoTheItem(item)}
+                onVoice={(id) => pickPlanVoice(id)}
+              />
+            )}
+            {turnBusy && (
+              <div className="flex items-center gap-2.5 text-sm text-muted-foreground" role="status" data-testid="turn-working">
+                <Loader2 className="size-4 shrink-0 animate-spin" aria-hidden="true" />
+                <span>{turnStep ?? 'Working…'}</span>
+              </div>
+            )}
+          </ChatPanel>
+        </aside>
+        )}
+      </div>
       {consentAsk && (
         <ConsentSheet who={consentAsk.who} busy={consenting} onConfirm={() => void confirmConsent()} onCancel={() => setConsentAsk(null)} />
       )}

@@ -105,6 +105,8 @@ export interface ContinuityReport {
   prosody: number | null
   audio_integration: number | null
   lip_sync: number | null
+  /** UTMOS, when measured (20b). */
+  naturalness?: number | null
   passed: boolean
   warnings: string[]
   measured: string[]
@@ -128,6 +130,9 @@ export interface EditPlan {
   flex?: number | null
   /** 20g: how loud the line is mixed, in dB against the take as voiced; null or 0 is the foreground, -12 a layer under the words. */
   level_db?: number | null
+  /** 20b: the vendor model that spoke it, and the dials Voltage set. */
+  model?: string | null
+  voice_settings?: Record<string, number> | null
 }
 
 /** A real media file held by the backend, addressed by the hash of its bytes. */
