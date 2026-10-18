@@ -92,9 +92,12 @@ export interface Voice {
   gender: string | null
   accent: string | null
   age: string | null
-  /** "premade" (ElevenLabs' own) or a library voice added to the account. */
+  /** "premade" (ElevenLabs' own), a library voice added to the account, or "mine" — one you uploaded (20i). */
   category?: string | null
 }
+
+/** One of your own voices (20i): uploaded under a name and cloned once. */
+export interface MyVoice { voice_id: string; name: string; seconds: number; at: string }
 export interface Selection { start: number; end: number }
 
 /** A score is null when it cannot be measured yet (no voice clone, no real

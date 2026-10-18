@@ -1238,6 +1238,33 @@ def test_a_line_taken_out_says_so_on_its_row_until_it_is_added_again(client, pro
     assert client.get(f"/projects/p1/plans/{plan_id}").json()["items"][0]["note"] is None
 
 
+def test_your_own_voice_is_uploaded_under_a_name_listed_and_deleted(client, tmp_path):
+    """20i: POST /voices/mine clones a recording of at least 10 s under a name, with consent; GET /voices lists it as mine; DELETE forgets it."""
+    short = tmp_path / "short.wav"
+    ffmpeg.generate_tone(short, 3.0, 220)
+    long = tmp_path / "me.wav"
+    ffmpeg.generate_tone(long, 12.0, 220)
+    with short.open("rb") as f:
+        refused = client.post("/voices/mine", data={"name": "Me", "consent": "true"}, files={"file": ("short.wav", f, "audio/wav")})
+    assert refused.status_code == 422 and "at least 10 s" in refused.json()["detail"]
+    with long.open("rb") as f:
+        no_consent = client.post("/voices/mine", data={"name": "Me", "consent": "false"}, files={"file": ("me.wav", f, "audio/wav")})
+    assert no_consent.status_code == 403
+    with long.open("rb") as f:
+        made = client.post("/voices/mine", data={"name": "  Me  ", "consent": "true"}, files={"file": ("me.wav", f, "audio/wav")})
+    assert made.status_code == 201, made.text
+    body = made.json()
+    assert body["name"] == "Me" and body["voice_id"].startswith("mock-clone-") and body["seconds"] == 12.0
+    listed = client.get("/voices").json()
+    assert [v["name"] for v in listed["mine"]] == ["Me"] and listed["voices"][0]["voice_id"] == "mock"
+    with long.open("rb") as f:
+        again = client.post("/voices/mine", data={"name": "me", "consent": "true"}, files={"file": ("me.wav", f, "audio/wav")})
+    assert again.status_code == 409
+    assert client.delete(f"/voices/mine/{body['voice_id']}").status_code == 204
+    assert client.get("/voices").json()["mine"] == []
+    assert client.delete(f"/voices/mine/{body['voice_id']}").status_code == 404
+
+
 def test_a_proposal_can_be_discarded_but_a_shipped_line_cannot(client, project):
     rm = client.post("/projects/p1/lines/remove", json={"start": 0.5, "end": 1.0}).json()
     plan_id = rm["plan"]["plan_id"]

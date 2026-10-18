@@ -63,6 +63,8 @@ class Workbench:
     # 20e: what is in the video already, and taking one edit back out.
     edits: Callable[[str], Sequence[Any]] = lambda project_id: []         # -> live ApprovedEdit (not reverted)
     revert: Callable[[str, str], bool] | None = None                      # (project_id, edit_id) -> undone
+    # 20i: the user's own uploaded voices, by owner.
+    mine: Callable[[str], Sequence[dict]] = lambda owner: []
     # 20g: a line mixed louder or softer, nothing voiced again.
     relevel_take: Callable[[str, Any, float], Any] | None = None          # (project_id, candidate, level_db) -> candidate
     relevel_edit: Callable[[str, str, float], dict | None] | None = None  # (project_id, edit_id, level_db) -> {edit_id, reverted, candidate}
@@ -221,9 +223,14 @@ def _list_voices(wb: Workbench, turn: Turn, args: dict) -> ToolResult:
             tag = " · designed for this clip" if made[v["voice_id"]].get("kind") == "designed" else " · added from the library for this clip"
         out.append(f"- {v['voice_id']} · {v['name']}" + (f" · {who}" if who else "")
                    + (f" · {v['description']}" if v.get("description") else "") + tag)
+    mine = list(wb.mine(getattr(turn.record, "owner", "")))
+    if mine:
+        out.append("The user's own voices (uploaded by them; \"my voice\" means one of these):")
+        for v in mine:
+            out.append(f"- {v['voice_id']} · {v['name']} · yours, {v.get('seconds', 0):.0f} s of reference")
     out.append(f"The default is {wb.default_voice()}. If none fits, search the library (add_voice_from_library) "
                "or design one from words (design_voice).")
-    return ToolResult("\n".join(out), step=f"Looked through {len(voices)} voices")
+    return ToolResult("\n".join(out), step=f"Looked through {len(voices) + len(mine)} voices")
 
 
 def _search_library(wb: Workbench, turn: Turn, args: dict) -> ToolResult:
@@ -311,8 +318,9 @@ def delivery_of(direction: str | None) -> str | None:
     return direction
 
 
-def _voice_name(wb: Workbench, voice_id: str) -> str:
-    return next((v["name"] for v in wb.voices() if v["voice_id"] == voice_id), voice_id)
+def _voice_name(wb: Workbench, voice_id: str, turn: Turn | None = None) -> str:
+    mine = wb.mine(getattr(turn.record, "owner", "")) if turn is not None else ()
+    return next((v["name"] for v in [*wb.voices(), *mine] if v["voice_id"] == voice_id), voice_id)
 
 
 # An audio tag in the words: "[sighs]", "[whispers]", "[long pause]".
@@ -369,7 +377,8 @@ def _synthesize_take(wb: Workbench, turn: Turn, args: dict) -> ToolResult:
         return ToolResult("There are no words to voice.")
     voice_id = (args.get("voice_id") or "").strip()
     own = voice_id in ("", "own")          # the speaker's own voice when the line has a speaker, else the default
-    if not own and voice_id != wb.default_voice() and not any(v["voice_id"] == voice_id for v in wb.voices()):
+    known = [*wb.voices(), *wb.mine(getattr(turn.record, "owner", ""))]
+    if not own and voice_id != wb.default_voice() and not any(v["voice_id"] == voice_id for v in known):
         return ToolResult(f"{voice_id} is not a voice in the catalogue. Use list_voices and pick one of its ids, "
                           "or leave it empty for the speaker's own voice.")
     duration = turn.record.source.duration
@@ -418,7 +427,7 @@ def _synthesize_take(wb: Workbench, turn: Turn, args: dict) -> ToolResult:
     if own:
         whose = f"{who}'s own voice" if who and wb.voice_for is not None else f"{_voice_name(wb, wb.default_voice())}'s voice"
     else:
-        whose = f"{_voice_name(wb, voice_id)}'s voice"
+        whose = f"{_voice_name(wb, voice_id, turn)}'s voice"
     if turn.autonomy == "ask" and not turn.spend_approved:
         raise WaitingForUser(f"Voice “{text}” in {whose}, about ${usd:.2f}?")
     wb.ensure_spend(turn.project_id)

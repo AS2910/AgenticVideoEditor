@@ -151,7 +151,7 @@ const DELIVERIES = ['warmer', 'more excited', 'calmer', 'slower', 'firmer']
 const MIX_NOTE: Record<string, string | null> = {
   replace: null, layer: 'plays over the picture', over: 'plays over the picture', concatenate: 'the picture makes room while it plays', remove: null,
 }
-const voiceLabel = (v: Voice) => (v.gender ? `${v.name} (${v.gender})` : v.name)
+const voiceLabel = (v: Voice) => (v.category === 'mine' ? `${v.name} (yours)` : v.gender ? `${v.name} (${v.gender})` : v.name)
 
 const Spinner = () => <Loader2 size={16} aria-hidden="true" className="shrink-0 animate-spin text-changed" />
 const PlayIcon = () => <Play size={14} aria-hidden="true" fill="currentColor" />

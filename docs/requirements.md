@@ -1,6 +1,6 @@
 # Voltage — what is built, as user and functional requirements
 
-*As of 2026-10-18, main at the 20h merge. This is the product as it stands, not a plan. Each requirement says how it is met and where; a gap is marked as one. The phase history behind it lives in `docs/superpowers/plans/`.*
+*As of 2026-10-18, main at the UX-9 merge (the studio, and your own voices). This is the product as it stands, not a plan. Each requirement says how it is met and where; a gap is marked as one. The phase history behind it lives in `docs/superpowers/plans/`.*
 
 ## 1. Purpose and scope
 
@@ -46,7 +46,7 @@ The stories were agreed on 2026-10-03 (`docs/superpowers/plans/2026-10-03-ux-pla
 | D6 | A plain record | Built | "What I did" steps as they happen; the plan's log; the Thinking line; messages persist with the project. |
 | E1 | Their own voice | Built | `clone_speaker` makes a speaker's voice from their own speech in the clip (needs about 10 s); a replacement with no voice named speaks in the speaker's own voice. |
 | E2 | A stand-in per speaker | Built | A hand-picked voice per speaker (Speakers bar); the agent picks from the catalogue, the vendor's library, or designs a voice from words; a stand-in is always said plainly. |
-| E3 | Perform it myself | Not built | No recording path yet. |
+| E3 | Perform it myself | Partly | No in-app recording, but **your own voice**: upload a recording under a name (Your voices in the dock), and every line can be spoken in it, by hand or by asking Voltage for "my voice". |
 | F1 | The picture keeps playing | Built | A voice-over plays over the moving picture by default; "hold the picture" is a choice. |
 | F2 | Long lines handled gracefully | Built | Lines are written and voiced to a syllable budget; a take is fitted pauses-first, within limits; the picture may flex up to 12% for a replacement; the agent chooses fit/natural/stretch and as shot/may flex per take. |
 | F3 | The mouth matches | Not built | Lip-sync is Phase 17, paused on a branch. |
@@ -87,6 +87,7 @@ The stories were agreed on 2026-10-03 (`docs/superpowers/plans/2026-10-03-ux-pla
 
 ### 4.3 The transcript (the one working surface)
 
+- **The studio (UX-9).** Three panes: the player with **lanes** under it (V1 picture, A1 spoken, A2 added with overlapping lines in sub-rows, A3 room tone), the transcript and takes, Voltage; a dock (Projects, Workspace, Speakers, Your voices); light and dark rooms in slate/obsidian and cyan.
 - **One transcript.** Four kinds of row, in time order: a **spoken line**; a **moved line** where it now plays; an **added line in the video** (every live layered edit); a **proposed or working added line** (every plan item with an added mix). Lines at the same moment are separate rows and play together; a layer over a spoken line never changes that line's words.
 - **State words** beside their colour: nothing (as shot), **Proposed**, **Added**, **Voicing…**, **Needs you**, **Couldn't voice it**, **Removed**, **Moved** / **Moved away**, **Planned**, **Reading**.
 - **Four verbs.** On a proposal: **Hear it · Add it · Edit it · Discard** (always visible; "Remove it" on a proposed removal). On a spoken line: Hear it · Edit it · Discard (proposes removal) · Add a line after · Move up / Move down / Shift to a time (on hover/focus, "…" on touch). On an added line: Hear it · **Take it out** · Edit it. On a removed line: **Put it back**. **Add all N** in the heading when more than one line is proposed.
@@ -99,7 +100,7 @@ The stories were agreed on 2026-10-03 (`docs/superpowers/plans/2026-10-03-ux-pla
 
 - **Vendor**: ElevenLabs. Models **v2** (steadiest, finest style control, reads tags as words so they are stripped), **v3** (expressive, performs tags, no surrounding-text context), **v4** (newest, performs tags, keeps context; the default when the text carries tags). Audio tags (`[excited]`, `[sighs]`, `[whispers]`, …) with timestamps; a tag's span is kept in the audio and dropped from the word list.
 - **Delivery**: free-text direction kept with the take, the vendor's dials (stability, style, speed, similarity), speed retries for fit.
-- **Voices**: a catalogue (premade and library-added, four Indian voices among them; never clones), the vendor's library by accent and gender, a **designed voice** from a description (three previews to hear in the thread; one kept by name; takes a slot), the **speaker's own voice** cloned from the clip (about 10 s of their speech; a hand-picked voice is cleared with the user's knowledge), a hand-picked **stand-in per speaker**. A stand-in is always named as one.
+- **Voices**: a catalogue (premade and library-added, four Indian voices among them; never clones), **your own voices** (uploaded under a name with your word that the voice is yours, 10 s or more, cloned once, kept per user, first in every picker as "Name (yours)"; "in my voice" means one of them to the agent), the vendor's library by accent and gender, a **designed voice** from a description (three previews to hear in the thread; one kept by name; takes a slot), the **speaker's own voice** cloned from the clip (about 10 s of their speech; a hand-picked voice is cleared with the user's knowledge), a hand-picked **stand-in per speaker**. A stand-in is always named as one.
 - **Fit**: every line carries a syllable budget; a take is fitted pauses-first (trim or open silence before speeding or slowing speech, within 0.8×–1.25×); a long line may start up to 150 ms early; the agent chooses `fit` (fit / natural / stretch) and `picture` (as shot / may flex) per take. One take per tool call; retries are the agent's decision.
 - **The sound check** (`continuity/measured.py`): prosody (pitch register against the surrounding speech; skipped for an added line in another voice on purpose), audio integration (level and clarity after automatic level and room-tone correction), voice match (SIM-o, wants 0.75) when the speaker's own voice was wanted, naturalness (UTMOS, wants 3.0). A failing take is **flagged, not blocked**: it is shown, not shipped, until the user says.
 - **Room**: stems (Demucs, optional) so a line sits over the original's own bed; room tone from the recording's own quiet fills a removal.
@@ -134,7 +135,7 @@ Google OIDC with PKCE (`/auth/login`, `/auth/callback`, `/auth/me`, `/auth/logou
 
 ## 5. Non-functional requirements, as met
 
-- **Tests are offline and deterministic**: 646 backend (pytest; ffmpeg-dependent tests skip without it; vendor responses replayed from recorded fixtures) and 243 front end (vitest). A bench (`python -m app.bench gate`) runs a labelled corpus against a baseline. The agent eval is the one paid test and is run by hand.
+- **Tests are offline and deterministic**: 648 backend (pytest; ffmpeg-dependent tests skip without it; vendor responses replayed from recorded fixtures) and 260 front end (vitest). A bench (`python -m app.bench gate`) runs a labelled corpus against a baseline. The agent eval is the one paid test and is run by hand.
 - **Latency**: a turn is typically 20–45 s and $0.10–0.20; a take about 10 s; a render seconds for a short clip (longer when the picture flexes or holds).
 - **Persistence**: everything but jobs survives a restart; an interrupted job is lost and said so.
 - **Accessibility and design** (`design-system/voltage/MASTER.md`): shadcn/ui on Tailwind v4, light and dark, Inter; every state has a word beside its colour; everything reachable from the keyboard with a visible focus ring; waits spoken through `role="status"`; sheets are real modals; 44 px targets on coarse pointers; no raw colours (guarded by a test).
@@ -190,7 +191,8 @@ Limits the API taught us: at most 8 union-typed parameters across strict tools (
 | `POST /projects/{id}/edits` | Commit a candidate directly (`override` for a flagged one). |
 | `POST /projects/{id}/export` | Render: the final, or with `{"with_proposals": true}` the preview. |
 | `POST /projects/{id}/variants` | A variant project. |
-| `GET /projects/{id}/artifacts/{sha256}` · `GET /voices` | Media; the catalogue. |
+| `GET /projects/{id}/artifacts/{sha256}` · `GET /voices` | Media; the catalogue and your own voices (`mine`). |
+| `POST /voices/mine` · `DELETE /voices/mine/{voice_id}` | Upload a voice of yours under a name (consent required, ≥ 10 s); remove it. |
 
 ## 8. Configuration
 

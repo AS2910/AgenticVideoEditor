@@ -169,6 +169,19 @@ def test_a_background_layer_is_voiced_under_the_words_and_levels_change_without_
     assert BY_NAME["set_level"].run(world.wb, t, {"item_id": "", "edit_id": "", "level": "background"}).text.startswith("Name an item_id")
 
 
+def test_the_users_own_voices_are_listed_as_theirs_and_named_on_a_take(world):
+    """20i: list_voices ends with the user's uploaded voices; a take in one is named by it."""
+    from dataclasses import replace
+    wb = replace(world.wb, mine=lambda owner: [{"voice_id": "MINE1", "name": "Me", "seconds": 12.0}])
+    out = BY_NAME["list_voices"].run(wb, world.turn(), {})
+    assert "The user's own voices (uploaded by them; \"my voice\" means one of these):" in out.text
+    assert "- MINE1 · Me · yours, 12 s of reference" in out.text
+    assert out.step == "Looked through 5 voices" or out.step.startswith("Looked through")
+    take = BY_NAME["synthesize_take"].run(wb, world.turn(), {"text": "Hello.", "voice_id": "MINE1", "start": 0, "end": 2,
+                                                                   "direction": None, "mix": "layer", "line": None, "item_id": None})
+    assert take.step == 'Voiced “Hello.” with Me' and "Me's voice" in take.text
+
+
 def test_ask_ends_the_turn_with_options_and_a_guess(world):
     with pytest.raises(WaitingForUser) as w:
         BY_NAME["ask"].run(world.wb, world.turn(), {"question": "Name the beach?", "options": ["Yes, Cavelossim", "Stay general"], "guess": "Stay general"})

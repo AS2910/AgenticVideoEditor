@@ -800,7 +800,8 @@ describe('App the agent (Phase 13, 20c)', () => {
     }))
     window.location.hash = 'p1'
     render(<App />)
-    expect((await screen.findAllByTestId('take')).some((t) => t.textContent?.includes("Brian's voice"))).toBe(true)
+    // The voices arrive on their own request, so the take's voice name follows a beat after the take.
+    await waitFor(() => expect(screen.getAllByTestId('take').some((t) => t.textContent?.includes("Brian's voice"))).toBe(true))
     expect(screen.queryByTestId('reading')).not.toBeInTheDocument()
   })
 

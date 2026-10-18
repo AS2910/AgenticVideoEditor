@@ -64,10 +64,28 @@ class MockVoiceAdapter:
         return 0
 
     default_voice = "mock"
+    # A clone is a name the tone is pitched by; nothing leaves the machine.
+    can_clone = True
 
     def voices(self) -> list[dict]:
         return [{"voice_id": "mock", "name": "Test tone", "description": "Offline stand-in",
                  "gender": None, "accent": None, "age": None}]
+
+    def create_clone(self, name: str, reference: Path) -> str:
+        self._clones = getattr(self, "_clones", set())
+        voice_id = f"mock-clone-{_digest(name, str(reference))[:8]}"
+        self._clones.add(voice_id)
+        return voice_id
+
+    def register_clone(self, voice_id: str) -> None:
+        self._clones = getattr(self, "_clones", set())
+        self._clones.add(voice_id)
+
+    def identity_for(self, plan: EditPlan) -> str:
+        return "clone" if plan.voice_profile_id in getattr(self, "_clones", set()) else "stock"
+
+    def delete_voice(self, voice_id: str) -> None:
+        getattr(self, "_clones", set()).discard(voice_id)
 
     def synthesize(
         self, source: Source, plan: EditPlan, transcript: Transcript | None = None,

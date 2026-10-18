@@ -283,6 +283,17 @@ class ProjectRepository:
                     return True
         return False
 
+    # ── meta: owner-level facts that belong to no project (the user's own voices, 20i) ──
+
+    def get_meta(self, key: str) -> str | None:
+        with self.db.tx() as c:
+            row = c.execute("SELECT value FROM meta WHERE key = ?", (key,)).fetchone()
+        return str(row["value"]) if row else None
+
+    def set_meta(self, key: str, value: str) -> None:
+        with self.db.tx() as c:
+            c.execute("INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value", (key, value))
+
     # ── settings ──
 
     def settings(self, project_id: str) -> dict:

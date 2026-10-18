@@ -1,4 +1,5 @@
 import type {
+  MyVoice,
   Project, ExportManifest, Job, ProjectSummary, ProjectDetail, Usage, Voice, Speaker,
   ProjectSettings, Autonomy, Effort, Plan, Mix, Selection, Candidate, Reading, Sight, ChatMessage,
 } from './types'
@@ -92,7 +93,22 @@ export const listProjects = async () =>
 /** Everything needed to reopen a project. */
 export const getProject = (id: string) => get<ProjectDetail>(`/projects/${id}`)
 
-export const listVoices = () => get<{ default: string; voices: Voice[] }>('/voices')
+export const listVoices = () => get<{ default: string; voices: Voice[]; mine?: MyVoice[] }>('/voices')
+
+/** 20i: your own voice, uploaded under a name; the server clones it once. */
+export async function uploadMyVoice(name: string, file: File): Promise<MyVoice> {
+  const body = new FormData()
+  body.append('name', name)
+  body.append('consent', 'true')
+  body.append('file', file)
+  const res = await fetch(`${BASE}/voices/mine`, { method: 'POST', headers: FROM_VOLTAGE, body })
+  if (!res.ok) return failure(res)
+  return (await res.json()) as MyVoice
+}
+export async function deleteMyVoice(voiceId: string): Promise<void> {
+  const res = await fetch(`${BASE}/voices/mine/${voiceId}`, { method: 'DELETE', headers: FROM_VOLTAGE })
+  if (!res.ok) return failure(res)
+}
 
 /** Rename a speaker or set their voice; `voice_id: null` with `clear_voice`
  *  returns them to the chat's voice. */

@@ -26,19 +26,20 @@ import { Presence } from './components/Presence'
 import { ThemeToggle } from './components/ThemeToggle'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
-import { ArrowUp, AudioLines, ChevronLeft, ChevronRight, Film, FolderOpen, Loader2, ShieldCheck, SlidersHorizontal, Users, Zap } from 'lucide-react'
+import { ArrowUp, AudioLines, ChevronLeft, ChevronRight, Film, FolderOpen, Loader2, Mic, ShieldCheck, SlidersHorizontal, Users, Zap } from 'lucide-react'
 import { Lanes } from './components/Lanes'
+import { VoicesSheet } from './components/VoicesSheet'
 import { SpeakersBar } from './components/SpeakersBar'
 import { clock } from './transcript/format'
 import { speakerSlot } from './transcript/speakers'
 import {
-  createProject, confirmPlace, exportProject, artifactUrl, pollJob, PollCancelled, ApiError, listProjects, getProject, deleteProject, getUsage, listVoices, updateSpeaker, detectSpeakers, revertEdit, updateSettings, removeLine, dismissItem, setEditLevel, setCandidateLevel, BACKGROUND_DB, moveCandidate, moveEdit, shiftLine, getPlan, approvePlan, readProject, grantConsent, createVariant, getMe, logout, postTurn, getMessages,
+  createProject, confirmPlace, exportProject, artifactUrl, pollJob, PollCancelled, ApiError, listProjects, getProject, deleteProject, getUsage, listVoices, updateSpeaker, detectSpeakers, revertEdit, updateSettings, removeLine, dismissItem, setEditLevel, setCandidateLevel, BACKGROUND_DB, uploadMyVoice, deleteMyVoice, moveCandidate, moveEdit, shiftLine, getPlan, approvePlan, readProject, grantConsent, createVariant, getMe, logout, postTurn, getMessages,
 } from './api'
 import type { Me, PlanApproval } from './api'
 import type {
   Word, Selection, Candidate, Segment, Project, ChatMessage,
   Insert, ProjectSummary, Usage, Statement, Voice, Revision,
-  Plan, PlanItem, Autonomy, Reading, Piece, ProjectDetail, ApprovedEditSummary,
+  Plan, PlanItem, Autonomy, Reading, Piece, ProjectDetail, ApprovedEditSummary, MyVoice,
 } from './types'
 import { piecesFromInserts, renderTimeFrom, sourceTimeFrom } from './timeline/selection'
 
@@ -90,6 +91,14 @@ export default function App() {
   const [projects, setProjects] = useState<ProjectSummary[]>([])
   const [usage, setUsage] = useState<Usage | null>(null)
   const [voices, setVoices] = useState<Voice[]>([])
+  // 20i: your own voices, uploaded under a name; offered first wherever a voice is picked.
+  const [myVoices, setMyVoices] = useState<MyVoice[]>([])
+  const [voicesOpen, setVoicesOpen] = useState(false)
+  const asVoice = (v: MyVoice): Voice => ({ voice_id: v.voice_id, name: v.name, description: 'your voice', gender: null, accent: null, age: null, category: 'mine' })
+  const takeInVoices = (r: { voices: Voice[]; mine?: MyVoice[] }) => {
+    setMyVoices(r.mine ?? [])
+    setVoices([...(r.mine ?? []).map(asVoice), ...r.voices])
+  }
   const [seekRequest, setSeekRequest] = useState<{ time: number; id: number; play?: boolean; until?: number } | null>(null)
   const [detecting, setDetecting] = useState(false)
   // Approved edits still in force, shown as tracked changes in the transcript.
@@ -247,7 +256,7 @@ export default function App() {
   useEffect(() => {
     if (stage !== 'editor' || voices.length > 0) return
     listVoices()
-      .then((r) => setVoices(r.voices))
+      .then(takeInVoices)
       .catch(() => {}) // without the list, the editor offers no voice to pick
   }, [stage, voices.length])
 
@@ -589,7 +598,7 @@ export default function App() {
       setTurnStep(null)
       void refreshUsage(projectId)
       // A turn may have made a voice (designed, or from the library): the catalogue is read again.
-      listVoices().then((r) => setVoices(r.voices)).catch(() => {})
+      listVoices().then(takeInVoices).catch(() => {})
     }
   }
 
@@ -1027,6 +1036,7 @@ export default function App() {
           <Button variant="ghost" size="icon" onClick={leave} aria-label="Projects" title="Projects"><FolderOpen aria-hidden="true" /></Button>
           <Button variant="ghost" size="icon" className="bg-accent text-primary" aria-label="Workspace" aria-current="page" title="Workspace"><AudioLines aria-hidden="true" /></Button>
           <Button variant="ghost" size="icon" onClick={() => document.getElementById('speakers')?.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' })} aria-label="Speakers" title="Speakers"><Users aria-hidden="true" /></Button>
+          <Button variant="ghost" size="icon" onClick={() => setVoicesOpen(true)} aria-label="Your voices" title="Your voices"><Mic aria-hidden="true" /></Button>
           <span className="flex-1" />
           <Button variant="ghost" size="icon" onClick={() => setPanelHidden((h) => !h)} aria-label={panelHidden ? 'Bring Voltage back' : 'Tuck Voltage away'} title={panelHidden ? 'Bring Voltage back' : 'Tuck Voltage away'}><Zap aria-hidden="true" className={cn(panelHidden ? 'text-muted-foreground' : 'text-primary')} /></Button>
         </nav>
@@ -1265,6 +1275,13 @@ export default function App() {
         </aside>
         )}
       </div>
+      <VoicesSheet
+        open={voicesOpen}
+        voices={myVoices}
+        onUpload={async (name, file) => { await uploadMyVoice(name, file); takeInVoices(await listVoices()) }}
+        onDelete={async (id) => { await deleteMyVoice(id); takeInVoices(await listVoices()) }}
+        onClose={() => setVoicesOpen(false)}
+      />
       {consentAsk && (
         <ConsentSheet who={consentAsk.who} busy={consenting} onConfirm={() => void confirmConsent()} onCancel={() => setConsentAsk(null)} />
       )}

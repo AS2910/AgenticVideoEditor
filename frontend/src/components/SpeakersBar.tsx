@@ -66,7 +66,7 @@ export function SpeakersBar({
               <option value={CHAT_VOICE}>Default voice</option>
               {voices.map((v) => (
                 <option key={v.voice_id} value={v.voice_id}>
-                  {v.name}{v.gender ? ` (${v.gender})` : ''}
+                  {v.name}{v.category === 'mine' ? ' (yours)' : v.gender ? ` (${v.gender})` : ''}
                 </option>
               ))}
             </select>

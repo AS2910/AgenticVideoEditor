@@ -1,3 +1,4 @@
+import json
 import logging
 import tempfile
 from dataclasses import asdict, replace
@@ -492,11 +493,81 @@ async def create_project(
     return _project_dict(repo.get(project_id))
 
 
+# ── 20i: the user's own voices ───────────────────────────────────────────────
+# Uploaded under a name, cloned once at the vendor, kept per owner (not per
+# project), and offered wherever a voice is picked: the editor's Voice select,
+# the speakers bar, and the agent's list ("in my voice" means one of these).
+
+MIN_MY_VOICE_SECONDS = 10.0
+
+
+def _my_voices(owner: str) -> list[dict]:
+    return json.loads(repo.get_meta(f"my_voices:{owner}") or "[]")
+
+
+def _set_my_voices(owner: str, voices: list[dict]) -> None:
+    repo.set_meta(f"my_voices:{owner}", json.dumps(voices))
+
+
 @app.get("/voices")
-def list_voices() -> dict:
-    """The voices a new line can be spoken in, and which one is the default.
-    Multi-voice comes later (a voice per speaker); today a voice is per edit."""
-    return {"default": voice.default_voice, "voices": voice.voices()}
+def list_voices(owner: str = Depends(current_owner)) -> dict:
+    """The voices a new line can be spoken in, which one is the default, and
+    the caller's own uploaded voices (20i)."""
+    mine = _my_voices(owner)
+    for v in mine:
+        getattr(voice, "register_clone", lambda vid: None)(v["voice_id"])
+    return {"default": voice.default_voice, "voices": voice.voices(), "mine": mine}
+
+
+@app.post("/voices/mine", status_code=201)
+async def add_my_voice(
+    name: str = Form(...), consent: bool = Form(False), file: UploadFile = File(...),
+    owner: str = Depends(current_owner),
+) -> dict:
+    """Upload a recording of your own voice and keep it under a name (20i).
+    Ten seconds or more of speech; the vendor clones it once (a voice slot,
+    no characters). Consent is the uploader's word that the voice is theirs
+    or one they may use."""
+    if not consent:
+        raise HTTPException(status_code=403, detail="Say it is your voice, or one you have the right to use.")
+    if settings.dry_run or not getattr(voice, "can_clone", False):
+        raise HTTPException(status_code=503, detail="Voices cannot be made in this setup (no vendor that clones).")
+    label = " ".join(name.split())[:40]
+    if not label:
+        raise HTTPException(status_code=422, detail="Give the voice a name.")
+    if any(v["name"].lower() == label.lower() for v in _my_voices(owner)):
+        raise HTTPException(status_code=409, detail=f"You already have a voice called {label}.")
+    filename = Path(file.filename or "voice.wav").name
+    with tempfile.TemporaryDirectory() as tmp:
+        staged = Path(tmp) / filename
+        await _spool(file, staged)
+        try:
+            wav, seconds = ffmpeg.extract_audio(staged, Path(tmp) / "voice.wav", sample_rate=44100)
+        except Exception:  # noqa: BLE001 — a file ffmpeg cannot read is the user's to replace
+            raise HTTPException(status_code=422, detail="That file has no audio I can read. A WAV, MP3, M4A or a video with sound works.") from None
+        if seconds < MIN_MY_VOICE_SECONDS:
+            raise HTTPException(status_code=422, detail=f"That is {seconds:.0f} s; at least {MIN_MY_VOICE_SECONDS:.0f} s of your voice is needed to clone it.")
+        try:
+            voice_id = voice.create_clone(f"voltage-mine-{label}", wav)
+        except Exception as exc:  # noqa: BLE001 — the vendor's refusal, in its own words
+            raise HTTPException(status_code=502, detail=str(exc) or "The voice could not be made.") from None
+    entry = {"voice_id": voice_id, "name": label, "seconds": round(seconds, 1), "at": _now()}
+    _set_my_voices(owner, [*_my_voices(owner), entry])
+    return entry
+
+
+@app.delete("/voices/mine/{voice_id}", status_code=204)
+def delete_my_voice(voice_id: str, owner: str = Depends(current_owner)) -> Response:
+    """Remove one of your own voices: forgotten here, and deleted at the vendor."""
+    mine = _my_voices(owner)
+    if not any(v["voice_id"] == voice_id for v in mine):
+        raise HTTPException(status_code=404, detail="No such voice of yours.")
+    _set_my_voices(owner, [v for v in mine if v["voice_id"] != voice_id])
+    try:
+        getattr(voice, "delete_voice", lambda v: None)(voice_id)
+    except Exception as exc:  # noqa: BLE001
+        logging.getLogger("ave").warning("voice %s forgotten, but still at ElevenLabs: %s", voice_id, exc)
+    return Response(status_code=204)
 
 
 @app.get("/projects")
@@ -1616,6 +1687,7 @@ def _workbench() -> Workbench:
         edits=lambda pid: [e for e in repo.list_edits(pid) if not e.reverted],
         revert=lambda pid, edit_id: _revert(pid, edit_id, by="Voltage"),
         relevel_take=lambda pid, candidate, level_db: _releveled(pid, candidate, level_db),
+        mine=_my_voices,
         relevel_edit=lambda pid, edit_id, level_db: _relevel_edit(pid, edit_id, level_db),
         default_voice=lambda: getattr(voice, "default_voice", "speaker-1"),
         hear=_hear_levels, sight_text=_sight_text, now=_now,

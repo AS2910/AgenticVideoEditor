@@ -44,3 +44,18 @@ All as OKLCH variables in `globals.css`, exposed with `@theme inline`; component
 ## Out of scope here
 
 Resizable panes; a waveform on pills; stems as separate playable lanes (A3 shows room-tone patches only, because that is what we render); a dictation button (no recording path, story E3).
+
+
+## As built (2026-10-18, on `main`)
+
+Built in the order above, in a worktree so the user's running app did not change under them, and merged once green.
+
+- **Tokens and type** — `globals.css` carries both rooms as OKLCH variables; `primary` is cyan in both; `changed`/`ok`/`needs` are cyan/emerald/rose soft pairs; Geist and JetBrains Mono self-hosted; `.tnum` now sets the mono face. The theme test's rules (tokens in both modes, no spelled colours, no gradients/glows/blurs, 12 px floor, focus rings, dvh, radii) are unchanged and pass.
+- **Lanes** (`components/Lanes.tsx`, 15 tests) — ruler with the playhead and a Seek slider; V1 Picture from the render's pieces ("Flexed +8%", "Held 0.6 s"); A1 Spoken by speaker (removed struck, replaced marked); A2 Added with greedy sub-row packing so overlapping added lines each get a pill ("Added · Woohoo!", "Proposed · …", a "−12 dB" tag for a background layer) and the placing block when a take is being moved; A3 Tone for room-tone patches. Every pill is a button that seeks.
+- **Layout** — the header holds brand, the file badge (mono), the play switch, the autonomy, the spend pill, Make a variant / Export again / Export MP4, What Voltage may do, theme and user; the dock holds Projects, Workspace, Speakers, Your voices and the Voltage toggle; three panes (≈ 41 / 35 / 24) each its own card and scroll; stacked under 960 px.
+- **Transcript pane** — "Transcript & takes · N lines", Add all (N), a speaker filter with counts, the state counts with dots; rows are cards (a proposal `border-primary`); the hero card has the delivery chips (a chip → "Voice i1 again, said warmer"), the direction, the facts grid (Voice · Dials · Fit · Picture) and the measured line (SIM-o, UTMOS, Prosody, Room against their bars, "Flagged: why") from `transcript/facts.ts`; a voicing card has a progress bar.
+- **Voltage pane** — header with the state and autonomy words, steps as a bordered list, the user's bubble in the accent, the gate card ("Your go is needed" / "One question"), the composer under "Instruction · Turn cap $x".
+- **Your voices (20i, asked for the same night)** — `POST /voices/mine` (name, consent, a recording of 10 s or more; cloned once at the vendor, kept per owner in the `meta` store), `GET /voices` returns `mine`, `DELETE /voices/mine/{id}`; the mock voice clones for the tests. The dock's **Your voices** opens `VoicesSheet` (the list with Remove; name, file, consent, Keep this voice). A voice of yours is first in every voice picker as "Name (yours)", and the agent's `list_voices` ends with "The user's own voices … 'my voice' means one of these"; a take may name it; the prompt says "say the whole transcript in my voice" is a replacement of every spoken line in that voice.
+- **Changed from the mocks**, as said beforehand: the 12 px floor, no invented telemetry (no FPS/codec/LUFS/latency/engine lines, no footer), no glows or frosted panels, autonomy in the header only, real dock destinations only.
+
+Suites at the merge: 648 backend / 260 front end.

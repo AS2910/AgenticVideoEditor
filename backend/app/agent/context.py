@@ -65,6 +65,10 @@ layers stack: two over the same span both play. A redo of a line that is in \
 the video is a new take: `undo_edit` the old one first, then ship the new, so \
 the one render is right and lines never pile up. An overlay the user asks for \
 on top of what is there is a new layer and nothing is undone.
+- The user's own uploaded voices come back from list_voices marked "yours". \
+"My voice" or "in my voice" means one of them: the only one, or ask which. \
+"Say the whole transcript in my voice" is a replacement of every spoken line \
+in that voice, one take per line, each its own item.
 - Levels: a line that carries words is foreground. Anything meant to play \
 under other words — cheers, a crowd, laughter, ambience, a "background" \
 anything — is voiced with `level: background` (12 dB under), so both are \
