@@ -929,7 +929,8 @@ def _approve_candidate(project_id: str, candidate: EditCandidate, overridden: bo
     if plan is not None:
         for item in plan.items:
             if item.candidate_id == candidate.candidate_id:
-                repo.update_item(project_id, plan.plan_id, item.item_id, status="approved", edit_id=edit_id)
+                repo.update_item(project_id, plan.plan_id, item.item_id, status="approved", edit_id=edit_id,
+                                 note=None if item.note == TAKEN_OUT else item.note)
     return edit_id
 
 
@@ -942,6 +943,10 @@ def revert_edit(project_id: str, edit_id: str, owner: str = Depends(current_owne
     if not _revert(project_id, edit_id):
         raise HTTPException(status_code=404, detail="edit not found")
     return {"edit_id": edit_id, "reverted": True}
+
+
+# 20h: what a row says once its line was taken out of the video (it stands as a proposal again).
+TAKEN_OUT = "Taken out of the video. Add it puts it back; Discard drops it for good."
 
 
 def _revert(project_id: str, edit_id: str, by: str = "You") -> bool:
@@ -958,7 +963,8 @@ def _revert(project_id: str, edit_id: str, by: str = "You") -> bool:
     if plan is not None:
         for item in plan.items:
             if item.edit_id == edit_id and item.status == "approved":
-                repo.update_item(project_id, plan.plan_id, item.item_id, status="ready", edit_id=None)
+                repo.update_item(project_id, plan.plan_id, item.item_id, status="ready", edit_id=None,
+                                 note=TAKEN_OUT)
                 repo.append_log(project_id, plan.plan_id, f"{by} undid the line at {_clock(item.selection.start)}")
     return True
 

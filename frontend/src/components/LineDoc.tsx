@@ -782,6 +782,7 @@ export function LineDoc({
                 <div className={metaClass}>
                   {after && statements.length > 0 ? `New line after ${clock(after.start)}` : 'New line'} · {item.mix === 'concatenate' ? 'the picture makes room' : 'plays over the picture'}
                 </div>
+                {item.note && <div className={cn(metaClass, 'text-needs')}>{item.note}</div>}
                 <div className={unfold}>{lineBlock(item, item.speaker)}</div>
               </div>
             )}

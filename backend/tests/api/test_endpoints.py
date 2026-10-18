@@ -1225,6 +1225,19 @@ def test_a_line_can_be_mixed_as_background_before_and_after_it_is_added(client, 
     assert client.post("/projects/p1/edits/nope/level", json={"level_db": -12}).status_code == 404
 
 
+def test_a_line_taken_out_says_so_on_its_row_until_it_is_added_again(client, project):
+    """20h: Take it out leaves a proposal whose note says what Add it and Discard now do; adding it again clears the note."""
+    import app.api.main as main
+    rm = client.post("/projects/p1/lines/remove", json={"start": 0.5, "end": 1.0}).json()
+    plan_id = rm["plan"]["plan_id"]
+    shipped = client.post(f"/projects/p1/plans/{plan_id}/approve", json={"items": ["i1"]}).json()
+    client.post(f"/projects/p1/edits/{shipped['approved'][0]['edit_id']}/revert")
+    item = client.get(f"/projects/p1/plans/{plan_id}").json()["items"][0]
+    assert item["status"] == "ready" and item["note"] == main.TAKEN_OUT
+    client.post(f"/projects/p1/plans/{plan_id}/approve", json={"items": ["i1"]})
+    assert client.get(f"/projects/p1/plans/{plan_id}").json()["items"][0]["note"] is None
+
+
 def test_a_proposal_can_be_discarded_but_a_shipped_line_cannot(client, project):
     rm = client.post("/projects/p1/lines/remove", json={"start": 0.5, "end": 1.0}).json()
     plan_id = rm["plan"]["plan_id"]
