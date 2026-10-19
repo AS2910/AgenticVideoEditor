@@ -157,19 +157,7 @@ def test_a_layered_edit_keeps_the_original_sound_underneath(source, tmp_path):
     assert np.allclose(out[mid], expected, atol=1e-3)
 
 
-def test_a_background_layer_is_mixed_under_at_its_level(source, tmp_path):
-    """20g: a layer with level_db plays at that gain over the original, so two audios coexist and both are heard."""
-    from dataclasses import replace
-    base = compose.decode(source.media.path)
-    edit = with_mix(approved(tmp_path, "a", 1.0, 2.0), "layer")
-    quiet = replace(edit, plan=replace(edit.plan, level_db=-12.0))
-    manifest = render(source, [quiet])
-    out = compose.splice(base, manifest.segments, layers=manifest.layers)
-    mid = slice(int(1.4 * RATE), int(1.6 * RATE))
-    gain = 10 ** (-12 / 20)
-    expected = base[mid] + gain * compose.decode(edit.audio.path, channels=base.shape[1])[int(0.4 * RATE):int(0.6 * RATE)]
-    assert np.allclose(out[mid], expected, atol=1e-3)
-    assert compose.gain_of(quiet) < 0.26 and compose.gain_of(edit) == 1.0
+# 20g's fixed -12 dB background became roles (2026-10-20): tests/render/test_mix.py.
 
 
 def test_two_layers_over_the_same_seconds_both_play(source, tmp_path):

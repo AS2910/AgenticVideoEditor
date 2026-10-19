@@ -29,7 +29,8 @@ from typing import Sequence
 import numpy as np
 
 from app.domain.models import Source
-from app.media import ffmpeg, room as roommod
+from app.media import ffmpeg, loudness, room as roommod
+from app.render import mix as mixmod
 from app.media.stems import Stems
 from app.render import retime
 from app.render.renderer import RenderInsert, RenderSegment
@@ -109,15 +110,15 @@ class Room:
         return roommod.spectral_match(wet, self.context, OUT_RATE).astype(np.float32)
 
 
-def gain_of(edit) -> float:
-    """The linear gain for an edit's level (20g): 1.0 for the foreground, less for a line mixed under the words."""
-    level = getattr(edit.plan, "level_db", None)
-    return float(10 ** (level / 20)) if level else 1.0
+def unity(edit) -> float:
+    """Every line as voiced. The mix (render.mix) sets real levels by role."""
+    return 1.0
 
 
 def splice(
     base: np.ndarray, segments: Sequence[RenderSegment], room: Room | None = None,
     layers: Sequence = (),
+    gain_for=unity,
 ) -> np.ndarray:
     """Replace each edited span of `base` with its edit's audio, crossfaded,
     then mix every layer over the result at its own level (20h): layers add
@@ -149,9 +150,6 @@ def splice(
         piece = audio[offset:offset + length]
         if len(piece) < length:
             piece = np.pad(piece, ((0, length - len(piece)), (0, 0)))
-        if gain_of(edit) != 1.0:
-            piece = piece * gain_of(edit)
-
         if room is not None and edit.plan.mix != "layer":
             piece = room.take(piece)
         fade = min(round(CROSSFADE * OUT_RATE), length // 2)
@@ -181,8 +179,8 @@ def splice(
         piece = cache[edit.audio.sha256][:length]
         if len(piece) < length:
             piece = np.pad(piece, ((0, length - len(piece)), (0, 0)))
-        if gain_of(edit) != 1.0:
-            piece = piece * gain_of(edit)
+        if gain_for(edit) != 1.0:
+            piece = piece * gain_for(edit)
         fade = min(round(CROSSFADE * OUT_RATE), length // 2)
         new = np.ones(length, dtype=np.float32)
         if fade:
@@ -367,7 +365,7 @@ def _exact(x: np.ndarray, samples: int, channels: int) -> np.ndarray:
     return np.vstack([x, np.zeros((samples - len(x), channels), dtype=np.float32)])
 
 
-def assemble(base: np.ndarray, pieces: Sequence[retime.Piece]) -> np.ndarray:
+def assemble(base: np.ndarray, pieces: Sequence[retime.Piece], gain_for=None) -> np.ndarray:
     """The soundtrack, piece by piece, each the exact length of its picture.
     `base` is the source's audio with the replaced spans already spliced."""
     channels = base.shape[1]
@@ -376,7 +374,8 @@ def assemble(base: np.ndarray, pieces: Sequence[retime.Piece]) -> np.ndarray:
     def audio_of(edit) -> np.ndarray:
         if edit.audio.sha256 not in cache:
             cache[edit.audio.sha256] = decode(edit.audio.path, channels=channels)
-        return cache[edit.audio.sha256] * gain_of(edit) if gain_of(edit) != 1.0 else cache[edit.audio.sha256]
+        g = gain_for(edit, cache[edit.audio.sha256]) if gain_for else 1.0
+        return cache[edit.audio.sha256] * g if g != 1.0 else cache[edit.audio.sha256]
 
     parts = []
     for p in pieces:
@@ -419,6 +418,10 @@ def compose(
     interpolator: str = "minterpolate",
     stems: Stems | None = None,
     layers: Sequence = (),
+    mix_settings: mixmod.MixSettings | None = None,
+    words: Sequence[tuple[float, float]] = (),
+    lines: Sequence[tuple[float, float]] = (),
+    on_mix=None,
 ) -> Path:
     """Write the edited video to `dest` (MP4, H.264 + AAC).
 
@@ -450,10 +453,40 @@ def compose(
     flexed = {p.edit.edit_id for p in (pieces or ()) if p.kind == "flex" and p.edit is not None}
     original = decode(source.media.path)
     room = Room.prepare(stems, original.shape[1], len(original))
-    spliced = splice(original, [s for s in segments if not (s.edit and s.edit.edit_id in flexed)], room, layers=layers)
+    spliced = splice(original, [s for s in segments if not (s.edit and s.edit.edit_id in flexed)], room)
+    # 2026-10-20: added lines are mixed by role, against the clip's own speech
+    # (render.mix): voices at its loudness, beds under them and ducking, the
+    # original's music dipping under an added voice; then the whole mix at the
+    # export loudness with a true-peak ceiling.
+    settings = mix_settings or mixmod.MixSettings()
+    channels = original.shape[1]
+    cache: dict[str, np.ndarray] = {}
+
+    def audio_of(edit) -> np.ndarray:
+        if edit.audio.sha256 not in cache:
+            cache[edit.audio.sha256] = decode(edit.audio.path, channels=channels)
+        return cache[edit.audio.sha256]
+
+    mixed = mixmod.mix(spliced, layers, audio_of, words, settings,
+                       bed=room.accompaniment if room is not None else None, lines=lines)
+
+    def gain_for(edit, audio) -> float:
+        if (edit.plan.mix in ("replace", "remove") and edit.plan.role is None) or mixmod.as_shot(edit):
+            return 1.0
+        return mixed.gains.get(edit.edit_id) or loudness.gain(mixmod.standalone_gain_db(edit, audio, mixed.voice_lufs, settings))
+
+    track = assemble(mixed.audio, pieces, gain_for) if not plain else mixed.audio
+    final_lufs = None
+    if settings.export_lufs is not None:
+        normalised, final_lufs = loudness.normalize(track, settings.export_lufs, settings.true_peak_db)
+        track = normalised.astype(np.float32)
+    if on_mix is not None:
+        on_mix({"voice_lufs": round(mixed.voice_lufs, 1), "lines": [r.as_dict() for r in mixed.reports],
+                "loudness_lufs": None if final_lufs is None else round(final_lufs, 1),
+                "true_peak_db": round(loudness.true_peak_db(track), 1) if len(track) else None})
     with tempfile.TemporaryDirectory() as tmp:
         audio = Path(tmp) / "audio.wav"
-        _write(audio, assemble(spliced, pieces) if not plain else spliced)
+        _write(audio, track)
         ffmpeg._run(ffmpeg.FFMPEG, [
             "-y", "-loglevel", "error", *ffmpeg._BITEXACT_IN,
             "-i", str(source.media.path), "-i", str(audio),

@@ -16,7 +16,8 @@
   },
   "model": "v4",
   "flex_max": null,
-  "level_db": null
+  "role": null,
+  "offset_db": null
  },
  "audio": {
   "kind": "audio",

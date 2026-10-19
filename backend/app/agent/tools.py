@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any, Callable, Sequence
 
 from app.agent.guards import Guard, TurnBudget, WaitingForUser
-from app.domain.models import BACKGROUND_DB, Selection
+from app.domain.models import ROLES, Selection, role_of
 from app.domain.plan import Plan, PlanItem
 
 
@@ -67,8 +67,9 @@ class Workbench:
     # 20i: the user's own uploaded voices, by owner.
     mine: Callable[[str], Sequence[dict]] = lambda owner: []
     # 20g: a line mixed louder or softer, nothing voiced again.
-    relevel_take: Callable[[str, Any, float], Any] | None = None          # (project_id, candidate, level_db) -> candidate
-    relevel_edit: Callable[[str, str, float], dict | None] | None = None  # (project_id, edit_id, level_db) -> {edit_id, reverted, candidate}
+    rerole_take: Callable[[str, Any, str, float], Any] | None = None          # (project_id, candidate, role, offset_db) -> candidate
+    rerole_edit: Callable[[str, str, str, float], dict | None] | None = None  # (project_id, edit_id, role, offset_db) -> {edit_id, reverted, candidate}
+    only_voice: Callable[[str, Any, tuple], bool] | None = None             # (project_id, plan, skip ids) -> no other speech in its span
     # Folders: the project the video is in — {project_id, name, brief, voices: [entries], videos: [sisters], files: [{name, text}]} — or None.
     project: Callable[[str], dict | None] = lambda video_id: None
     # Bug 1: the final render against the edits as they are now — {edit_hash, render, at, rendering, edits}.
@@ -306,8 +307,9 @@ def _project_state(wb: Workbench, turn: Turn, args: dict) -> ToolResult:
     for i in items:
         out.append(f"- {i.item_id} at {i.selection.start:.1f}–{i.selection.end:.1f} s: “{i.new_text}”: {i.status}"
                    + (f", take {i.candidate_id}" if i.candidate_id else ""))
-    out.extend(shipped_lines(wb.edits(turn.project_id)))
-    out.append(render_line(wb.render_state(turn.project_id)))
+    state = wb.render_state(turn.project_id) if wb.render_state else {}
+    out.extend(shipped_lines(wb.edits(turn.project_id), (state or {}).get("mix")))
+    out.append(render_line(state))
     return ToolResult("\n".join(out))
 
 
@@ -338,10 +340,12 @@ def render_line(state: dict) -> str:
     return "Render: no finished render of the edits now; the video is rendered when the user opens it or exports. Do not say it is ready."
 
 
-def shipped_lines(edits: Sequence[Any]) -> list[str]:
+def shipped_lines(edits: Sequence[Any], mix: dict | None = None) -> list[str]:
     """What is in the video already, one line per live edit, for the agent's
     view of the project (20e). Layered edits stack: two over the same span
-    both play."""
+    both play. An added line says its role and, from the last render's mix,
+    how it sits: a bed how far under the voices, a voice how far over the rest."""
+    measured = {ln.get("edit_id"): ln for ln in ((mix or {}).get("lines") or [])}
     live = [e for e in edits if not getattr(e, "reverted", False)]
     if not live:
         return []
@@ -349,7 +353,21 @@ def shipped_lines(edits: Sequence[Any]) -> list[str]:
     for e in live:
         sel = e.plan.selection
         words = f"“{e.plan.new_text}”" if e.plan.new_text else "(silence)"
-        out.append(f"- {e.edit_id} at {sel.start:.1f}–{sel.end:.1f} s: {words}, {_MIX_WORDS.get(e.plan.mix, e.plan.mix)}")
+        how = _MIX_WORDS.get(e.plan.mix, e.plan.mix)
+        if e.plan.mix in ("layer", "over", "concatenate"):
+            role = role_of(e.plan)
+            offset = getattr(e.plan, "offset_db", None)
+            how += f", {role}" + (f" {offset:+.0f} dB" if offset else "")
+            m = measured.get(e.edit_id) or {}
+            if role == "bed" and m.get("alone"):
+                how += " (no speech here, so it plays nearly full)"
+            elif role == "bed" and m.get("under_db") is not None:
+                how += f" (sits {m['under_db']:.0f} dB under the voices" + (", ducking while they speak)" if m.get("ducks") else ")")
+            if m.get("ratio_db") is not None:
+                how += f" (heard {m['ratio_db']:.0f} dB over everything else)"
+            if m.get("flag"):
+                how += f". Not clear: {m['flag']}"
+        out.append(f"- {e.edit_id} at {sel.start:.1f}–{sel.end:.1f} s: {words}, {how}")
     return out
 
 
@@ -623,7 +641,8 @@ def _synthesize_take(wb: Workbench, turn: Turn, args: dict) -> ToolResult:
     delivery = delivery_of(direction)
     settings = voice_settings_of(args)
     model = model_for(text, args.get("model"))
-    level_db = BACKGROUND_DB if args.get("level") == "background" else None
+    role = args.get("role") if args.get("role") in ROLES else None
+    offset_db = float(args.get("offset_db") or 0.0) or None
     if existing is None:
         item = PlanItem(item_id=f"i{len(plan.items) + 1}", selection=selection, old_text=old_text, new_text=text,
                         speaker=speaker, mix=mix, delivery=delivery, reason=direction or "", kind="planned",
@@ -651,7 +670,7 @@ def _synthesize_take(wb: Workbench, turn: Turn, args: dict) -> ToolResult:
         candidate = wb.generate(turn.project_id, record, candidate_id, selection, text, voice_id,
                                 fit, mix, step, delivery=delivery, voice_notes=voice_notes,
                                 voice_settings=settings, model=model, flex_max=flex_max, max_regenerations=0,
-                                level_db=level_db)
+                                role=role, offset_db=offset_db)
     except Exception as exc:  # noqa: BLE001 — the model hears why and decides; nothing crashes the turn
         reason = str(exc) or type(exc).__name__
         finish = getattr(wb.repo, "finish_attempt", None)
@@ -929,14 +948,28 @@ def _move_item(wb: Workbench, turn: Turn, args: dict) -> ToolResult:
                       step=f"Moved {item.item_id} to {sel.start:.2f} s")
 
 
-def _set_level(wb: Workbench, turn: Turn, args: dict) -> ToolResult:
-    """20g: a line mixed under the words (background) or at full level (foreground), nothing voiced again."""
-    level_db = BACKGROUND_DB if args.get("level") == "background" else 0.0
-    word = "background" if level_db else "foreground"
+ROLE_WORD = {"voice": "a Voice", "bed": "a Bed", "effect": "an Effect"}
+
+
+def _set_role(wb: Workbench, turn: Turn, args: dict) -> ToolResult:
+    """2026-10-20: what a line is in the mix, which sets its level against the
+    clip's speech: Voice, Bed (under the words, ducking) or Effect; offset_db
+    fine-tunes it. Nothing is voiced again. The only speech in its span does
+    not become a Bed unless the user said so."""
+    role = args.get("role") if args.get("role") in ROLES else "voice"
+    offset = float(args.get("offset_db") or 0.0)
+    anyway = bool(args.get("user_said_bed"))
+    what = ROLE_WORD[role] + (f" ({offset:+.0f} dB)" if offset else "")
     item_id, edit_id = (args.get("item_id") or "").strip(), (args.get("edit_id") or "").strip()
+
+    def only_speech(plan, skip) -> bool:
+        return role == "bed" and role_of(plan) != "bed" and not anyway and wb.only_voice is not None \
+            and wb.only_voice(turn.project_id, plan, skip)
+    refuse = ("It is the only speech in its span: as a Bed it would just be quieter. Ask the user: keep it as Voice, "
+              "or play it quietly under (Voice, offset_db -8). Make it a Bed only if they say so (user_said_bed).")
     if item_id:
-        if wb.relevel_take is None:
-            return ToolResult("Levels cannot be set in this setup.")
+        if wb.rerole_take is None:
+            return ToolResult("Roles cannot be set in this setup.")
         plan = _plan(wb, turn)
         item = plan.item(item_id)
         if item is None or not item.candidate_id:
@@ -946,20 +979,28 @@ def _set_level(wb: Workbench, turn: Turn, args: dict) -> ToolResult:
         candidate = wb.repo.get_candidate(turn.project_id, item.candidate_id)
         if candidate is None:
             return ToolResult(f"The take {item.candidate_id} is gone.")
-        out = wb.relevel_take(turn.project_id, candidate, level_db)
+        if candidate.plan.mix in ("replace", "remove"):
+            return ToolResult(f"{item_id} replaces a line of the original speech, which is always a Voice.")
+        if only_speech(candidate.plan, (candidate.candidate_id,)):
+            return ToolResult(refuse)
+        out = wb.rerole_take(turn.project_id, candidate, role, offset)
         wb.repo.update_item(turn.project_id, turn.plan_id, item.item_id, candidate_id=out.candidate_id)
-        return ToolResult(f"{item_id} is {word} now ({level_db:+.0f} dB), as take {out.candidate_id}; the same audio, not voiced again.",
-                          step=f"Set {item_id} to {word}")
+        return ToolResult(f"{item_id} is {what} now, as take {out.candidate_id}; the same audio, not voiced again.",
+                          step=f"Made {item_id} {what}")
     if edit_id:
-        if wb.relevel_edit is None:
-            return ToolResult("Levels cannot be set in this setup.")
+        if wb.rerole_edit is None:
+            return ToolResult("Roles cannot be set in this setup.")
+        edit = next((e for e in (wb.edits(turn.project_id) if wb.edits else ())
+                     if e.edit_id == edit_id and not getattr(e, "reverted", False)), None)
+        if edit is not None and only_speech(edit.plan, (edit.edit_id, getattr(edit, "candidate_id", ""))):
+            return ToolResult(refuse)
         if turn.autonomy == "ask" and not turn.commit_approved:
-            raise WaitingForUser(f"Mix {edit_id} as {word} ({level_db:+.0f} dB)?", ("Yes", "Not yet"), "Yes")
-        out = wb.relevel_edit(turn.project_id, edit_id, level_db)
+            raise WaitingForUser(f"Make {edit_id} {what}?", ("Yes", "Not yet"), "Yes")
+        out = wb.rerole_edit(turn.project_id, edit_id, role, offset)
         if out is None:
-            return ToolResult(f"There is no live edit {edit_id}; project_state lists what is in the video.")
-        return ToolResult(f"{edit_id} is {word} now ({level_db:+.0f} dB) as edit {out['edit_id']}; the video is rendered again when something ships next.",
-                          step=f"Set {edit_id} to {word}")
+            return ToolResult(f"There is no added line {edit_id} in the video (a line of the original speech is always a Voice); project_state lists them.")
+        return ToolResult(f"{edit_id} is {what} now as edit {out['edit_id']}; the video is rendered again when something ships next.",
+                          step=f"Made {edit_id} {what}")
     return ToolResult("Name an item_id (a proposal) or an edit_id (a line in the video).")
 
 
@@ -1092,7 +1133,8 @@ TOOLS: tuple[Tool, ...] = (
                   "mix": {"type": "string", "enum": ["layer", "concatenate"], "description": "When placing: layer = over the picture and sound (the usual), concatenate = the picture waits."},
                   "fit": {"type": "string", "enum": ["fit", "natural", "stretch"], "description": "How the take meets its slot: fit = pauses first, then tempo (the usual); natural = as spoken from the slot's start, running into the pause; stretch = tempo only."},
                   "picture": {"type": "string", "enum": ["default", "as shot", "may flex"], "description": "Whether the picture under the take may run a little slower or faster to fit it. default = as shot for a placed line, may flex for a replacement."},
-                  "level": {"type": "string", "enum": ["foreground", "background"], "description": "foreground = full level (words). background = mixed 12 dB under, for cheers, a crowd, ambience, anything that plays under other words so both are heard."},
+                  "role": {"type": "string", "enum": ["voice", "bed", "effect"], "description": "What the line is in the mix. voice = words meant to be understood (at the clip's speech level). bed = music, a crowd, cheers, ambience: under the words and ducking while they play. effect = a sound at the speech level."},
+                  "offset_db": {"type": "number", "description": "A fine-tune on top of the role's level, -24 to +6 dB; 0 for none. Speech wanted 'in the background' is a voice with a negative offset."},
                   "item_id": {"type": "string", "description": "An existing item to voice again; empty for a new one."}}), Guard.SPEND, _synthesize_take, strict=True),
     Tool("keep_take", "Put an earlier take back on an item (after voicing it again and preferring the first).",
          _schema({"item_id": {"type": "string"}, "candidate_id": {"type": "string"}}), Guard.FREE, _keep_take),
@@ -1122,10 +1164,12 @@ TOOLS: tuple[Tool, ...] = (
          _schema({"line": {"type": "integer"}, "to": {"type": "number", "description": "Where the words should start, in seconds."}}), Guard.COMMIT, _shift_line, strict=True),
     Tool("move_item", "Place a voiced item's take at another time, the same audio, nothing voiced again.",
          _schema({"item_id": {"type": "string"}, "start": {"type": "number", "description": "Seconds."}}), Guard.FREE, _move_item),
-    Tool("set_level", "Mix a line louder or softer without voicing it again: background (12 dB under the words) or foreground. A proposal by item_id, or a line in the video by edit_id.",
+    Tool("set_role", "What a line is in the mix, without voicing it again: voice (words, at the clip's speech level), bed (music, crowd, cheers, ambience: under the voices, ducking while they speak) or effect; offset_db fine-tunes it. A proposal by item_id, or an added line in the video by edit_id. Lines of the original speech are always voices.",
          _schema({"item_id": {"type": "string", "description": "A proposal; empty when naming an edit."},
-                  "edit_id": {"type": "string", "description": "A line in the video; empty when naming an item."},
-                  "level": {"type": "string", "enum": ["foreground", "background"]}}), Guard.COMMIT, _set_level),
+                  "edit_id": {"type": "string", "description": "An added line in the video; empty when naming an item."},
+                  "role": {"type": "string", "enum": ["voice", "bed", "effect"]},
+                  "offset_db": {"type": "number", "description": "-24 to +6 dB on top of the role's level; 0 for none."},
+                  "user_said_bed": {"type": "boolean", "description": "True only when the user asked for the only speech in its span to be a Bed."}}), Guard.COMMIT, _set_role),
     Tool("measure", "The full sound check of a take: its scores, what was done to fit it, how it was spoken.",
          _schema({"candidate_id": {"type": "string"}}), Guard.FREE, _measure),
     Tool("ship", "Make the voiced lines part of the video and render it. Only when the user asks for it, or said just do it and the work is done.",

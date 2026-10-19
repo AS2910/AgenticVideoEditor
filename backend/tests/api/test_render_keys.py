@@ -98,9 +98,9 @@ def test_an_identical_request_reuses_the_render_and_a_changed_edit_set_renders_a
     state = client.get("/videos/p1/renders").json()["final"]
     assert state["edit_hash"] == first["edit_hash"] and state["render"]["sha256"] == first["render"]["sha256"]
     assert line_correlation(first["render"]["sha256"], take["audio"]["sha256"]) > 0.9
-    # A releveled layer is a different edit set: a new hash, a new render.
+    # A layer in another role is a different edit set: a new hash, a new render.
     edit_id = client.get("/videos/p1").json()["edits"][0]["edit_id"]
-    client.post(f"/videos/p1/edits/{edit_id}/level", json={"level_db": -12})
+    client.post(f"/videos/p1/edits/{edit_id}/role", json={"role": "bed", "confirm": True})
     third = client.post("/videos/p1/export").json()
     assert third["edit_hash"] != first["edit_hash"] and third["cached"] is False and len(calls) == 2   # the level change itself does not render
 

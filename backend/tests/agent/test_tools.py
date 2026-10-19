@@ -148,28 +148,38 @@ def test_project_state_lists_what_is_in_the_video_and_undo_edit_takes_one_out(wo
     assert BY_NAME["undo_edit"].run(world.wb, world.turn(), {"edit_id": "e1"}).text.startswith("There is no live edit e1")
 
 
-def test_a_background_layer_is_voiced_under_the_words_and_levels_change_without_voicing_again(world):
-    """20g: `level: background` mixes a layer 12 dB under; set_level moves a proposal or a shipped line between the two."""
+def test_a_line_is_voiced_in_a_role_and_set_role_changes_it_without_voicing_again(world):
+    """2026-10-20: roles, not levels. A crowd is voiced as a Bed; set_role moves a proposal or a
+    shipped line between roles, with a fine-tune; the only speech in its span never silently becomes a Bed."""
     t = world.turn()
     out = BY_NAME["synthesize_take"].run(world.wb, t, {"text": "[shouting] Woohoo!", "voice_id": "kL06KYMvPY56NluIQ72m", "start": 0, "end": 7,
-                                                       "direction": None, "mix": "layer", "line": None, "item_id": None, "level": "background"})
-    assert world.made[-1]["level_db"] == -12.0 and out.step.startswith("Voiced")
+                                                       "direction": None, "mix": "layer", "line": None, "item_id": None, "role": "bed", "offset_db": 0})
+    assert world.made[-1]["role"] == "bed" and world.made[-1]["offset_db"] is None and out.step.startswith("Voiced")
     plain = BY_NAME["synthesize_take"].run(world.wb, t, {"text": "Welcome.", "voice_id": "kL06KYMvPY56NluIQ72m", "start": 0, "end": 2,
                                                          "direction": None, "mix": "layer", "line": None, "item_id": None})
-    assert world.made[-1]["level_db"] is None and plain.step.startswith("Voiced")
-    # A proposal: the item follows the releveled take.
-    out = BY_NAME["set_level"].run(world.wb, t, {"item_id": "i2", "edit_id": "", "level": "background"})
-    assert out.step == "Set i2 to background" and world.leveled[-1][1] == -12.0
+    assert world.made[-1]["role"] is None and plain.step.startswith("Voiced")
+    # A proposal: the item follows the re-roled take.
+    out = BY_NAME["set_role"].run(world.wb, t, {"item_id": "i2", "edit_id": "", "role": "bed", "offset_db": 0})
+    assert out.step == "Made i2 a Bed" and world.leveled[-1] == ("c2", "bed", 0.0)
     assert world.repo.get_plan("p1", "plan1").item("i2").candidate_id.endswith("L")
-    # A line in the video: gated under Check with me, then releveled by its edit.
+    # The only speech in its span: refused, with the question to ask.
+    world.alone["only_voice"] = True
+    refused = BY_NAME["set_role"].run(world.wb, t, {"item_id": "i2", "edit_id": "", "role": "bed", "offset_db": 0})
+    assert refused.text.startswith("It is the only speech in its span") and refused.step is None
+    said = BY_NAME["set_role"].run(world.wb, t, {"item_id": "i2", "edit_id": "", "role": "bed", "offset_db": 0, "user_said_bed": True})
+    assert said.step == "Made i2 a Bed"
+    quiet = BY_NAME["set_role"].run(world.wb, t, {"item_id": "i2", "edit_id": "", "role": "voice", "offset_db": -8})
+    assert quiet.step == "Made i2 a Voice (-8 dB)"
+    world.alone["only_voice"] = False
+    # A line in the video: gated under Check with me, then re-roled by its edit.
     world.live_edits.append(_live_edit("e9", "Woohoo!", start=0.0, end=7.0))
     with pytest.raises(WaitingForUser) as w:
-        BY_NAME["set_level"].run(world.wb, world.turn(autonomy="ask"), {"item_id": "", "edit_id": "e9", "level": "foreground"})
-    assert w.value.question == "Mix e9 as foreground (+0 dB)?"
-    out = BY_NAME["set_level"].run(world.wb, t, {"item_id": "", "edit_id": "e9", "level": "foreground"})
-    assert out.text.startswith("e9 is foreground now (+0 dB) as edit e9L")
-    assert BY_NAME["set_level"].run(world.wb, t, {"item_id": "", "edit_id": "nope", "level": "background"}).text.startswith("There is no live edit nope")
-    assert BY_NAME["set_level"].run(world.wb, t, {"item_id": "", "edit_id": "", "level": "background"}).text.startswith("Name an item_id")
+        BY_NAME["set_role"].run(world.wb, world.turn(autonomy="ask"), {"item_id": "", "edit_id": "e9", "role": "effect", "offset_db": 0})
+    assert w.value.question == "Make e9 an Effect?"
+    out = BY_NAME["set_role"].run(world.wb, t, {"item_id": "", "edit_id": "e9", "role": "voice", "offset_db": 0})
+    assert out.text.startswith("e9 is a Voice now as edit e9L")
+    assert BY_NAME["set_role"].run(world.wb, t, {"item_id": "", "edit_id": "nope", "role": "bed", "offset_db": 0}).text.startswith("There is no added line nope")
+    assert BY_NAME["set_role"].run(world.wb, t, {"item_id": "", "edit_id": "", "role": "bed", "offset_db": 0}).text.startswith("Name an item_id")
 
 
 def test_the_users_own_voices_are_listed_as_theirs_and_named_on_a_take(world):

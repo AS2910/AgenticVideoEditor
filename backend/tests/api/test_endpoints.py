@@ -866,6 +866,8 @@ def test_settings_say_what_voltage_may_do_and_round_trip(client, project):
         "ceiling_usd": main.ledger.ceiling_usd,
         # Volt: which steps still ask under Just do it, and the model (read-only).
         "ask_before": {"ship": False, "clone": False, "design": False}, "model": main.settings.agent_model,
+        # 2026-10-20: the mix, each in its range.
+        "mix": {"voice_default_lufs": -18.0, "bed_under_db": 15.0, "speech_clear_db": 10.0, "loudness": "social"},
     }
 
     resp = client.put("/videos/p1/settings", json={"turn_usd": 0.2, "effort": "xhigh"})
@@ -881,6 +883,8 @@ def test_settings_say_what_voltage_may_do_and_round_trip(client, project):
     assert client.put("/videos/p1/settings", json={"effort": "low"}).status_code == 422
     assert client.put("/videos/p1/settings", json={"turn_usd": "a lot"}).status_code == 422
     assert client.put("/videos/p1/settings", json={"autonomy": "yolo"}).status_code == 422
+    mix = client.put("/videos/p1/settings", json={"mix": {"bed_under_db": 30, "loudness": "general"}}).json()["settings"]["mix"]
+    assert mix["bed_under_db"] == 18.0 and mix["loudness"] == "general" and mix["voice_default_lufs"] == -18.0
 
 
 # ── plans: made by the agent's tools, shipped by approve ─────────────────────
@@ -1208,27 +1212,70 @@ def test_a_removal_cannot_be_moved(client, project):
     assert client.post(f"/videos/p1/edits/{shipped['approved'][0]['edit_id']}/move", json={"start": 1.0}).status_code == 422
 
 
-def test_a_line_can_be_mixed_as_background_before_and_after_it_is_added(client, project, monkeypatch):
-    """20g: /candidates/{id}/level relevels a proposal (the item follows); /edits/{id}/level relevels a line in the video (revert + re-approve)."""
+def test_a_line_takes_a_role_before_and_after_it_is_added(client, project, monkeypatch):
+    """2026-10-20: /candidates/{id}/role re-roles a proposal (the item follows); /edits/{id}/role a line in the video (revert + re-approve)."""
     from tests.agent.conftest import reply, text as said
-    result = turn(client, monkeypatch, [reply(take("c", text="Woohoo!", line=None, start=0.0, end=2.0, level="background"), stop="tool_use"),
+    result = turn(client, monkeypatch, [reply(take("c", text="Woohoo!", line=None, start=0.0, end=2.0, role="bed"), stop="tool_use"),
                                         reply(said("A cheer, under the words."))])
     item = result["plan"]["items"][0]
-    assert item["status"] == "ready" and item["candidate"]["plan"]["level_db"] == -12.0
+    assert item["status"] == "ready" and item["candidate"]["plan"]["role"] == "bed"
     plan_id = result["plan"]["plan_id"]
-    # Louder as a proposal: a new take, the item follows it.
-    up = client.post(f"/videos/p1/candidates/{item['candidate']['candidate_id']}/level", json={"level_db": 0}).json()
-    assert up["plan"]["level_db"] is None and up["candidate_id"] != item["candidate"]["candidate_id"]
+    # A Voice as a proposal, fine-tuned: a new take, the item follows it.
+    up = client.post(f"/videos/p1/candidates/{item['candidate']['candidate_id']}/role", json={"role": "voice", "offset_db": -3}).json()
+    assert (up["plan"]["role"], up["plan"]["offset_db"]) == ("voice", -3.0) and up["candidate_id"] != item["candidate"]["candidate_id"]
     assert client.get(f"/videos/p1/plans/{plan_id}").json()["items"][0]["candidate"]["candidate_id"] == up["candidate_id"]
-    # Added, then softer in the video: the old edit reverted, the same take approved at -12.
+    # Added, then a Bed in the video (the speaker talks under it, so no question): the old edit reverted, the same take approved.
     shipped = client.post(f"/videos/p1/plans/{plan_id}/approve", json={"items": ["i1"]}).json()
     edit_id = shipped["approved"][0]["edit_id"]
-    down = client.post(f"/videos/p1/edits/{edit_id}/level", json={"level_db": -12}).json()
-    assert down["reverted"] == edit_id and down["candidate"]["plan"]["level_db"] == -12.0
-    edits = client.get("/videos/p1").json()["edits"]
-    live = [x for x in edits if not x["reverted"]]
-    assert [x["edit_id"] for x in live] == [down["edit_id"]] and live[0]["level_db"] == -12.0
-    assert client.post("/videos/p1/edits/nope/level", json={"level_db": -12}).status_code == 404
+    down = client.post(f"/videos/p1/edits/{edit_id}/role", json={"role": "bed"}).json()
+    assert down["reverted"] == edit_id and down["candidate"]["plan"]["role"] == "bed"
+    live = [x for x in client.get("/videos/p1").json()["edits"] if not x["reverted"]]
+    assert [x["edit_id"] for x in live] == [down["edit_id"]] and live[0]["role"] == "bed"
+    assert client.post("/videos/p1/edits/nope/role", json={"role": "bed"}).status_code == 404
+    assert client.post(f"/videos/p1/edits/{down['edit_id']}/role", json={"role": "loud"}).status_code == 422
+
+
+def test_the_only_speech_in_its_span_is_not_silently_made_a_bed(client, project, monkeypatch):
+    import app.api.main as main
+    from app.domain.models import Transcript
+    speechless(monkeypatch, main, Transcript(words=()))
+    narration = generate(text="Welcome.", start=0.0, end=2.0, mix="layer")
+    asked = client.post(f"/videos/p1/candidates/{narration['candidate_id']}/role", json={"role": "bed"})
+    assert asked.status_code == 409
+    detail = asked.json()["detail"]
+    assert detail["question"].startswith("This is the only speech here. As a Bed it would just be quieter.")
+    assert [o["label"] for o in detail["options"]] == ["Keep it as Voice", "Play it quietly under", "Make it a Bed anyway"]
+    assert detail["options"][1]["offset_db"] == -8.0
+    said = client.post(f"/videos/p1/candidates/{narration['candidate_id']}/role", json={"role": "bed", "confirm": True}).json()
+    assert said["plan"]["role"] == "bed"
+
+
+def test_a_level_from_before_roles_reads_as_a_role():
+    from app.store import codec
+    base = {"selection": {"start": 0, "end": 1}, "new_text": "x", "voice_profile_id": "v", "mix": "layer"}
+    assert (codec.plan({**base, "level_db": -12.0}).role, codec.plan({**base, "level_db": -12.0}).offset_db) == ("bed", None)
+    assert codec.plan({**base, "level_db": 0}).role is None and codec.plan(base).role is None
+    assert (codec.plan({**base, "level_db": -4.0}).role, codec.plan({**base, "level_db": -4.0}).offset_db) == ("voice", -4.0)
+
+
+def test_the_render_lands_on_the_loudness_target_with_no_clipping(client, project, tmp_path):
+    import re
+    import subprocess
+    import app.api.main as main
+    take = generate(text="Woohoo!", start=0.0, end=2.0, mix="layer")
+    client.post("/videos/p1/edits", json={"candidate_id": take["candidate_id"]})
+    for loudness, target in (("social", -14.0), ("general", -16.0)):
+        client.put("/videos/p1/settings", json={"mix": {"loudness": loudness}})
+        out = client.post("/videos/p1/export").json()
+        assert out["mix"]["loudness_lufs"] == pytest.approx(target, abs=0.5) and out["mix"]["true_peak_db"] <= -1.0
+        path = main.artifacts.find("p1", out["render"]["sha256"])
+        err = subprocess.run([main.ffmpeg.FFMPEG, "-hide_banner", "-nostats", "-i", str(path), "-af", "ebur128=peak=true", "-f", "null", "-"],
+                             capture_output=True, text=True).stderr
+        summary = err[err.rindex("Summary:"):]
+        assert float(re.search(r"I:\s+(-?[\d.]+) LUFS", summary).group(1)) == pytest.approx(target, abs=0.5)
+        assert float(re.search(r"Peak:\s+(-?[\d.]+) dBFS", summary).group(1)) <= -0.5   # after AAC, still no clipping
+    line = next(ln for ln in out["mix"]["lines"])
+    assert line["role"] == "voice" and line["level_lufs"] is not None
 
 
 def test_a_line_taken_out_says_so_on_its_row_until_it_is_added_again(client, project):

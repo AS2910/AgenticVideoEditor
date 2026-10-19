@@ -83,13 +83,35 @@ class EditPlan:
     # 20c: how far the picture over this take may flex to fit it (1.0 = as
     # shot); None = the project's setting.
     flex_max: float | None = None
-    # 20g: how loud this line is mixed, in dB against the take as voiced.
-    # None or 0 = foreground; BACKGROUND_DB for a layer that plays under the
-    # words (cheers, a crowd, ambience), so two audios coexist and both are heard.
-    level_db: float | None = None
+    # 2026-10-20: what an added line is in the mix, which sets its level
+    # against the clip's own speech (app/render/mix.py): "voice" (words meant
+    # to be understood), "bed" (music, a crowd, cheers, ambience: under the
+    # words and ducking while they play) or "effect" (a sound at the speech's
+    # level). None = voice. A line of the original speech is always a voice.
+    role: str | None = None
+    # The user's fine-tune on top of the role's level, in dB (-24 to +6).
+    offset_db: float | None = None
 
 
-BACKGROUND_DB = -12.0
+ROLES = ("voice", "bed", "effect")
+OFFSET_RANGE = (-24.0, 6.0)
+
+
+def role_of(plan) -> str:
+    """The line's role in the mix; anything not set is a voice."""
+    role = getattr(plan, "role", None)
+    return role if role in ROLES else "voice"
+
+
+def role_from_level(level_db: float | None) -> tuple[str | None, float | None]:
+    """A level from before roles (20g's fixed -12 dB background) as a role:
+    -12 dB (anything under -9) was a background, so a bed; 0 or none a voice;
+    anything else a voice with that level as its fine-tune."""
+    if level_db is None or abs(level_db) < 0.05:
+        return None, None
+    if level_db <= -9.0:
+        return "bed", None
+    return "voice", round(max(OFFSET_RANGE[0], min(OFFSET_RANGE[1], level_db)), 1)
 
 
 @dataclass(frozen=True)

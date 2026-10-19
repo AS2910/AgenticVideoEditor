@@ -18,8 +18,9 @@ from typing import Literal, Sequence
 
 from app.domain.models import (
     Source, Selection, ContinuityReport, EditCandidate, ApprovedEdit, MediaArtifact,
-    Consent, EditPlan,
+    Consent, EditPlan, ROLES, OFFSET_RANGE, role_of,
 )
+from app.render import mix as mixmod
 from app.domain.plan import Plan, PlanItem
 from app.domain.transcript import (
     assign_speakers, room_after, snap_to_word_boundaries, speaker_of, statements_of,
@@ -192,7 +193,7 @@ def _candidate_dict(candidate: EditCandidate) -> dict:
             "voice_settings": candidate.plan.voice_settings,
             "model": candidate.plan.model,
             "flex_max": candidate.plan.flex_max,
-            "level_db": candidate.plan.level_db,
+            "role": role_of(candidate.plan), "offset_db": candidate.plan.offset_db,
         },
         "audio": _artifact_dict(candidate.audio),
         "frames": _artifact_dict(candidate.frames),
@@ -641,6 +642,8 @@ def _settings(project_id: str, owner: str | None = None) -> dict:
         "ceiling_usd": ledger.ceiling_usd,
         "ask_before": _ask_before(saved["ask_before"]) if saved.get("ask_before") is not None else defaults["ask_before"],
         "model": settings.agent_model,
+        # 2026-10-20: how lines are mixed and how loud the render lands.
+        "mix": {**MIX_DEFAULTS, **(saved.get("mix") or {})},
     }
     if saved.get("tutorial"):
         out["tutorial"] = True   # the guided run's sample video (its turns replay a recording)
@@ -1163,7 +1166,7 @@ def _edit_dict(e: ApprovedEdit, speakers: dict[str, str | None]) -> dict:
         "mix": e.plan.mix,
         "delivery": e.plan.delivery,
         "flex": e.plan.flex,
-        "level_db": e.plan.level_db,
+        "role": role_of(e.plan), "offset_db": e.plan.offset_db,
         "overridden": e.overridden,
         "reverted": e.reverted,
         "partner": e.partner,
@@ -1352,6 +1355,9 @@ class SettingsUpdate(BaseModel):
     effort: Literal["medium", "high", "xhigh"] | None = None
     # Volt: the steps that still ask under Just do it, any subset.
     ask_before: dict[str, bool] | None = None
+    # 2026-10-20: the mix. Any subset of voice_default_lufs, bed_under_db (12 to 18),
+    # speech_clear_db and loudness ("social" -14 LUFS or "general" -16).
+    mix: dict | None = None
 
 
 @app.get("/videos/{project_id}/settings")
@@ -1372,8 +1378,46 @@ def update_settings(
     _owned(project_id, owner)
     turn_usd = None if req.turn_usd is None else _clamp_turn_usd(req.turn_usd)
     ask_before = None if req.ask_before is None else _ask_before({**_settings(project_id, owner)["ask_before"], **req.ask_before})
-    repo.set_settings(project_id, autonomy=req.autonomy, turn_usd=turn_usd, effort=req.effort, ask_before=ask_before)
+    mix = None if req.mix is None else _clean_mix({**_settings(project_id, owner)["mix"], **req.mix})
+    repo.set_settings(project_id, autonomy=req.autonomy, turn_usd=turn_usd, effort=req.effort, ask_before=ask_before, mix=mix)
     return {"settings": _settings(project_id, owner)}
+
+
+MIX_DEFAULTS = {"voice_default_lufs": -18.0, "bed_under_db": 15.0, "speech_clear_db": 10.0, "loudness": "social"}
+LOUDNESS_TARGETS = {"social": -14.0, "general": -16.0}
+
+
+def _clean_mix(m: dict) -> dict:
+    """The mix settings, each in its range."""
+    return {
+        "voice_default_lufs": round(min(-10.0, max(-30.0, float(m.get("voice_default_lufs", -18.0)))), 1),
+        "bed_under_db": round(min(18.0, max(12.0, float(m.get("bed_under_db", 15.0)))), 1),
+        "speech_clear_db": round(min(20.0, max(3.0, float(m.get("speech_clear_db", 10.0)))), 1),
+        "loudness": m.get("loudness") if m.get("loudness") in LOUDNESS_TARGETS else "social",
+    }
+
+
+def _mix_settings(project_id: str) -> mixmod.MixSettings:
+    m = _clean_mix({**MIX_DEFAULTS, **(repo.settings(project_id).get("mix") or {})})
+    return mixmod.MixSettings(voice_default_lufs=m["voice_default_lufs"], bed_under_db=m["bed_under_db"],
+                              clear_db=m["speech_clear_db"], export_lufs=LOUDNESS_TARGETS[m["loudness"]])
+
+
+def _speech_spans(record: ProjectRecord, edits) -> list[tuple[float, float]]:
+    """Where the original's words are heard: every word but those a removal took out."""
+    removed = [e.plan.selection for e in edits if e.plan.mix == "remove"]
+    return [(w.start, w.end) for w in record.transcript.words
+            if not any(r.start <= w.start + 1e-3 and w.end <= r.end + 1e-3 for r in removed)]
+
+
+def _mix_report(mixed: dict, previewed) -> dict | None:
+    """The mix as the rows read it: per line by edit and by take (a proposal's
+    row knows its take), with the item a previewed proposal came from."""
+    if not mixed:
+        return None
+    items = {e.edit_id: item_id for item_id, e in previewed}
+    lines = [{**ln, "item_id": items.get(ln["edit_id"])} for ln in mixed.get("lines", [])]
+    return {**mixed, "lines": lines}
 
 
 class SpeakerUpdate(BaseModel):
@@ -2110,7 +2154,7 @@ def _generate(
     text: str, voice_id: str, fit: str | None, mix: str, report,
     delivery: str | None = None, voice_notes: tuple[str, ...] = (),
     voice_settings: dict | None = None, model: str | None = None, flex_max: float | None = None,
-    max_regenerations: int | None = None, level_db: float | None = None,
+    max_regenerations: int | None = None, role: str | None = None, offset_db: float | None = None,
 ) -> EditCandidate:
     """One line through generation and continuity, saved as a candidate.
     A take that does not fit its slot raises SpanMismatch to the caller
@@ -2127,7 +2171,7 @@ def _generate(
             try:
                 candidate = _generate(project_id, record, candidate_id, window, text, voice_id,
                                       None, "layer", report, delivery, voice_notes, voice_settings, model, flex_max,
-                                      max_regenerations, level_db)
+                                      max_regenerations, role, offset_db)
             except SpanMismatch:
                 candidate = None
             if candidate is not None:
@@ -2135,10 +2179,10 @@ def _generate(
             report(0.1, "No room to play over the picture; holding it instead")
         return _generate(project_id, record, candidate_id, selection, text, voice_id,
                          fit, "concatenate", report, delivery, voice_notes, voice_settings, model, flex_max,
-                         max_regenerations, level_db)
+                         max_regenerations, role, offset_db)
     plan = EditPlan(selection, text, voice_id, fit=fit, mix=mix, delivery=delivery,
                     voice_settings=voice_settings or None, model=model or None, flex_max=flex_max,
-                    level_db=level_db or None)
+                    role=role if role in ROLES and role != "voice" else None, offset_db=offset_db or None)
     cost = voice.cost_of(plan)
     if not budget.can_afford(project_id, cost):
         raise BudgetExceeded(cost, budget.remaining(project_id))
@@ -2380,10 +2424,11 @@ def edit_set_hash(record: ProjectRecord, edits: Sequence[ApprovedEdit], mode: st
     moved or releveled take keeps its candidate but changes the sound."""
     parts = [{
         "audio": e.audio.sha256, "start": round(e.plan.selection.start, 3), "end": round(e.plan.selection.end, 3),
-        "mix": e.plan.mix, "level": e.plan.level_db, "flex": getattr(e.plan, "flex", None), "fit": e.plan.fit,
+        "mix": e.plan.mix, "role": e.plan.role, "offset": e.plan.offset_db, "flex": getattr(e.plan, "flex", None), "fit": e.plan.fit,
         "text": e.plan.new_text,
     } for e in edits]
     body = json.dumps({"source": record.source.media.sha256, "mode": mode,
+                       "mix": asdict(_mix_settings(record.source.project_id)),
                        "edits": sorted(parts, key=lambda p: (p["start"], p["audio"]))}, sort_keys=True)
     return hashlib.sha256(body.encode()).hexdigest()[:16]
 
@@ -2395,7 +2440,8 @@ def _render_status(project_id: str, mode: str) -> dict:
     done = (repo.settings(project_id).get("renders") or {}).get(h)
     in_flight = _lock_for(f"{project_id}:{h}").locked()
     return {"edit_hash": h, "render": done["render"] if done else None, "at": done["at"] if done else None,
-            "rendering": in_flight and done is None, "edits": len(edits)}
+            "rendering": in_flight and done is None, "edits": len(edits),
+            "mix": (done.get("manifest") or {}).get("mix") if done else repo.settings(project_id).get("mix_report")}
 
 
 def _export(record: ProjectRecord, proposals: bool = False, request_id: int | None = None) -> dict:
@@ -2412,7 +2458,7 @@ def _export(record: ProjectRecord, proposals: bool = False, request_id: int | No
         if done is not None and artifacts.find(project_id, done["render"]["sha256"]) is not None:
             render_log.info("render reuse video=%s mode=%s hash=%s sha=%s request=%s", project_id, mode, h, done["render"]["sha256"][:12], request_id)
             if not proposals:
-                repo.set_settings(project_id, render={**done["record"], "at": done["at"]})
+                repo.set_settings(project_id, render={**done["record"], "at": done["at"]}, mix_report=done["manifest"].get("mix"))
             return {**done["manifest"], "edit_hash": h, "mode": mode, "cached": True}
         out = _render_now(record, edits, previewed, proposals)
         at = _now()
@@ -2421,7 +2467,7 @@ def _export(record: ProjectRecord, proposals: bool = False, request_id: int | No
         if not proposals:
             # The latest finished render, for the Export page's receipt; a preview
             # with proposals in it is not the video the user takes away.
-            repo.set_settings(project_id, render={**record_, "at": at, "edit_hash": h})
+            repo.set_settings(project_id, render={**record_, "at": at, "edit_hash": h}, mix_report=out.get("mix"))
         renders = dict(repo.settings(project_id).get("renders") or {})
         renders[h] = {"mode": mode, "at": at, "render": out["render"], "record": record_, "manifest": out}
         if len(renders) > RENDERS_KEPT:
@@ -2435,6 +2481,7 @@ def _export(record: ProjectRecord, proposals: bool = False, request_id: int | No
 
 def _render_now(record: ProjectRecord, edits: list[ApprovedEdit], previewed: list[tuple[str, ApprovedEdit]], proposals: bool) -> dict:
     project_id = record.source.project_id
+    mixed: dict = {}
     manifest = render(record.source, edits)
     pieces = _pieces(record, manifest, edits)
     # Synchronous: with nothing but copies the video is stream-copied and only
@@ -2445,6 +2492,8 @@ def _render_now(record: ProjectRecord, edits: list[ApprovedEdit], previewed: lis
             record.source, manifest.segments, Path(tmp) / "export.mp4",
             inserts=manifest.inserts, pieces=pieces, interpolator=settings.interpolator,
             stems=_stems(record, manifest), layers=manifest.layers,
+            mix_settings=_mix_settings(project_id), words=_speech_spans(record, edits),
+            lines=[(st.start, st.end) for st in statements_of(record.transcript)], on_mix=mixed.update,
         )
         rendered = artifacts.put_file(
             project_id, path, kind="video", container="mp4",
@@ -2453,6 +2502,10 @@ def _render_now(record: ProjectRecord, edits: list[ApprovedEdit], previewed: lis
     held_at = {p.start: p.out for p in pieces if p.kind == "hold"}
     return {
         "render": _artifact_dict(rendered),
+        # 2026-10-20: what the mix did with every added line (role, level, how
+        # far a bed sits under the voices, whether each voice is heard) and the
+        # loudness the whole render landed on.
+        "mix": _mix_report(mixed, previewed),
         # 20e: the proposals this render carries (none for the final).
         "proposals": [item_id for item_id, _ in previewed],
         # Phase 16: every stretch of the output and where it came from.
@@ -2460,7 +2513,7 @@ def _render_now(record: ProjectRecord, edits: list[ApprovedEdit], previewed: lis
         # The strip's view: a layered span counts as edited too (the manifest keeps layers apart so they mix).
         "segments": _segments_with_layers(manifest),
         "layers": [
-            {"edit_id": e.edit_id, "start": e.plan.selection.start, "end": e.plan.selection.end, "level_db": e.plan.level_db}
+            {"edit_id": e.edit_id, "start": e.plan.selection.start, "end": e.plan.selection.end, "role": role_of(e.plan), "offset_db": e.plan.offset_db}
             for e in manifest.layers
         ],
         "inserts": [
@@ -3169,35 +3222,68 @@ def _moved(project_id: str, record: ProjectRecord, source: EditCandidate, start:
     return moved
 
 
-class LevelRequest(BaseModel):
-    # dB against the take as voiced: 0 foreground, BACKGROUND_DB (-12) under the words.
-    level_db: float
+class RoleRequest(BaseModel):
+    # What the line is in the mix: "voice", "bed" or "effect".
+    role: Literal["voice", "bed", "effect"]
+    # The fine-tune on top of the role's level, in dB (-24 to +6).
+    offset_db: float = 0.0
+    # Make the only speech in its span a Bed anyway: the user was asked and said so.
+    confirm: bool = False
 
 
-def _releveled(project_id: str, source: EditCandidate, level_db: float) -> EditCandidate:
-    """The same take at another level (20g): nothing is voiced again."""
-    level = round(max(-40.0, min(6.0, level_db)), 1) or None
+ONLY_VOICE = ("This is the only speech here. As a Bed it would just be quieter. "
+              "Keep it as Voice, or play it quietly under (Voice at -8 dB)?")
+
+
+def _only_voice(project_id: str, record: ProjectRecord, plan: EditPlan, skip: set[str]) -> bool:
+    """Whether a line is the only speech in its span: none of the original's
+    words play there, and no other added line that is a voice."""
+    sel = plan.selection
+    edits = [e for e in repo.list_edits(project_id) if not e.reverted]
+    if any(a < sel.end and sel.start < b for a, b in _speech_spans(record, edits)):
+        return False
+    others = [e.plan for e in edits if e.edit_id not in skip and e.candidate_id not in skip
+              and e.plan.mix in ("layer", "over", "concatenate")]
+    others += [c.plan for c in (repo.get_candidate(project_id, i.candidate_id) for i in (repo.latest_plan(project_id).items if repo.latest_plan(project_id) else ())
+               if i.status == "ready" and i.candidate_id and i.candidate_id not in skip) if c is not None and c.plan.mix in ("layer", "over", "concatenate")]
+    return not any(role_of(p) == "voice" and p.selection.start < sel.end and sel.start < p.selection.end for p in others)
+
+
+def _check_role(project_id: str, record: ProjectRecord, plan: EditPlan, role: str, confirm: bool, skip: set[str]) -> None:
+    if role == "bed" and role_of(plan) != "bed" and not confirm and _only_voice(project_id, record, plan, skip):
+        raise HTTPException(status_code=409, detail={
+            "question": ONLY_VOICE,
+            "options": [{"label": "Keep it as Voice", "role": "voice", "offset_db": float(plan.offset_db or 0.0)},
+                        {"label": "Play it quietly under", "detail": "Voice at -8 dB", "role": "voice", "offset_db": -8.0},
+                        {"label": "Make it a Bed anyway", "role": "bed", "offset_db": 0.0, "confirm": True}],
+        })
+
+
+def _reroled(project_id: str, source: EditCandidate, role: str, offset_db: float) -> EditCandidate:
+    """The same take in another role, or fine-tuned (2026-10-20): nothing is voiced again."""
+    offset = round(max(OFFSET_RANGE[0], min(OFFSET_RANGE[1], float(offset_db or 0.0))), 1) or None
     candidate = EditCandidate(
         candidate_id=repo.next_candidate_id(project_id),
-        plan=replace(source.plan, level_db=level),
+        plan=replace(source.plan, role=None if role == "voice" else role, offset_db=offset),
         audio=source.audio, frames=source.frames, continuity=source.continuity,
-        fit_notes=tuple(n for n in source.fit_notes if not n.startswith("level")) + ((f"level {level:+.0f} dB",) if level else ()),
+        fit_notes=tuple(n for n in source.fit_notes if not n.startswith(("level", "role"))),
     )
     repo.save_candidate(project_id, candidate)
     return candidate
 
 
-@app.post("/videos/{project_id}/candidates/{candidate_id}/level")
-@app.post("/projects/{project_id}/candidates/{candidate_id}/level", deprecated=True)
-def level_candidate(project_id: str, candidate_id: str, req: LevelRequest, owner: str = Depends(current_owner)) -> dict:
-    """A proposed take mixed louder or softer (20g); the plan item follows it."""
-    _owned(project_id, owner)
+@app.post("/videos/{project_id}/candidates/{candidate_id}/role")
+def role_candidate(project_id: str, candidate_id: str, req: RoleRequest, owner: str = Depends(current_owner)) -> dict:
+    """A proposed take as a Voice, a Bed or an Effect, or fine-tuned; the plan item follows it.
+    The only speech in its span does not silently become a Bed: 409 with the question."""
+    record = _owned(project_id, owner)
     source = repo.get_candidate(project_id, candidate_id)
     if source is None:
         raise HTTPException(status_code=404, detail="candidate not found")
-    if source.plan.mix == "remove":
-        raise HTTPException(status_code=422, detail="A removal has no audio to level.")
-    out = _releveled(project_id, source, req.level_db)
+    if source.plan.mix in ("remove", "replace"):
+        raise HTTPException(status_code=422, detail="A line of the original speech is always a voice.")
+    _check_role(project_id, record, source.plan, req.role, req.confirm, {candidate_id})
+    out = _reroled(project_id, source, req.role, req.offset_db)
     plan = repo.latest_plan(project_id)
     if plan is not None:
         for item in plan.items:
@@ -3206,29 +3292,29 @@ def level_candidate(project_id: str, candidate_id: str, req: LevelRequest, owner
     return _candidate_dict(out)
 
 
-@app.post("/videos/{project_id}/edits/{edit_id}/level")
-@app.post("/projects/{project_id}/edits/{edit_id}/level", deprecated=True)
-def level_edit(project_id: str, edit_id: str, req: LevelRequest, owner: str = Depends(current_owner)) -> dict:
-    """An added line in the video mixed louder or softer (20g): the old edit
-    is reverted and the same take approved at the new level, in one step."""
-    _owned(project_id, owner)
-    out = _relevel_edit(project_id, edit_id, req.level_db)
-    if out is None:
+@app.post("/videos/{project_id}/edits/{edit_id}/role")
+def role_edit(project_id: str, edit_id: str, req: RoleRequest, owner: str = Depends(current_owner)) -> dict:
+    """An added line in the video as a Voice, a Bed or an Effect, or fine-tuned:
+    the old edit is reverted and the same take approved in its new role, in one step."""
+    record = _owned(project_id, owner)
+    edit = next((e for e in repo.list_edits(project_id) if e.edit_id == edit_id and not e.reverted), None)
+    if edit is None:
         raise HTTPException(status_code=404, detail="edit not found")
+    _check_role(project_id, record, edit.plan, req.role, req.confirm, {edit_id, edit.candidate_id})
+    out = _rerole_edit(project_id, edit_id, req.role, req.offset_db)
+    if out is None:
+        raise HTTPException(status_code=422, detail="A line of the original speech is always a voice.")
     return out
 
 
-def _relevel_edit(project_id: str, edit_id: str, level_db: float) -> dict | None:
+def _rerole_edit(project_id: str, edit_id: str, role: str, offset_db: float) -> dict | None:
     edit = next((e for e in repo.list_edits(project_id) if e.edit_id == edit_id and not e.reverted), None)
-    if edit is None or edit.plan.mix == "remove":
+    if edit is None or edit.plan.mix in ("remove", "replace") or edit.partner:
         return None
     source = repo.get_candidate(project_id, edit.candidate_id) or EditCandidate(
         edit.candidate_id, edit.plan, edit.audio, edit.frames, ContinuityReport(None, None, None, None, True, (), ()),
     )
-    if edit.partner:
-        # A shifted spoken line is speech moved in time, not a layer to mix under the words.
-        raise HTTPException(status_code=422, detail="A moved line keeps its own level.")
-    out = _releveled(project_id, source, level_db)
+    out = _reroled(project_id, source, role, offset_db)
     repo.revert_edit(project_id, edit_id)
     new_id = _approve_candidate(project_id, out, overridden=edit.overridden)
     return {"edit_id": new_id, "reverted": edit_id, "candidate": _candidate_dict(out)}
@@ -3357,9 +3443,10 @@ def _workbench() -> Workbench:
         edits=lambda pid: [e for e in repo.list_edits(pid) if not e.reverted],
         render_state=lambda pid: _render_status(pid, "final"),
         revert=lambda pid, edit_id: _revert(pid, edit_id, by="Voltage"),
-        relevel_take=lambda pid, candidate, level_db: _releveled(pid, candidate, level_db),
+        rerole_take=lambda pid, candidate, role, offset_db: _reroled(pid, candidate, role, offset_db),
         mine=_my_voices,
-        relevel_edit=lambda pid, edit_id, level_db: _relevel_edit(pid, edit_id, level_db),
+        rerole_edit=lambda pid, edit_id, role, offset_db: _rerole_edit(pid, edit_id, role, offset_db),
+        only_voice=lambda pid, plan, skip: _only_voice(pid, repo.get(pid), plan, set(skip)),
         default_voice=lambda: getattr(voice, "default_voice", "speaker-1"),
         hear=_hear_levels, sight_text=_sight_text, now=_now,
         design=voice.design_voice if can_design else None, design_cost=design_cost,

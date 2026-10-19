@@ -52,7 +52,7 @@ class FakeCandidate:
     def __init__(self, candidate_id, selection, new_text, passed=True, warnings=()):
         self.candidate_id = candidate_id
         self.plan = SimpleNamespace(selection=selection, new_text=new_text, fit=None, voice_profile_id="v", delivery=None,
-                                    voice_settings=None, model=None)
+                                    voice_settings=None, model=None, mix="layer", role=None, offset_db=None)
         self.continuity = SimpleNamespace(passed=passed, warnings=tuple(warnings), prosody=None, audio_integration=None,
                                           voice_match=None, naturalness=None, measured=())
         self.fit_notes = ("nearest of 3 takes",)
@@ -75,10 +75,10 @@ def world():
     shipped: list[list[str]] = []
 
     def generate(project_id, rec, candidate_id, selection, text_, voice_id, fit, mix, report, delivery=None, voice_notes=(),
-                 voice_settings=None, model=None, flex_max=None, max_regenerations=None, level_db=None):
+                 voice_settings=None, model=None, flex_max=None, max_regenerations=None, role=None, offset_db=None):
         made.append({"candidate_id": candidate_id, "selection": selection, "text": text_, "voice_id": voice_id, "mix": mix,
                      "delivery": delivery, "voice_settings": voice_settings, "model": model, "fit": fit, "flex_max": flex_max,
-                     "level_db": level_db,
+                     "role": role, "offset_db": offset_db,
                      "voice_notes": tuple(voice_notes), "max_regenerations": max_regenerations})
         ledger.record(project_id, "elevenlabs", "take", len(text_), "characters", 0.03)
         report(0.5, "Synthesizing the new line")
@@ -145,18 +145,19 @@ def world():
 
     live_edits: list = []
     undone: list[str] = []
-    leveled: list[tuple[str, float]] = []
+    leveled: list[tuple[str, str, float]] = []
+    alone: dict = {"only_voice": False}
 
-    def relevel_take(project_id, candidate, level_db):
-        leveled.append((candidate.candidate_id, level_db))
+    def rerole_take(project_id, candidate, role, offset_db):
+        leveled.append((candidate.candidate_id, role, offset_db))
         c = FakeCandidate(candidate.candidate_id + "L", candidate.plan.selection, candidate.plan.new_text)
         repo_candidates[c.candidate_id] = c
         return c
 
-    def relevel_edit(project_id, edit_id, level_db):
+    def rerole_edit(project_id, edit_id, role, offset_db):
         if not any(e.edit_id == edit_id and not e.reverted for e in live_edits):
             return None
-        leveled.append((edit_id, level_db))
+        leveled.append((edit_id, role, offset_db))
         return {"edit_id": edit_id + "L", "reverted": edit_id, "candidate": {}}
 
     def revert(project_id, edit_id):
@@ -196,7 +197,7 @@ def world():
         move_take=move_take,
         edits=lambda project_id: [e for e in live_edits if not e.reverted],
         revert=revert,
-        relevel_take=relevel_take, relevel_edit=relevel_edit,
+        rerole_take=rerole_take, rerole_edit=rerole_edit, only_voice=lambda pid, plan, skip: alone["only_voice"],
     )
     # The repo's candidate store is what `measure` reads; the fake pipeline fills it.
     repo.get_candidate = lambda project_id, candidate_id: repo_candidates.get(candidate_id)
@@ -208,4 +209,4 @@ def world():
     return SimpleNamespace(repo=repo, ledger=ledger, record=record, wb=wb, turn=turn, made=made, shipped=shipped,
                            designed=designed, saved=saved, added=added, deleted=deleted, audio=audio,
                            lines=lines, speakers=speakers, cloned=cloned, removed=removed, shifted=shifted, moved=moved,
-                           live_edits=live_edits, undone=undone, leveled=leveled)
+                           live_edits=live_edits, undone=undone, leveled=leveled, alone=alone)
