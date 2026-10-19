@@ -87,11 +87,46 @@ describe('Home (projects as folders)', () => {
     expect(onSample).toHaveBeenCalledOnce()
   })
 
-  it('makes a new project from the side', async () => {
+  it('makes a new project from the side: label, input and buttons stacked; the new one leads the list, selected', async () => {
+    const made = { project_id: 'f3', name: 'Diwali 2026 regional variants', brief: '', ceiling_usd: null, spent_usd: 0, created_at: '2026-10-19T08:00:00Z', video_count: 0 }
+    const onNewFolder = vi.fn(async () => made)
+    const { rerender } = render(<ProjectsPage me={ME} projects={VIDEOS} folders={FOLDERS} onOpen={vi.fn()} onUpload={vi.fn()} onSample={vi.fn()} onDelete={vi.fn()} onNewFolder={onNewFolder} uploading={false} />)
+    await userEvent.click(screen.getByRole('button', { name: '+ New project' }))
+    const form = screen.getByRole('form', { name: 'New project' })
+    const input = within(form).getByRole('textbox', { name: 'New project' })
+    expect(input).toHaveFocus()
+    expect(input).toHaveAttribute('placeholder', 'Project name')
+    expect(input.className).toMatch(/w-full/)
+    expect(input.className).toMatch(/min-w-0/)
+    const create = within(form).getByRole('button', { name: 'Create' })
+    expect(create).toBeDisabled()
+    await userEvent.type(input, 'Diwali 2026 regional variants')
+    expect(create).toBeEnabled()
+    await userEvent.keyboard('{Enter}')
+    await waitFor(() => expect(onNewFolder).toHaveBeenCalledWith('Diwali 2026 regional variants'))
+    expect(screen.queryByRole('form', { name: 'New project' })).toBeNull()
+    // The caller's list now has it (at the end, as the server orders it); the page puts it first and selected.
+    rerender(<ProjectsPage me={ME} projects={VIDEOS} folders={[...FOLDERS, made]} onOpen={vi.fn()} onUpload={vi.fn()} onSample={vi.fn()} onDelete={vi.fn()} onNewFolder={onNewFolder} uploading={false} />)
+    const links = within(screen.getByTestId('projects-side')).getAllByRole('link')
+    expect(links[0]).toHaveTextContent('Diwali 2026 regional variants')
+    expect(links[0]).toHaveAttribute('aria-current', 'true')
+    expect(links[0]).toHaveAttribute('title', 'Diwali 2026 regional variants')
+    expect(links[1]).not.toHaveAttribute('aria-current')
+  })
+
+  it('cancels the new project on Escape or Cancel, and never creates an empty one', async () => {
     const { onNewFolder } = setup()
     await userEvent.click(screen.getByRole('button', { name: '+ New project' }))
-    await userEvent.type(screen.getByRole('textbox', { name: 'Name the project' }), 'Brand interviews{Enter}')
-    await waitFor(() => expect(onNewFolder).toHaveBeenCalledWith('Brand interviews'))
+    await userEvent.keyboard('{Enter}')
+    expect(onNewFolder).not.toHaveBeenCalled()
+    await userEvent.type(screen.getByRole('textbox', { name: 'New project' }), 'Half a name{Escape}')
+    expect(screen.queryByRole('form', { name: 'New project' })).toBeNull()
+    await userEvent.click(screen.getByRole('button', { name: '+ New project' }))
+    expect(screen.getByRole('textbox', { name: 'New project' })).toHaveValue('')
+    await userEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+    expect(screen.queryByRole('form', { name: 'New project' })).toBeNull()
+    expect(screen.getByRole('button', { name: '+ New project' })).toBeInTheDocument()
+    expect(onNewFolder).not.toHaveBeenCalled()
   })
 
   it('says how the upload is going and shows the rejection reason', () => {

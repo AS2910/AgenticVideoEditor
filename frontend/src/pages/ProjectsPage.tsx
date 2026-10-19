@@ -24,6 +24,8 @@ interface ProjectsPageProps {
   onSample: () => void
   onDelete: (id: string) => void
   onNewFolder?: (name: string) => Promise<ProjectFolder | void> | void
+  /** A project the Move dialog made itself: the caller only refreshes its lists. */
+  onFolderMade?: (folder: ProjectFolder) => void
   /** A video moved (or made standalone): the caller refreshes its lists. */
   onMoved?: (videoId: string, projectId: string | null) => void
   /** Above the hero: the offer of the guided run to someone new. */
@@ -75,13 +77,19 @@ type Tab = 'all' | 'in' | 'none'
  *  "Add to" picker, and the recent videos as cards with a project chip.
  *  Each card's ••• has Move to project… and Delete; deleting waits with
  *  Undo before anything goes. */
-export function ProjectsPage({ me, projects, folders = [], onOpen, onUpload, onSample, onDelete, onNewFolder, onMoved, banner, uploading, progress = null, error, undoMs = 5000 }: ProjectsPageProps) {
+export function ProjectsPage({ me, projects, folders = [], onOpen, onUpload, onSample, onDelete, onNewFolder, onFolderMade, onMoved, banner, uploading, progress = null, error, undoMs = 5000 }: ProjectsPageProps) {
   const input = useRef<HTMLInputElement>(null)
   const [over, setOver] = useState(false)
   const [dest, setDest] = useState<string>('none')
   const [tab, setTab] = useState<Tab>('all')
   const [adding, setAdding] = useState(false)
   const [newName, setNewName] = useState('')
+  const [making, setMaking] = useState(false)
+  const [makeError, setMakeError] = useState<string | null>(null)
+  // The project just made: first in the list, and shown as selected.
+  const [selected, setSelected] = useState<string | null>(null)
+  const nameInput = useRef<HTMLInputElement>(null)
+  useEffect(() => { if (adding) nameInput.current?.focus() }, [adding])
   const [menu, setMenu] = useState<string | null>(null)
   const [moving, setMoving] = useState<ProjectSummary | null>(null)
   const [toast, setToast] = useState<string | null>(null)
@@ -121,13 +129,24 @@ export function ProjectsPage({ me, projects, folders = [], onOpen, onUpload, onS
     timer.current = null
     setDeleting(null)
   }
+  const cancelFolder = () => { setAdding(false); setNewName(''); setMakeError(null) }
   const makeFolder = async () => {
     const n = newName.trim()
-    if (!n || !onNewFolder) return
-    await onNewFolder(n)
-    setAdding(false)
-    setNewName('')
+    if (!n || !onNewFolder || making) return
+    setMaking(true)
+    setMakeError(null)
+    try {
+      const made = await onNewFolder(n)
+      if (made) setSelected(made.project_id)
+      cancelFolder()
+    } catch (e) {
+      setMakeError(e instanceof Error ? e.message : 'Could not make the project.')
+    } finally {
+      setMaking(false)
+    }
   }
+  // The new project leads the list until the page is left; the rest keep the server's order.
+  const listed = selected ? [...folders.filter((f) => f.project_id === selected), ...folders.filter((f) => f.project_id !== selected)] : folders
   const inProjects = projects.filter((p) => p.project_id)
   const standalone = projects.filter((p) => !p.project_id)
   const shown = tab === 'all' ? projects : tab === 'in' ? inProjects : standalone
@@ -136,21 +155,40 @@ export function ProjectsPage({ me, projects, folders = [], onOpen, onUpload, onS
   return (
     <Shell active="projects" me={me} right={<MonthSpend />} mainClassName="flex flex-wrap">
       {/* The projects, down the side. */}
-      <aside className="flex min-w-0 flex-[0_1_260px] flex-col gap-1 border-line px-4 py-6 sm:border-r-[1.5px]" aria-label="Projects" data-testid="projects-side">
+      <aside className="flex min-w-0 basis-full flex-col gap-1 border-b-[1.5px] border-line px-4 py-6 sm:flex-[0_1_260px] sm:border-r-[1.5px] sm:border-b-0" aria-label="Projects" data-testid="projects-side">
         {onNewFolder && !adding && <button type="button" className="btn volt shine mb-3.5 w-full" onClick={() => setAdding(true)}>+ New project</button>}
         {adding && (
-          <form className="rise mb-3.5 flex items-center gap-2.5 rounded-lg border-[1.5px] border-foreground bg-card px-2.5 py-2" onSubmit={(e) => { e.preventDefault(); void makeFolder() }}>
-            <Folder />
-            <input className="min-w-0 flex-1 rounded-sm bg-transparent text-base outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50" aria-label="Name the project" placeholder="Name the project…" value={newName} autoFocus onChange={(e) => setNewName(e.target.value)} onKeyDown={(e) => { if (e.key === 'Escape') { setAdding(false); setNewName('') } }} />
-            <button type="submit" className="btn sm" disabled={!newName.trim()}>Make it</button>
+          <form
+            className="rise mb-3.5 flex w-full min-w-0 flex-col gap-2.5 rounded-lg border-[1.5px] border-foreground bg-card p-3"
+            aria-label="New project"
+            data-testid="new-project"
+            onSubmit={(e) => { e.preventDefault(); void makeFolder() }}
+            onKeyDown={(e) => { if (e.key === 'Escape') { e.preventDefault(); cancelFolder() } }}
+          >
+            <label htmlFor="new-project-name" className="flex items-center gap-2.5 font-semibold"><Folder />New project</label>
+            <input
+              ref={nameInput}
+              id="new-project-name"
+              className="box-border h-10 w-full min-w-0 rounded-md border-[1.5px] border-line2 bg-background px-2.5 text-base text-foreground outline-none placeholder:text-faint focus-visible:border-ink focus-visible:ring-[3px] focus-visible:ring-volt"
+              placeholder="Project name"
+              value={newName}
+              maxLength={80}
+              disabled={making}
+              onChange={(e) => setNewName(e.target.value)}
+            />
+            {makeError && <span className="text-[13px] text-destructive" role="alert">{makeError}</span>}
+            <div className="flex flex-wrap items-center gap-2">
+              <button type="submit" className="btn volt sm" disabled={!newName.trim() || making} aria-busy={making || undefined}>{making ? 'Creating…' : 'Create'}</button>
+              <button type="button" className="act" onClick={cancelFolder}>Cancel</button>
+            </div>
           </form>
         )}
         <span className="tag px-2.5 py-1.5 text-faint">Projects</span>
         {folders.length === 0 && <span className="px-2.5 py-1.5 text-[13px] text-muted-foreground">A project holds videos that share a brief, voices and a ceiling.</span>}
-        {folders.map((f) => (
-          <a key={f.project_id} href={hrefFor({ page: 'folder', projectId: f.project_id })} className="flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-foreground no-underline hover:bg-sunk">
-            <Folder filled={countIn(f.project_id) > 0} />
-            <span className="flex-1 truncate font-medium">{f.name}</span>
+        {listed.map((f) => (
+          <a key={f.project_id} href={hrefFor({ page: 'folder', projectId: f.project_id })} aria-current={f.project_id === selected ? 'true' : undefined} title={f.name} className="flex min-w-0 items-center gap-2.5 rounded-lg px-2.5 py-2 text-foreground no-underline hover:bg-sunk aria-[current=true]:bg-sunk aria-[current=true]:font-semibold">
+            <Folder filled={countIn(f.project_id) > 0 || f.project_id === selected} />
+            <span className="min-w-0 flex-1 truncate font-medium">{f.name}</span>
             <span className="tnum text-xs text-faint">{f.video_count ?? countIn(f.project_id)}</span>
           </a>
         ))}
@@ -310,7 +348,7 @@ export function ProjectsPage({ me, projects, folders = [], onOpen, onUpload, onS
           video={moving}
           folders={folders}
           onClose={() => setMoving(null)}
-          onFolderMade={(f) => { void onNewFolder?.(f.name) }}
+          onFolderMade={(f) => onFolderMade?.(f)}
           onMoved={(projectId, projectName) => {
             const v = moving
             setMoving(null)

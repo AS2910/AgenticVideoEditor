@@ -945,6 +945,7 @@ function Studio() {
           onSample={() => void loadSample()}
           onDelete={(id) => void removeProject(id)}
           onNewFolder={async (name) => { const made = await createFolder(name); await refreshProjects(); return made }}
+          onFolderMade={() => void refreshProjects()}
           onMoved={() => void refreshProjects()}
           banner={onboarding.loaded && !onboarding.onboarding.tour.finished && !onboarding.onboarding.tour.skipped ? (
             <div className="rise flex flex-wrap items-center gap-4 rounded-xl bg-pane px-5 py-4 text-ptext shadow-volt" data-testid="tour-offer">
