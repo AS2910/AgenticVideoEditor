@@ -321,6 +321,11 @@ export const readProject = (id: string, again = false) =>
 export const postTurn = (id: string, text: string, approve = false) =>
   post<Job>(`/videos/${id}/turns`, approve ? { text, approve } : { text })
 
+/** The way through a question the turn's cap caused: this turn's cap rises by
+ *  exactly what the step needs and the same turn carries on. Refused (409),
+ *  naming the scope, past the video's or the project's ceiling. */
+export const postAllowMore = (id: string) => post<Job>(`/videos/${id}/turns/allow-more`, {})
+
 /** The thread after a message (by seq): what Voltage said and did. */
 export const getMessages = (id: string, after = 0) => get<ChatMessage[]>(`/videos/${id}/messages?after=${after}`)
 

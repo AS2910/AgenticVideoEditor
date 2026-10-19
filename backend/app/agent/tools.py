@@ -1032,10 +1032,20 @@ def _undo_edit(wb: Workbench, turn: Turn, args: dict) -> ToolResult:
 
 
 def _ask(wb: Workbench, turn: Turn, args: dict) -> ToolResult:
-    options = tuple(o.strip() for o in (args.get("options") or []) if o and o.strip())[:3]
-    if len(options) < 2:
+    # Each option is {label, detail} (a short label for the button, the full
+    # sentence beneath it; "" for none), or a plain string.
+    pairs: list[tuple[str, str | None]] = []
+    for o in args.get("options") or []:
+        label, detail = (o.get("label"), o.get("detail")) if isinstance(o, dict) else (o, None)
+        label, detail = (label or "").strip(), (detail or "").strip()
+        if label:
+            pairs.append((label, detail if detail and detail != label else None))
+    pairs = pairs[:3]
+    if len(pairs) < 2:
         return ToolResult("Give two or three options to choose from.")
-    raise WaitingForUser(args["question"].strip(), options, (args.get("guess") or "").strip() or None, gate=False)
+    options = tuple(label for label, _ in pairs)
+    raise WaitingForUser(args["question"].strip(), options, (args.get("guess") or "").strip() or None, gate=False,
+                         details=tuple(detail for _, detail in pairs))
 
 
 # ── the registry ──────────────────────────────────────────────────────────────
@@ -1135,9 +1145,13 @@ TOOLS: tuple[Tool, ...] = (
          Guard.COMMIT, _ship, strict=True),
     Tool("undo_edit", "Take a shipped edit back out of the video (project_state lists them). A redo of a line that is in the video already: voice the new take, ship it, then undo the old edit, so lines do not pile up.",
          _schema({"edit_id": {"type": "string"}}), Guard.COMMIT, _undo_edit),
-    Tool("ask", "Stop and ask the user one thing, with two or three options and your own guess. The turn ends; their answer starts the next.",
-         _schema({"question": {"type": "string"}, "options": {"type": "array", "items": {"type": "string"}},
-                  "guess": {"type": "string", "description": "The option you would take; empty for none."}}), Guard.FREE, _ask, strict=True),
+    Tool("ask", "Stop and ask the user one thing, with two or three options and your own guess. The turn ends; their answer starts the next. "
+         "Keep each option's label short (about 40 characters, it is the button); put a longer sentence in its detail.",
+         _schema({"question": {"type": "string"},
+                  "options": {"type": "array", "items": _schema({
+                      "label": {"type": "string", "description": "The button: a few words, about 40 characters at most."},
+                      "detail": {"type": "string", "description": "The full sentence shown under the label; empty for none."}})},
+                  "guess": {"type": "string", "description": "The label of the option you would take; empty for none."}}), Guard.FREE, _ask, strict=True),
 
 )
 

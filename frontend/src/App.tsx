@@ -37,7 +37,7 @@ import { go, hrefFor, useRoute } from './lib/route'
 import { cn } from '@/lib/utils'
 import { clock } from './transcript/format'
 import {
-  createProject, confirmPlace, exportProject, artifactUrl, pollJob, PollCancelled, ApiError, listVideos, listFolders, createFolder, startTutorial, getProject, deleteProject, getUsage, getSpend, listVoices, updateSpeaker, detectSpeakers, revertEdit, updateSettings, removeLine, dismissItem, setEditLevel, setCandidateLevel, BACKGROUND_DB, moveCandidate, moveEdit, getArrangement, putArrangement, undoArrangement, getPlan, approvePlan, readProject, grantConsent, getMe, postTurn, getMessages,
+  createProject, confirmPlace, exportProject, artifactUrl, pollJob, PollCancelled, ApiError, listVideos, listFolders, createFolder, startTutorial, getProject, deleteProject, getUsage, getSpend, listVoices, updateSpeaker, detectSpeakers, revertEdit, updateSettings, removeLine, dismissItem, setEditLevel, setCandidateLevel, BACKGROUND_DB, moveCandidate, moveEdit, getArrangement, putArrangement, undoArrangement, getPlan, approvePlan, readProject, grantConsent, getMe, postTurn, postAllowMore, getMessages,
 } from './api'
 import type { ArrangementView, Me, PlanApproval } from './api'
 import type { Arrangement, Placed } from './transcript/arrange'
@@ -578,9 +578,9 @@ function Studio() {
 
   /** A goal for the whole video, an answer to Voltage's question, or a change
    *  to the plan: every one is a turn (20c; the form planner is gone). */
-  const clarify = (answer?: string) => {
+  const clarify = (answer?: string, allowMore = false) => {
     if (!plan?.question) return
-    return takeTurn(answer ?? plan.question.guess ?? plan.question.options[0])
+    return takeTurn(answer ?? plan.question.guess ?? plan.question.options[0], false, allowMore && !!plan.question.turn_cap)
   }
 
   /** The box is for the whole video: a goal, a change to the plan, an answer.
@@ -592,23 +592,24 @@ function Studio() {
    *  paid step needs the project's consent (UX-3): asked before the turn
    *  under Just do it, and when the server asks for it (403) under Check
    *  with me — then the same turn goes again, once. */
-  const takeTurn = async (text: string, again = false) => {
+  const takeTurn = async (text: string, again = false, allowMore = false) => {
     if (!projectId) return
-    if (autonomy === 'draft' && !consentGiven.current) return withConsent(null, () => void takeTurn(text, again))
+    if (autonomy === 'draft' && !consentGiven.current) return withConsent(null, () => void takeTurn(text, again, allowMore))
     if (!again) say({ role: 'user', text })
     setError(null)
     setShippedNote(null)
     setTurnBusy(true)
     setTurnStep('Thinking…')
     try {
-      const job = await postTurn(projectId, text)
+      // "Go ahead, allow $0.04 more": this turn's cap rises by exactly that and the same turn carries on.
+      const job = allowMore ? await postAllowMore(projectId) : await postTurn(projectId, text)
       tour.notify('turn-started')
       await followTurn(job.job_id)
     } catch (e) {
       setTurnBusy(false)
       setTurnStep(null)
       if (e instanceof ApiError && e.status === 403 && !consentGiven.current && !again) {
-        return withConsent(null, () => void takeTurn(text, true))
+        return withConsent(null, () => void takeTurn(text, true, allowMore))
       }
       tell(e instanceof ApiError ? e.message : "I couldn't take that in. Try saying it another way.")
     }
@@ -1346,7 +1347,7 @@ function Studio() {
           </main>
   
           {/* Voltage: black in both themes. */}
-          <aside className="pane flex min-h-0 w-[400px] shrink-0 flex-col max-[960px]:min-h-[60dvh] max-[960px]:w-auto" aria-label="Voltage" aria-busy={turnBusy || undefined}>
+          <aside className="pane flex min-h-0 w-[400px] min-w-0 max-w-full shrink-0 flex-col overflow-x-hidden max-[960px]:h-[85dvh] max-[960px]:min-h-[60dvh] max-[960px]:w-auto" aria-label="Voltage" aria-busy={turnBusy || undefined}>
             <VoltagePane
               messages={messages}
               projectId={project.video_id}
@@ -1358,7 +1359,8 @@ function Studio() {
               cap={`Turn cap $${mayDo.turn_usd.toFixed(2)}`}
               spend={spend}
               question={clarifying ? plan?.question ?? null : null}
-              onAnswer={(o) => void clarify(o)}
+              onAnswer={(o, allowMore) => void clarify(o, allowMore)}
+              turnCap={mayDo.turn_usd}
               onSubmit={submitComposer}
               inputRef={composerRef}
               seed={seed}
