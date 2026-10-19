@@ -3,6 +3,7 @@ import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { VoltagePane } from './VoltagePane'
 import type { ChatMessage } from '../types'
+import { unlabelledMoney } from '../lib/money'
 
 const THREAD: ChatMessage[] = [
   { role: 'user', text: 'Make it 30% off', seq: 1 },
@@ -89,5 +90,36 @@ describe('VoltagePane: the composer and the gate', () => {
     expect(within(card).getByRole('link', { name: 'Read more' })).toHaveAttribute('href', '#help/saving-and-reusing-your-voices')
     await userEvent.click(within(card).getByRole('button', { name: '⚡ Show me' }))
     expect(onShowMe).toHaveBeenCalledWith('save-voice')
+  })
+})
+
+describe('VoltagePane: spend scopes in the trace', () => {
+  const SPEND = {
+    turn: { spent_usd: 0.03, ceiling_usd: 0.5, label: 'This turn' },
+    video: { spent_usd: 0.61, ceiling_usd: 2, label: 'This video' },
+    project: { spent_usd: 0.61, ceiling_usd: 10, label: 'Project Ashish Testing' },
+    month: { spent_usd: 3.1, ceiling_usd: 100, label: 'October' },
+    binding: 'video' as const,
+  }
+
+  it('closes the latest trace with the turn, the video and the project, each named', () => {
+    render(<VoltagePane messages={THREAD} state="ready" cap="Turn cap $0.50" spend={SPEND} onSubmit={() => {}} />)
+    expect(screen.getByTestId('trace-spend')).toHaveTextContent('This turn $0.03 · video $0.61 · project $0.61')
+    expect(unlabelledMoney(document.body)).toEqual([])
+  })
+
+  it('leaves the project out for a standalone video', () => {
+    const { project: _p, ...alone } = SPEND
+    render(<VoltagePane messages={THREAD} state="ready" spend={{ ...alone, binding: 'video' }} onSubmit={() => {}} />)
+    expect(screen.getByTestId('trace-spend')).toHaveTextContent(/^This turn \$0\.03 · video \$0\.61$/)
+  })
+
+  it('labels every figure in a gate card and a folded turn', () => {
+    const thread: ChatMessage[] = [...THREAD, { role: 'user', text: 'And the second line', seq: 5 },
+      { role: 'assistant', text: 'Thinking', kind: 'step', cost: 0.02, seq: 6, data: { tool: 'thinking', t: 2 } }]
+    render(<VoltagePane messages={thread} state="needs your go" need cap="Turn cap $0.50" onSubmit={() => {}}
+      question={{ text: 'Voice it for about $0.04?', options: ['Go', 'Not yet'], gate: true, cost_usd: 0.04, left_usd: 0.46 } as never} />)
+    expect(screen.getByTestId('earlier-turn')).toHaveTextContent('$0.03')
+    expect(unlabelledMoney(screen.getByRole('log'))).toEqual([])
   })
 })

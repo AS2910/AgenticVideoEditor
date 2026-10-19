@@ -45,3 +45,34 @@ def test_calls_since_counts_one_vendors_rows_from_a_moment():
     ledger.record("p2", "elevenlabs", "speech", 7, "characters", 0.001)
     assert ledger.calls_since("p1", "elevenlabs", mark) == 2
     assert ledger.calls_since("p1", "elevenlabs", "2000-01-01T00:00:00.000Z") == 3
+
+
+def test_each_refusal_names_its_scope_and_the_way_on():
+    from datetime import datetime, timezone
+    from app.usage import ProjectCeilingReached, UserCeilingReached
+    assert str(SpendCeilingReached(2.1, 2.0, "ad.mp4")) == (
+        "ad.mp4 has reached its $2 video ceiling. Raise it in Settings, or start a variant.")
+    assert str(ProjectCeilingReached(10.2, 10.0, "Ashish Testing")) == (
+        "Ashish Testing has reached its $10 project ceiling. Raise it on the project page, or move the video out.")
+    october = datetime(2026, 10, 19, tzinfo=timezone.utc)
+    assert str(UserCeilingReached(100.5, 100.0, now=october)) == (
+        "You have reached your $100 ceiling for October. It resets on 1 November.")
+    assert str(UserCeilingReached(1, 2.5, now=datetime(2026, 12, 3, tzinfo=timezone.utc))).endswith(
+        "$2.50 ceiling for December. It resets on 1 January.")
+
+
+def test_a_row_carries_the_turn_running_when_it_was_charged():
+    from app.usage import current_turn
+    ledger = Ledger()
+    ledger.record("p1", "openai", "transcription", 1, "minutes", 0.01)
+    token = current_turn.set("j7")
+    try:
+        ledger.record("p1", "anthropic", "agent", 10, "tokens", 0.02)
+        ledger.record_project_level("f1", "elevenlabs", "voice design", 5, "characters", 0.03)
+    finally:
+        current_turn.reset(token)
+    with ledger.db.tx() as c:
+        rows = [tuple(r) for r in c.execute("SELECT project_id, folder_id, turn_id FROM usage ORDER BY id")]
+    assert rows == [("p1", None, None), ("p1", None, "j7"), ("", "f1", "j7")]
+    assert ledger.spent_usd_by_turn("p1", "j7") == pytest.approx(0.02)
+    assert ledger.spent_usd("p1") == pytest.approx(0.03)        # the project-level row is no video's

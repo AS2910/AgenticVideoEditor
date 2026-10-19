@@ -330,7 +330,20 @@ export interface Question {
 
 /** Phase 20: what a turn of Voltage leaves behind — the plan as it stands,
  *  its closing line, and the one thing it asks. */
-export interface TurnResult { type: 'turn'; plan: Plan | null; reply: string; question: PlanQuestion | null }
+export interface TurnResult { type: 'turn'; plan: Plan | null; reply: string; question: PlanQuestion | null; spend?: SpendSummary }
+
+/** Spend scopes (2026-10-19), narrowest first: a turn, a video, a project, the month. */
+export type SpendScopeKey = 'turn' | 'video' | 'project' | 'month'
+/** One scope: what it spent, its ceiling (null: none set) and its label ("This video", "Project Diwali", "October"). */
+export interface SpendScope { spent_usd: number; ceiling_usd: number | null; label: string }
+/** `GET /spend`: every scope for the context, and the one with the least headroom. */
+export interface SpendSummary {
+  turn?: SpendScope
+  video?: SpendScope
+  project?: SpendScope
+  month: SpendScope
+  binding: SpendScopeKey | null
+}
 
 export type JobStatus = 'queued' | 'running' | 'succeeded' | 'failed'
 
@@ -369,7 +382,24 @@ export interface UsageReport {
   by_video: { video_id: string; filename: string; turns: number; voice_characters: number; spent_usd: number; cap_usd: number }[]
   /** Folders (2026-10-19). */
   by_project: { project_id: string; name: string; videos: number; turns: number; spent_usd: number; ceiling_usd: number | null }[]
+  /** Spend scopes: projects with their videos nested (spent while in that project), "No project" last. */
+  groups?: UsageGroup[]
+  /** The chosen scope's totals. */
+  totals?: UsageTotals
 }
+
+export interface UsageGroup {
+  /** null for "No project". */
+  project_id: string | null
+  name: string
+  ceiling_usd: number | null
+  /** Costs that belong to no single video; null for "No project". */
+  project_level_usd: number | null
+  spent_usd: number
+  /** `here`: the video is in this project now (false: it spent here, then moved). */
+  videos: { video_id: string; filename: string; spent_usd: number; here: boolean }[]
+}
+export interface UsageTotals { scope: string; label: string; spent_usd: number; ceiling_usd: number | null; by_vendor: { vendor: string; label: string; usd: number }[] }
 
 /** A voice made inside one of your projects (designed, added from the library, or a speaker's clone); deleted with the project unless kept. */
 export interface MadeVoice { voice_id: string; name: string; kind: 'designed' | 'library' | 'cloned'; video_id: string; filename: string; description?: string | null; seconds?: number | null; kept?: boolean }

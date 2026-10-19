@@ -649,7 +649,7 @@ def test_no_new_paid_work_once_the_ceiling_is_reached(client, project, monkeypat
 
     result = send(client, "make it 30% off")
 
-    assert "spending limit" in result["reply"]
+    assert "ad.mp4 has reached its $2 video ceiling. Raise it in Settings, or start a variant." == result["reply"]
     assert result["plan"]["status"] == "proposed"
     assert scripted.calls == []          # Claude was never called
 
@@ -1573,7 +1573,7 @@ def test_a_person_has_a_ceiling_across_their_projects(client, sample_video, monk
     resp = client.post("/videos/p1/turns", json={"text": "make it 30% off"}, headers=HEADERS)
     assert resp.status_code == 202
     job = await_job(client, resp.json()["job_id"])
-    assert job["status"] == "succeeded" and "across your videos" in job["result"]["reply"]
+    assert job["status"] == "succeeded" and "You have reached your $0.05 ceiling for " in job["result"]["reply"] and job["result"]["ceiling"] == "month"
     assert scripted.calls == []                               # Claude was never called
     assert client.post("/videos/p1/reading", json={}, headers=HEADERS).status_code == 402
 

@@ -1,14 +1,16 @@
 import { useEffect, useRef, useState } from 'react'
 import type { DragEvent } from 'react'
-import type { ProjectDetailFolder, ProjectFolder, ProjectSummary, MyVoice, MadeVoice } from '../types'
+import type { ProjectDetailFolder, ProjectFolder, ProjectSummary, MyVoice, MadeVoice, SpendSummary } from '../types'
 import type { Me } from '../api'
-import { ApiError, answerSuggestion, deleteFolder, deleteFolderFile, frameUrl, getFolder, listMadeVoices, listVoices, shareVoice, unshareVoice, updateFolder, uploadFolderFile } from '../api'
+import { ApiError, answerSuggestion, deleteFolder, deleteFolderFile, frameUrl, getFolder, getSpend, listMadeVoices, listVoices, shareVoice, unshareVoice, updateFolder, uploadFolderFile } from '../api'
 import { go, hrefFor } from '../lib/route'
 import { clock } from '../transcript/format'
 import { cn } from '@/lib/utils'
 import { Shell } from './Shell'
 import { formatDate } from '../lib/dates'
 import { usd, usdShort } from './fmt'
+import { ceilingWord } from '../lib/money'
+import { FillBar } from './bits'
 
 interface ProjectPageProps {
   me: Me | null
@@ -44,6 +46,8 @@ export function ProjectPage({ me, projectId, onUpload, uploading, error, onDelet
   const [name, setName] = useState('')
   const [deleting, setDeleting] = useState(false)
   const [ceilingDraft, setCeilingDraft] = useState<string | null>(null)
+  // Spend scopes: this project's spend and the month's, for the header.
+  const [spend, setSpend] = useState<SpendSummary | null>(null)
   const [adding, setAdding] = useState(false)
   const [mine, setMine] = useState<(MyVoice | MadeVoice)[]>([])
   const [busy, setBusy] = useState<string | null>(null)
@@ -64,6 +68,13 @@ export function ProjectPage({ me, projectId, onUpload, uploading, error, onDelet
     }
   }
   useEffect(() => { void load() /* eslint-disable-line react-hooks/exhaustive-deps */ }, [projectId])
+  // Spend scopes: read again when the project or its ceiling changes.
+  const ceilingNow = detail?.project.ceiling_usd ?? null
+  useEffect(() => {
+    let live = true
+    getSpend({ project: projectId }).then((s) => { if (live) setSpend(s) }).catch(() => { /* the header line stays quiet */ })
+    return () => { live = false }
+  }, [projectId, ceilingNow])
   useEffect(() => () => { if (saveTimer.current) clearTimeout(saveTimer.current) }, [])
   useEffect(() => {
     if (!menu) return
@@ -179,8 +190,9 @@ export function ProjectPage({ me, projectId, onUpload, uploading, error, onDelet
   }
   const voiceKind: Record<string, string> = { designed: 'Designed', cloned: 'Cloned', recorded: 'Recorded', library: 'Library' }
   const ceiling = project.ceiling_usd
-  const share_ = ceiling && ceiling > 0 ? Math.min(1, project.spent_usd / ceiling) : 0
-  const tagLine = [`${detail.videos.length} ${detail.videos.length === 1 ? 'video' : 'videos'}`, `${detail.voices.length} shared ${detail.voices.length === 1 ? 'voice' : 'voices'}`, `${detail.files.length} ${detail.files.length === 1 ? 'file' : 'files'}`, ceiling ? `${usd(project.spent_usd)} of the ${usdShort(ceiling)} project ceiling` : `${usd(project.spent_usd)} spent · no project ceiling`].join(' · ')
+  const tagLine = [`${detail.videos.length} ${detail.videos.length === 1 ? 'video' : 'videos'}`, `${detail.voices.length} shared ${detail.voices.length === 1 ? 'voice' : 'voices'}`, `${detail.files.length} ${detail.files.length === 1 ? 'file' : 'files'}`].join(' · ')
+  const ours = spend?.project ?? null
+  const month = spend?.month ?? null
 
   return (
     <Shell active="projects" me={me} mainClassName="mx-auto flex w-full max-w-[1200px] flex-col gap-7 px-4 pt-9 pb-20 sm:px-6">
@@ -198,6 +210,12 @@ export function ProjectPage({ me, projectId, onUpload, uploading, error, onDelet
               <h1 className="disp rise m-0 truncate text-[clamp(36px,5vw,56px)] leading-none font-bold">{project.name}</h1>
             )}
             <span className="tag text-muted-foreground">{tagLine}</span>
+            {/* Spend scopes: this project's spend, then the month's, each named. */}
+            <span className="tnum text-sm" data-money-scope="project" data-testid="project-spend">
+              {usd(ours?.spent_usd ?? project.spent_usd)} spent in this project
+              {month && <span data-money-scope="month"> · {usd(month.spent_usd)}{month.ceiling_usd != null ? ` of your ${ceilingWord(month.ceiling_usd)}` : ''} in {month.label}</span>}
+            </span>
+            {ceiling ? <FillBar share={(ours?.spent_usd ?? project.spent_usd) / ceiling} height={8} strong className="max-w-[320px]" label={`Project ${project.name}: ${usd(ours?.spent_usd ?? project.spent_usd)} of its ${ceilingWord(ceiling)} project ceiling`} /> : null}
           </div>
           <div className="relative" data-menu>
             <button type="button" className="btn" aria-label="More for this project" aria-haspopup="menu" aria-expanded={menu} onClick={() => setMenu((m) => !m)}>•••</button>
@@ -327,7 +345,7 @@ export function ProjectPage({ me, projectId, onUpload, uploading, error, onDelet
                 <input className="tnum h-8 w-20 rounded-md border-[1.5px] border-line2 bg-background px-2 text-right outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50" type="number" step="0.1" min="0.1" defaultValue={(project.settings?.turn_usd ?? 0.5).toFixed(2)} aria-label="Money per turn" onBlur={(e) => { const n = Number(e.target.value); if (n > 0 && n !== project.settings?.turn_usd) void setDefault({ turn_usd: n }) }} />
               </label>
             </div>
-            <div className="flex items-center gap-2.5 border-t border-line py-2">
+            <div className="flex items-center gap-2.5 border-t border-line py-2" data-money-scope="project">
               <span className="flex-1">Project ceiling</span>
               {ceilingDraft === null ? (
                 <button type="button" className="act tnum font-semibold" onClick={() => setCeilingDraft(ceiling ? String(ceiling) : '')} aria-label="Change the project ceiling">{ceiling ? `${usd(project.spent_usd)} / ${usdShort(ceiling)}` : 'None · set one'}</button>
@@ -340,7 +358,6 @@ export function ProjectPage({ me, projectId, onUpload, uploading, error, onDelet
                 </form>
               )}
             </div>
-            {ceiling ? <div className="h-2 overflow-hidden rounded-[3px] border-[1.5px] border-foreground" role="meter" aria-label="Spent against the project ceiling" aria-valuemin={0} aria-valuemax={ceiling} aria-valuenow={project.spent_usd}><span className="fillin block h-full bg-volt" style={{ width: `${share_ * 100}%` }} /></div> : null}
             <span className="text-[13px] text-muted-foreground">Each video keeps its own settings; these are what a new one starts with. The lowest ceiling wins.</span>
           </div>
         </aside>

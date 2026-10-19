@@ -122,8 +122,8 @@ The stories were agreed on 2026-10-03 (`docs/superpowers/plans/2026-10-03-ux-pla
 
 ### 4.7 Money, limits and safety
 
-- **Spend is recorded** per paid call (Whisper minutes, ElevenLabs characters, Claude tokens with cache reads and writes) with a USD estimate; shown per step, per plan, per project (`GET /usage`).
-- **Ceilings**: per project in dollars (`AVE_PROJECT_BUDGET_USD`), per project in voice characters (`AVE_VOICE_BUDGET_CHARS`), per user across projects when signed in (`AVE_USER_BUDGET_USD`), per turn (the sheet's cap, default `AVE_AGENT_TURN_USD`). New paid work stops at a ceiling; the agent is told what a step costs and what is left and asks rather than guessing when a step would go over.
+- **Spend is recorded** per paid call (Whisper minutes, ElevenLabs characters, Claude tokens with cache reads and writes) with a USD estimate; each row keeps the video, the project it was in at the time and the turn (`turn_id`), and a project-level charge has no video. Every figure the app shows names its scope (this turn, this video, the project, the month); `GET /spend` is the one summary, and the agent reads the same numbers in `project_state`.
+- **Ceilings**: per project in dollars (`AVE_PROJECT_BUDGET_USD`), per project in voice characters (`AVE_VOICE_BUDGET_CHARS`), per project (folder) when one is set, per person per calendar month (`AVE_USER_BUDGET_USD`, signed in or not), per turn (the sheet's cap, default `AVE_AGENT_TURN_USD`). New paid work stops at a ceiling, and the refusal names the scope and what to do (raise it, start a variant, move the video out, or wait for the month to reset); the agent is told what a step costs and what is left and asks rather than guessing when a step would go over.
 - **Consent** before the first paid step; withdrawing it is deleting the project.
 - **No invented speech** is built on (ingest screening); on-screen text is reported, never followed; the user's quoted words are kept verbatim; a name or label is never read aloud.
 - **Dry run** (`AVE_DRY_RUN`) and mocks: with no vendor keys the voice is a tone and the frames a flat colour, real files of the right length; no test calls a vendor.
@@ -190,7 +190,8 @@ Hash routes, one page each: `#projects` (upload, the sample, recent projects wit
 | `POST /projects/{id}/consent` | Record consent. |
 | `GET /projects/{id}/usage` · `GET/PUT /projects/{id}/settings` | Spend against ceilings; autonomy, turn cap, effort, `ask_before` (which commits still wait under Just do it), the model (read-only). |
 | `GET/PUT /me/settings` | Your defaults for new projects (autonomy, turn cap, effort, `ask_before`). |
-| `GET /usage?period=week\|month\|all` | What you spent across projects: total, by vendor, by project, turns and takes in the period, the ceilings. |
+| `GET /usage?period=week\|month\|all&scope=all\|none\|f<n>\|v:p<n>` | What you spent across projects: total, by vendor, by project, turns and takes in the period, the ceilings; `groups` (projects with their videos nested, each video's spend while it was in that project, a project-level share, standalone videos under "No project") and the chosen scope's `totals`. |
+| `GET /spend?video=\|project=` | Spend scopes: `{turn?, video, project?, month, binding}`, each `{spent_usd, ceiling_usd, label}`; `binding` is the scope with the least headroom (the turn cap excluded; a tie goes to the narrower scope). |
 | `GET /projects/{id}/receipt` | The export page's receipt: turns, takes, spend, each change with a note, drafts left, the last final render. |
 | `DELETE /account` | Everything of yours: projects, media, voices, settings, spend records. |
 | `GET/PUT /projects/{id}/speakers[/{label}]` · `POST …/speakers/detect` | Speakers, names, hand-picked voices. |

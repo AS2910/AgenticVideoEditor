@@ -2,9 +2,10 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { ProjectsPage } from './ProjectsPage'
+import { unlabelledMoney } from '../lib/money'
 
 const ok = (body: unknown, status = 200) => ({ ok: status < 400, status, json: async () => body, text: async () => JSON.stringify(body) }) as Response
-const REPORT = { period: 'month', spent_usd: 2.06, ceiling_usd: 10, project_cap_usd: 2, turns: 16, takes: 14, voices_made: 3, avg_turn_usd: 0.14, by_vendor: [], by_video: [], by_project: [] }
+const SPEND = { month: { spent_usd: 2.06, ceiling_usd: 10, label: 'October' }, binding: 'month' }
 const ME = { mode: 'google' as const, user: { sub: '1', email: 'ashish@example.com', name: 'Ashish Sinha', picture: null } }
 const OFF = { mode: 'off' as const, user: null }
 const FOLDERS = [
@@ -19,7 +20,7 @@ const VIDEOS = [
 /** Routes by URL: the page asks for this month's spend; the move dialog moves a video. */
 function routeFetch(moves: { url: string; body: unknown }[] = [], conflict = false) {
   return vi.fn(async (url: string, init?: RequestInit) => {
-    if (url.includes('/usage?period=month')) return ok(REPORT)
+    if (url.endsWith('/api/spend')) return ok(SPEND)
     if (url.endsWith('/videos/p2') && init?.method === 'PATCH') {
       const body = JSON.parse(String(init.body))
       moves.push({ url, body })
@@ -44,7 +45,9 @@ describe('Home (projects as folders)', () => {
     expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('What should your next video say?')
     expect(screen.getByRole('link', { name: 'Home' })).toHaveAttribute('aria-current', 'page')
     expect(screen.getByRole('link', { name: 'Account' })).toHaveTextContent('A')
-    expect(await screen.findByTestId('month-spend')).toHaveTextContent(/\$2\.06of \$10 · [A-Z][a-z]{2}/)
+    // Spend scopes: the monthly scope, named.
+    expect(await screen.findByTestId('month-spend')).toHaveTextContent('October: $2.06 of $10')
+    expect(unlabelledMoney(document.body)).toEqual([])
     const side = screen.getByTestId('projects-side')
     expect(within(side).getByRole('link', { name: /Diwali 2026/ })).toHaveAttribute('href', '#p/f1')
     expect(within(side).getByRole('link', { name: /Goa tourism/ })).toBeInTheDocument()

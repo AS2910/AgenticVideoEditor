@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { ProjectPage } from './ProjectPage'
+import { unlabelledMoney } from '../lib/money'
 
 const ok = (body: unknown, status = 200) => ({ ok: status < 400, status, json: async () => body, text: async () => JSON.stringify(body) }) as Response
 const ME = { mode: 'off' as const, user: null }
@@ -27,6 +28,7 @@ function routeFetch(calls: { url: string; method: string; body?: unknown }[] = [
     const body = typeof init?.body === 'string' ? JSON.parse(init.body) : undefined
     if (method !== 'GET') calls.push({ url, method, body })
     if (url.endsWith('/projects/f1') && method === 'GET') return ok(detail)
+    if (url.endsWith('/spend?project=f1')) return ok({ project: { spent_usd: detail.project.spent_usd, ceiling_usd: detail.project.ceiling_usd, label: `Project ${detail.project.name}` }, month: { spent_usd: 3.1, ceiling_usd: 100, label: 'October' }, binding: 'project' })
     if (url.endsWith('/projects/f1') && method === 'PATCH') { detail = { ...detail, project: { ...detail.project, ...body } }; return ok(detail.project) }
     if (url.endsWith('/projects/f1/suggestions/s1/accept')) { detail = { ...detail, project: { ...detail.project, brief: detail.project.brief + ' The offer ends 2 November.' }, suggestions: [] }; return ok(detail) }
     if (url.includes('/projects/f1?videos=') && method === 'DELETE') return ({ ok: true, status: 204, json: async () => null, text: async () => '' }) as Response
@@ -43,7 +45,9 @@ describe('ProjectPage (a folder of videos)', () => {
     vi.stubGlobal('fetch', routeFetch())
     render(<ProjectPage me={ME} projectId="f1" onUpload={() => {}} />)
     expect(await screen.findByRole('heading', { level: 1 })).toHaveTextContent('Diwali 2026')
-    expect(screen.getByText('2 videos · 3 shared voices · 1 file · $1.94 of the $10 project ceiling')).toBeInTheDocument()
+    expect(screen.getByText('2 videos · 3 shared voices · 1 file')).toBeInTheDocument()
+    // Spend scopes: the project's spend, then the month's, each named.
+    await waitFor(() => expect(screen.getByTestId('project-spend')).toHaveTextContent('$1.94 spent in this project · $3.10 of your $100 in October'))
     const cards = screen.getAllByRole('link', { name: /\.mp4/ })
     expect(cards.map((c) => c.getAttribute('href'))).toEqual(['#v/p2', '#v/p3'])
     expect(screen.getAllByText('2 proposed').length).toBeGreaterThan(0)
@@ -52,8 +56,22 @@ describe('ProjectPage (a folder of videos)', () => {
     expect(screen.getByRole('textbox', { name: 'Project brief' })).toHaveValue('Brand is Bhaji Cam, said BAH-jee cam.')
     expect(within(screen.getByTestId('shared-voices')).getByText('Diwali Narrator')).toBeInTheDocument()
     expect(within(screen.getByTestId('files')).getByText('brand-guide.pdf')).toBeInTheDocument()
-    expect(screen.getByRole('meter', { name: 'Spent against the project ceiling' })).toHaveAttribute('aria-valuenow', '1.94')
+    expect(screen.getByRole('meter', { name: 'Project Diwali 2026: $1.94 of its $10 project ceiling' })).toHaveAttribute('aria-valuenow', '19')
+    expect(unlabelledMoney(document.body)).toEqual([])
     expect(screen.getByText(/planned as a batch turn/)).toBeInTheDocument()
+  })
+
+  it('shows the project ceiling meter only when one is set', async () => {
+    const plain = { ...DETAIL, project: { ...DETAIL.project, ceiling_usd: null, spent_usd: 0.58 } }
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.endsWith('/projects/f1')) return ok(plain)
+      if (url.endsWith('/spend?project=f1')) return ok({ project: { spent_usd: 0.58, ceiling_usd: null, label: 'Project Diwali 2026' }, month: { spent_usd: 0.58, ceiling_usd: 100, label: 'October' }, binding: 'month' })
+      throw new Error(`unexpected ${url}`)
+    }))
+    render(<ProjectPage me={ME} projectId="f1" onUpload={() => {}} />)
+    await waitFor(() => expect(screen.getByTestId('project-spend')).toHaveTextContent('$0.58 spent in this project · $0.58 of your $100 in October'))
+    expect(screen.queryByRole('meter', { name: /project ceiling/ })).toBeNull()
+    expect(unlabelledMoney(document.body)).toEqual([])
   })
 
   it('accepts Voltage’s suggestion into the brief, and saves an edited brief after typing stops', async () => {

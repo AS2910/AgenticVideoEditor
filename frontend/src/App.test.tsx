@@ -5,6 +5,7 @@ import App from './App'
 import type { ArrangementView } from './api'
 import { EMPTY as ARRANGE_EMPTY, overrun as arrangeOverrun, place as arrangePlace, specs as arrangeSpecs } from './transcript/arrange'
 import type { Arrangement } from './transcript/arrange'
+import { unlabelledMoney } from './lib/money'
 
 const SOURCE_MEDIA = {
   kind: 'video', sha256: 's'.repeat(64), duration: 2.3, container: 'mp4',
@@ -97,6 +98,15 @@ const TEXTBOX = { name: /describe a change/i }
 const saidTo = (calls: { url: string; body: unknown }[]) =>
   calls.filter((c) => c.url.endsWith('/turns')).map((c) => (c.body as { text: string }).text)
 
+/** Spend scopes: the summary for p1, in a project whose ceiling binds first. */
+const SPEND = {
+  turn: { spent_usd: 0.03, ceiling_usd: 0.5, label: 'This turn' },
+  video: { spent_usd: 0.61, ceiling_usd: 10, label: 'This video' },
+  project: { spent_usd: 0.61, ceiling_usd: 1, label: 'Project Ashish Testing' },
+  month: { spent_usd: 3.1, ceiling_usd: 100, label: 'October' },
+  binding: 'project',
+}
+
 /** Routes by URL. `job` overrides the polled job so a test can exercise the failure path. */
 /** The test clip's one line, arranged as the server would answer. */
 function arrangedView(arrangement: Partial<Arrangement> = {}): ArrangementView {
@@ -134,6 +144,7 @@ function routeFetch(job: unknown = JOB_TURN) {
         { voice_id: 'nPczCjzI2devNBz1zQrb', name: 'Brian', description: '', gender: 'male', accent: 'american', age: null },
       ] })
     }
+    if (url.endsWith('/spend?video=p1')) return ok(SPEND)
     if (url.endsWith('/usage')) {
       return ok({ spent_usd: 0.01, ceiling_usd: 2, voice_characters: 7,
         voice_characters_ceiling: 2000, lines: [] })
@@ -238,7 +249,7 @@ describe('App full journey', () => {
     // Everything goes through one door.
     expect(calls[0]).toMatchObject({ url: '/api/videos/p1/turns', body: { text: 'change "20% off" to "30% off"' } })
     await waitFor(() => expect(screen.getAllByTestId('take').some((t) => t.textContent?.includes("Brian's voice"))).toBe(true))
-    await waitFor(() => expect(screen.getByTestId('spend')).toHaveTextContent('$0.01'))
+    await waitFor(() => expect(screen.getByTestId('spend')).toHaveTextContent('Project $0.61 of $1'))
     // 20e: the proposal is a row in the one transcript, with its verbs; nothing to ship in the panel.
     expect(screen.queryByRole('group', { name: 'Ready to ship' })).toBeNull()
     expect(screen.getByText('Proposed')).toBeInTheDocument()
@@ -1521,5 +1532,45 @@ describe('App: Edited, As shot, With proposals (2026-10-19)', () => {
     fireEvent.loadedMetadata(video())
     expect(video().currentTime).toBeCloseTo(1.4, 2)
     expect(screen.getByRole('button', { name: 'Pause' })).toBeInTheDocument()   // still playing
+  })
+})
+
+describe('Spend scopes in the editor header', () => {
+  it('shows the binding scope with its label, and opens the scopes stacked with the binding one marked', async () => {
+    vi.stubGlobal('fetch', routeFetch())
+    const user = userEvent.setup()
+    render(<App />)
+    await reachGoal(user)
+    const pill = await screen.findByTestId('spend')
+    await waitFor(() => expect(pill).toHaveTextContent('Project $0.61 of $1'))
+    expect(pill).toHaveAttribute('data-money-scope', 'project')
+    await user.click(pill)
+    const pop = screen.getByRole('dialog', { name: 'Spend' })
+    expect(within(pop).getByTestId('meter-video')).toHaveTextContent('This video $0.61 of $10')
+    expect(within(pop).getByTestId('meter-project')).toHaveTextContent('Project Ashish Testing $0.61 of $1stops paid work first')
+    expect(within(pop).getByTestId('meter-month')).toHaveTextContent('October $3.10 of $100')
+    expect(within(pop).getByTestId('meter-month')).not.toHaveTextContent('stops paid work first')
+    expect(within(pop).getByRole('link', { name: 'See this video in Usage →' })).toHaveAttribute('href', '#usage/v/p1')
+    expect(unlabelledMoney(screen.getByTestId('editor-header'))).toEqual([])
+    expect(unlabelledMoney(screen.getByRole('log', { name: 'The conversation' }))).toEqual([])
+    await user.keyboard('{Escape}')
+    expect(screen.queryByRole('dialog', { name: 'Spend' })).toBeNull()
+  })
+
+  it('says "No project" for a standalone video, with no project meter', async () => {
+    const base = routeFetch()
+    const { project: _p, ...alone } = SPEND
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => (url.endsWith('/spend?video=p1') ? ok({ ...alone, binding: 'video' }) : base(url, init))))
+    const user = userEvent.setup()
+    render(<App />)
+    await reachGoal(user)
+    const pill = await screen.findByTestId('spend')
+    await waitFor(() => expect(pill).toHaveTextContent('Video $0.61 of $10'))
+    await user.click(pill)
+    const pop = screen.getByRole('dialog', { name: 'Spend' })
+    expect(within(pop).getByTestId('meter-no-project')).toHaveTextContent('No project')
+    expect(within(pop).queryByTestId('meter-project')).toBeNull()
+    expect(within(pop).getByTestId('meter-video')).toHaveTextContent('stops paid work first')
+    expect(unlabelledMoney(pop)).toEqual([])
   })
 })

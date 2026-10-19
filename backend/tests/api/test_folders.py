@@ -216,7 +216,7 @@ def test_the_project_ceiling_joins_the_reservation_and_rows_carry_the_folder(cli
     scripted = _agent_on(monkeypatch, main, [])
     resp = client.post("/videos/p1/turns", json={"text": "make it 30% off"})
     job = await_job(client, resp.json()["job_id"])
-    assert job["status"] == "succeeded" and "The project Spring sale has used its $0.05 spending ceiling" in job["result"]["reply"]
+    assert job["status"] == "succeeded" and job["result"]["reply"] == "Spring sale has reached its $0.05 project ceiling. Raise it on the project page, or move the video out."
     assert scripted.calls == []
     # The video's own ceiling was nowhere near; raise the project's and the turn runs.
     client.patch("/projects/f1", json={"ceiling_usd": 1.0})

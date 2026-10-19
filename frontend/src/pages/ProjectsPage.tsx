@@ -1,15 +1,16 @@
 import { useEffect, useRef, useState } from 'react'
 import type React from 'react'
 import type { DragEvent } from 'react'
-import type { ProjectFolder, ProjectSummary, UsageReport } from '../types'
+import type { ProjectFolder, ProjectSummary, SpendSummary } from '../types'
 import type { Me } from '../api'
-import { frameUrl, getUsageReport } from '../api'
+import { frameUrl, getSpend } from '../api'
+import { ofCeiling } from '../lib/money'
 import { hrefFor } from '../lib/route'
 import { clock } from '../transcript/format'
 import { cn } from '@/lib/utils'
 import { Shell } from './Shell'
 import { FillBar } from './bits'
-import { monthShort, usd, usdShort, whenLabel } from './fmt'
+import { whenLabel } from './fmt'
 import { MoveDialog } from '../components/MoveDialog'
 
 interface ProjectsPageProps {
@@ -38,21 +39,22 @@ interface ProjectsPageProps {
   undoMs?: number
 }
 
-/** This month's spend against the ceiling, in the header; nothing until the report is in. */
+/** This month's spend against the monthly ceiling, in the header, labelled with the month:
+ *  "October: $0.14 of $100". Nothing until the summary is in. */
 function MonthSpend() {
-  const [report, setReport] = useState<UsageReport | null>(null)
+  const [spend, setSpend] = useState<SpendSummary | null>(null)
   useEffect(() => {
     let live = true
-    getUsageReport('month').then((r) => { if (live) setReport(r) }).catch(() => { /* the header just stays quiet */ })
+    getSpend().then((s) => { if (live) setSpend(s) }).catch(() => { /* the header just stays quiet */ })
     return () => { live = false }
   }, [])
-  if (!report) return null
-  const share = report.ceiling_usd > 0 ? report.spent_usd / report.ceiling_usd : 0
+  if (!spend) return null
+  const month = spend.month
+  const share = month.ceiling_usd ? month.spent_usd / month.ceiling_usd : 0
   return (
-    <a href={hrefFor({ page: 'usage' })} className="inline-flex items-center gap-2 text-foreground no-underline" data-testid="month-spend">
-      <span className="tnum font-semibold">{usd(report.spent_usd)}</span>
-      <FillBar share={share} height={8} strong className="w-[52px] rounded-sm" />
-      <span className="tag text-faint">of {usdShort(report.ceiling_usd)} · {monthShort()}</span>
+    <a href={hrefFor({ page: 'usage' })} className="inline-flex items-center gap-2 text-foreground no-underline" data-testid="month-spend" data-money-scope="month">
+      <span className="tnum"><span className="font-semibold">{month.label}:</span> {ofCeiling(month)}</span>
+      {month.ceiling_usd != null && <FillBar share={share} height={8} strong className="w-[52px] rounded-sm" />}
     </a>
   )
 }

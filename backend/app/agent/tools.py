@@ -77,6 +77,8 @@ class Workbench:
     suggest: Callable[[str, str, str], str | None] | None = None          # (video_id, addition, why)
     # Help: the articles, best match first -> [{slug, section, title, summary, body, tour}]
     help_search: Callable[[str], Sequence[dict]] = lambda query: []
+    # Spend scopes: the one summary for a video ({turn?, video, project?, month, binding}) -> or None.
+    spend: Callable[[str], dict | None] = lambda video_id: None
 
 
 @dataclass
@@ -294,7 +296,10 @@ def _project_state(wb: Workbench, turn: Turn, args: dict) -> ToolResult:
     spent_turn = wb.ledger.spent_usd_since(turn.project_id, turn.started_at)
     spent_all = wb.ledger.spent_usd(turn.project_id)
     out = [f"Autonomy: {'Check with me' if turn.autonomy == 'ask' else 'Just do it'}. "
-           f"This turn: ${spent_turn:.2f} of ${turn.budget.usd:.2f}; the project: ${spent_all:.2f}."]
+           f"This turn: ${spent_turn:.2f} of ${turn.budget.usd:.2f}; the video: ${spent_all:.2f}."]
+    summary = wb.spend(turn.project_id)
+    if summary:
+        out.append(spend_state(summary))
     items = [i for i in (plan.items if plan else ()) if i.kind == "planned" and i.status != "dismissed"]
     if not items:
         out.append("No lines planned or voiced yet.")
@@ -308,6 +313,16 @@ def _project_state(wb: Workbench, turn: Turn, args: dict) -> ToolResult:
 
 _MIX_WORDS = {"layer": "layered over the picture and sound", "over": "over the picture", "replace": "replacing the words",
               "concatenate": "added after the line, the picture holding", "remove": "the words removed"}
+
+
+def spend_state(summary: dict) -> str:
+    """The money, by scope, as the user sees it: "Spend: this turn $x · video
+    $y · project $z"; a standalone video has no project part."""
+    turn_usd = (summary.get("turn") or {}).get("spent_usd", 0.0)
+    parts = [f"this turn ${turn_usd:.2f}", f"video ${summary['video']['spent_usd']:.2f}"]
+    if summary.get("project"):
+        parts.append(f"project ${summary['project']['spent_usd']:.2f}")
+    return "Spend: " + " · ".join(parts)
 
 
 def render_line(state: dict) -> str:

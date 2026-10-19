@@ -84,7 +84,8 @@ CREATE TABLE IF NOT EXISTS usage (
     unit       TEXT NOT NULL,          -- "minutes" | "characters" | "tokens"
     usd        REAL NOT NULL,          -- estimated
     at         TEXT NOT NULL,
-    folder_id  TEXT                    -- the video's project at the time of the charge (Folders)
+    folder_id  TEXT,                   -- the video's project at the time of the charge (Folders)
+    turn_id    TEXT                    -- the turn that caused it (spend scopes); NULL outside a turn
 );
 CREATE INDEX IF NOT EXISTS usage_by_project ON usage (project_id);
 """
@@ -103,6 +104,7 @@ MIGRATIONS = (
     ("messages", "data", "TEXT"),                             # Phase 20b: a card's facts (voice previews), JSON
     ("videos", "project_id", "TEXT"),                         # Folders: the folder a video is in
     ("usage", "folder_id", "TEXT"),                           # Folders: the folder at the time of the charge
+    ("usage", "turn_id", "TEXT"),                             # Spend scopes: the turn that caused the charge
 )
 
 

@@ -1,27 +1,26 @@
 import { useEffect, useState } from 'react'
-import type { UsageReport, UserSettings } from '../types'
+import type { SpendSummary } from '../types'
 import type { Me } from '../api'
-import { getUsageReport, getUserSettings } from '../api'
+import { getSpend } from '../api'
 import { hrefFor } from '../lib/route'
+import { ceilingWord, usd } from '../lib/money'
 import { Shell, SideNav } from './Shell'
 import { FillBar } from './bits'
-import { usd } from './fmt'
 
-/** Billing, said plainly: there is no billing system in this build. The ceilings are real;
- *  the plan, the card and the invoices are not, and the page says so instead of pretending. */
+/** Billing, said plainly: there is no billing system in this build. The page holds the plan,
+ *  the monthly ceiling, payment and invoices, nothing per project or per video: where the money
+ *  went is the Usage page's. The monthly ceiling is real; the plan, the card and the invoices
+ *  are not, and the page says so instead of pretending. */
 export function BillingPage({ me }: { me: Me | null }) {
-  const [report, setReport] = useState<UsageReport | null>(null)
-  const [settings, setSettings] = useState<UserSettings | null>(null)
+  const [spend, setSpend] = useState<SpendSummary | null>(null)
   useEffect(() => {
     let live = true
-    getUsageReport('month').then((r) => { if (live) setReport(r) }).catch(() => { /* the tiles say so */ })
-    getUserSettings().then((s) => { if (live) setSettings(s) }).catch(() => { /* likewise */ })
+    getSpend().then((s) => { if (live) setSpend(s) }).catch(() => { /* the tile says so */ })
     return () => { live = false }
   }, [])
-  const share = report && report.ceiling_usd > 0 ? report.spent_usd / report.ceiling_usd : 0
-  const top = report?.by_video.reduce<UsageReport['by_video'][number] | null>((a, b) => (a === null || b.spent_usd > a.spent_usd ? b : a), null) ?? null
+  const month = spend?.month ?? null
+  const share = month?.ceiling_usd ? month.spent_usd / month.ceiling_usd : 0
   const card = 'rounded-xl border-[1.5px] border-foreground bg-card p-[22px]'
-  const cell = 'flex flex-col gap-2 rounded-[10px] bg-sunk p-4'
 
   return (
     <Shell active="billing" me={me} mainClassName="mx-auto flex w-full max-w-[1100px] flex-col gap-8 px-4 pt-10 pb-20 sm:flex-row sm:gap-12 sm:px-6 sm:pt-12">
@@ -33,30 +32,16 @@ export function BillingPage({ me }: { me: Me | null }) {
           <div className="flex flex-[1_1_280px] flex-col gap-1.5">
             <span className="tag text-volt">Your plan</span>
             <span className="disp text-4xl font-bold">No plan yet</span>
-            <span className="text-pmuted">Billing isn't set up in this build. Nothing is charged; spend is only counted against the ceilings below.</span>
+            <span className="text-pmuted">Billing isn't set up in this build. Nothing is charged; spend is only counted against the monthly ceiling below.</span>
           </div>
         </div>
 
-        <section className={`${card} flex flex-col gap-4`} aria-labelledby="ceil-h">
-          <div className="flex flex-wrap items-baseline gap-2.5"><h2 id="ceil-h" className="disp m-0 text-[22px] font-bold">Spending ceilings</h2><span className="tag text-faint">what keeps a session from running away</span></div>
-          <div className="grid grid-cols-[repeat(auto-fit,minmax(200px,1fr))] gap-3.5">
-            <div className={cell}>
-              <span className="tag text-faint">Monthly</span>
-              <span className="disp text-[30px] font-bold">{report ? usd(report.spent_usd) : '…'} <span className="text-base text-muted-foreground">/ {report ? usd(report.ceiling_usd) : '…'}</span></span>
-              <FillBar share={share} height={10} strong label="Spent against the monthly ceiling" />
-            </div>
-            <div className={cell}>
-              <span className="tag text-faint">Per project</span>
-              <span className="disp text-[30px] font-bold">{report ? usd(report.project_cap_usd) : '…'}</span>
-              <span className="text-[13px] text-muted-foreground">{top ? `Highest so far: ${top.filename} at ${usd(top.spent_usd)}` : 'No project has spent anything this month.'}</span>
-            </div>
-            <div className={cell}>
-              <span className="tag text-faint">Per turn</span>
-              <span className="disp text-[30px] font-bold">{settings ? usd(settings.turn_usd) : '…'}</span>
-              <a href={hrefFor({ page: 'settings' })} className="text-[13px] text-muted-foreground">Change in settings</a>
-            </div>
-          </div>
-          <p className="m-0 text-[13px] text-muted-foreground">The monthly and project ceilings are fixed by this build; there is no way to raise them yet.</p>
+        <section className={`${card} flex flex-col gap-4`} aria-labelledby="ceil-h" data-money-scope="month" data-testid="monthly-ceiling">
+          <div className="flex flex-wrap items-baseline gap-2.5"><h2 id="ceil-h" className="disp m-0 text-[22px] font-bold">Monthly ceiling</h2><span className="tag text-faint">across every project and video</span></div>
+          <span className="disp text-[30px] font-bold">{month ? `${month.label}: ${usd(month.spent_usd)}` : '…'} <span className="text-base text-muted-foreground">of {month?.ceiling_usd != null ? ceilingWord(month.ceiling_usd) : '…'}</span></span>
+          <FillBar share={share} height={10} strong label="Spent against the monthly ceiling" />
+          <p className="m-0 text-[13px] text-muted-foreground">New paid work stops when the month reaches it; it resets on the first of the month. The ceiling is fixed by this build; there is no way to raise it yet.</p>
+          <a className="act self-start" href={hrefFor({ page: 'usage' })}>See where it went in Usage →</a>
         </section>
 
         <section className={`${card} flex flex-wrap items-center gap-[18px]`} aria-labelledby="pay-h">

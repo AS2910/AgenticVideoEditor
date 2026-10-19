@@ -1,6 +1,6 @@
 import type { Arrangement } from './transcript/arrange'
 import type {
-  MyVoice, UserSettings, UsageReport, MadeVoice, CloneableSpeaker, DesignedPreview, Receipt,
+  MyVoice, UserSettings, UsageReport, SpendSummary, MadeVoice, CloneableSpeaker, DesignedPreview, Receipt,
   Project, ExportManifest, Job, ProjectSummary, ProjectDetail, Usage, Voice, Speaker,
   ProjectSettings, Autonomy, Effort, Plan, Mix, Selection, Candidate, Reading, Sight, ChatMessage,
   ProjectFolder, ProjectDetailFolder, ProjectFile, HelpArticle, Onboarding, ProjectVoice,
@@ -387,8 +387,12 @@ export async function deleteAccount(): Promise<void> {
   const res = await fetch(`${BASE}/account`, { method: 'DELETE', headers: FROM_VOLTAGE })
   if (!res.ok) return failure(res)
 }
-/** Spend across your projects for a period. */
-export const getUsageReport = (period: 'week' | 'month' | 'all' = 'month') => get<UsageReport>(`/usage?period=${period}`)
+/** Spend across your projects for a period; `scope` picks the totals: all, `none` (standalone), a project `f3` or a video `v:p2`. */
+export const getUsageReport = (period: 'week' | 'month' | 'all' = 'month', scope: string = 'all') =>
+  get<UsageReport>(`/usage?period=${period}${scope !== 'all' ? `&scope=${encodeURIComponent(scope)}` : ''}`)
+/** Spend scopes: every scope for a video, a project, or (neither) the month, with the binding one. */
+export const getSpend = (context: { video?: string; project?: string } = {}) =>
+  get<SpendSummary>(context.video ? `/spend?video=${context.video}` : context.project ? `/spend?project=${context.project}` : '/spend')
 /** What went into a project's file. */
 export const getReceipt = (id: string) => get<Receipt>(`/videos/${id}/receipt`)
 
