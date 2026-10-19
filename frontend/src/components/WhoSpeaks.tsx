@@ -74,16 +74,3 @@ export function WhoSpeaks({ speakers, statements, reading, onName }: {
     </section>
   )
 }
-
-export const EXAMPLES = [
-  "Change the offer wherever it's said",
-  'Fix how the brand name is said',
-  'Make the shopkeeper warmer',
-  'Add a closing line',
-]
-export const SILENT_EXAMPLES = [
-  'Introduce the place',
-  'Write a line for this',
-  'Look at it and help me decide',
-  'Say "Welcome to Goa" at the start',
-]

@@ -1,6 +1,6 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
 import type { ReactNode, RefObject } from 'react'
-import type { ChatMessage, HelpRef, PlanQuestion, SpendSummary } from '../types'
+import type { ChatMessage, HelpRef, PlanQuestion, SpendSummary, Suggestion } from '../types'
 import { spendLine } from '../lib/money'
 import { optionsOf } from '../lib/options'
 import { artifactUrl } from '../api'
@@ -196,7 +196,10 @@ interface VoltagePaneProps {
   inputRef?: RefObject<HTMLTextAreaElement | null>
   seed?: { text: string; id: number } | null
   /** Short follow-ups offered under the thread (chips). */
-  suggestions?: string[]
+  /** 2026-10-20: chips from this video; a click puts the chip's prompt in the box, Enter sends. */
+  suggestions?: Suggestion[]
+  /** What happened to a chip: shown, put in the box, sent (as it was, or edited first). */
+  onChipEvent?: (event: 'shown' | 'clicked' | 'sent', chip: Suggestion, edited?: boolean) => void
   /** Content before the thread (the first read), and after it (the plan's record). */
   before?: ReactNode
   children?: ReactNode
@@ -213,7 +216,7 @@ interface VoltagePaneProps {
  *  a question as a gate card — then the chips and the composer. */
 export function VoltagePane({
   messages, projectId, state, busy, need, engine, chips = [], cap, spend, question, onAnswer, turnCap, onSubmit, placeholder = 'Say what to change…', sendLabel = 'Send',
-  inputRef, seed, suggestions = [], before, children, working, empty, onShowMe,
+  inputRef, seed, suggestions = [], onChipEvent, before, children, working, empty, onShowMe,
 }: VoltagePaneProps) {
   const [prompt, setPrompt] = useState('')
   const [openTrace, setOpenTrace] = useState<number | null>(null)
@@ -253,10 +256,36 @@ export function VoltagePane({
   const [showAll, setShowAll] = useState(false)
   const shown = showAll ? turns : turns.slice(-2)
   const hidden = turns.length - shown.length
+  // The chip whose prompt is in the box: sent as it was, or edited first.
+  const fromChip = useRef<Suggestion | null>(null)
+  const ownBox = useRef<HTMLTextAreaElement | null>(null)
+  const box = inputRef ?? ownBox
+  const chipsShown = working || busy ? [] : suggestions.slice(0, 4)
+  const counted = useRef(new Set<string>())
+  useEffect(() => {
+    for (const c of chipsShown) {
+      const key = `${c.kind}|${c.label}`
+      if (!counted.current.has(key)) { counted.current.add(key); onChipEvent?.('shown', c) }
+    }
+  })
+  const useChip = (c: Suggestion) => {
+    fromChip.current = c
+    setPrompt(c.prompt)
+    onChipEvent?.('clicked', c)
+    // In the box, editable, the cursor at the end: nothing is sent from a single click.
+    requestAnimationFrame(() => {
+      const el = box.current
+      if (!el) return
+      el.focus()
+      el.setSelectionRange(c.prompt.length, c.prompt.length)
+    })
+  }
   const submit = () => {
     const text = prompt.trim()
     if (!text) return
     nearBottom.current = true           // what you said, and what follows it, comes into view
+    if (fromChip.current) onChipEvent?.('sent', fromChip.current, text !== fromChip.current.prompt.trim())
+    fromChip.current = null
     onSubmit(text)
     setPrompt('')
   }
@@ -340,16 +369,18 @@ export function VoltagePane({
       </div>
 
       <div className="flex min-w-0 flex-none flex-col gap-3 px-5.5 pt-3.5 pb-5.5 @max-[380px]:px-4">
-        {suggestions.length > 0 && (
-          <div className="flex flex-wrap gap-1.5" role="group" aria-label="Try one">
-            {suggestions.map((s) => <button key={s} type="button" className="sugg" onClick={() => onSubmit(s)}>{s}</button>)}
+        {chipsShown.length > 0 && (
+          <div className="flex min-w-0 flex-wrap gap-1.5" role="group" aria-label="Suggestions for this video" data-testid="chips">
+            {chipsShown.map((c) => (
+              <button key={`${c.kind}-${c.label}`} type="button" className="sugg max-w-full truncate" title={c.prompt} data-kind={c.kind} onClick={() => useChip(c)}>{c.label}</button>
+            ))}
           </div>
         )}
         <label htmlFor="ask-voltage" className="sr-only">Describe a change</label>
         <div className={cn('flex flex-col gap-2 rounded-xl border-[1.5px] bg-psunk py-3 pr-3 pl-3.5', turns.length === 0 ? 'border-volt' : 'border-pline')} data-tour="composer">
           <textarea
             id="ask-voltage"
-            ref={inputRef}
+            ref={box}
             rows={2}
             aria-label="Describe a change"
             placeholder={placeholder}

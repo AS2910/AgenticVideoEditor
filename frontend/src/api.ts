@@ -1,5 +1,6 @@
 import type { Arrangement } from './transcript/arrange'
 import type {
+  Suggestion, SuggestionKind, Understanding,
   Role,
   MyVoice, UserSettings, UsageReport, SpendSummary, MadeVoice, CloneableSpeaker, DesignedPreview, Receipt,
   Project, ExportManifest, Job, ProjectSummary, ProjectDetail, Usage, Voice, Speaker,
@@ -420,3 +421,14 @@ export const keepDesignedVoice = (generatedVoiceId: string, name: string, sha256
   post<MyVoice>('/voices/mine/from-preview', { generated_voice_id: generatedVoiceId, name, sha256, description, consent: true })
 /** A sample of one of your voices, or a designed preview, playable. */
 export const voiceSampleUrl = (sha256: string) => `${BASE}/voices/sample/${sha256}`
+
+// ── 2026-10-20: chips from this video, and what Voltage sees in it ───────────
+export const getSuggestions = (id: string) => get<{ suggestions: Suggestion[]; source: 'turn' | 'reading' | 'generic' }>(`/videos/${id}/suggestions`)
+/** What people do with the chips, by kind; never in the way of the editor. */
+export const chipEvent = (id: string, event: 'shown' | 'clicked' | 'sent', kind: SuggestionKind, label: string, edited = false) => {
+  void post(`/videos/${id}/suggestions/events`, { event, kind, label, edited }).catch(() => {})
+}
+export const getUnderstanding = (id: string) => get<Understanding>(`/videos/${id}/understanding`)
+export const correctUnderstanding = (id: string, change: { text: string; beat_at?: number; label?: string; remove?: boolean }) =>
+  post<Understanding>(`/videos/${id}/understanding/corrections`, change)
+export const setStyle = (id: string, line: string, accepted = true) => put<Understanding>(`/videos/${id}/style`, { line, accepted })

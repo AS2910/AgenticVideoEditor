@@ -1007,7 +1007,8 @@ describe('App panel order', () => {
     const base = routeFetch()
     vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
       if (url.endsWith('/videos') && init?.method === 'POST') return ok({ ...PROJECT, transcript: [], statements: [], frames: [{ index: 0, at: 0.3 }, { index: 1, at: 1.2 }, { index: 2, at: 2.0 }] })
-      if (url.endsWith('/reading')) return ok({ opening: 'No one speaks. A beach at dusk.', roles: [], sight: { opening: 'No one speaks. A beach at dusk.', setting: 'A wide beach at dusk', mood: 'calm', people: 'two, far off', text_on_screen: '', place_guess: 'Goa', confidence: 'medium', beats: [] } })
+      if (url.endsWith('/reading')) return ok({ opening: 'No one speaks. A beach at dusk.', roles: [], sight: { opening: 'No one speaks. A beach at dusk.', setting: 'A wide beach at dusk', mood: 'calm', people: 'two, far off', text_on_screen: '', place_guess: 'Goa', confidence: 'medium', beats: [] },
+        suggestions: [{ label: 'Introduce this beach at dusk', prompt: 'Write a short voice-over introducing this beach at dusk.', kind: 'add', grounded_in: 'frames' }] })
       return base(url, init)
     }))
     const user = userEvent.setup()
@@ -1018,10 +1019,11 @@ describe('App panel order', () => {
     expect(screen.getByTestId('sight')).toHaveTextContent('The place: Goa')
     expect(screen.getByRole('button', { name: 'Looks right' })).toBeInTheDocument()
     expect(screen.getByText('Where should the voice-over go?')).toBeInTheDocument()
-    // Volt: an example chip is sent as a turn.
-    await user.click(screen.getByRole('button', { name: 'Introduce the place' }))
-    expect(await screen.findByText('Introduce the place')).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Introduce the place' })).toBeNull()
+    // 2026-10-20: a chip from the first read puts its prompt in the box; Enter sends it as a turn.
+    await user.click(await screen.findByRole('button', { name: 'Introduce this beach at dusk' }))
+    expect(screen.getByRole('textbox', { name: 'Describe a change' })).toHaveValue('Write a short voice-over introducing this beach at dusk.')
+    await user.keyboard('{Enter}')
+    expect(await screen.findByText('Write a short voice-over introducing this beach at dusk.')).toBeInTheDocument()
   })
 
   it('places a voice-over on a clip with no speech: the span and the words go to Voltage in a sentence (UX-5)', async () => {

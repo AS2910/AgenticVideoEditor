@@ -226,6 +226,8 @@ export interface Project {
   plan?: Plan | null
   /** Voltage's first look at the clip, once it has had one (UX-2). */
   reading?: Reading | null
+  /** 2026-10-20: the chips above Voltage's box, from this video. */
+  suggestions?: Suggestion[]
   /** UX-5: a clip with no speech shows its frames where the transcript would be. */
   frames?: FrameRef[]
 }
@@ -234,7 +236,20 @@ export interface Project {
 export interface RoleGuess { label: string; role: string; why: string }
 
 /** Voltage's first look at a clip: a specific opening line and a role per speaker. */
-export interface Reading { opening: string; roles: RoleGuess[]; at?: string; /** UX-5: what Voltage saw, on a clip with no speech. */ sight?: Sight | null }
+export interface Reading { opening: string; roles: RoleGuess[]; at?: string; /** UX-5: what Voltage saw, on a clip with no speech. */ sight?: Sight | null; /** 2026-10-20: the first chips. */ suggestions?: Suggestion[] }
+/** 2026-10-20: a chip above Voltage's box, from this video: what it says, what it puts in the box, what kind, what it points at. */
+export type SuggestionKind = 'fix' | 'change' | 'add' | 'voice' | 'finish'
+export interface Suggestion { label: string; prompt: string; kind: SuggestionKind; grounded_in: 'time' | 'words' | 'frames' | 'brief' }
+/** 2026-10-20: what Voltage sees in the video, as a piece. */
+export interface Beat { at: number; kind: 'cut' | 'motion' | 'audio' | 'visual'; label: string; confidence: number; source: 'signal' | 'vision' | 'user' }
+export interface Understanding {
+  version: number
+  read?: { format?: string; genre?: string; summary?: string; setting?: string; subjects?: string; audio_notes?: string; on_screen_text?: string[] } | null
+  beats: Beat[]
+  corrections: { text: string; at: string; beat_at?: number; label?: string; remove?: boolean }[]
+  style?: { line: string; accepted: boolean; by: 'voltage' | 'user' } | null
+  signals?: { orientation?: string; energy?: number[]; energy_step?: number } | null
+}
 
 /** What Voltage saw in a clip with no speech (UX-5). */
 export interface Sight {

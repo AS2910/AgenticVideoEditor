@@ -52,11 +52,34 @@ describe('VoltagePane: the composer and the gate', () => {
     expect(screen.getByText('Turn cap $0.50')).toBeInTheDocument()
   })
 
-  it('offers the suggestions as chips that send', async () => {
+  it('offers chips from the video: a click puts the prompt in the box, editable, and Enter sends it (2026-10-20)', async () => {
     const onSubmit = vi.fn()
-    render(<VoltagePane messages={[]} state="ready" onSubmit={onSubmit} suggestions={['Add a closing line', 'Fix the brand name']} />)
-    await userEvent.click(screen.getByRole('button', { name: 'Fix the brand name' }))
-    expect(onSubmit).toHaveBeenCalledWith('Fix the brand name')
+    const onChipEvent = vi.fn()
+    const chips = [
+      { label: 'Say Bhaji Cam clearly', prompt: 'Voice line 2 again so “Bhaji Cam” is said clearly.', kind: 'fix' as const, grounded_in: 'words' as const },
+      { label: 'Add the 30% Diwali offer', prompt: 'Add the 30% Diwali offer at the end.', kind: 'change' as const, grounded_in: 'brief' as const },
+      { label: 'Try a warmer voice', prompt: 'Try a warmer voice for line 1.', kind: 'voice' as const, grounded_in: 'words' as const },
+      { label: 'Export', prompt: 'Export the video.', kind: 'finish' as const, grounded_in: 'time' as const },
+      { label: 'Fifth', prompt: 'A fifth chip.', kind: 'add' as const, grounded_in: 'time' as const },
+    ]
+    render(<VoltagePane messages={[]} state="ready" onSubmit={onSubmit} suggestions={chips} onChipEvent={onChipEvent} />)
+    const group = screen.getByRole('group', { name: 'Suggestions for this video' })
+    expect(within(group).getAllByRole('button')).toHaveLength(4)
+    expect(onChipEvent).toHaveBeenCalledWith('shown', chips[0])
+    await userEvent.click(within(group).getByRole('button', { name: 'Say Bhaji Cam clearly' }))
+    const box = screen.getByRole('textbox', { name: 'Describe a change' }) as HTMLTextAreaElement
+    expect(box).toHaveValue(chips[0].prompt)
+    expect(onSubmit).not.toHaveBeenCalled()                       // no spend from a single click
+    expect(onChipEvent).toHaveBeenLastCalledWith('clicked', chips[0])
+    await userEvent.type(box, ' Slowly.{Enter}')
+    expect(onSubmit).toHaveBeenCalledWith(`${chips[0].prompt} Slowly.`)
+    expect(onChipEvent).toHaveBeenLastCalledWith('sent', chips[0], true)
+  })
+
+  it('hides the chips while a turn runs', () => {
+    render(<VoltagePane messages={[]} state="working" working="Voicing line 2" onSubmit={() => {}}
+      suggestions={[{ label: 'Export', prompt: 'Export the video.', kind: 'finish', grounded_in: 'time' }]} />)
+    expect(screen.queryByRole('group', { name: 'Suggestions for this video' })).not.toBeInTheDocument()
   })
 
   it('shows a gate as a card with the cost and what is left, Go ahead first; an answer is the next turn', async () => {

@@ -12,7 +12,7 @@ import type { LineRequest, PendingLine } from './components/LineDoc'
 import type { LineKey } from './transcript/keys'
 import { WhatVoltageMayDo } from './components/WhatVoltageMayDo'
 import type { MayDo } from './components/WhatVoltageMayDo'
-import { WhoSpeaks, EXAMPLES, SILENT_EXAMPLES } from './components/WhoSpeaks'
+import { WhoSpeaks } from './components/WhoSpeaks'
 import { Wordmark, Wave } from './components/Wordmark'
 import { Lanes } from './components/Lanes'
 import { AccountDot } from './pages/Shell'
@@ -37,14 +37,14 @@ import { go, hrefFor, useRoute } from './lib/route'
 import { cn } from '@/lib/utils'
 import { clock } from './transcript/format'
 import {
-  createProject, confirmPlace, exportProject, artifactUrl, pollJob, PollCancelled, ApiError, listVideos, listFolders, createFolder, startTutorial, getProject, deleteProject, getUsage, getSpend, listVoices, updateSpeaker, detectSpeakers, revertEdit, updateSettings, removeLine, dismissItem, setEditRole, setCandidateRole, roleQuestion, moveCandidate, moveEdit, getArrangement, putArrangement, undoArrangement, getPlan, approvePlan, readProject, grantConsent, getMe, postTurn, postAllowMore, getMessages,
+  createProject, confirmPlace, exportProject, artifactUrl, pollJob, PollCancelled, ApiError, listVideos, listFolders, createFolder, startTutorial, getProject, deleteProject, getUsage, getSpend, listVoices, updateSpeaker, detectSpeakers, revertEdit, updateSettings, removeLine, dismissItem, setEditRole, setCandidateRole, roleQuestion, moveCandidate, moveEdit, getArrangement, putArrangement, undoArrangement, getPlan, approvePlan, readProject, grantConsent, getMe, postTurn, postAllowMore, getMessages, chipEvent,
 } from './api'
 import type { ArrangementView, Me, PlanApproval, RoleChange, RoleQuestion } from './api'
 import type { Arrangement, Placed } from './transcript/arrange'
 import type {
   Word, Selection, Candidate, Segment, Project, ChatMessage,
   Insert, ProjectSummary, Usage, SpendSummary, Statement, Voice, Revision,
-  Plan, PlanItem, Autonomy, Reading, Piece, ProjectDetail, ApprovedEditSummary, MyVoice, ProjectFolder, ExportManifest, MixReport,
+  Plan, PlanItem, Autonomy, Reading, Piece, ProjectDetail, ApprovedEditSummary, MyVoice, ProjectFolder, ExportManifest, MixReport, Suggestion,
 } from './types'
 import { piecesFromInserts, renderTimeFrom, sourceTimeFrom } from './timeline/selection'
 
@@ -123,6 +123,8 @@ function Studio() {
   const [projects, setProjects] = useState<ProjectSummary[]>([])
   // Help (2026-10-19): a goal put in the box for the guided run; a tour waiting for its video to open; the ? sheet.
   const [seed, setSeed] = useState<{ text: string; id: number } | null>(null)
+  // 2026-10-20: the chips above Voltage's box, from this video (the first read, then each turn).
+  const [suggestions, setSuggestions] = useState<Suggestion[]>([])
   const [pendingTour, setPendingTour] = useState<Tour | null>(null)
   const [keysOpen, setKeysOpen] = useState(false)
   const [undoneAfterExport, setUndoneAfterExport] = useState(false)
@@ -223,6 +225,7 @@ function Studio() {
     setMayDoOpen(false)
     setPlan(null)
     setReading(null)
+    setSuggestions([])
     setReadingBusy(false)
     setShippedNote(null)
     setConsentAsk(null)
@@ -302,7 +305,7 @@ function Studio() {
     readFor.current = projectId
     setReadingBusy(true)
     readProject(projectId)
-      .then((r) => setReading(r))
+      .then((r) => { setReading(r); if (r.suggestions?.length) setSuggestions(r.suggestions) })
       .catch(() => {})   // the stage still works with the plain count
       .finally(() => { setReadingBusy(false); void refreshUsage(projectId) })
   }, [projectId, reading, project?.statements?.length, refreshUsage])
@@ -318,6 +321,7 @@ function Studio() {
       effort: loaded.settings?.effort ?? MAY_DO.effort, ceiling_usd: loaded.settings?.ceiling_usd ?? MAY_DO.ceiling_usd })
     setPlan(loaded.plan ?? null)
     setReading(loaded.reading ?? null)
+    setSuggestions(loaded.suggestions ?? [])
     // The thread's high-water mark belongs to this project: a fresh upload after
     // another project starts at zero, or its first replies would be skipped.
     seenSeq.current = Math.max(0, ...((loaded as Partial<ProjectDetail>).messages ?? []).map((m) => m.seq ?? 0))
@@ -692,6 +696,7 @@ function Studio() {
     if (!latest) return { changed: false, render: null }
     // p60: the items too, not only the edits, so the rows, the header's counts and Voltage's words come from one record.
     if (latest.plan) setPlan(latest.plan)
+    if (latest.suggestions) setSuggestions(latest.suggestions)
     const live = latest.edits.filter((e) => !e.reverted).map(asRevision)
     const before = approved.map((r) => r.edit_id).sort().join(',')
     const after = live.map((r) => r.edit_id).sort().join(',')
@@ -1379,7 +1384,8 @@ function Studio() {
               placeholder={placeholder}
               sendLabel={sendLabel}
               working={turnBusy ? (turnStep ?? 'Working…') : null}
-              suggestions={firstRead && !readingBusy ? (statements.length > 0 ? EXAMPLES : SILENT_EXAMPLES) : undefined}
+              suggestions={readingBusy ? [] : suggestions}
+              onChipEvent={(event, c, edited) => { if (projectId) chipEvent(projectId, event, c.kind, c.label, edited) }}
               before={firstRead ? (
                 <div className="flex flex-col gap-3.5" data-testid="first-read">
                   {readingBusy && !reading ? (
