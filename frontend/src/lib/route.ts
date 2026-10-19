@@ -5,11 +5,15 @@ import { useEffect, useState } from 'react'
  *  start; `#v/p12` opens a video in the editor and `#v/p12/export` its
  *  export page; `#p/f3` is a project (a folder of videos); the account pages
  *  are `#voices`, `#usage`, `#settings`, `#billing` and `#help` (with an
- *  article: `#help/<slug>`). An old `#p12` link still opens the video. */
+ *  article: `#help/<slug>`). Usage takes a scope: `#usage/v/p12` (one
+ *  video), `#usage/p/f3` (one project), `#usage/none` (standalone videos).
+ *  An old `#p12` link still opens the video. */
+export type UsageScope = { kind: 'video'; id: string } | { kind: 'project'; id: string } | { kind: 'none' }
+
 export type Route =
   | { page: 'projects' }
   | { page: 'voices' }
-  | { page: 'usage' }
+  | { page: 'usage'; scope?: UsageScope | null }
   | { page: 'settings' }
   | { page: 'billing' }
   | { page: 'help'; slug?: string | null }
@@ -26,9 +30,15 @@ export function parseRoute(hash: string): Route {
   // The links of the first release: `#p12` and `#p12/export` named a video.
   const old = /^(p\d+)(?:\/(export))?$/.exec(h)
   if (old) return old[2] === 'export' ? { page: 'export', projectId: old[1] } : { page: 'editor', projectId: old[1] }
+  const usage = /^usage(?:\/(?:(v|p)\/([A-Za-z0-9_-]+)|(none)))?$/.exec(h)
+  if (usage) {
+    if (usage[3]) return { page: 'usage', scope: { kind: 'none' } }
+    if (usage[1]) return { page: 'usage', scope: { kind: usage[1] === 'v' ? 'video' : 'project', id: usage[2] } }
+    return { page: 'usage' }
+  }
   const help = /^help(?:\/([A-Za-z0-9_-]+))?$/.exec(h)
   if (help) return { page: 'help', slug: help[1] ?? null }
-  if (h === 'voices' || h === 'usage' || h === 'settings' || h === 'billing') return { page: h }
+  if (h === 'voices' || h === 'settings' || h === 'billing') return { page: h }
   return { page: 'projects' }
 }
 
@@ -38,6 +48,7 @@ export const hrefFor = (r: Route): string =>
     : r.page === 'folder' ? `#p/${r.projectId}`
     : r.page === 'help' ? (r.slug ? `#help/${r.slug}` : '#help')
     : r.page === 'projects' ? '#home'
+    : r.page === 'usage' ? (!r.scope ? '#usage' : r.scope.kind === 'none' ? '#usage/none' : `#usage/${r.scope.kind === 'video' ? 'v' : 'p'}/${r.scope.id}`)
     : `#${r.page}`
 
 export function go(r: Route): void {

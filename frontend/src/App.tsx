@@ -6,6 +6,7 @@ import { captionAt, takeCaption } from './transcript/caption'
 import type { CaptionPending } from './transcript/caption'
 import { Timeline } from './components/Timeline'
 import { VoltagePane } from './components/VoltagePane'
+import { SpendPill } from './components/Spend'
 import { LineDoc } from './components/LineDoc'
 import type { LineRequest, PendingLine } from './components/LineDoc'
 import type { LineKey } from './transcript/keys'
@@ -36,12 +37,12 @@ import { go, hrefFor, useRoute } from './lib/route'
 import { cn } from '@/lib/utils'
 import { clock } from './transcript/format'
 import {
-  createProject, confirmPlace, exportProject, artifactUrl, pollJob, PollCancelled, ApiError, listVideos, listFolders, createFolder, startTutorial, getProject, deleteProject, getUsage, listVoices, updateSpeaker, detectSpeakers, revertEdit, updateSettings, removeLine, dismissItem, setEditLevel, setCandidateLevel, BACKGROUND_DB, moveCandidate, moveEdit, shiftLine, getPlan, approvePlan, readProject, grantConsent, getMe, postTurn, getMessages,
+  createProject, confirmPlace, exportProject, artifactUrl, pollJob, PollCancelled, ApiError, listVideos, listFolders, createFolder, startTutorial, getProject, deleteProject, getUsage, getSpend, listVoices, updateSpeaker, detectSpeakers, revertEdit, updateSettings, removeLine, dismissItem, setEditLevel, setCandidateLevel, BACKGROUND_DB, moveCandidate, moveEdit, shiftLine, getPlan, approvePlan, readProject, grantConsent, getMe, postTurn, getMessages,
 } from './api'
 import type { Me, PlanApproval } from './api'
 import type {
   Word, Selection, Candidate, Segment, Project, ChatMessage,
-  Insert, ProjectSummary, Usage, Statement, Voice, Revision,
+  Insert, ProjectSummary, Usage, SpendSummary, Statement, Voice, Revision,
   Plan, PlanItem, Autonomy, Reading, Piece, ProjectDetail, ApprovedEditSummary, MyVoice, ProjectFolder, ExportManifest,
 } from './types'
 import { piecesFromInserts, renderTimeFrom, sourceTimeFrom } from './timeline/selection'
@@ -133,6 +134,8 @@ function Studio() {
   const [moving, setMoving] = useState(false)
   const [crumbMenu, setCrumbMenu] = useState(false)
   const [usage, setUsage] = useState<Usage | null>(null)
+  // Spend scopes: this turn, this video, its project, the month, and the one that stops paid work first.
+  const [spend, setSpend] = useState<SpendSummary | null>(null)
   const [voices, setVoices] = useState<Voice[]>([])
   const asVoice = (v: MyVoice): Voice => ({ voice_id: v.voice_id, name: v.name, description: 'your voice', gender: null, accent: null, age: null, category: 'mine' })
   const takeInVoices = (r: { voices: Voice[]; mine?: MyVoice[] }) => {
@@ -205,6 +208,7 @@ function Studio() {
     setPreview(null)
     setError(null)
     setUsage(null)
+    setSpend(null)
     setApproved([])
     setAutonomy('ask')
     setMayDo(MAY_DO)
@@ -260,11 +264,11 @@ function Studio() {
   /** Re-reads what the project has spent; after anything that may have paid. */
   const refreshUsage = useCallback(async (id: string | null) => {
     if (!id) return
-    try {
-      setUsage(await getUsage(id))
-    } catch {
-      // The meter is informational; a failed read leaves the last value.
-    }
+    // Both are informational; a failed read leaves the last value.
+    await Promise.all([
+      getUsage(id).then(setUsage).catch(() => {}),
+      getSpend({ video: id }).then(setSpend).catch(() => {}),
+    ])
   }, [])
 
   useEffect(() => { void refreshUsage(projectId) }, [projectId, refreshUsage])
@@ -633,7 +637,8 @@ function Studio() {
       })
       await pullMessages()
       if (finished.status === 'failed') tell(finished.error ?? "Something went wrong on my side. Say it again and I'll retry.")
-      const result = finished.result as { type?: string; plan?: Plan } | null
+      const result = finished.result as { type?: string; plan?: Plan; spend?: SpendSummary } | null
+      if (result?.spend) setSpend(result.spend)
       let fresh: Plan | null = null
       if (result && result.type === 'turn' && result.plan) fresh = result.plan
       else {
@@ -1020,7 +1025,7 @@ function Studio() {
       return <HelpPage me={me} initialSlug={route.slug ?? null} onReplay={() => void startGuidedRun()} onAsk={() => { const recent = projects[0]; if (recent) go({ page: 'editor', projectId: recent.video_id }); else go({ page: 'projects' }) }} onShowMe={showMe} />
     }
     if (route.page === 'voices') return <VoicesPage me={me} />
-    if (route.page === 'usage') return <UsagePage me={me} />
+    if (route.page === 'usage') return <UsagePage me={me} scope={route.scope ?? null} />
     if (route.page === 'settings') return <SettingsPage me={me} onSignedOut={signedOutNow} />
     if (route.page === 'billing') return <BillingPage me={me} />
     if (route.page === 'export') {
@@ -1132,8 +1137,6 @@ function Studio() {
     // O flips Edited ↔ As shot (from With proposals, to As shot).
     flipRef.current = route.page === 'editor' && changes > 0 ? () => switchView(view === 'original' ? 'final' : 'original') : null
     const scanning = turnBusy ? (turnStep ?? 'Voltage is working') : readingBusy ? 'Voltage is reading the clip' : null
-    const spent = usage?.spent_usd ?? 0
-    const ceiling = usage?.ceiling_usd ?? mayDo.ceiling_usd
     const isTutorial = !!project.settings?.tutorial
     const tipCandidates: { id: string; target: string; when: boolean }[] = [
       { id: 'first-failed-take', target: 'transcript-row', when: planItems.some((i) => i.status === 'failed') },
@@ -1208,11 +1211,7 @@ function Studio() {
             <span className="tag">{autonomy === 'ask' ? 'Check with me' : 'Just do it'}</span>
             <svg width="12" height="12" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>
           </button>
-          <a className="tnum flex items-center gap-2 rounded-md px-2 py-1.5 text-[13px] text-foreground no-underline hover:bg-sunk" href={hrefFor({ page: 'usage' })} aria-label={`Spent $${spent.toFixed(2)} of $${ceiling} on this video${usage?.project_ceiling_usd ? `, $${(usage.project_spent_usd ?? 0).toFixed(2)} of $${usage.project_ceiling_usd} on the project` : ''}. Usage`} data-testid="spend" data-tour="spend">
-            ${spent.toFixed(2)}
-            <span className="h-2 w-12 overflow-hidden rounded-sm bg-line" aria-hidden="true"><span className="block h-full bg-foreground" style={{ width: `${Math.min(100, ceiling > 0 ? (spent / ceiling) * 100 : 0)}%` }} /></span>
-            <span className="text-faint">{project.project_id && usage?.project_ceiling_usd ? `video · $${(usage.project_spent_usd ?? 0).toFixed(2)}/$${usage.project_ceiling_usd} project` : `$${Number.isInteger(ceiling) ? ceiling : ceiling.toFixed(2)}`}</span>
-          </a>
+          <SpendPill summary={spend} videoId={project.video_id} />
           <a className={cn('btn ink sm', exporting && 'opacity-70')} href={hrefFor({ page: 'export', projectId: project.video_id })} aria-busy={exporting || undefined} data-tour="export" data-tour-action="export">
             {exporting ? 'Rendering…' : 'Export'}
           </a>
@@ -1333,6 +1332,7 @@ function Studio() {
               engine={engine}
               chips={contextChips}
               cap={`Turn cap $${mayDo.turn_usd.toFixed(2)}`}
+              spend={spend}
               question={clarifying ? plan?.question ?? null : null}
               onAnswer={(o) => void clarify(o)}
               onSubmit={submitComposer}

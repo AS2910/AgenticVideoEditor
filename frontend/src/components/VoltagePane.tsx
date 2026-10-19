@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { ReactNode, RefObject } from 'react'
-import type { ChatMessage, HelpRef, PlanQuestion } from '../types'
+import type { ChatMessage, HelpRef, PlanQuestion, SpendSummary } from '../types'
+import { spendLine } from '../lib/money'
 import { artifactUrl } from '../api'
 import { ArrowUp } from 'lucide-react'
 import { cn } from '@/lib/utils'
@@ -33,8 +34,9 @@ function helpOf(t: Turn): HelpRef[] {
 const mmss = (s: number) => `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(Math.floor(s % 60)).padStart(2, '0')}`
 const money = (n: number) => `$${n.toFixed(2)}`
 
-/** The trace: `time ├ sentence tool  cost`, mono, rising in; the last line closes with └. */
-function Trace({ steps, open, onToggle }: { steps: ChatMessage[]; open: boolean; onToggle: () => void }) {
+/** The trace: `time ├ sentence tool  cost`, mono, rising in; the last line closes with └.
+ *  The latest turn's footer names every scope: "This turn $0.03 · video $0.61 · project $0.61". */
+function Trace({ steps, open, onToggle, spend }: { steps: ChatMessage[]; open: boolean; onToggle: () => void; spend?: SpendSummary | null }) {
   const spent = steps.reduce((t, s) => t + (s.cost ?? 0), 0)
   const last = steps[steps.length - 1]
   const seconds = typeof last?.data?.t === 'number' ? last.data.t : null
@@ -44,7 +46,7 @@ function Trace({ steps, open, onToggle }: { steps: ChatMessage[]; open: boolean;
       <div className="flex items-center gap-2">
         <span className="tag pm">Trace · {steps.length} {steps.length === 1 ? 'step' : 'steps'}{seconds !== null ? ` · ${Math.round(seconds)} s` : ''}</span>
         <span className="flex-1" />
-        {spent > 0 && <span className="tnum font-semibold text-volt">{money(spent)}</span>}
+        {spent > 0 && !spend && <span className="tnum font-semibold text-volt" data-money-scope="turn"><span className="pm font-normal">This turn </span>{money(spent)}</span>}
       </div>
       <ol className="trace m-0 list-none p-0" role="list" aria-label="What Voltage did">
         {shown.map((s, k) => {
@@ -52,7 +54,7 @@ function Trace({ steps, open, onToggle }: { steps: ChatMessage[]; open: boolean;
           const tool = typeof s.data?.tool === 'string' && s.data.tool !== 'thinking' ? s.data.tool : null
           const t = typeof s.data?.t === 'number' ? mmss(s.data.t) : ''
           return (
-            <li key={s.seq ?? k} className="ln" role="listitem">
+            <li key={s.seq ?? k} className="ln" role="listitem" data-money-scope="step">
               <span className="ts">{t}</span>
               <span className="g" aria-hidden="true">{isLast ? '└' : '├'}</span>
               <span className="c">{s.text}{tool && <span className="tool"> {tool}</span>}</span>
@@ -66,6 +68,7 @@ function Trace({ steps, open, onToggle }: { steps: ChatMessage[]; open: boolean;
           {open ? 'Show less ↑' : `Show all ${steps.length} →`}
         </button>
       )}
+      {spend && <span className="tnum border-t border-pline pt-2 text-xs pm" data-money-scope="turn" data-testid="trace-spend">{spendLine(spend)}</span>}
     </div>
   )
 }
@@ -103,6 +106,8 @@ interface VoltagePaneProps {
   chips?: string[]
   /** What one turn may spend, under the composer. */
   cap?: string
+  /** Spend scopes: the summary after the latest turn, for its trace's footer. */
+  spend?: SpendSummary | null
   question?: PlanQuestion | null
   onAnswer?: (option: string) => void
   onSubmit: (text: string) => void
@@ -127,7 +132,7 @@ interface VoltagePaneProps {
  *  state word, the thread as turns — your bubble, the trace, Voltage's words,
  *  a question as a gate card — then the chips and the composer. */
 export function VoltagePane({
-  messages, projectId, state, busy, need, engine, chips = [], cap, question, onAnswer, onSubmit, placeholder = 'Say what to change…', sendLabel = 'Send',
+  messages, projectId, state, busy, need, engine, chips = [], cap, spend, question, onAnswer, onSubmit, placeholder = 'Say what to change…', sendLabel = 'Send',
   inputRef, seed, suggestions = [], before, children, working, empty, onShowMe,
 }: VoltagePaneProps) {
   const [prompt, setPrompt] = useState('')
@@ -183,7 +188,7 @@ export function VoltagePane({
           const isLatest = index === turns.length - 1
           if (!isLatest && !showAll && turns.length > 1) {
             return (
-              <button key={index} type="button" className="tag pm flex gap-2.5 rounded-lg bg-psunk px-3 py-2 text-left" onClick={() => setShowAll(true)} data-testid="earlier-turn">
+              <button key={index} type="button" className="tag pm flex gap-2.5 rounded-lg bg-psunk px-3 py-2 text-left" onClick={() => setShowAll(true)} data-testid="earlier-turn" data-money-scope="turn">
                 <span className="flex-1 truncate">Turn {index + 1}{t.user ? ` · ${t.user.text}` : ''}</span>
                 {spent > 0 && <span className="tnum">{money(spent)}</span>}
               </button>
@@ -192,7 +197,7 @@ export function VoltagePane({
           return (
             <div key={index} className="flex flex-col gap-4.5" data-testid="turn">
               {t.user && <div className="bubble text-sm"><span className="sr-only">You: </span>{t.user.text}</div>}
-              {t.steps.length > 0 && <Trace steps={t.steps} open={openTrace === index} onToggle={() => setOpenTrace((o) => (o === index ? null : index))} />}
+              {t.steps.length > 0 && <Trace steps={t.steps} open={openTrace === index} onToggle={() => setOpenTrace((o) => (o === index ? null : index))} spend={isLatest && t.user ? spend : null} />}
               {t.cards.map((c) => <Previews key={c.seq} projectId={projectId} m={c} />)}
               {t.said.length > 0 && (
                 <div className="flex flex-col gap-2.5 text-[15px] leading-relaxed [&_strong]:font-medium [&_strong]:text-volt">
@@ -220,11 +225,11 @@ export function VoltagePane({
         {question && (
           <div className={cn(question.gate ? 'gate' : 'flex flex-col gap-3.5 rounded-xl border border-pline p-4')} data-testid="clarify" data-tour={question.gate ? 'gate' : 'question'} role="group" aria-label={question.gate ? 'Your go is needed' : 'One question'}>
             <span className={cn('tag', question.gate ? 'text-volt' : 'pm')}>{question.gate ? '⚡ Your go is needed' : 'One question'}</span>
-            <p className="m-0 text-[15px] leading-relaxed"><strong className="font-medium">{question.text}</strong></p>
+            <p className="m-0 text-[15px] leading-relaxed" data-money-scope="step"><strong className="font-medium">{question.text}</strong></p>
             {(question.cost_usd != null || question.left_usd != null) && (
               <div className="tnum grid grid-cols-2 gap-2 text-xs sm:grid-cols-3">
-                {question.cost_usd != null && <div className="rounded-lg bg-psunk px-2.5 py-2"><div className="pm">THIS STEP</div><div className="text-[15px]">~{money(question.cost_usd)}</div></div>}
-                {question.left_usd != null && <div className="rounded-lg bg-psunk px-2.5 py-2"><div className="pm">LEFT IN TURN</div><div className="text-[15px] text-volt">{money(question.left_usd)}</div></div>}
+                {question.cost_usd != null && <div className="rounded-lg bg-psunk px-2.5 py-2" data-money-scope="step"><div className="pm">THIS STEP</div><div className="text-[15px]">~{money(question.cost_usd)}</div></div>}
+                {question.left_usd != null && <div className="rounded-lg bg-psunk px-2.5 py-2" data-money-scope="turn"><div className="pm">LEFT IN TURN</div><div className="text-[15px] text-volt">{money(question.left_usd)}</div></div>}
               </div>
             )}
             <div className="flex flex-wrap gap-2">
@@ -258,7 +263,7 @@ export function VoltagePane({
             onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submit() } }}
           />
           <div className="flex items-center gap-2">
-            <span className="tag pm">{cap ?? 'Nothing is spent until you say go'}</span>
+            <span className="tag pm" data-money-scope="turn">{cap ?? 'Nothing is spent until you say go'}</span>
             <span className="flex-1" />
             <span className="kbd pm hidden sm:inline" aria-hidden="true">/</span>
             <button type="button" className="btn volt sm w-[34px] p-0" onClick={submit} disabled={disabled} aria-label={sendLabel} title={sendLabel} data-tour-action="composer">

@@ -46,7 +46,9 @@ from app.media.reference import extract_reference_audio, speech_seconds
 from app.orchestrator.clones import CloneService, VoiceChoice
 from app.orchestrator.pipeline import run_edit
 from app.store.db import Database
-from app.usage import Ledger, SpendCeilingReached, WHISPER_USD_PER_MINUTE, claude_usd
+from app.usage import (
+    Ledger, SpendCeilingReached, WHISPER_USD_PER_MINUTE, claude_usd, current_turn, month_name, month_start,
+)
 from app import auth
 from app.store.repository import Project, ProjectRecord, ProjectRepository, LOCAL_OWNER
 from app.store.artifacts import ArtifactStore
@@ -247,8 +249,8 @@ def current_owner(request: Request) -> str:
 
 
 def _ensure_spend(project_id: str) -> None:
-    """The video's ceiling, its project's when one is set (Folders), and
-    with sign-in the person's across videos; the lowest wins."""
+    """The video's ceiling, its project's when one is set (Folders), and the
+    owner's for the month; the refusal names the scope that was reached."""
     record = repo.get(project_id)
     folder = None
     if record is not None and record.folder_id:
@@ -257,10 +259,82 @@ def _ensure_spend(project_id: str) -> None:
             folder = (project.project_id, float(project.ceiling_usd), project.name)
     ledger.ensure_can_spend(
         project_id,
-        owner=record.owner if record and settings.auth_mode != "off" else None,
-        owner_ceiling_usd=settings.user_budget_usd if settings.auth_mode != "off" else None,
+        owner=record.owner if record else None,
+        owner_ceiling_usd=settings.user_budget_usd,
         folder=folder,
+        filename=record.source.filename if record else "",
     )
+
+
+# ── Spend scopes: turn → video → project → month ─────────────────────────────
+
+SCOPE_ORDER = ("turn", "video", "project", "month")
+
+
+def _scope(spent: float, ceiling: float | None, label: str) -> dict:
+    return {"spent_usd": round(spent, 4), "ceiling_usd": None if ceiling is None else round(float(ceiling), 4),
+            "label": label}
+
+
+def _binding(scopes: dict) -> str | None:
+    """The scope that stops paid work first: the least headroom (ceiling less
+    spent) among the scopes with a ceiling; a tie goes to the narrower scope.
+    The turn's cap is left out: it starts again with every turn, so it never
+    stops the next one."""
+    best = None
+    for key in SCOPE_ORDER[1:]:
+        scope = scopes.get(key)
+        if not scope or scope["ceiling_usd"] is None:
+            continue
+        room = scope["ceiling_usd"] - scope["spent_usd"]
+        if best is None or room < best[0] - 1e-9:
+            best = (room, key)
+    return best[1] if best else None
+
+
+def _month_scope(owner: str) -> dict:
+    return _scope(ledger.spent_usd_by_owner(owner, iso(month_start())), settings.user_budget_usd, month_name())
+
+
+def _project_scope(project: Project) -> dict:
+    return _scope(ledger.spent_usd_by_folder(project.project_id), project.ceiling_usd, f"Project {project.name}")
+
+
+def _spend_summary(owner: str, video_id: str | None = None, project_id: str | None = None) -> dict:
+    """Every scope for the context, each {spent_usd, ceiling_usd, label}, and
+    the binding one. A video: its last turn (when it has had one), itself,
+    its project (when it is in one) and the month; a project: itself and the
+    month; nothing: the month."""
+    out: dict = {}
+    project = None
+    if video_id is not None:
+        record = repo.get(video_id)
+        last = repo.settings(video_id).get("last_turn") or {}
+        if last.get("id"):
+            out["turn"] = _scope(ledger.spent_usd_by_turn(video_id, last["id"], last.get("at")),
+                                 _settings(video_id, owner)["turn_usd"], "This turn")
+        out["video"] = _scope(ledger.spent_usd(video_id), ledger.ceiling_usd, "This video")
+        project = _folder_of(record) if record else None
+    elif project_id is not None:
+        project = repo.get_project(project_id)
+    if project is not None:
+        out["project"] = _project_scope(project)
+    out["month"] = _month_scope(owner)
+    out["binding"] = _binding(out)
+    return out
+
+
+@app.get("/spend")
+def get_spend(video: str | None = None, project: str | None = None, owner: str = Depends(current_owner)) -> dict:
+    """One summary of spend for the current context, every scope labelled,
+    plus `binding`: the scope with the least headroom."""
+    if video is not None:
+        _owned(video, owner)
+        return _spend_summary(owner, video_id=video)
+    if project is not None:
+        _owned_project(project, owner)
+        return _spend_summary(owner, project_id=project)
+    return _spend_summary(owner)
 
 
 # ── Phase 9c: sign-in ────────────────────────────────────────────────────────
@@ -930,8 +1004,7 @@ def design_my_voice(req: DesignRequest, owner: str = Depends(current_owner)) -> 
         raise HTTPException(status_code=503, detail="Voices cannot be designed in this setup (no vendor that designs).")
     key = _user_store(owner)
     try:
-        ledger.ensure_can_spend(key, owner=owner if settings.auth_mode != "off" else None,
-                                owner_ceiling_usd=settings.user_budget_usd if settings.auth_mode != "off" else None)
+        ledger.ensure_can_spend(key, owner=owner, owner_ceiling_usd=settings.user_budget_usd, filename="Your voices")
         previews = list(voice.design_voice(key, description))
     except (SpendCeilingReached, BudgetExceeded) as exc:
         raise HTTPException(status_code=402, detail=str(exc)) from exc
@@ -1141,14 +1214,84 @@ def _period_start(period: str) -> str | None:
     return None
 
 
+def _usage_groups(owner: str, since: str | None) -> tuple[list[dict], dict]:
+    """The Usage table: every project with its videos nested (each video's
+    spend while it was in that project), a Project-level row per project,
+    and the standalone videos under "No project". A video moved between
+    projects shows under each, with what it spent there. Also each
+    (group, video) pair's spend by vendor, for the chosen scope's totals."""
+    rows = ledger.breakdown(owner, since)
+    videos = {r.source.project_id: r for r in repo.list(owner)}
+    folders = repo.list_projects(owner)
+    cells: dict[tuple[str | None, str], dict[str, float]] = {}
+    for row in rows:
+        if row["video_id"].startswith("user-"):
+            continue
+        key = (row["folder_id"], row["video_id"])
+        cells.setdefault(key, {})[row["vendor"]] = cells.get(key, {}).get(row["vendor"], 0.0) + row["usd"]
+
+    def video_rows(folder_id: str | None) -> list[dict]:
+        ids = {vid for (fid, vid) in cells if fid == folder_id and vid}
+        ids |= {vid for vid, r in videos.items() if r.folder_id == folder_id}
+        out = []
+        for vid in ids:
+            r = videos.get(vid)
+            if r is None:
+                continue   # a deleted video's rows went with it
+            out.append({"video_id": vid, "filename": r.source.filename, "here": r.folder_id == folder_id,
+                        "spent_usd": round(sum(cells.get((folder_id, vid), {}).values()), 4)})
+        return sorted(out, key=lambda v: (-v["spent_usd"], v["filename"]))
+
+    groups = []
+    for p in folders:
+        project_level = round(sum(cells.get((p.project_id, ""), {}).values()), 4)
+        nested = video_rows(p.project_id)
+        groups.append({"project_id": p.project_id, "name": p.name, "ceiling_usd": p.ceiling_usd,
+                       "project_level_usd": project_level, "videos": nested,
+                       "spent_usd": round(project_level + sum(v["spent_usd"] for v in nested), 4)})
+    alone = video_rows(None)
+    groups.append({"project_id": None, "name": "No project", "ceiling_usd": None, "project_level_usd": None,
+                   "videos": alone, "spent_usd": round(sum(v["spent_usd"] for v in alone), 4)})
+    return groups, {"cells": cells, "rows": rows}
+
+
+def _usage_totals(owner: str, period: str, scope: str, groups: list[dict], raw: dict) -> dict:
+    """The chosen scope's totals: spent, its ceiling (when it has one) and by vendor."""
+    cells: dict = raw["cells"]
+    if scope.startswith("v:"):
+        vid = scope[2:]
+        record = _owned(vid, owner)
+        picked = [c for (fid, v), c in cells.items() if v == vid]
+        label, ceiling = record.source.filename, ledger.ceiling_usd
+    elif scope == "none":
+        picked = [c for (fid, v), c in cells.items() if fid is None]
+        label, ceiling = "Standalone videos", None
+    elif scope != "all":
+        project = _owned_project(scope, owner)
+        picked = [c for (fid, v), c in cells.items() if fid == project.project_id]
+        label, ceiling = f"Project {project.name}", project.ceiling_usd
+    else:
+        picked = [{row["vendor"]: row["usd"]} for row in raw["rows"]]
+        label = month_name() if period == "month" else ("Last 7 days" if period == "week" else "All time")
+        ceiling = settings.user_budget_usd if period == "month" else None
+    by_vendor = {v: 0.0 for v in VENDOR_LABELS}
+    for c in picked:
+        for vendor, usd in c.items():
+            by_vendor[vendor] = by_vendor.get(vendor, 0.0) + usd
+    return {"scope": scope, "label": label, "spent_usd": round(sum(by_vendor.values()), 4), "ceiling_usd": ceiling,
+            "by_vendor": [{"vendor": v, "label": VENDOR_LABELS.get(v, v), "usd": round(usd, 4)} for v, usd in by_vendor.items()]}
+
+
 @app.get("/usage")
-def get_my_usage(period: Literal["week", "month", "all"] = "month", owner: str = Depends(current_owner)) -> dict:
+def get_my_usage(period: Literal["week", "month", "all"] = "month", scope: str = "all",
+                 owner: str = Depends(current_owner)) -> dict:
     """What the caller has spent across their projects in the period: the
     week is the last seven days, the month the calendar month so far (UTC).
     A turn is one "Thinking" step; a take is one ElevenLabs speech call; the
     voices made are the caller's own plus every project's. A voice designed
     outside any project (the voices page) counts in the totals, not by project."""
     since = _period_start(period)
+    groups, raw = _usage_groups(owner, since)
     by_vendor = {v: 0.0 for v in VENDOR_LABELS}
     by_video: list[dict] = []
     turns = takes = 0
@@ -1193,6 +1336,11 @@ def get_my_usage(period: Literal["week", "month", "all"] = "month", owner: str =
         "by_vendor": [{"vendor": v, "label": VENDOR_LABELS.get(v, v), "usd": round(usd, 4)} for v, usd in by_vendor.items()],
         "by_video": by_video,
         "by_project": by_project,
+        # Spend scopes: the table (projects with their videos nested, "No
+        # project" last) and the chosen scope's totals (`scope` = all | none
+        # | f<n> | v:p<n>).
+        "groups": groups,
+        "totals": _usage_totals(owner, period, scope, groups, raw),
     }
 
 
@@ -2915,6 +3063,7 @@ def _workbench() -> Workbench:
         slots=getattr(voice, "slots", lambda: None), put_audio=put_audio,
         speakers=repo.speakers, voice_for=_voice_for, remove_words=_remove_words, shift_words=_shift_words, move_take=_moved,
         project=_project_view, suggest=_suggest_brief, help_search=lambda query: search_help_articles(query, limit=3),
+        spend=lambda pid: _spend_summary(repo.get(pid).owner if repo.get(pid) else LOCAL_OWNER, video_id=pid),
     )
 
 
@@ -2973,14 +3122,25 @@ def take_turn(project_id: str, req: TurnRequest, owner: str = Depends(current_ow
     repo.update_plan(project_id, plan.plan_id, status="running", question=None)
     job = jobs.create("turn", project_id)
     started_at = _now()
+    # Spend scopes: the turn's id is the job's; every charge it causes carries it.
+    repo.set_settings(project_id, last_turn={"id": job.job_id, "at": started_at})
 
     def work(report) -> dict:
+        token = current_turn.set(job.job_id)
+        try:
+            out = turn_work(report)
+            return {**out, "spend": _spend_summary(owner, video_id=project_id)}
+        finally:
+            current_turn.reset(token)
+
+    def turn_work(report) -> dict:
         try:
             _ensure_spend(project_id)
         except SpendCeilingReached as exc:
             repo.update_plan(project_id, plan.plan_id, status="proposed")
             repo.add_message(project_id, "assistant", str(exc))
-            return {"plan": _plan_dict(repo.get_plan(project_id, plan.plan_id)), "reply": str(exc), "question": None}
+            return {"plan": _plan_dict(repo.get_plan(project_id, plan.plan_id)), "reply": str(exc), "question": None,
+                    "ceiling": exc.scope}
         budget_ = TurnBudget(usd=prefs["turn_usd"])
         turn = AgentTurn(project_id=project_id, record=record, plan_id=plan.plan_id, autonomy=autonomy,
                          spend_approved=approve or autonomy == "draft", budget=budget_, started_at=started_at,

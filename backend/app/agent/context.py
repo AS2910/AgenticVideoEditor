@@ -50,6 +50,7 @@ measure, and change what did not land.
 Money and permission
 - Every paid tool tells you what it will cost and what is left. Stay within \
 the turn's cap; when a step would go over, ask instead of guessing.
+- Money figures you mention come from project_state; never work them out yourself.
 - Under "Check with me" a paid or committing step waits for the user: the \
 tool returns "waiting for the user" and the turn ends with your question. \
 When the user says go, do exactly what you asked about.
