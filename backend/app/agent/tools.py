@@ -884,9 +884,12 @@ def _shift_line(wb: Workbench, turn: Turn, args: dict) -> ToolResult:
     if turn.autonomy == "ask" and not turn.commit_approved:
         raise WaitingForUser(f"Move line {line.index} (“{line.text}”) to {to:.2f} s, as spoken?", ("Move it", "Not yet"), "Move it")
     out = wb.shift_words(turn.project_id, turn.record, Selection(line.start, line.end), to)
+    if out.get("error"):
+        return ToolResult(f"Line {line.index} stays where it was: {out['error']}")
     sel = out["selection"]
-    return ToolResult(f"Line {line.index} now plays from {sel['start']:.2f} s (edit {out['edit_id']}); the room's sound is where it was. "
-                      "It is part of the video already; undo_edit takes it out.",
+    return ToolResult(f"Line {line.index} is pinned to play from {sel['start']:.2f} s; the room's sound is where it was, "
+                      "and the other lines follow one another around it. It is part of the video already; "
+                      "the user can unpin it or undo the move in the transcript.",
                       step=f"Moved line {line.index} to {sel['start']:.2f} s")
 
 
@@ -1100,7 +1103,7 @@ TOOLS: tuple[Tool, ...] = (
          _schema({"speaker": {"type": "string", "description": "The speaker's name or label, from read_transcript."}}), Guard.COMMIT, _clone_speaker, strict=True),
     Tool("remove_line", "Propose taking a spoken line out: the words go, the room's own sound stays, the picture is untouched. A proposal like a take; ship makes it part of the video.",
          _schema({"line": {"type": "integer", "description": "The transcript line."}}), Guard.FREE, _remove_line),
-    Tool("shift_line", "Move a spoken line to another time, as it was spoken: nothing is voiced. Part of the video at once (undo from the review).",
+    Tool("shift_line", "Move a spoken line to another time, as it was spoken: nothing is voiced. The line is pinned there and the other lines follow one another around it; a replacement moves with its line. Part of the video at once.",
          _schema({"line": {"type": "integer"}, "to": {"type": "number", "description": "Where the words should start, in seconds."}}), Guard.COMMIT, _shift_line, strict=True),
     Tool("move_item", "Place a voiced item's take at another time, the same audio, nothing voiced again.",
          _schema({"item_id": {"type": "string"}, "start": {"type": "number", "description": "Seconds."}}), Guard.FREE, _move_item),

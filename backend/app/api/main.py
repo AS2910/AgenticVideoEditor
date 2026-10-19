@@ -28,6 +28,7 @@ from app.media.fit import speaking_rate, syllable_budget, syllables
 from app.config import load_settings
 from app.timefmt import iso, now_iso
 from app.agent.prose import plain
+from app import arrange
 from app.media import frames as frames_mod, motion, shots
 from app.media import stems as stems_module
 from app.media import ffmpeg, ingest
@@ -2219,9 +2220,10 @@ def _lock_for(key: str) -> threading.Lock:
 
 
 def _render_edits(project_id: str, proposals: bool) -> tuple[list[ApprovedEdit], list[tuple[str, ApprovedEdit]]]:
+    record = repo.get(project_id)
     edits = [e for e in repo.list_edits(project_id) if not e.reverted]
     previewed = _proposal_edits(project_id) if proposals else []
-    return edits + [e for _, e in previewed], previewed
+    return _arranged_edits(project_id, record, edits + [e for _, e in previewed]), previewed
 
 
 def edit_set_hash(record: ProjectRecord, edits: Sequence[ApprovedEdit], mode: str) -> str:
@@ -2651,45 +2653,341 @@ def _room_tone_candidate(project_id: str, record: ProjectRecord, selection: Sele
 @app.post("/projects/{project_id}/lines/shift", deprecated=True)
 def shift_line(project_id: str, req: ShiftRequest, owner: str = Depends(current_owner)) -> dict:
     """Move a line of the original speech to another time, as it was
-    spoken: its words leave their place (the room's sound stays there) and
-    play over the picture from `to`. Nothing is voiced. Two edits, undone
-    together; the placed half can be moved again like any kept line."""
+    spoken: the line is pinned at `to` in the arrangement, its old place
+    gets the room's sound, and the other lines flow around it."""
     record = _owned(project_id, owner)
     if not any(w.end > req.start and w.start < req.end for w in record.transcript.words):
         raise HTTPException(status_code=422, detail="Nothing is said there to move.")
-    out = _shift_words(project_id, record, Selection(req.start, req.end), req.to)
-    repo.add_message(project_id, "user", f"Moved the line at {_clock(out['from']['start'])} to {_clock(out['selection']['start'])}")
+    # 2026-10-19: a move is the arrangement's now: the line is pinned there and the others flow.
+    return _pin_line(project_id, record, Selection(req.start, req.end), req.to)
+
+
+# ── The arrangement (2026-10-19): the transcript's order is the playback order ──
+#
+# A move is not an edit any more. The video keeps one arrangement: the order
+# of its spoken lines, the lines pinned to a time, the tightest pause, and how
+# a run past the end is handled. Lines follow one another (`app.arrange`); a
+# line that ends up somewhere else plays there, its old place filled with the
+# room's own sound, and a replacement travels with its line. The render builds
+# those edits from the arrangement each time, so there is one row per line and
+# one undo per action.
+
+ARRANGEMENT_HISTORY = 50
+ARRANGE_RATE = 48000
+
+
+def _arrangement(project_id: str) -> arrange.Arrangement:
+    return arrange.Arrangement.from_dict(repo.settings(project_id).get("arrangement"))
+
+
+def _arrangement_lines(record: ProjectRecord) -> list[arrange.LineSpec]:
+    return arrange.specs(statements_of(record.transcript))
+
+
+def _line_replacements(record: ProjectRecord, edits: Sequence[ApprovedEdit]) -> dict[str, ApprovedEdit]:
+    """Each spoken line's replacement in the video, if it has one: the latest
+    kept take that covers most of it. It moves with its line."""
+    out: dict[str, ApprovedEdit] = {}
+    sts = statements_of(record.transcript)
+    for e in edits:
+        if e.reverted or e.plan.mix != "replace":
+            continue
+        for i, st in enumerate(sts):
+            span = st.end - st.start
+            overlap = min(e.plan.selection.end, st.end) - max(e.plan.selection.start, st.start)
+            if span > 0 and overlap >= 0.5 * span:
+                out[f"L{i}"] = e
     return out
 
 
-def _shift_words(project_id: str, record: ProjectRecord, span: Selection, to: float) -> dict:
-    """A line of the original speech moved to `to`, as spoken: two edits,
-    the room's sound where it was and the words placed over the picture."""
-    source = snap_to_word_boundaries(record.transcript, span)
-    duration = record.source.duration
-    to = round(min(max(0.0, to), duration), 3)
-    length = source.end - source.start
-    words = " ".join(w.text for w in record.transcript.words if w.end > source.start and w.start < source.end)
+def _arrangement_audio(project_id: str, record: ProjectRecord, name: str, make) -> MediaArtifact:
+    """A sound the arrangement needs (a line's own words, the room's sound
+    for its old place, the tail that plays over a held last frame), made once
+    and kept by name with the video."""
+    cache = dict(repo.settings(project_id).get("arrangement_audio") or {})
+    got = cache.get(name)
+    if got is not None and artifacts.find(project_id, got["sha256"]) is not None:
+        return MediaArtifact(**got)
     with tempfile.TemporaryDirectory() as tmp:
-        path, got = ffmpeg.extract_segment(record.source.media.path, Path(tmp) / "line.wav", source.start, source.end)
-        audio = artifacts.put_file(project_id, path, kind="audio", container="wav", duration=got)
-    placed = EditCandidate(
-        candidate_id=repo.next_candidate_id(project_id),
-        plan=EditPlan(Selection(to, round(min(duration, to + length), 3)), words, "original", fit="start", mix="layer"),
-        audio=audio, frames=record.source.media,
-        continuity=ContinuityReport(None, None, None, None, True, (), ()),
-        fit_notes=(f"moved from {_clock(source.start)}",),
-    )
-    repo.save_candidate(project_id, placed)
-    removed = _room_tone_candidate(project_id, record, source)
-    removed_id = _approve_candidate(project_id, removed, overridden=False)
-    placed_id = _approve_candidate(project_id, placed, overridden=False, partner=removed_id)
-    repo.relink_edit(project_id, removed_id, placed_id)
+        path, seconds = make(Path(tmp))
+        audio = artifacts.put_file(project_id, path, kind="audio", container="wav", duration=seconds)
+    cache[name] = asdict(audio)
+    repo.set_settings(project_id, arrangement_audio=cache)
+    return audio
+
+
+def _original_words(project_id: str, record: ProjectRecord, spec: arrange.LineSpec) -> MediaArtifact:
+    def make(tmp: Path):
+        return ffmpeg.extract_segment(record.source.media.path, tmp / "line.wav", spec.orig_start, spec.orig_end,
+                                      sample_rate=ARRANGE_RATE)
+    return _arrangement_audio(project_id, record, f"{spec.key}:words:{spec.orig_start:.3f}-{spec.orig_end:.3f}", make)
+
+
+def _room_in_place_of(project_id: str, record: ProjectRecord, spec: arrange.LineSpec) -> MediaArtifact:
+    def make(tmp: Path):
+        from app.continuity import signals
+        from app.continuity.measured import _write_wav
+        seconds = spec.orig_end - spec.orig_start
+        _write_wav(tmp / "room.wav", _room_tone(record, seconds), signals.RATE)
+        return tmp / "room.wav", seconds
+    return _arrangement_audio(project_id, record, f"{spec.key}:room:{spec.orig_start:.3f}-{spec.orig_end:.3f}", make)
+
+
+def _tail_of(project_id: str, record: ProjectRecord, audio: MediaArtifact, offset: float) -> MediaArtifact:
+    """The part of a take from `offset` on: what is still to be heard once the clip has ended."""
+    def make(tmp: Path):
+        return ffmpeg.extract_segment(audio.path, tmp / "tail.wav", offset, audio.duration, sample_rate=ARRANGE_RATE)
+    return _arrangement_audio(project_id, record, f"tail:{audio.sha256[:16]}:{offset:.3f}", make)
+
+
+def _placements(record: ProjectRecord, arrangement: arrange.Arrangement) -> list[arrange.Placed]:
+    return arrange.place(_arrangement_lines(record), arrangement)
+
+
+def _arranged_edits(project_id: str, record: ProjectRecord, edits: list[ApprovedEdit]) -> list[ApprovedEdit]:
+    """The edits a render plays once the arrangement has had its say: every
+    line that plays somewhere else becomes the room's sound at its old place
+    and its words (or its replacement) at the new one. A run past the end is
+    never cut silently: the last frame holds while the line finishes, unless
+    the user chose to trim it."""
+    _migrate_moves(project_id, record)
+    arrangement = _arrangement(project_id)
+    lines = _arrangement_lines(record)
+    if arrangement.is_default([ln.key for ln in lines]):
+        return edits
+    placed = arrange.place(lines, arrangement)
+    moved = [p for p in placed if p.moved]
+    if not moved:
+        return edits
+    spec = {ln.key: ln for ln in lines}
+    texts = {f"L{i}": st.text for i, st in enumerate(statements_of(record.transcript))}
+    taken = _line_replacements(record, edits)
+    dropped = {taken[p.key].edit_id for p in moved if p.key in taken}
+    out = [e for e in edits if e.edit_id not in dropped]
+    duration = record.source.duration
+    for p in moved:
+        ln = spec[p.key]
+        out.append(ApprovedEdit(
+            edit_id=f"arr-{p.key}-out", candidate_id="arrangement",
+            plan=EditPlan(Selection(ln.orig_start, ln.orig_end), "", "none", mix="remove"),
+            audio=_room_in_place_of(project_id, record, ln), frames=record.source.media,
+        ))
+        take = taken.get(p.key)
+        audio = take.audio if take is not None else _original_words(project_id, record, ln)
+        start = round(min(p.start, duration), 3)
+        end = round(min(duration, p.start + audio.duration), 3)
+        plan = (replace(take.plan, selection=Selection(start, end), mix="layer", fit="start", flex=None)
+                if take is not None else
+                EditPlan(Selection(start, end), texts.get(p.key, ""), "original", fit="start", mix="layer"))
+        out.append(ApprovedEdit(edit_id=f"arr-{p.key}-in", candidate_id=take.candidate_id if take else "arrangement",
+                                plan=plan, audio=audio, frames=record.source.media))
+        past = p.start + audio.duration - duration
+        if past > 0.01 and arrangement.end != "trim":
+            # Let the picture ease: the last frame holds while the rest is heard.
+            tail = _tail_of(project_id, record, audio, max(0.0, duration - p.start))
+            out.append(ApprovedEdit(
+                edit_id=f"arr-{p.key}-hold", candidate_id="arrangement",
+                plan=EditPlan(Selection(duration, duration), texts.get(p.key, ""), "original", mix="concatenate"),
+                audio=tail, frames=record.source.media,
+            ))
+    return out
+
+
+def _arrangement_dict(project_id: str, record: ProjectRecord) -> dict:
+    _migrate_moves(project_id, record)
+    arrangement = _arrangement(project_id)
+    lines = _arrangement_lines(record)
+    placed = arrange.place(lines, arrangement)
+    spec = {ln.key: ln for ln in lines}
+    sts = statements_of(record.transcript)
+    taken = _line_replacements(record, [e for e in repo.list_edits(project_id) if not e.reverted])
+    duration = record.source.duration
+    over = arrange.overrun(placed, duration)
+    saved = repo.settings(project_id)
     return {
-        "edit_id": placed_id, "removed_edit_id": removed_id, "candidate": _candidate_dict(placed),
-        "from": {"start": source.start, "end": source.end},
-        "selection": {"start": placed.plan.selection.start, "end": placed.plan.selection.end}, "mix": "layer",
+        "arrangement": arrangement.as_dict(),
+        "duration": duration,
+        "lines": [{
+            "key": p.key, "index": int(p.key[1:]) + 1, "text": sts[int(p.key[1:])].text,
+            "speaker": sts[int(p.key[1:])].speaker,
+            "orig_start": spec[p.key].orig_start, "orig_end": spec[p.key].orig_end,
+            "length": spec[p.key].length, "gap": spec[p.key].gap,
+            "start": p.start, "end": p.end, "pinned": p.pinned, "pushed_after": p.pushed_after, "moved": p.moved,
+            "replaced_by": taken[p.key].edit_id if p.key in taken else None,
+        } for p in placed],
+        "overrun": over,
+        "ease_ok": 0 < over <= arrange.EASE_LIMIT_S,
+        "min_gap_default": arrange.DEFAULT_MIN_GAP,
+        "can_undo": bool(saved.get("arrangement_history")),
     }
+
+
+def _save_arrangement(project_id: str, record: ProjectRecord, new: arrange.Arrangement, said: str | None) -> None:
+    """One action, one undo: the arrangement before it is kept to go back to."""
+    lines = _arrangement_lines(record)
+    keys = {ln.key for ln in lines}
+    conflict = arrange.pin_conflict(lines, new.pins)
+    if conflict:
+        raise HTTPException(status_code=422, detail=conflict)
+    new = arrange.Arrangement(
+        order=tuple(k for k in new.order if k in keys), pins={k: round(max(0.0, v), 3) for k, v in new.pins.items() if k in keys},
+        min_gap=None if new.min_gap is None else round(max(0.0, float(new.min_gap)), 3),
+        end=new.end if new.end in ("hold", "trim") else None,
+    )
+    old = _arrangement(project_id)
+    if new == old:
+        return
+    history = list(repo.settings(project_id).get("arrangement_history") or [])[-(ARRANGEMENT_HISTORY - 1):]
+    repo.set_settings(project_id, arrangement=new.as_dict(), arrangement_history=history + [old.as_dict()])
+    if said:
+        repo.add_message(project_id, "user", said)
+
+
+def _arrangement_said(record: ProjectRecord, before: list[arrange.Placed], after: list[arrange.Placed]) -> str | None:
+    """What the user did, in a sentence for the chat, so Voltage knows."""
+    was = {p.key: p.start for p in before}
+    changed = [p for p in after if abs(was.get(p.key, p.start) - p.start) > 0.005]
+    if not changed:
+        return None
+    first = changed[0]
+    line = int(first.key[1:]) + 1
+    more = f", and {len(changed) - 1} more line{'s' if len(changed) > 2 else ''} follow" if len(changed) > 1 else ""
+    return f"Moved line {line} to {_clock(first.start)}{more}"
+
+
+def _migrate_moves(project_id: str, record: ProjectRecord) -> None:
+    """Moves made before the arrangement (two-edit shifts, takes moved off
+    their line) become the arrangement once, so each line has one row: the
+    old edits are undone, a moved take goes back on its line, and the line
+    is placed where it was moved to."""
+    saved = repo.settings(project_id)
+    if saved.get("arrangement_v1"):
+        return
+    edits = [e for e in repo.list_edits(project_id)]
+    lines = _arrangement_lines(record)
+    targets: dict[str, float] = {}
+
+    def line_at(start: float, end: float) -> str | None:
+        best, overlap = None, 0.0
+        for ln in lines:
+            o = min(end, ln.orig_end) - max(start, ln.orig_start)
+            if o > overlap:
+                best, overlap = ln.key, o
+        return best
+
+    live = [e for e in edits if not e.reverted]
+    for e in live:
+        if e.plan.mix == "layer" and e.partner:
+            partner = next((x for x in edits if x.edit_id == e.partner), None)
+            if partner is None or partner.plan.mix != "remove":
+                continue
+            key = line_at(partner.plan.selection.start, partner.plan.selection.end)
+            if key is not None:
+                targets[key] = e.plan.selection.start
+                repo.revert_edit(project_id, e.edit_id)
+                repo.revert_edit(project_id, partner.edit_id)
+    for e in live:
+        if e.plan.mix != "replace":
+            continue
+        cand = repo.get_candidate(project_id, e.candidate_id)
+        if cand is None or not any(n.startswith("moved to") for n in cand.fit_notes):
+            continue
+        origin = next((x for x in edits if x.audio.sha256 == e.audio.sha256 and x.edit_id != e.edit_id
+                       and (c := repo.get_candidate(project_id, x.candidate_id)) is not None
+                       and not any(n.startswith("moved") for n in c.fit_notes)), None)
+        if origin is None:
+            continue
+        key = line_at(origin.plan.selection.start, origin.plan.selection.end)
+        if key is None:
+            continue
+        repo.revert_edit(project_id, e.edit_id)
+        if origin.reverted:
+            _approve_candidate(project_id, repo.get_candidate(project_id, origin.candidate_id), overridden=origin.overridden)
+        targets.setdefault(key, e.plan.selection.start)
+    arrangement = _arrangement(project_id)
+    if targets:
+        # As an order where that is enough, a pin only where it is not.
+        order = [ln.key for ln in lines]
+        for key, to in sorted(targets.items(), key=lambda kv: kv[1]):
+            order.remove(key)
+            at = next((i for i, k in enumerate(order) if next(ln for ln in lines if ln.key == k).orig_start >= to - 1e-6), len(order))
+            order.insert(at, key)
+        arrangement = arrange.Arrangement(order=tuple(order), pins=dict(arrangement.pins), min_gap=arrangement.min_gap, end=arrangement.end)
+        placed = {p.key: p for p in arrange.place(lines, arrangement)}
+        pins = dict(arrangement.pins)
+        for key, to in targets.items():
+            if abs(placed[key].start - to) > 0.05:
+                pins[key] = round(to, 3)
+        arrangement = arrange.Arrangement(order=arrangement.order, pins=pins, min_gap=arrangement.min_gap, end=arrangement.end)
+        if arrange.pin_conflict(lines, arrangement.pins):
+            arrangement = arrange.Arrangement(order=arrangement.order, min_gap=arrangement.min_gap, end=arrangement.end)
+        render_log.info("arrangement migrated video=%s moved=%s", project_id, sorted(targets))
+    repo.set_settings(project_id, arrangement=arrangement.as_dict(), arrangement_v1=True)
+
+
+@app.get("/videos/{project_id}/arrangement")
+def get_arrangement(project_id: str, owner: str = Depends(current_owner)) -> dict:
+    """Where every spoken line plays, in playback order."""
+    return _arrangement_dict(project_id, _owned(project_id, owner))
+
+
+class ArrangementRequest(BaseModel):
+    # The lines in playback order, by key ("L0" is the first spoken line).
+    order: list[str] = []
+    # Lines held at a time the user typed: key -> seconds.
+    pins: dict[str, float] = {}
+    # Tighten gaps: every pause at most this long; None keeps the original pauses.
+    min_gap: float | None = None
+    # A run past the end: "hold" lets the picture ease, "trim" fades the last line out.
+    end: Literal["hold", "trim"] | None = None
+
+
+@app.put("/videos/{project_id}/arrangement")
+def put_arrangement(project_id: str, req: ArrangementRequest, owner: str = Depends(current_owner)) -> dict:
+    """The whole arrangement, as one action (one undo)."""
+    record = _owned(project_id, owner)
+    _migrate_moves(project_id, record)
+    before = _placements(record, _arrangement(project_id))
+    new = arrange.Arrangement(order=tuple(req.order), pins=dict(req.pins), min_gap=req.min_gap, end=req.end)
+    _save_arrangement(project_id, record, new, _arrangement_said(record, before, _placements(record, new)))
+    return _arrangement_dict(project_id, record)
+
+
+@app.post("/videos/{project_id}/arrangement/undo")
+def undo_arrangement(project_id: str, owner: str = Depends(current_owner)) -> dict:
+    """Back to the arrangement before the last action."""
+    record = _owned(project_id, owner)
+    history = list(repo.settings(project_id).get("arrangement_history") or [])
+    if not history:
+        raise HTTPException(status_code=409, detail="Nothing to undo in the arrangement.")
+    repo.set_settings(project_id, arrangement=history[-1], arrangement_history=history[:-1])
+    repo.add_message(project_id, "user", "Undid the last move")
+    return _arrangement_dict(project_id, record)
+
+
+def _shift_by_pin(project_id: str, record: ProjectRecord, span: Selection, to: float) -> dict:
+    try:
+        return _pin_line(project_id, record, span, to)
+    except HTTPException as e:
+        return {"error": str(e.detail)}
+
+
+def _pin_line(project_id: str, record: ProjectRecord, span: Selection, to: float) -> dict:
+    """A line pinned to start at `to` (the agent's shift_line, and the old
+    shift endpoint): the lines around it flow, its old place gets the room's sound."""
+    _migrate_moves(project_id, record)
+    lines = _arrangement_lines(record)
+    best = max(lines, key=lambda ln: min(span.end, ln.orig_end) - max(span.start, ln.orig_start), default=None)
+    if best is None or min(span.end, best.orig_end) - max(span.start, best.orig_start) <= 0:
+        raise HTTPException(status_code=422, detail="Nothing is said there to move.")
+    current = _arrangement(project_id)
+    before = arrange.place(lines, current)
+    to = round(min(max(0.0, to), record.source.duration), 3)
+    new = arrange.Arrangement(order=current.order, pins={**current.pins, best.key: to}, min_gap=current.min_gap, end=current.end)
+    _save_arrangement(project_id, record, new, _arrangement_said(record, before, arrange.place(lines, new)))
+    placed = next(p for p in arrange.place(lines, new) if p.key == best.key)
+    return {"key": best.key, "from": {"start": best.orig_start, "end": best.orig_end},
+            "selection": {"start": placed.start, "end": placed.end}, "edit_id": f"arr-{best.key}"}
 
 
 # ── UX-1b: move a take or a kept line anywhere on the timeline ────────────────
@@ -2820,11 +3118,19 @@ def move_edit(
     """A kept line, placed somewhere else: the old edit is reverted and the
     same take approved at the new place, in one step."""
     record = _owned(project_id, owner)
+    _migrate_moves(project_id, record)
     edit = next((e for e in repo.list_edits(project_id) if e.edit_id == edit_id and not e.reverted), None)
     if edit is None:
         raise HTTPException(status_code=404, detail="edit not found")
     if edit.plan.mix == "remove":
         raise HTTPException(status_code=422, detail="A removal has no audio to move.")
+    if edit.plan.mix == "replace" and req.mix in (None, "replace"):
+        # A replacement travels with its line (2026-10-19): moving it moves the line.
+        line = next((k for k, e in _line_replacements(record, [edit]).items() if e.edit_id == edit_id), None)
+        if line is not None:
+            st = statements_of(record.transcript)[int(line[1:])]
+            out = _pin_line(project_id, record, Selection(st.start, st.end), req.start)
+            return {"edit_id": edit_id, "reverted": None, "pinned": out["key"], "selection": out["selection"]}
     source = repo.get_candidate(project_id, edit.candidate_id) or EditCandidate(
         edit.candidate_id, edit.plan, edit.audio, edit.frames, ContinuityReport(None, None, None, None, True, (), ()),
     )
@@ -2913,7 +3219,7 @@ def _workbench() -> Workbench:
         add_from_library=getattr(voice, "add_from_library", None),
         delete_voice=getattr(voice, "delete_voice", None),
         slots=getattr(voice, "slots", lambda: None), put_audio=put_audio,
-        speakers=repo.speakers, voice_for=_voice_for, remove_words=_remove_words, shift_words=_shift_words, move_take=_moved,
+        speakers=repo.speakers, voice_for=_voice_for, remove_words=_remove_words, shift_words=_shift_by_pin, move_take=_moved,
         project=_project_view, suggest=_suggest_brief, help_search=lambda query: search_help_articles(query, limit=3),
     )
 

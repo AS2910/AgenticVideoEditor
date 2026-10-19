@@ -1,0 +1,417 @@
+[
+ {
+  "name": "unchanged: the original timing exactly",
+  "statements": [
+   [
+    0.4,
+    2.0
+   ],
+   [
+    2.5,
+    4.0
+   ],
+   [
+    4.3,
+    6.0
+   ]
+  ],
+  "lengths": {},
+  "arrangement": {},
+  "duration": 7.0,
+  "placed": [
+   {
+    "key": "L0",
+    "start": 0.4,
+    "end": 2.0,
+    "pinned": false,
+    "pushed_after": null,
+    "moved": false
+   },
+   {
+    "key": "L1",
+    "start": 2.5,
+    "end": 4.0,
+    "pinned": false,
+    "pushed_after": null,
+    "moved": false
+   },
+   {
+    "key": "L2",
+    "start": 4.3,
+    "end": 6.0,
+    "pinned": false,
+    "pushed_after": null,
+    "moved": false
+   }
+  ],
+  "overrun": 0.0
+ },
+ {
+  "name": "the last line first: gaps travel with their lines",
+  "statements": [
+   [
+    0.4,
+    2.0
+   ],
+   [
+    2.5,
+    4.0
+   ],
+   [
+    4.3,
+    6.0
+   ]
+  ],
+  "lengths": {},
+  "arrangement": {
+   "order": [
+    "L2",
+    "L0",
+    "L1"
+   ]
+  },
+  "duration": 7.0,
+  "placed": [
+   {
+    "key": "L2",
+    "start": 0.3,
+    "end": 2.0,
+    "pinned": false,
+    "pushed_after": null,
+    "moved": true
+   },
+   {
+    "key": "L0",
+    "start": 2.4,
+    "end": 4.0,
+    "pinned": false,
+    "pushed_after": null,
+    "moved": true
+   },
+   {
+    "key": "L1",
+    "start": 4.5,
+    "end": 6.0,
+    "pinned": false,
+    "pushed_after": null,
+    "moved": true
+   }
+  ],
+  "overrun": 0.0
+ },
+ {
+  "name": "the first line last",
+  "statements": [
+   [
+    0.4,
+    2.0
+   ],
+   [
+    2.5,
+    4.0
+   ],
+   [
+    4.3,
+    6.0
+   ]
+  ],
+  "lengths": {},
+  "arrangement": {
+   "order": [
+    "L1",
+    "L2",
+    "L0"
+   ]
+  },
+  "duration": 7.0,
+  "placed": [
+   {
+    "key": "L1",
+    "start": 0.5,
+    "end": 2.0,
+    "pinned": false,
+    "pushed_after": null,
+    "moved": true
+   },
+   {
+    "key": "L2",
+    "start": 2.3,
+    "end": 4.0,
+    "pinned": false,
+    "pushed_after": null,
+    "moved": true
+   },
+   {
+    "key": "L0",
+    "start": 4.4,
+    "end": 6.0,
+    "pinned": false,
+    "pushed_after": null,
+    "moved": true
+   }
+  ],
+  "overrun": 0.0
+ },
+ {
+  "name": "a pinned line; the others flow around it",
+  "statements": [
+   [
+    0.4,
+    2.0
+   ],
+   [
+    2.5,
+    4.0
+   ],
+   [
+    4.3,
+    6.0
+   ]
+  ],
+  "lengths": {},
+  "arrangement": {
+   "pins": {
+    "L2": 1.0
+   }
+  },
+  "duration": 7.0,
+  "placed": [
+   {
+    "key": "L2",
+    "start": 1.0,
+    "end": 2.7,
+    "pinned": true,
+    "pushed_after": null,
+    "moved": true
+   },
+   {
+    "key": "L0",
+    "start": 3.1,
+    "end": 4.7,
+    "pinned": false,
+    "pushed_after": 1.0,
+    "moved": true
+   },
+   {
+    "key": "L1",
+    "start": 5.2,
+    "end": 6.7,
+    "pinned": false,
+    "pushed_after": null,
+    "moved": true
+   }
+  ],
+  "overrun": 0.0
+ },
+ {
+  "name": "a flowing line that would run into a pin is pushed after it",
+  "statements": [
+   [
+    0.4,
+    2.0
+   ],
+   [
+    2.5,
+    4.0
+   ],
+   [
+    4.3,
+    6.0
+   ]
+  ],
+  "lengths": {},
+  "arrangement": {
+   "order": [
+    "L0",
+    "L2",
+    "L1"
+   ],
+   "pins": {
+    "L1": 2.1
+   }
+  },
+  "duration": 7.0,
+  "placed": [
+   {
+    "key": "L0",
+    "start": 0.4,
+    "end": 2.0,
+    "pinned": false,
+    "pushed_after": null,
+    "moved": false
+   },
+   {
+    "key": "L1",
+    "start": 2.1,
+    "end": 3.6,
+    "pinned": true,
+    "pushed_after": null,
+    "moved": true
+   },
+   {
+    "key": "L2",
+    "start": 3.9,
+    "end": 5.6,
+    "pinned": false,
+    "pushed_after": 2.1,
+    "moved": true
+   }
+  ],
+  "overrun": 0.0
+ },
+ {
+  "name": "tighten gaps",
+  "statements": [
+   [
+    0.4,
+    2.0
+   ],
+   [
+    2.5,
+    4.0
+   ],
+   [
+    4.3,
+    6.0
+   ]
+  ],
+  "lengths": {},
+  "arrangement": {
+   "min_gap": 0.15
+  },
+  "duration": 7.0,
+  "placed": [
+   {
+    "key": "L0",
+    "start": 0.4,
+    "end": 2.0,
+    "pinned": false,
+    "pushed_after": null,
+    "moved": false
+   },
+   {
+    "key": "L1",
+    "start": 2.15,
+    "end": 3.65,
+    "pinned": false,
+    "pushed_after": null,
+    "moved": true
+   },
+   {
+    "key": "L2",
+    "start": 3.8,
+    "end": 5.5,
+    "pinned": false,
+    "pushed_after": null,
+    "moved": true
+   }
+  ],
+  "overrun": 0.0
+ },
+ {
+  "name": "a replaced line plays its fitted take's length",
+  "statements": [
+   [
+    0.4,
+    2.0
+   ],
+   [
+    2.5,
+    4.0
+   ],
+   [
+    4.3,
+    6.0
+   ]
+  ],
+  "lengths": {
+   "L1": 1.9
+  },
+  "arrangement": {
+   "order": [
+    "L1",
+    "L0",
+    "L2"
+   ]
+  },
+  "duration": 7.0,
+  "placed": [
+   {
+    "key": "L1",
+    "start": 0.5,
+    "end": 2.4,
+    "pinned": false,
+    "pushed_after": null,
+    "moved": true
+   },
+   {
+    "key": "L0",
+    "start": 2.8,
+    "end": 4.4,
+    "pinned": false,
+    "pushed_after": null,
+    "moved": true
+   },
+   {
+    "key": "L2",
+    "start": 4.7,
+    "end": 6.4,
+    "pinned": false,
+    "pushed_after": null,
+    "moved": true
+   }
+  ],
+  "overrun": 0.0
+ },
+ {
+  "name": "runs past the end",
+  "statements": [
+   [
+    0.4,
+    2.0
+   ],
+   [
+    2.5,
+    4.0
+   ],
+   [
+    4.3,
+    6.0
+   ]
+  ],
+  "lengths": {},
+  "arrangement": {
+   "pins": {
+    "L2": 5.8
+   }
+  },
+  "duration": 7.0,
+  "placed": [
+   {
+    "key": "L0",
+    "start": 0.4,
+    "end": 2.0,
+    "pinned": false,
+    "pushed_after": null,
+    "moved": false
+   },
+   {
+    "key": "L1",
+    "start": 2.5,
+    "end": 4.0,
+    "pinned": false,
+    "pushed_after": null,
+    "moved": false
+   },
+   {
+    "key": "L2",
+    "start": 5.8,
+    "end": 7.5,
+    "pinned": true,
+    "pushed_after": null,
+    "moved": true
+   }
+  ],
+  "overrun": 0.5
+ }
+]
