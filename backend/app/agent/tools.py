@@ -71,6 +71,8 @@ class Workbench:
     relevel_edit: Callable[[str, str, float], dict | None] | None = None  # (project_id, edit_id, level_db) -> {edit_id, reverted, candidate}
     # Folders: the project the video is in — {project_id, name, brief, voices: [entries], videos: [sisters], files: [{name, text}]} — or None.
     project: Callable[[str], dict | None] = lambda video_id: None
+    # Bug 1: the final render against the edits as they are now — {edit_hash, render, at, rendering, edits}.
+    render_state: Callable[[str], dict] = lambda video_id: {}
     # Folders: record a brief suggestion for the project page -> its id, or None when the video is in no project.
     suggest: Callable[[str, str, str], str | None] | None = None          # (video_id, addition, why)
     # Help: the articles, best match first -> [{slug, section, title, summary, body, tour}]
@@ -300,11 +302,25 @@ def _project_state(wb: Workbench, turn: Turn, args: dict) -> ToolResult:
         out.append(f"- {i.item_id} at {i.selection.start:.1f}–{i.selection.end:.1f} s: “{i.new_text}” — {i.status}"
                    + (f", take {i.candidate_id}" if i.candidate_id else ""))
     out.extend(shipped_lines(wb.edits(turn.project_id)))
+    out.append(render_line(wb.render_state(turn.project_id)))
     return ToolResult("\n".join(out))
 
 
 _MIX_WORDS = {"layer": "layered over the picture and sound", "over": "over the picture", "replace": "replacing the words",
               "concatenate": "added after the line, the picture holding", "remove": "the words removed"}
+
+
+def render_line(state: dict) -> str:
+    """The render, as the record has it — the only ground for saying the video is ready."""
+    if not state:
+        return "Render: unknown in this setup; do not say the video is rendered or ready."
+    if not state.get("edits"):
+        return "Render: nothing is in the video yet; the original plays."
+    if state.get("render"):
+        return f"Render: the final render matches the edits in the video now (finished {state.get('at') or 'earlier'})."
+    if state.get("rendering"):
+        return "Render: the final render for the edits now is still running; say it is rendering, not ready."
+    return "Render: no finished render of the edits now; the video is rendered when the user opens it or exports. Do not say it is ready."
 
 
 def shipped_lines(edits: Sequence[Any]) -> list[str]:
@@ -949,8 +965,11 @@ def _ship(wb: Workbench, turn: Turn, args: dict) -> ToolResult:
     if flagged:
         text += (" A take that did not pass its check ships only on the user's word: when they say ship it as it is, "
                  "call ship again with anyway set, and say the check flagged it.")
-    if result.get("export"):
-        text += " The edited video is rendered; the user can download it from the top bar."
+    state = wb.render_state(turn.project_id)
+    if result.get("export") and state.get("render"):
+        text += " The edited video is rendered for these edits; the user can download it from the top bar."
+    elif shipped:
+        text += " The render for these edits has not finished; do not say the video is ready."
     return ToolResult(text, step=text.split(" A take that")[0].rstrip("."))
 
 

@@ -39,7 +39,11 @@ CROSSFADE = 0.02     # seconds per seam
 AUDIO_BITRATE = "192k"
 SILENT_BED_DB = -60.0  # an accompaniment quieter than this is no bed at all
 # Codecs that play in every browser inside MP4. Anything else is re-encoded.
-_COPYABLE_VIDEO = {"h264"}
+# Codecs whose picture an MP4 can carry as it is: an unretimed render copies them
+# instead of re-encoding. HEVC (phones, WhatsApp; 8K in one bug report) re-encoded
+# took minutes; copied, it takes as long as the audio.
+_COPYABLE_VIDEO = {"h264", "hevc"}
+_COPY_TAG = {"hevc": ["-tag:v", "hvc1"]}
 
 
 def _channels(path: str | Path) -> int:
@@ -438,8 +442,8 @@ def compose(
     plain = pieces is None or all(p.kind == "copy" for p in pieces)
     if not plain:
         video_map = ["-filter_complex", video_graph(pieces, fps, interpolator), "-map", "[v]", *reencode]
-    elif _video_codec(source.media.path) in _COPYABLE_VIDEO:
-        video_map = ["-map", "0:v:0", "-c:v", "copy"]
+    elif (codec := _video_codec(source.media.path)) in _COPYABLE_VIDEO:
+        video_map = ["-map", "0:v:0", "-c:v", "copy", *_COPY_TAG.get(codec or "", [])]
     else:
         video_map = ["-map", "0:v:0", *reencode]
     # Flexed spans take their audio from their piece, not the splice.

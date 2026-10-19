@@ -1,4 +1,7 @@
 import json
+import time
+import threading
+import hashlib
 import logging
 import tempfile
 from dataclasses import asdict, replace
@@ -11,7 +14,7 @@ from fastapi import Depends, FastAPI, HTTPException, File, Form, Request, Respon
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from pydantic import BaseModel
 
-from typing import Literal
+from typing import Literal, Sequence
 
 from app.domain.models import (
     Source, Selection, ContinuityReport, EditCandidate, ApprovedEdit, MediaArtifact,
@@ -1849,7 +1852,7 @@ def create_variant(project_id: str, owner: str = Depends(current_owner)) -> dict
         repo.set_speaker(new_id, s.label, name=s.name, voice_id=s.voice_id)
     # The original's settings carry over (its render does not: the variant has
     # not been rendered); the owner's defaults fill whatever it never set.
-    saved = _starting_settings(owner, _folder_of(record)) | {k: v for k, v in repo.settings(project_id).items() if k not in ("reading", "render")} | {"variant_of": project_id}
+    saved = _starting_settings(owner, _folder_of(record)) | {k: v for k, v in repo.settings(project_id).items() if k not in ("reading", "render", "renders")} | {"variant_of": project_id}
     if "reading" in repo.settings(project_id):
         saved["reading"] = repo.settings(project_id)["reading"]
     repo.set_settings(new_id, **saved)
@@ -2082,6 +2085,8 @@ def _revert(project_id: str, edit_id: str, by: str = "You") -> bool:
 
 
 class ExportRequest(BaseModel):
+    # Bug 1 (2026-10-19): the client's own id for this request, echoed back, so it can keep only the latest.
+    request_id: int | None = None
     # 20e: render the proposed takes too (the plan's ready items), so the user
     # can play the video with what is waiting for their Add it.
     with_proposals: bool = False
@@ -2090,7 +2095,16 @@ class ExportRequest(BaseModel):
 @app.post("/videos/{project_id}/export")
 @app.post("/projects/{project_id}/export", deprecated=True)
 def export_project(project_id: str, req: ExportRequest | None = None, owner: str = Depends(current_owner)) -> dict:
-    return _export(_owned(project_id, owner), proposals=bool(req and req.with_proposals))
+    out = _export(_owned(project_id, owner), proposals=bool(req and req.with_proposals), request_id=req.request_id if req else None)
+    return {**out, "request_id": req.request_id if req else None}
+
+
+@app.get("/videos/{project_id}/renders")
+def render_state(project_id: str, owner: str = Depends(current_owner)) -> dict:
+    """Where each mode's render stands against the edits as they are now:
+    the edit-set hash, and the finished render for it (or null)."""
+    _owned(project_id, owner)
+    return {mode: _render_status(project_id, mode) for mode in ("final", "proposals")}
 
 
 def _proposal_edits(project_id: str) -> list[tuple[str, ApprovedEdit]]:
@@ -2171,11 +2185,90 @@ def _segments_with_layers(manifest) -> list[dict]:
     return out
 
 
-def _export(record: ProjectRecord, proposals: bool = False) -> dict:
-    project_id = record.source.project_id
+# ── Bug 1 (2026-10-19): every render is keyed by (video, mode, edit set) ─────
+# An identical request reuses the finished artifact; a changed edit set always
+# renders anew; two requests for the same key share one render (single
+# flight); one video renders one thing at a time. Each render is logged with
+# its key, its artifact and its times.
+
+render_log = logging.getLogger("voltage.render")
+_render_locks: dict[str, threading.Lock] = {}
+_render_locks_guard = threading.Lock()
+RENDERS_KEPT = 12
+
+
+def _lock_for(key: str) -> threading.Lock:
+    with _render_locks_guard:
+        return _render_locks.setdefault(key, threading.Lock())
+
+
+def _render_edits(project_id: str, proposals: bool) -> tuple[list[ApprovedEdit], list[tuple[str, ApprovedEdit]]]:
     edits = [e for e in repo.list_edits(project_id) if not e.reverted]
     previewed = _proposal_edits(project_id) if proposals else []
-    edits = edits + [e for _, e in previewed]
+    return edits + [e for _, e in previewed], previewed
+
+
+def edit_set_hash(record: ProjectRecord, edits: Sequence[ApprovedEdit], mode: str) -> str:
+    """What a render is built from, as a hash: the source, the mode, and
+    every edit's take, place, mix and level. Ids alone are not enough — a
+    moved or releveled take keeps its candidate but changes the sound."""
+    parts = [{
+        "audio": e.audio.sha256, "start": round(e.plan.selection.start, 3), "end": round(e.plan.selection.end, 3),
+        "mix": e.plan.mix, "level": e.plan.level_db, "flex": getattr(e.plan, "flex", None), "fit": e.plan.fit,
+        "text": e.plan.new_text,
+    } for e in edits]
+    body = json.dumps({"source": record.source.media.sha256, "mode": mode,
+                       "edits": sorted(parts, key=lambda p: (p["start"], p["audio"]))}, sort_keys=True)
+    return hashlib.sha256(body.encode()).hexdigest()[:16]
+
+
+def _render_status(project_id: str, mode: str) -> dict:
+    record = repo.get(project_id)
+    edits, _ = _render_edits(project_id, mode == "proposals")
+    h = edit_set_hash(record, edits, mode)
+    done = (repo.settings(project_id).get("renders") or {}).get(h)
+    in_flight = _lock_for(f"{project_id}:{h}").locked()
+    return {"edit_hash": h, "render": done["render"] if done else None, "at": done["at"] if done else None,
+            "rendering": in_flight and done is None, "edits": len(edits)}
+
+
+def _export(record: ProjectRecord, proposals: bool = False, request_id: int | None = None) -> dict:
+    project_id = record.source.project_id
+    mode = "proposals" if proposals else "final"
+    edits, previewed = _render_edits(project_id, proposals)
+    h = edit_set_hash(record, edits, mode)
+    key = f"{project_id}:{h}"
+    started = time.time()
+    render_log.info("render request video=%s mode=%s hash=%s request=%s edits=%d", project_id, mode, h, request_id, len(edits))
+    # Same key in flight: wait for it and take its artifact. Another key for this video: wait our turn.
+    with _lock_for(key), _lock_for(f"{project_id}:video"):
+        done = (repo.settings(project_id).get("renders") or {}).get(h)
+        if done is not None and artifacts.find(project_id, done["render"]["sha256"]) is not None:
+            render_log.info("render reuse video=%s mode=%s hash=%s sha=%s request=%s", project_id, mode, h, done["render"]["sha256"][:12], request_id)
+            if not proposals:
+                repo.set_settings(project_id, render={**done["record"], "at": done["at"]})
+            return {**done["manifest"], "edit_hash": h, "mode": mode, "cached": True}
+        out = _render_now(record, edits, previewed, proposals)
+        at = _now()
+        record_ = {"sha256": out["render"]["sha256"], "duration": out["render"]["duration"],
+                   "filename": f"{Path(record.source.filename).stem}-voltage.mp4"}
+        if not proposals:
+            # The latest finished render, for the Export page's receipt; a preview
+            # with proposals in it is not the video the user takes away.
+            repo.set_settings(project_id, render={**record_, "at": at, "edit_hash": h})
+        renders = dict(repo.settings(project_id).get("renders") or {})
+        renders[h] = {"mode": mode, "at": at, "render": out["render"], "record": record_, "manifest": out}
+        if len(renders) > RENDERS_KEPT:
+            for old in sorted(renders, key=lambda k: renders[k]["at"])[: len(renders) - RENDERS_KEPT]:
+                renders.pop(old)
+        repo.set_settings(project_id, renders=renders)
+        render_log.info("render done video=%s mode=%s hash=%s sha=%s request=%s seconds=%.1f",
+                        project_id, mode, h, out["render"]["sha256"][:12], request_id, time.time() - started)
+        return {**out, "edit_hash": h, "mode": mode, "cached": False}
+
+
+def _render_now(record: ProjectRecord, edits: list[ApprovedEdit], previewed: list[tuple[str, ApprovedEdit]], proposals: bool) -> dict:
+    project_id = record.source.project_id
     manifest = render(record.source, edits)
     pieces = _pieces(record, manifest, edits)
     # Synchronous: with nothing but copies the video is stream-copied and only
@@ -2191,13 +2284,6 @@ def _export(record: ProjectRecord, proposals: bool = False) -> dict:
             project_id, path, kind="video", container="mp4",
             duration=ffmpeg.duration_of(path),
         )
-    if not proposals:
-        # The latest finished render, for the Export page's receipt; a preview
-        # with proposals in it is not the video the user takes away.
-        repo.set_settings(project_id, render={
-            "sha256": rendered.sha256, "duration": rendered.duration,
-            "filename": f"{Path(record.source.filename).stem}-voltage.mp4", "at": _now(),
-        })
     held_at = {p.start: p.out for p in pieces if p.kind == "hold"}
     return {
         "render": _artifact_dict(rendered),
@@ -2799,6 +2885,7 @@ def _workbench() -> Workbench:
         voices=_catalogue, library=getattr(voice, "library", lambda accent, language="en": []),
         estimate_usd=estimate_usd, generate=_generate, ensure_spend=_ensure_spend, ship=_ship,
         edits=lambda pid: [e for e in repo.list_edits(pid) if not e.reverted],
+        render_state=lambda pid: _render_status(pid, "final"),
         revert=lambda pid, edit_id: _revert(pid, edit_id, by="Voltage"),
         relevel_take=lambda pid, candidate, level_db: _releveled(pid, candidate, level_db),
         mine=_my_voices,

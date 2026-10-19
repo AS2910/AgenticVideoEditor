@@ -216,8 +216,10 @@ export async function pollJob(
 }
 
 /** Renders the video: the added lines only, or (20e) with the proposals mixed in for "With proposals" playback. */
-export const exportProject = (id: string, withProposals = false) =>
-  post<ExportManifest>(`/videos/${id}/export`, withProposals ? { with_proposals: true } : undefined)
+/** A render of the video as it is now (Final), or with the proposals mixed in. `requestId` comes back
+ *  on the answer so the caller can keep only its latest request (bug 1, 2026-10-19). */
+export const exportProject = (id: string, withProposals = false, requestId?: number) =>
+  post<ExportManifest>(`/videos/${id}/export`, { ...(withProposals ? { with_proposals: true } : {}), ...(requestId !== undefined ? { request_id: requestId } : {}) })
 
 /** 20g: a line mixed louder or softer, nothing voiced again. BACKGROUND_DB is the level under the words. */
 export const BACKGROUND_DB = -12

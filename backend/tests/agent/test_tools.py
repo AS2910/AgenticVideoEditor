@@ -102,8 +102,11 @@ def test_ship_sends_the_voiced_lines_and_waits_under_check_with_me(world):
     with pytest.raises(WaitingForUser) as w:
         BY_NAME["ship"].run(world.wb, world.turn(autonomy="ask"), {"item_ids": None})
     assert (w.value.question, w.value.options) == ("Ship 1 change and render the video?", ("Ship it", "Not yet"))
-    out = BY_NAME["ship"].run(world.wb, t, {"item_ids": None})
-    assert out.text == "Shipped 1 change. The edited video is rendered; the user can download it from the top bar."
+    # Bug 1: "rendered" only when the record shows a finished render of these edits.
+    import dataclasses
+    rendered = dataclasses.replace(world.wb, render_state=lambda vid: {"edits": 1, "render": {"sha256": "r"}, "at": "2026-10-19T16:20:00.000Z"})
+    out = BY_NAME["ship"].run(rendered, t, {"item_ids": None})
+    assert out.text == "Shipped 1 change. The edited video is rendered for these edits; the user can download it from the top bar."
     assert world.shipped == [["i1"]]
     again = BY_NAME["ship"].run(world.wb, t, {"item_ids": None})
     assert again.text.startswith("Nothing is ready to ship")
@@ -446,3 +449,20 @@ def test_a_kept_designed_voice_remembers_its_description(world):
     BY_NAME["save_voice"].run(world.wb, t, {"generated_voice_id": "g1", "name": "Dusk"})
     [made] = world.repo.settings("p1")["made_voices"]
     assert (made["name"], made["kind"], made["description"]) == ("Dusk", "designed", "an older woman")
+
+
+def test_project_state_and_ship_never_call_the_video_ready_without_a_finished_render(world):
+    """Bug 1: Voltage said "the rendered video is ready" from memory while three renders still ran."""
+    import dataclasses
+    from app.agent.tools import render_line
+    t = world.turn()
+    BY_NAME["synthesize_take"].run(world.wb, t, {"text": "Welcome.", "voice_id": "kL06KYMvPY56NluIQ72m", "start": 0, "end": 2, "direction": None, "mix": None, "line": None, "item_id": None})
+    running = dataclasses.replace(world.wb, render_state=lambda vid: {"edits": 1, "render": None, "rendering": True})
+    out = BY_NAME["ship"].run(running, t, {"item_ids": None})
+    assert "has not finished; do not say the video is ready" in out.text and "is rendered" not in out.text
+    state = BY_NAME["project_state"].run(running, t, {})
+    assert "still running; say it is rendering, not ready" in state.text
+    assert "Do not say it is ready" in render_line({"edits": 2, "render": None, "rendering": False})
+    assert "matches the edits in the video now" in render_line({"edits": 2, "render": {"sha256": "x"}, "at": "t"})
+    assert "nothing is in the video yet" in render_line({"edits": 0})
+    assert "unknown in this setup" in render_line({})

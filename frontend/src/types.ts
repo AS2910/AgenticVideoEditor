@@ -292,7 +292,7 @@ export interface Insert { at: number; duration: number; artifact: MediaArtifact;
 export interface Piece { start: number; end: number; out_start: number; out_end: number; kind: 'copy' | 'flex' | 'living' | 'hold'; factor: number | null }
 
 /** `render` is the finished MP4, stored like any other artifact. */
-export interface ExportManifest { segments: Segment[]; render: MediaArtifact; inserts?: Insert[]; pieces?: Piece[]; /** 20e: the proposals this render carries. */ proposals?: string[] }
+export interface ExportManifest { segments: Segment[]; render: MediaArtifact; inserts?: Insert[]; pieces?: Piece[]; /** 20e: the proposals this render carries. */ proposals?: string[]; /** Bug 1: what it was built from (video, mode, edit set), the mode, whether it was reused, the caller's request id. */ edit_hash?: string; mode?: 'final' | 'proposals'; cached?: boolean; request_id?: number | null }
 
 /** A message in the thread. `step` is one thing Voltage did (Phase 20), with what it cost. */
 /** One preview of a voice Voltage designed (20b): playable from its artifact. */

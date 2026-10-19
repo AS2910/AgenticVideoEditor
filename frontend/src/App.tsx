@@ -42,7 +42,7 @@ import type { Me, PlanApproval } from './api'
 import type {
   Word, Selection, Candidate, Segment, Project, ChatMessage,
   Insert, ProjectSummary, Usage, Statement, Voice, Revision,
-  Plan, PlanItem, Autonomy, Reading, Piece, ProjectDetail, ApprovedEditSummary, MyVoice, ProjectFolder,
+  Plan, PlanItem, Autonomy, Reading, Piece, ProjectDetail, ApprovedEditSummary, MyVoice, ProjectFolder, ExportManifest,
 } from './types'
 import { piecesFromInserts, renderTimeFrom, sourceTimeFrom } from './timeline/selection'
 
@@ -105,13 +105,16 @@ function Studio() {
   const [, setInserts] = useState<Insert[]>([])
   const [pieces, setPieces] = useState<Piece[]>([])
   const [download, setDownload] = useState<{ url: string; filename: string } | null>(null)
-  const [exporting, setExporting] = useState(false)
+  // Bug 1 (2026-10-19): renders are asked for per mode, and only the latest request's answer is taken.
+  const renderSeq = useRef({ final: 0, proposals: 0 })
+  const [renderPending, setRenderPending] = useState<{ final: number | null; proposals: number | null }>({ final: null, proposals: null })
+  const exporting = renderPending.final !== null
   const [uploadShare, setUploadShare] = useState<number | null>(null)
   const [rendered, setRendered] = useState<{ url: string; duration: number } | null>(null)
   // 20e: which render plays — the final, the original, or the preview with the proposals mixed in.
   const [view, setView] = useState<'original' | 'final' | 'proposals'>('original')
   const [preview, setPreview] = useState<{ url: string; duration: number; pieces: Piece[]; key: string } | null>(null)
-  const [previewing, setPreviewing] = useState(false)
+  const previewing = renderPending.proposals !== null
   const [error, setError] = useState<string | null>(null)
   const [projects, setProjects] = useState<ProjectSummary[]>([])
   // Help (2026-10-19): a goal put in the box for the guided run; a tour waiting for its video to open; the ? sheet.
@@ -433,7 +436,14 @@ function Studio() {
     setError(null)
     try {
       const passed = item.candidate?.continuity.passed ?? true
-      takeInApproval(await approvePlan(projectId, plan.plan_id, passed ? { items: [item.item_id] } : { items: [item.item_id], override: true }))
+      const seq = beginRender('final')
+      let result: PlanApproval | null = null
+      try {
+        result = await approvePlan(projectId, plan.plan_id, passed ? { items: [item.item_id] } : { items: [item.item_id], override: true })
+        takeInApproval(result, seq)
+      } finally {
+        endRender('final', seq, result?.export ?? null)
+      }
       setPreview(null)
     } catch (e) {
       setError(e instanceof ApiError ? e.message : 'Could not add that line.')
@@ -497,7 +507,8 @@ function Studio() {
     audio.onended = () => { setPlayingTake(null); playingCandidate.current = null }
     playingCandidate.current = c
     const span = c.plan.selection
-    const overFinal = rendered !== null && pieces.every((p) => p.kind === 'copy')
+    // Over the final only when it is the render of the edits now (no newer one pending); else over the original.
+    const overFinal = rendered !== null && renderPending.final === null && pieces.every((p) => p.kind === 'copy')
     setView(overFinal ? 'final' : 'original')
     setSeekRequest((r) => ({ time: span.start, id: (r?.id ?? 0) + 1, play: true, until: span.start + c.audio.duration + 0.3 }))
     setCurrentTime(span.start)
@@ -691,14 +702,15 @@ function Studio() {
   /** The plan after an approval: its items as they stand, the new edits as
    *  revisions on their lines, and the render, which the player switches to.
    *  Returns the download when there is a render. */
-  const takeInApproval = (result: PlanApproval) => {
+  const takeInApproval = (result: PlanApproval, seq: number) => {
     setPlan(result.plan)
     setPreview(null)
     const fresh = result.plan.items.filter((i) => i.status === 'approved' && i.edit_id
       && !approved.some((r) => r.edit_id === i.edit_id))
     setApproved((a) => [...a, ...fresh.map(itemRevision)])
     if (fresh.length > 0) { tour.notify('added'); onboarding.markChecklist('add') }
-    if (!result.export || !projectId) return null
+    // The approval's render is taken only if no newer final render was asked for meanwhile.
+    if (!result.export || !projectId || !isLatest('final', seq)) return null
     setSegments(result.export.segments)
     setInserts(result.export.inserts ?? [])
     setPieces(result.export.pieces ?? piecesFromInserts(result.export.inserts ?? [], project?.duration ?? 0))
@@ -730,11 +742,14 @@ function Studio() {
   const approveAll = async (items: PlanItem[]) => {
     if (!projectId || !plan) return
     setError(null)
+    const seq = beginRender('final')
+    let manifest: ExportManifest | null = null
     try {
       const result = await approvePlan(projectId, plan.plan_id, {
         items: items.map((i) => i.item_id), override: items.some((i) => !(i.candidate?.continuity.passed ?? true)),
       })
-      takeInApproval(result)
+      manifest = result.export ?? null
+      takeInApproval(result, seq)
       setPreview(null)
       if (result.skipped.length > 0) {
         setError(`${result.skipped.length} ${result.skipped.length === 1 ? 'line was' : 'lines were'} not added. Hear them, then Add it one by one or ask for another take.`)
@@ -742,6 +757,7 @@ function Studio() {
     } catch (e) {
       setError(e instanceof ApiError ? e.message : 'Could not add those lines.')
     } finally {
+      endRender('final', seq, manifest)
       void refreshUsage(projectId)
     }
   }
@@ -816,22 +832,42 @@ function Studio() {
   /** 20e: the preview render with the proposals mixed in, for "With proposals"
    *  playback; made once per set of takes and dropped when they change. */
   const ensurePreview = async () => {
-    if (!projectId || previewing) return
+    if (!projectId) return
     const key = (plan?.items ?? []).filter((i) => i.kind === 'planned' && i.status === 'ready').map((i) => i.candidate?.candidate_id ?? i.item_id).join(',')
     if (preview && preview.key === key) return
-    setPreviewing(true)
     setError(null)
+    const seq = beginRender('proposals')
+    let manifest: ExportManifest | null = null
     try {
-      const manifest = await exportProject(projectId, true)
+      manifest = await exportProject(projectId, true, seq)
+      if (!isLatest('proposals', seq)) return
       const url = artifactUrl(projectId, manifest.render.sha256)
       setPreview({ url, duration: manifest.render.duration, key,
         pieces: manifest.pieces ?? piecesFromInserts(manifest.inserts ?? [], project?.duration ?? 0) })
     } catch {
-      setError('Could not render the preview with the proposals.')
-      setView(rendered ? 'final' : 'original')
+      if (isLatest('proposals', seq)) {
+        setError('Could not render the preview with the proposals.')
+        setView(rendered ? 'final' : 'original')
+      }
     } finally {
-      setPreviewing(false)
+      endRender('proposals', seq, manifest)
     }
+  }
+
+  /** A render asked for: its id, the latest for its mode. */
+  const beginRender = (mode: 'final' | 'proposals') => {
+    const seq = ++renderSeq.current[mode]
+    setRenderPending((p) => ({ ...p, [mode]: seq }))
+    console.debug('[render] request', { mode, seq })
+    return seq
+  }
+  /** Its answer: taken only when no newer request for the mode was made since; the status clears with the latest. */
+  const isLatest = (mode: 'final' | 'proposals', seq: number) => seq === renderSeq.current[mode]
+  const endRender = (mode: 'final' | 'proposals', seq: number, manifest?: ExportManifest | null) => {
+    const latest = isLatest(mode, seq)
+    console.debug(latest ? '[render] take' : '[render] drop (stale)', { mode, seq, hash: manifest?.edit_hash, sha: manifest?.render.sha256.slice(0, 12), cached: manifest?.cached })
+    if (latest) setRenderPending((p) => ({ ...p, [mode]: null }))
+    return latest
   }
 
   /** Renders the approved edits; the render (and its download) once it is ready to play, else null. */
@@ -840,9 +876,12 @@ function Studio() {
   ): Promise<{ download: { url: string; filename: string }; duration: number } | null> => {
     if (!id) return null
     setError(null)
-    setExporting(true)
+    const seq = beginRender('final')
+    let manifest: ExportManifest | null = null
     try {
-      const manifest = await exportProject(id)
+      manifest = await exportProject(id, false, seq)
+      // An older render that finishes after a newer one was asked for is dropped: it no longer matches the edits.
+      if (!isLatest('final', seq)) return null
       setSegments(manifest.segments)
       setInserts(manifest.inserts ?? [])
       setPieces(manifest.pieces ?? piecesFromInserts(manifest.inserts ?? [], project?.duration ?? 0))
@@ -853,10 +892,10 @@ function Studio() {
       setRendered({ url, duration: manifest.render.duration })
       return { download, duration: manifest.render.duration }
     } catch {
-      setError('Export failed.')
+      if (isLatest('final', seq)) setError('Export failed.')
       return null
     } finally {
-      setExporting(false)
+      endRender('final', seq, manifest)
     }
   }
 
@@ -1121,7 +1160,7 @@ function Studio() {
           {views.length > 1 && (
             <div className="segs" role="group" aria-label="Play" data-tour="playback-switch">
               {views.map(([v, label]) => (
-                <button key={v} type="button" className="seg" aria-pressed={view === v} onClick={() => { setView(v); setCurrentTime(0); if (v === 'proposals') void ensurePreview(); if (v === 'original') heardBoth('original') }}>
+                <button key={v} type="button" className="seg" aria-pressed={view === v} onClick={() => { setView(v); if (v === 'proposals') void ensurePreview(); if (v === 'original') heardBoth('original') }}>
                   {v === 'proposals' && !previewReady && previewing ? `${label}…` : label}
                 </button>
               ))}

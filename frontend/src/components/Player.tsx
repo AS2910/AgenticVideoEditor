@@ -63,10 +63,15 @@ export function Player({
   // longer than the source `duration` describes.
   const [length, setLength] = useState(duration)
 
-  // A new file (original ↔ edited) starts paused from its beginning.
+  // Bug 1: a new file (a finished render, or another mode) resumes at the moment the old one was at,
+  // paused. The URL carries the artifact's sha, so a new render is always a new file.
+  const lastTime = useRef(0)
+  const resumeAt = useRef<number | null>(null)
   useEffect(() => {
     setPlaying(false)
     setLength(duration)
+    resumeAt.current = lastTime.current
+    console.debug('[player] load', { src: src.split('/').pop()?.slice(0, 12), at: Number(lastTime.current.toFixed(2)) })
   }, [src, duration])
 
   useEffect(() => { onPlayingChange?.(playing) }, [playing, onPlayingChange])
@@ -82,6 +87,7 @@ export function Player({
       return
     }
     video.currentTime = seekRequest.time
+    lastTime.current = seekRequest.time
     stopAt.current = seekRequest.until ?? null
     if (seekRequest.play) {
       playSafely(video)
@@ -99,6 +105,7 @@ export function Player({
   }
 
   const seek = (t: number) => {
+    lastTime.current = t
     if (videoRef.current) videoRef.current.currentTime = t
     onSeek(t)
   }
@@ -120,9 +127,17 @@ export function Player({
           onLoadedMetadata={(e) => {
             const d = e.currentTarget.duration
             if (Number.isFinite(d) && d > 0) setLength(d)
+            const at = resumeAt.current
+            resumeAt.current = null
+            if (at !== null && at > 0) {
+              const t = Number.isFinite(d) && d > 0 ? Math.min(at, Math.max(0, d - 0.05)) : at
+              e.currentTarget.currentTime = t
+              onTimeUpdate?.(t)
+            }
           }}
           onTimeUpdate={(e) => {
             const t = e.currentTarget.currentTime
+            lastTime.current = t
             onTimeUpdate?.(t)
             if (stopAt.current !== null && t >= stopAt.current) {
               stopAt.current = null

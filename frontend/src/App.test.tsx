@@ -1378,3 +1378,70 @@ describe('App: the guided run and the keyboard sheet (Tutorial map and Help)', (
     await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Keyboard' })).toBeNull())
   })
 })
+
+describe('App: renders land in the order they were asked for (bug 1)', () => {
+  /** /export answers held until the test releases them, by request id and mode. */
+  function heldRenders(edits: unknown[], plan: unknown = null) {
+    const base = routeFetch()
+    const held: { id: number; proposals: boolean; release: (sha: string) => void }[] = []
+    const f = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.endsWith('/videos/p1') && !init?.method) {
+        return ok({ ...PROJECT, created_at: '2026-10-19T08:00:00Z', settings: { autonomy: 'ask' }, edits, plan, messages: [{ role: 'user', text: 'x' }] })
+      }
+      if (url.endsWith('/export')) {
+        const body = JSON.parse(String(init?.body ?? '{}'))
+        return new Promise<Response>((resolve) => {
+          held.push({ id: body.request_id, proposals: !!body.with_proposals,
+            release: (sha) => resolve(ok({ segments: SEGMENTS, render: { ...RENDER, sha256: sha.repeat(64) }, edit_hash: sha, request_id: body.request_id })) })
+        })
+      }
+      if (url.endsWith('/edits/e1/level')) {
+        return ok({ edit_id: 'e2', reverted: 'e1', candidate: { ...CANDIDATE, plan: { ...CANDIDATE.plan, mix: 'layer', level_db: -12 } } })
+      }
+      return base(url, init)
+    })
+    vi.stubGlobal('fetch', f)
+    return held
+  }
+  const LAYER = { edit_id: 'e1', candidate_id: 'c1', new_text: 'Hello there', selection: { start: 0.4, end: 0.9 }, mix: 'layer', overridden: false, reverted: false }
+
+  it('drops an older final render that finishes after a newer one; Rendering… clears only with the newer', async () => {
+    const held = heldRenders([LAYER])
+    window.location.hash = 'v/p1'
+    const user = userEvent.setup()
+    const { container } = render(<App />)
+    await waitFor(() => expect(held).toHaveLength(1))                       // opening renders the edits (request 1)
+    expect(screen.getByRole('link', { name: /rendering/i })).toBeInTheDocument()
+    await user.click(await screen.findByRole('button', { name: /make it background/i }))   // the edit set changes: request 2
+    await waitFor(() => expect(held).toHaveLength(2))
+    held[1].release('b')                                                     // the newer finishes first
+    await waitFor(() => expect((container.querySelector('video') as HTMLVideoElement).getAttribute('src')).toBe(`/api/videos/p1/artifacts/${'b'.repeat(64)}`))
+    expect(screen.getByRole('link', { name: 'Export' })).toBeInTheDocument()  // the status is the latest's
+    held[0].release('a')                                                     // the older lands late: dropped
+    await new Promise((r) => setTimeout(r, 50))
+    expect((container.querySelector('video') as HTMLVideoElement).getAttribute('src')).toBe(`/api/videos/p1/artifacts/${'b'.repeat(64)}`)
+    expect(screen.getByRole('link', { name: 'Export' })).toBeInTheDocument()
+  })
+
+  it('asks for the preview again while an older one runs, and shows only the latest', async () => {
+    const plan = { ...PLAN_DONE, items: [{ ...PLAN_ITEM, status: 'ready', mix: 'layer', candidate: { ...BRIAN_TAKE, plan: { ...BRIAN_TAKE.plan, mix: 'layer' } } }] }
+    const held = heldRenders([], plan)
+    window.location.hash = 'v/p1'
+    const user = userEvent.setup()
+    const { container } = render(<App />)
+    const withProposals = await screen.findByRole('button', { name: /with proposals/i })
+    await user.click(withProposals)
+    await waitFor(() => expect(held.filter((h) => h.proposals)).toHaveLength(1))
+    await user.click(screen.getByRole('button', { name: /original/i }))
+    await user.click(screen.getByRole('button', { name: /with proposals/i }))
+    // Before the fix a second ask was ignored while the first ran, and the status could never clear.
+    await waitFor(() => expect(held.filter((h) => h.proposals)).toHaveLength(2))
+    const [older, newer] = held.filter((h) => h.proposals)
+    older.release('c')
+    await new Promise((r) => setTimeout(r, 50))
+    expect(screen.getByTestId('mode-badge')).toBeInTheDocument()
+    expect((container.querySelector('video') as HTMLVideoElement).getAttribute('src')).not.toBe(`/api/videos/p1/artifacts/${'c'.repeat(64)}`)
+    newer.release('d')
+    await waitFor(() => expect((container.querySelector('video') as HTMLVideoElement).getAttribute('src')).toBe(`/api/videos/p1/artifacts/${'d'.repeat(64)}`))
+  })
+})
