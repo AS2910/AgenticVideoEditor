@@ -286,6 +286,8 @@
   .prop { background: var(--card); border: 1.5px solid var(--foreground); box-shadow: 4px 4px 0 var(--foreground); animation: pop .6s .1s cubic-bezier(.2, .8, .2, 1) both; transition: box-shadow .2s ease; }
   .prop:hover { box-shadow: 7px 7px 0 var(--foreground); }
   .waiting { background: var(--card); border: 1.5px dashed var(--foreground); }
+  /* 2026-10-20: a Bed on the Tracks lane, hatched in its own colour so it reads as under the voices. */
+  .hatch { background-image: repeating-linear-gradient(135deg, transparent 0 5px, color-mix(in oklab, currentColor 22%, transparent) 5px 7px); }
   .pill { font: inherit; font-size: 13px; font-weight: 500; height: 32px; padding: 0 12px; border-radius: 999px; border: 1.5px solid var(--line2); background: var(--card); color: var(--muted-foreground); cursor: pointer; transition: all .15s ease; }
   .pill:hover { border-color: var(--foreground); color: var(--foreground); }
   .pill.on, .pill[aria-pressed="true"] { border-color: var(--ink); background: var(--volt); color: var(--ink); }

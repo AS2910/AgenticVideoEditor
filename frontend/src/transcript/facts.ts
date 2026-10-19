@@ -22,12 +22,11 @@ export function takeFacts(c: Candidate, voiceName?: string | null): { grid: Fact
     : plan.delivery ? plan.delivery : 'as voiced'
   const fitNotes = (c.fit_notes ?? []).filter((n) => !n.startsWith('nearest') && !n.startsWith('moved') && !n.startsWith('level'))
   const picture = plan.flex && Math.abs(plan.flex - 1) > 0.005 ? `${pct(plan.flex)} flexed` : 'as shot'
-  const level = plan.level_db && plan.level_db < 0 ? ` · ${Math.round(plan.level_db)} dB` : ''
   const grid: Fact[] = [
     { label: 'Voice', value: [voiceName ?? null, model].filter(Boolean).join(' · ') || 'the default' },
     { label: 'Dials', value: dials },
     { label: 'Fit', value: fitNotes.length ? fitNotes.join(', ').replace(/^./, (ch) => ch.toUpperCase()) : plan.fit === 'stretch' ? 'Tempo only' : 'Pauses first' },
-    { label: 'Picture', value: picture + level },
+    { label: 'Picture', value: picture },
   ]
   const r = c.continuity
   const measured: Fact[] = (['voice_match', 'naturalness', 'prosody', 'audio_integration'] as const).flatMap((k) => {

@@ -30,6 +30,7 @@ from app.domain.models import role_of
 from app.media import loudness as L
 
 FRAME = 0.01
+LIFT_MARGIN_DB = 2.0     # a lifted voice clears the check with room to spare, not by a rounding error
 
 
 @dataclass(frozen=True)
@@ -64,13 +65,15 @@ class LineReport:
     ratio_db: float | None = None         # a voice: over everything else in its span
     covered_by: str | None = None
     flag: str | None = None
+    raised_db: float | None = None        # a voice lifted over loud sound under it, so it is heard
 
     def as_dict(self) -> dict:
         r = lambda v: None if v is None else round(v, 1)   # noqa: E731
         return {"edit_id": self.edit_id, "candidate_id": self.candidate_id, "role": self.role,
                 "start": round(self.start, 3), "end": round(self.end, 3), "gain_db": r(self.gain_db),
                 "level_lufs": r(self.level_lufs), "under_db": r(self.under_db), "alone": self.alone,
-                "ducks": self.ducks, "ratio_db": r(self.ratio_db), "covered_by": self.covered_by, "flag": self.flag}
+                "ducks": self.ducks, "ratio_db": r(self.ratio_db), "covered_by": self.covered_by, "flag": self.flag,
+                "raised_db": r(self.raised_db)}
 
 
 @dataclass
@@ -182,11 +185,20 @@ def mix(
         if role == "bed":
             continue
         own = L.loudness(take, rate)
-        g = 0.0 if own <= L.SILENCE or as_shot(e) else voice_lufs - own + float(e.plan.offset_db or 0.0)
+        target, raised = voice_lufs, None
+        if role == "voice" and not as_shot(e) and words_mask[i0:i1].mean() <= 0.2:
+            # Over music or a crowd (no speech under it): the original dips by at
+            # most its cap, and the voice is lifted, if it must be, to clear what is left.
+            under = L.loudness(bed[i0:i1] if bed is not None else out_base[i0:i1], rate)
+            cap = settings.stem_duck_max_db if bed is not None else settings.source_duck_max_db
+            needed = under - cap + settings.clear_db + LIFT_MARGIN_DB
+            if under > L.SILENCE and needed > target:
+                raised, target = needed - target, needed
+        g = 0.0 if own <= L.SILENCE or as_shot(e) else target - own + float(e.plan.offset_db or 0.0)
         piece = take * L.gain(g) * _fades(len(take), 0.01, rate)[:, None]
         pieces[e.edit_id] = (i0, i1, piece)
         level = L.loudness(piece, rate)
-        reports[e.edit_id] = LineReport(e.edit_id, e.candidate_id, role, i0 / rate, i1 / rate, g, level)
+        reports[e.edit_id] = LineReport(e.edit_id, e.candidate_id, role, i0 / rate, i1 / rate, g, level, raised_db=raised)
         if role == "voice":
             active = L.frames_active(take, rate)
             f0 = int(i0 / (rate * FRAME))

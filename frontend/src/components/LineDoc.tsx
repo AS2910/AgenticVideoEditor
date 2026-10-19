@@ -10,6 +10,9 @@ import { verdict } from '../transcript/verdict'
 import { takeFacts } from '../transcript/facts'
 import { parseTime, timecode } from '../transcript/time'
 import { PlaceEditor } from './PlaceEditor'
+import { RoleControl } from './RoleControl'
+import type { MixLine, Role } from '../types'
+import type { RoleChange, RoleQuestion } from '../api'
 import { GripVertical, Loader2, Pin } from 'lucide-react'
 import { EMPTY, moveTo, place, playingOrder } from '../transcript/arrange'
 import type { Arrangement, LineSpec, Placed } from '../transcript/arrange'
@@ -78,9 +81,13 @@ interface LineDocProps {
   onRemove: (statement: Statement) => void
   /** Hear it on a proposal: the take in place. */
   onHearTake: (item: PlanItem, candidate: Candidate) => void
-  /** 20g: a line mixed under the words (background) or at full level, nothing voiced again. */
-  onLevel?: (target: { editId?: string; candidate?: Candidate; item?: PlanItem }, levelDb: number) => void
-  backgroundDb?: number
+  /** 2026-10-20: an added line's role in the mix and its fine-tune, nothing voiced again;
+   *  resolves to the server's question when the only speech in its span would become a Bed. */
+  onRole?: (target: { editId?: string; candidate?: Candidate; item?: PlanItem }, change: RoleChange) => Promise<RoleQuestion | null | void>
+  /** What the last render's mix did with each line (the version playing). */
+  mixLines?: MixLine[]
+  /** The bed setting (dB under the voices), for a row's facts before it is rendered. */
+  bedUnderDb?: number
   /** UX-9: a delivery chip on a proposal asks Voltage for that take again, said that way. */
   onDelivery?: (item: PlanItem, delivery: string) => void
   /** p60: a line whose latest attempt failed (and has no take) asks Voltage to try again, as a turn. */
@@ -176,7 +183,7 @@ const Spinner = () => <Loader2 size={16} aria-hidden="true" className="shrink-0 
 export function LineDoc({
   statements, words = [], speakers = [], voices = [], revisions = [], selection, currentTime,
   pendingLines = [], items = [], disabled, usdPerChar, playing,
-  onSeek, onHear, onAdd, onDiscard, onAddAll, onUndo, onRemove, onHearTake, onLevel, backgroundDb = -12, onDelivery, onRetry,
+  onSeek, onHear, onAdd, onDiscard, onAddAll, onUndo, onRemove, onHearTake, onRole, mixLines = [], bedUnderDb = 15, onDelivery, onRetry,
   onEditingChange, onMove, onMoveKept, placing, onPlacing, duration, version = 'edited',
   arranged, onArrange, onArrangeUndo, onPreview,
 }: LineDocProps) {
@@ -589,15 +596,16 @@ export function LineDoc({
     )
   }
 
-  /** 20g: "background (−12 dB) · Make it foreground", or "Make it background". */
-  const levelControl = (levelDb: number | null | undefined, target: { editId?: string; candidate?: Candidate; item?: PlanItem }) => {
-    if (!onLevel) return null
-    const background = (levelDb ?? 0) < 0
+  /** 2026-10-20: Voice · Bed · Effect on an added line, its facts, Fine-tune and the mix's word on it. */
+  const levelControl = (plan: { role?: Role | null; offset_db?: number | null }, target: { editId?: string; candidate?: Candidate; item?: PlanItem }, at: Statement) => {
+    if (!onRole) return null
+    const measured = mixLines.find((m) => (target.editId && m.edit_id === target.editId) || (target.candidate && m.candidate_id === target.candidate.candidate_id)) ?? null
     return (
-      <span className="tnum" data-testid="level">
-        {background ? `background (${Math.round(levelDb!)} dB) · ` : ''}
-        <LinkButton onClick={() => onLevel(target, background ? 0 : backgroundDb)}>{background ? 'Make it foreground' : 'Make it background'}</LinkButton>
-      </span>
+      <RoleControl
+        key={target.editId ?? target.candidate?.candidate_id}
+        role={plan.role ?? 'voice'} offset={plan.offset_db ?? 0} mix={measured} bedUnderDb={bedUnderDb} disabled={disabled}
+        onChange={(change) => onRole(target, change)} onHear={() => onSeek(at)}
+      />
     )
   }
 
@@ -639,7 +647,7 @@ export function LineDoc({
         {item.note && <div className={metaClass} data-testid="item-note">{item.note}</div>}
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
           {onMove && placeControl(c.candidate_id, c.plan.selection.start, c.audio.duration, (t) => onMove(item, c, t))}
-          {isAdd(item) && levelControl(c.plan.level_db, { candidate: c, item })}
+          {isAdd(item) && levelControl(c.plan, { candidate: c, item }, { text: item.new_text, start: c.plan.selection.start, end: c.plan.selection.end, speaker: null })}
         </div>
       </div>
     )
@@ -707,7 +715,7 @@ export function LineDoc({
         </div>
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
           {onMove && placeControl(c.candidate_id, c.plan.selection.start, c.audio.duration, (t) => onMove(item, c, t))}
-          {isAdd(item) && levelControl(c.plan.level_db, { candidate: c, item })}
+          {isAdd(item) && levelControl(c.plan, { candidate: c, item }, { text: item.new_text, start: c.plan.selection.start, end: c.plan.selection.end, speaker: null })}
         </div>
         {verbs(item, c, order, mode, true)}
       </div>
@@ -982,7 +990,7 @@ export function LineDoc({
                 <div className={metaClass}>{(MIX_NOTE[rev.mix] ?? 'Over the picture').replace(/^./, (ch) => ch.toUpperCase())}{voice ? ` · ${voice}'s voice` : ''}{others > 0 ? ` · with ${others} other ${others === 1 ? 'line' : 'lines'} at this moment` : ''}</div>
                 <div className="flex flex-wrap items-center gap-x-3 gap-y-1 empty:hidden">
                   {rev.edit_id && onMoveKept && placeControl(`edit-${rev.edit_id}`, rev.start, Math.max(0.05, rev.end - rev.start), (t) => onMoveKept(rev.edit_id!, t))}
-                  {rev.edit_id && levelControl(rev.level_db, { editId: rev.edit_id })}
+                  {rev.edit_id && levelControl(rev, { editId: rev.edit_id }, s)}
                 </div>
                 {rev.edit_id && keptActs(s, rev.edit_id, order, 'layer', rev.start)}
               </>

@@ -137,23 +137,29 @@ describe('Lanes: seeking and placing', () => {
 })
 
 describe('Lanes: levels, proposals, names', () => {
-  it('tags a line mixed in the background with its level', () => {
-    render(<Lanes {...base} revisions={[add({ start: 10, end: 13, text: 'Crowd noise', level_db: -12 })]} onSeek={() => {}} />)
-    const pill = screen.getByRole('button', { name: 'Added line at 0:10: Crowd noise' })
-    expect(within(pill).getByTestId('level')).toHaveTextContent('−12 dB')
+  it('draws a Bed shorter and hatched, dipping where a voice speaks over it (2026-10-20)', () => {
+    render(<Lanes {...base} revisions={[add({ start: 10, end: 14, text: 'Crowd noise', role: 'bed' }), add({ start: 11, end: 12, text: 'Welcome', role: 'voice' })]} onSeek={() => {}} />)
+    const pill = screen.getByRole('button', { name: 'Added line at 0:10: Crowd noise, a bed under the voices' })
+    expect(pill).toHaveClass('hatch')
+    expect(pill).toHaveAttribute('data-role', 'bed')
+    expect(within(pill).getByTestId('role-tag')).toHaveTextContent('Bed')
+    const dip = within(pill).getByTestId('duck')
+    expect(dip.style.left).toBe('25%')
+    expect(dip.style.width).toBe('25%')
     expect(pill).toHaveAttribute('title', 'Crowd noise')
   })
 
-  it('leaves a foreground line untagged', () => {
-    render(<Lanes {...base} revisions={[add({ start: 10, end: 13, level_db: 0 })]} onSeek={() => {}} />)
-    expect(screen.queryByTestId('level')).toBeNull()
+  it('leaves a voice untagged and unhatched', () => {
+    render(<Lanes {...base} revisions={[add({ start: 10, end: 13, role: 'voice' })]} onSeek={() => {}} />)
+    expect(screen.queryByTestId('role-tag')).toBeNull()
+    expect(screen.queryByTestId('duck')).toBeNull()
   })
 
   it('shows a proposed line in the changed tone, a working one with a pulse, a stuck one as needing you', () => {
     const items = [
       item({ item_id: 'i1', status: 'ready' }),
       item({ item_id: 'i2', status: 'working', candidate: null, selection: { start: 25, end: 25 }, new_text: 'Still voicing' }),
-      item({ item_id: 'i3', status: 'needs-you', candidate: candidate({ selection: { start: 30, end: 30 }, new_text: 'Help me', level_db: -12 }) }),
+      item({ item_id: 'i3', status: 'needs-you', candidate: candidate({ selection: { start: 30, end: 30 }, new_text: 'Help me', role: 'bed' }) }),
       item({ item_id: 'i4', status: 'dismissed', candidate: candidate({ selection: { start: 40, end: 40 }, new_text: 'Gone' }) }),
       item({ item_id: 'i5', status: 'ready', mix: 'replace', selection: { start: 31, end: 34 }, new_text: 'Replaced words', candidate: candidate({ selection: { start: 31, end: 34 }, new_text: 'Replaced words', mix: 'replace' }) }),
     ]
@@ -165,9 +171,9 @@ describe('Lanes: levels, proposals, names', () => {
     expect(proposed.style.width).toBe(`${(2 / 48.9) * 100}%`)
     const voicing = a2.getByRole('button', { name: 'Voicing line at 0:25: Still voicing' })
     expect(within(voicing).getByTestId('pulse')).toHaveClass('animate-pulse')
-    const needs = a2.getByRole('button', { name: 'Line needing you at 0:30: Help me' })
+    const needs = a2.getByRole('button', { name: 'Line needing you at 0:30: Help me, a bed under the voices' })
     expect(needs).toHaveClass('border-ink', 'bg-warn', 'text-ink')
-    expect(within(needs).getByTestId('level')).toHaveTextContent('−12 dB')
+    expect(within(needs).getByTestId('role-tag')).toHaveTextContent('Bed')
     expect(a2.queryByRole('button', { name: /Gone/ })).toBeNull()
     // A replace item marks its spoken line, not A2.
     expect(a2.queryByRole('button', { name: /Replaced words/ })).toBeNull()

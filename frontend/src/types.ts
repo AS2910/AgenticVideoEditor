@@ -4,7 +4,7 @@ export interface Statement { text: string; start: number; end: number; speaker?:
 
 /** An approved edit as the transcript shows it: the new words over a span,
  *  as inline tracked changes. `edit_id` is what Revert names. */
-export interface Revision { edit_id?: string; start: number; end: number; text: string; mix: Mix; /** The other half of a shifted line. */ partner?: string | null; /** 20g: the level it is mixed at, dB; null or 0 is the foreground. */ level_db?: number | null; /** Volt: who says it and whose voice, when known. */ speaker?: string | null; voice_profile_id?: string | null }
+export interface Revision { edit_id?: string; start: number; end: number; text: string; mix: Mix; /** The other half of a shifted line. */ partner?: string | null; /** 2026-10-20: what it is in the mix, and the fine-tune on top, dB. */ role?: Role; offset_db?: number | null; /** Volt: who says it and whose voice, when known. */ speaker?: string | null; voice_profile_id?: string | null }
 
 /** How much Voltage does on its own: show the plan and wait for your go (the
  *  controlled default), or voice it straight away. */
@@ -15,7 +15,31 @@ export type Effort = 'medium' | 'high' | 'xhigh'
 
 /** Per-project preferences, remembered on the server. */
 /** What Voltage may do on a project (20d): the autonomy, what one turn may spend, how hard it thinks; the ceiling is read-only. */
-export interface ProjectSettings { autonomy: Autonomy; turn_usd?: number; effort?: Effort; ceiling_usd?: number; /** Volt: which commits still ask under Just do it, and the model Voltage runs on. */ ask_before?: AskBefore; model?: string; /** The guided run's sample video: its turns replay a recording, free. */ tutorial?: boolean }
+/** 2026-10-20: an added line is a Voice (words), a Bed (music, crowd, ambience: under the words, ducking) or an Effect. */
+export type Role = 'voice' | 'bed' | 'effect'
+export interface MixSettings { voice_default_lufs: number; bed_under_db: number; speech_clear_db: number; loudness: 'social' | 'general' }
+/** What the mix did with one line: its level, how far a bed sits under the voices, whether a voice is heard. */
+export interface MixLine {
+  edit_id: string
+  candidate_id: string
+  item_id?: string | null
+  role: Role
+  start: number
+  end: number
+  gain_db: number | null
+  level_lufs: number | null
+  under_db: number | null
+  alone: boolean
+  ducks: boolean
+  ratio_db: number | null
+  covered_by: string | null
+  flag: string | null
+  /** A voice lifted over loud sound under it (a crowd, music) so it is heard, dB. */
+  raised_db?: number | null
+}
+export interface MixReport { voice_lufs: number; lines: MixLine[]; loudness_lufs: number | null; true_peak_db: number | null }
+
+export interface ProjectSettings { autonomy: Autonomy; turn_usd?: number; effort?: Effort; ceiling_usd?: number; /** Volt: which commits still ask under Just do it, and the model Voltage runs on. */ ask_before?: AskBefore; model?: string; /** The guided run's sample video: its turns replay a recording, free. */ tutorial?: boolean; /** 2026-10-20: the mix. */ mix?: MixSettings }
 
 /** Where a plan item stands. */
 export type ItemStatus =
@@ -133,8 +157,9 @@ export interface EditPlan {
   /** Phase 16: the picture's factor over the selection for a replaced line —
    *  1.08 is the picture 8% slower so the take fits at natural speech; null or 1 is none. */
   flex?: number | null
-  /** 20g: how loud the line is mixed, in dB against the take as voiced; null or 0 is the foreground, -12 a layer under the words. */
-  level_db?: number | null
+  /** 2026-10-20: what the line is in the mix (its level follows from it), and the user's fine-tune, dB. */
+  role?: Role
+  offset_db?: number | null
   /** 20b: the vendor model that spoke it, and the dials Voltage set. */
   model?: string | null
   voice_settings?: Record<string, number> | null
@@ -260,8 +285,9 @@ export interface ApprovedEditSummary {
   reverted?: boolean
   /** The other half of a shifted line (UX-1c). */
   partner?: string | null
-  /** 20g: the level it is mixed at. */
-  level_db?: number | null
+  /** 2026-10-20: what it is in the mix, and the fine-tune. */
+  role?: Role
+  offset_db?: number | null
   /** Volt: the line's speaker and the voice that said it, when known. */
   speaker?: string | null
   voice_profile_id?: string | null
@@ -293,7 +319,7 @@ export interface Insert { at: number; duration: number; artifact: MediaArtifact;
 export interface Piece { start: number; end: number; out_start: number; out_end: number; kind: 'copy' | 'flex' | 'living' | 'hold'; factor: number | null }
 
 /** `render` is the finished MP4, stored like any other artifact. */
-export interface ExportManifest { segments: Segment[]; render: MediaArtifact; inserts?: Insert[]; pieces?: Piece[]; /** 20e: the proposals this render carries. */ proposals?: string[]; /** Bug 1: what it was built from (video, mode, edit set), the mode, whether it was reused, the caller's request id. */ edit_hash?: string; mode?: 'final' | 'proposals'; cached?: boolean; request_id?: number | null }
+export interface ExportManifest { segments: Segment[]; render: MediaArtifact; inserts?: Insert[]; pieces?: Piece[]; /** 20e: the proposals this render carries. */ proposals?: string[]; /** Bug 1: what it was built from (video, mode, edit set), the mode, whether it was reused, the caller's request id. */ edit_hash?: string; mode?: 'final' | 'proposals'; cached?: boolean; request_id?: number | null; /** 2026-10-20: what the mix did with each line, and the loudness it landed on. */ mix?: MixReport | null }
 
 /** A message in the thread. `step` is one thing Voltage did (Phase 20), with what it cost. */
 /** One preview of a voice Voltage designed (20b): playable from its artifact. */

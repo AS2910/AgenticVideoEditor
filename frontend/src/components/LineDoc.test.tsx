@@ -110,28 +110,58 @@ describe('LineDoc: the line is the unit', () => {
     expect(h.onAdd).toHaveBeenCalledWith(expect.objectContaining({ item_id: 'r' }))
   })
 
-  it('mixes a line under the words or back to the front, without voicing it again (20g)', async () => {
-    const onLevel = vi.fn()
+  it('gives every added line a role, Voice, Bed or Effect, with one line of facts, and none to a spoken line (2026-10-20)', async () => {
+    const onRole = vi.fn(async () => null)
     doc({
-      onLevel,
+      onRole,
+      mixLines: [{ edit_id: 'e2', candidate_id: 'x', role: 'bed', start: 0.4, end: 1.8, gain_db: -9, level_lufs: -33, under_db: 15.2, alone: false, ducks: true, ratio_db: null, covered_by: null, flag: null },
+        { edit_id: 'e1', candidate_id: 'y', role: 'voice', start: 0.4, end: 6.9, gain_db: 0, level_lufs: -18, under_db: null, alone: false, ducks: false, ratio_db: 6, covered_by: 'e3', flag: '“cheers” covers this line at 0:00; lower it or make it a Bed.' }],
       revisions: [
         { edit_id: 'e1', start: 0.4, end: 6.9, text: 'Golden sands.', mix: 'layer' },
-        { edit_id: 'e2', start: 0.4, end: 1.8, text: 'Woohoo!', mix: 'layer', level_db: -12 },
+        { edit_id: 'e2', start: 0.4, end: 1.8, text: 'Woohoo!', mix: 'layer', role: 'bed' },
       ],
       items: [item({ item_id: 'i3', selection: { start: 0.4, end: 1.8 }, mix: 'layer', old_text: '', new_text: 'Yeahhh!',
         candidate: take({ candidate_id: 'c3', plan: { ...take().plan, selection: { start: 0.4, end: 1.8 }, new_text: 'Yeahhh!', mix: 'layer' } }) })],
     })
     const rows = screen.getAllByRole('listitem', { name: /added line at 0:00|proposed line at 0:00/i })
-    expect(rows[1]).toHaveTextContent('background (-12 dB)')
-    await userEvent.click(within(rows[1]).getByRole('button', { name: 'Make it foreground' }))
-    expect(onLevel).toHaveBeenLastCalledWith({ editId: 'e2' }, 0)
-    await userEvent.click(within(rows[0]).getByRole('button', { name: 'Make it background' }))
-    expect(onLevel).toHaveBeenLastCalledWith({ editId: 'e1' }, -12)
-    await userEvent.click(within(rows[2]).getByRole('button', { name: 'Make it background' }))
-    expect(onLevel).toHaveBeenLastCalledWith({ candidate: expect.objectContaining({ candidate_id: 'c3' }), item: expect.objectContaining({ item_id: 'i3' }) }, -12)
-    // Only added lines carry a level: two controls for the two foreground layers, none on the spoken lines.
-    expect(screen.getAllByRole('button', { name: /make it background/i })).toHaveLength(2)
+    const bed = rows.find((r) => r.textContent?.includes('Woohoo!'))!
+    expect(within(bed).getByTestId('role-facts')).toHaveTextContent('Bed · sits 15 dB under the voices · ducks while they speak')
+    expect(within(within(bed).getByRole('group', { name: 'What this line is in the mix' })).getByRole('button', { name: 'Bed' })).toHaveAttribute('aria-pressed', 'true')
+    const voice = rows.find((r) => r.textContent?.includes('Golden sands.'))!
+    expect(within(voice).getByTestId('mix-flag')).toHaveTextContent('“cheers” covers this line at 0:00; lower it or make it a Bed.')
+    await userEvent.click(within(voice).getByRole('button', { name: 'Effect' }))
+    expect(onRole).toHaveBeenLastCalledWith({ editId: 'e1' }, { role: 'effect', offset_db: 0 })
+    const proposal = rows.find((r) => r.textContent?.includes('Yeahhh!'))!
+    await userEvent.click(within(proposal).getByRole('button', { name: 'Bed' }))
+    expect(onRole).toHaveBeenLastCalledWith({ candidate: expect.objectContaining({ candidate_id: 'c3' }), item: expect.objectContaining({ item_id: 'i3' }) }, { role: 'bed', offset_db: 0 })
+    // Only added lines have a role: three controls for the three added lines, none on the spoken lines.
+    expect(screen.getAllByRole('group', { name: 'What this line is in the mix' })).toHaveLength(3)
   })
+
+  it('asks before the only speech in its span becomes a Bed, and fine-tunes with Hear it in place', async () => {
+    const question = { question: 'This is the only speech here. As a Bed it would just be quieter. Keep it as Voice, or play it quietly under (Voice at -8 dB)?',
+      options: [{ label: 'Keep it as Voice', role: 'voice' as const, offset_db: 0 }, { label: 'Play it quietly under', detail: 'Voice at -8 dB', role: 'voice' as const, offset_db: -8 },
+        { label: 'Make it a Bed anyway', role: 'bed' as const, offset_db: 0, confirm: true }] }
+    const onRole = vi.fn().mockResolvedValueOnce(question).mockResolvedValue(null)
+    const h = doc({ onRole, revisions: [{ edit_id: 'e1', start: 0.4, end: 6.9, text: 'Golden sands.', mix: 'layer' }] })
+    const row = screen.getByRole('listitem', { name: /added line at 0:00/i })
+    await userEvent.click(within(row).getByRole('button', { name: 'Bed' }))
+    const card = await within(row).findByTestId('role-question')
+    expect(card).toHaveTextContent('This is the only speech here.')
+    await userEvent.click(within(card).getByRole('button', { name: /Play it quietly under/ }))
+    expect(onRole).toHaveBeenLastCalledWith({ editId: 'e1' }, { role: 'voice', offset_db: -8, confirm: undefined })
+    await waitFor(() => expect(within(row).queryByTestId('role-question')).not.toBeInTheDocument())
+    await userEvent.click(within(row).getByRole('button', { name: 'Fine-tune' }))
+    const slider = within(row).getByRole('slider')
+    expect(slider).toHaveAttribute('min', '-24')
+    expect(slider).toHaveAttribute('max', '6')
+    fireEvent.change(slider, { target: { value: '-5' } })
+    fireEvent.pointerUp(slider)
+    expect(onRole).toHaveBeenLastCalledWith({ editId: 'e1' }, { role: 'voice', offset_db: -5 })
+    await userEvent.click(within(row).getByRole('button', { name: 'Hear it in place' }))
+    expect(h.onSeek).toHaveBeenCalled()
+  })
+
 
   it('numbers an unnamed speaker in order of appearance (20e)', () => {
     doc({ speakers: [{ label: 'A', name: '', voice_id: null }, { label: 'B', name: '', voice_id: null }] })

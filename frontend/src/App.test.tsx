@@ -931,13 +931,13 @@ describe('App: the server\'s edits win after a turn, and a line can be mixed und
     expect(exports()).toBe(before + 1)   // the render follows the edits
   })
 
-  it('Make it background relevels an added line: the row swaps to the new edit and the video renders again', async () => {
+  it('making an added line a Bed swaps the row to the new edit and renders the video again (2026-10-20)', async () => {
     const base = routeFetch()
     const f = vi.fn(async (url: string, init?: RequestInit) => {
       if (url.endsWith('/videos/p1') && !init?.method) return ok({ ...silent, edits: [e1, e2] })
-      if (url.endsWith('/edits/e2/level')) {
-        expect(JSON.parse(String(init?.body))).toEqual({ level_db: -12 })
-        return ok({ edit_id: 'e3', reverted: 'e2', candidate: { ...CANDIDATE, candidate_id: 'c3', plan: { ...CANDIDATE.plan, selection: { start: 0.4, end: 1.8 }, new_text: 'Woohoo!', mix: 'layer', level_db: -12 } } })
+      if (url.endsWith('/edits/e2/role')) {
+        expect(JSON.parse(String(init?.body))).toEqual({ role: 'bed', offset_db: 0 })
+        return ok({ edit_id: 'e3', reverted: 'e2', candidate: { ...CANDIDATE, candidate_id: 'c3', plan: { ...CANDIDATE.plan, selection: { start: 0.4, end: 1.8 }, new_text: 'Woohoo!', mix: 'layer', role: 'bed' } } })
       }
       return base(url, init)
     })
@@ -946,9 +946,29 @@ describe('App: the server\'s edits win after a turn, and a line can be mixed und
     const user = userEvent.setup()
     render(<App />)
     const rows = await screen.findAllByRole('listitem', { name: 'Added line at 0:00' })
-    await user.click(within(rows[1]).getByRole('button', { name: 'Make it background' }))
-    await waitFor(() => expect(within(screen.getAllByRole('listitem', { name: 'Added line at 0:00' })[1]).getByText(/background \(-12 dB\)/)).toBeInTheDocument())
+    await user.click(within(within(rows[1]).getByRole('group', { name: 'What this line is in the mix' })).getByRole('button', { name: 'Bed' }))
+    await waitFor(() => expect(within(screen.getAllByRole('listitem', { name: 'Added line at 0:00' })[1]).getByTestId('role-facts')).toHaveTextContent(/^Bed · sits 15 dB under the voices/))
     expect(f.mock.calls.filter(([url]) => String(url).endsWith('/export')).length).toBeGreaterThanOrEqual(2)
+  })
+
+  it('asks before the only speech here becomes a Bed', async () => {
+    const base = routeFetch()
+    const f = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.endsWith('/videos/p1') && !init?.method) return ok({ ...silent, edits: [e1, e2] })
+      if (url.endsWith('/edits/e2/role')) {
+        return { ok: false, status: 409, text: async () => JSON.stringify({ detail: { question: 'This is the only speech here. As a Bed it would just be quieter. Keep it as Voice, or play it quietly under (Voice at -8 dB)?',
+          options: [{ label: 'Keep it as Voice', role: 'voice', offset_db: 0 }, { label: 'Play it quietly under', detail: 'Voice at -8 dB', role: 'voice', offset_db: -8 }, { label: 'Make it a Bed anyway', role: 'bed', offset_db: 0, confirm: true }] } }) } as Response
+      }
+      return base(url, init)
+    })
+    vi.stubGlobal('fetch', f)
+    window.location.hash = 'p1'
+    const user = userEvent.setup()
+    render(<App />)
+    const rows = await screen.findAllByRole('listitem', { name: 'Added line at 0:00' })
+    await user.click(within(within(rows[1]).getByRole('group', { name: 'What this line is in the mix' })).getByRole('button', { name: 'Bed' }))
+    expect(await within(rows[1]).findByTestId('role-question')).toHaveTextContent('This is the only speech here.')
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
   })
 })
 
@@ -1391,8 +1411,8 @@ describe('App: renders land in the order they were asked for (bug 1)', () => {
             release: (sha) => resolve(ok({ segments: SEGMENTS, render: { ...RENDER, sha256: sha.repeat(64) }, edit_hash: sha, request_id: body.request_id })) })
         })
       }
-      if (url.endsWith('/edits/e1/level')) {
-        return ok({ edit_id: 'e2', reverted: 'e1', candidate: { ...CANDIDATE, plan: { ...CANDIDATE.plan, mix: 'layer', level_db: -12 } } })
+      if (url.endsWith('/edits/e1/role')) {
+        return ok({ edit_id: 'e2', reverted: 'e1', candidate: { ...CANDIDATE, plan: { ...CANDIDATE.plan, mix: 'layer', role: 'bed' } } })
       }
       return base(url, init)
     })
@@ -1408,7 +1428,7 @@ describe('App: renders land in the order they were asked for (bug 1)', () => {
     const { container } = render(<App />)
     await waitFor(() => expect(held).toHaveLength(1))                       // opening renders the edits (request 1)
     expect(screen.getByRole('link', { name: /rendering/i })).toBeInTheDocument()
-    await user.click(await screen.findByRole('button', { name: /make it background/i }))   // the edit set changes: request 2
+    await user.click(await screen.findByRole('button', { name: 'Bed' }))   // the edit set changes: request 2
     await waitFor(() => expect(held).toHaveLength(2))
     held[1].release('b')                                                     // the newer finishes first
     await waitFor(() => expect((container.querySelector('video') as HTMLVideoElement).getAttribute('src')).toBe(`/api/videos/p1/artifacts/${'b'.repeat(64)}`))

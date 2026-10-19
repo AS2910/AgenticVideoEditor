@@ -118,3 +118,12 @@ def test_a_moved_original_line_keeps_its_recorded_level():
     quiet = _speech(1.0, 0.01)[0]
     out = _run(base, [_edit("arr-L1-in", 1.0, 2.0, None)], {"arr-L1-in": quiet}, [])
     assert out.reports[0].gain_db == 0.0
+
+
+def test_a_voice_over_a_loud_crowd_is_lifted_to_be_heard_and_says_so():
+    """The boxing clip (p61): commentary at the default level drowned in the crowd even after the dip."""
+    crowd = _noise(6.0, 0.6)
+    out = _run(crowd.copy(), [_edit("v", 1.0, 4.0, "voice", "Blue goes down")], {"v": _speech(3.0, 0.05, seed=5)[0]}, [])
+    rep = out.reports[0]
+    assert rep.raised_db is not None and rep.raised_db > 0
+    assert rep.ratio_db >= S.clear_db - 0.5 and rep.flag is None

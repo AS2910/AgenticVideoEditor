@@ -1,6 +1,6 @@
 import { useId, useRef } from 'react'
 import type { PointerEvent as ReactPointerEvent, ReactNode, Ref } from 'react'
-import type { ItemStatus, Mix, Piece, PlanItem, Revision, Speaker, Statement } from '../types'
+import type { ItemStatus, Mix, Piece, PlanItem, Revision, Role, Speaker, Statement } from '../types'
 import { speakerSlot } from '../transcript/speakers'
 import { clock } from '../transcript/format'
 import { cn } from '@/lib/utils'
@@ -114,8 +114,8 @@ const flexPct = (factor: number | null) => {
 }
 /** "0.6 s": the seconds a frame is held, to the hundredth, trailing zeros dropped. */
 const heldFor = (p: Piece) => `${Math.round((p.out_end - p.out_start) * 100) / 100} s`
-/** "−12 dB" for a line mixed under the words. */
-const levelTag = (db: number) => `−${Math.round(Math.abs(db))} dB`
+/** "Bed", "Effect": an added line's role, when it is not a plain voice. */
+const ROLE_TAG: Record<Role, string | null> = { voice: null, bed: 'Bed', effect: 'Effect' }
 
 const ROW = 'relative h-7 pointer-coarse:h-12'
 
@@ -175,7 +175,8 @@ interface Added extends Span {
   text: string
   tone: Tone
   state: 'added' | 'proposed' | 'voicing' | 'needs-you' | 'failed'
-  level: number | null
+  /** 2026-10-20: a Bed is drawn shorter and hatched, dipping where voices speak over it. */
+  role: Role
 }
 const ADDED_WORD: Record<Added['state'], string> = {
   added: 'Added', proposed: 'Proposed', voicing: 'Voicing…', 'needs-you': 'Needs you', failed: 'Failed',
@@ -220,7 +221,7 @@ export function Lanes({
   const added: Added[] = [
     ...revisions
       .filter((r) => ADDS.has(r.mix) && !r.partner)
-      .map((r, i): Added => ({ key: `rev-${r.edit_id ?? i}`, start: r.start, end: r.end, text: r.text, tone: 'ok', state: 'added', level: r.level_db ?? null })),
+      .map((r, i): Added => ({ key: `rev-${r.edit_id ?? i}`, start: r.start, end: r.end, text: r.text, tone: 'ok', state: 'added', role: r.role ?? 'voice' })),
     ...items
       .filter((i) => ADDS.has(i.mix) && LIVE.has(i.status))
       .map((i): Added => {
@@ -229,10 +230,18 @@ export function Lanes({
         const end = c ? start + c.audio.duration : i.selection.end
         const state: Added['state'] = i.status === 'ready' ? 'proposed' : i.status === 'working' ? 'voicing' : i.status === 'needs-you' ? 'needs-you' : 'failed'
         const tone: Tone = state === 'proposed' || state === 'voicing' ? 'changed' : 'needs'
-        return { key: `item-${i.item_id}`, start, end, text: c?.plan.new_text ?? i.new_text, tone, state, level: c?.plan.level_db ?? null }
+        return { key: `item-${i.item_id}`, start, end, text: c?.plan.new_text ?? i.new_text, tone, state, role: c?.plan.role ?? 'voice' }
       }),
   ]
   const subRows = packRows(added)
+  // Where someone speaks: the original's lines (where they play now) and every added voice. A bed dips under each.
+  const voices: Span[] = [
+    ...statements.map((s, i) => placedAt[i] ?? s),
+    ...added.filter((a) => a.role === 'voice'),
+  ]
+  const dips = (a: Added) => voices
+    .filter((v) => v !== a && overlaps(v, a))
+    .map((v) => ({ left: ((Math.max(v.start, a.start) - a.start) / (a.end - a.start)) * 100, width: ((Math.min(v.end, a.end) - Math.max(v.start, a.start)) / (a.end - a.start)) * 100 }))
 
   // The take being placed: dragged along A2; the pointer's offset inside it is kept.
   const startPlacing = (e: ReactPointerEvent<HTMLDivElement>) => {
@@ -369,10 +378,16 @@ export function Lanes({
         ) : subRows.map((row, r) => (
           <div key={r} className={ROW} data-testid="sublane">
             {row.map((a) => (
-              <Pill key={a.key} at={at(a.start, a.end)} tone={TONES[a.tone]} label={`${ADDED_NAME[a.state]} at ${clock(a.start)}: ${a.text}`} title={a.text} onClick={() => onSeek(a.start)} data-state={a.state}>
+              <Pill key={a.key} at={at(a.start, a.end)} tone={TONES[a.tone]}
+                label={`${ADDED_NAME[a.state]} at ${clock(a.start)}: ${a.text}${a.role === 'bed' ? ', a bed under the voices' : a.role === 'effect' ? ', an effect' : ''}`}
+                title={a.text} onClick={() => onSeek(a.start)} data-state={a.state} data-role={a.role}
+                className={cn(a.role === 'bed' && 'hatch inset-y-1.5 min-h-4 pointer-coarse:min-h-11')}>
+                {a.role === 'bed' && dips(a).map((d, k) => (
+                  <span key={k} className="pointer-events-none absolute top-0 h-[45%] rounded-b-sm bg-lane" style={{ left: `${d.left}%`, width: `${d.width}%` }} aria-hidden="true" data-testid="duck" />
+                ))}
                 {a.state === 'voicing' && <span className="size-1.5 shrink-0 animate-pulse rounded-full bg-changed" aria-hidden="true" data-testid="pulse" />}
-                <span className="truncate"><span className="font-medium">{`${ADDED_WORD[a.state]} · `}</span>{a.text}</span>
-                {a.level !== null && a.level < 0 && <span className="tnum ml-auto shrink-0 rounded-sm bg-card/70 px-1 font-mono" data-testid="level">{levelTag(a.level)}</span>}
+                <span className="relative truncate"><span className="font-medium">{`${ADDED_WORD[a.state]} · `}</span>{a.text}</span>
+                {ROLE_TAG[a.role] && <span className="tnum relative ml-auto shrink-0 rounded-sm bg-card/70 px-1 font-mono" data-testid="role-tag">{ROLE_TAG[a.role]}</span>}
               </Pill>
             ))}
             <Head pct={head} className="bg-foreground/50" />

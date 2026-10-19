@@ -1,5 +1,6 @@
 import type { Arrangement } from './transcript/arrange'
 import type {
+  Role,
   MyVoice, UserSettings, UsageReport, SpendSummary, MadeVoice, CloneableSpeaker, DesignedPreview, Receipt,
   Project, ExportManifest, Job, ProjectSummary, ProjectDetail, Usage, Voice, Speaker,
   ProjectSettings, Autonomy, Effort, Plan, Mix, Selection, Candidate, Reading, Sight, ChatMessage,
@@ -222,12 +223,19 @@ export async function pollJob(
 export const exportProject = (id: string, withProposals = false, requestId?: number) =>
   post<ExportManifest>(`/videos/${id}/export`, { ...(withProposals ? { with_proposals: true } : {}), ...(requestId !== undefined ? { request_id: requestId } : {}) })
 
-/** 20g: a line mixed louder or softer, nothing voiced again. BACKGROUND_DB is the level under the words. */
-export const BACKGROUND_DB = -12
-export const setEditLevel = (id: string, editId: string, levelDb: number) =>
-  post<{ edit_id: string; reverted: string; candidate: Candidate }>(`/videos/${id}/edits/${editId}/level`, { level_db: levelDb })
-export const setCandidateLevel = (id: string, candidateId: string, levelDb: number) =>
-  post<Candidate>(`/videos/${id}/candidates/${candidateId}/level`, { level_db: levelDb })
+/** 2026-10-20: a line's role in the mix and its fine-tune, nothing voiced again. The only
+ *  speech in its span answers 409 with a question (RoleQuestion) unless `confirm`. */
+export interface RoleChange { role: Role; offset_db?: number; confirm?: boolean }
+export interface RoleQuestion { question: string; options: { label: string; detail?: string; role: Role; offset_db: number; confirm?: boolean }[] }
+export const setEditRole = (id: string, editId: string, change: RoleChange) =>
+  post<{ edit_id: string; reverted: string; candidate: Candidate }>(`/videos/${id}/edits/${editId}/role`, change)
+export const setCandidateRole = (id: string, candidateId: string, change: RoleChange) =>
+  post<Candidate>(`/videos/${id}/candidates/${candidateId}/role`, change)
+/** The question in a 409 from a role change, if that is what it was. */
+export const roleQuestion = (e: unknown): RoleQuestion | null => {
+  const detail = e instanceof ApiError && e.status === 409 ? (e.body as { detail?: unknown } | null)?.detail : null
+  return detail && typeof detail === 'object' && 'question' in detail ? detail as RoleQuestion : null
+}
 
 /** Discard a proposal (20e): it leaves the plan. */
 export const dismissItem = (id: string, planId: string, itemId: string) =>

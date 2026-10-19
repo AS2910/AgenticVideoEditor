@@ -37,14 +37,14 @@ import { go, hrefFor, useRoute } from './lib/route'
 import { cn } from '@/lib/utils'
 import { clock } from './transcript/format'
 import {
-  createProject, confirmPlace, exportProject, artifactUrl, pollJob, PollCancelled, ApiError, listVideos, listFolders, createFolder, startTutorial, getProject, deleteProject, getUsage, getSpend, listVoices, updateSpeaker, detectSpeakers, revertEdit, updateSettings, removeLine, dismissItem, setEditLevel, setCandidateLevel, BACKGROUND_DB, moveCandidate, moveEdit, getArrangement, putArrangement, undoArrangement, getPlan, approvePlan, readProject, grantConsent, getMe, postTurn, getMessages,
+  createProject, confirmPlace, exportProject, artifactUrl, pollJob, PollCancelled, ApiError, listVideos, listFolders, createFolder, startTutorial, getProject, deleteProject, getUsage, getSpend, listVoices, updateSpeaker, detectSpeakers, revertEdit, updateSettings, removeLine, dismissItem, setEditRole, setCandidateRole, roleQuestion, moveCandidate, moveEdit, getArrangement, putArrangement, undoArrangement, getPlan, approvePlan, readProject, grantConsent, getMe, postTurn, getMessages,
 } from './api'
-import type { ArrangementView, Me, PlanApproval } from './api'
+import type { ArrangementView, Me, PlanApproval, RoleChange, RoleQuestion } from './api'
 import type { Arrangement, Placed } from './transcript/arrange'
 import type {
   Word, Selection, Candidate, Segment, Project, ChatMessage,
   Insert, ProjectSummary, Usage, SpendSummary, Statement, Voice, Revision,
-  Plan, PlanItem, Autonomy, Reading, Piece, ProjectDetail, ApprovedEditSummary, MyVoice, ProjectFolder, ExportManifest,
+  Plan, PlanItem, Autonomy, Reading, Piece, ProjectDetail, ApprovedEditSummary, MyVoice, ProjectFolder, ExportManifest, MixReport,
 } from './types'
 import { piecesFromInserts, renderTimeFrom, sourceTimeFrom } from './timeline/selection'
 
@@ -115,7 +115,9 @@ function Studio() {
   const [rendered, setRendered] = useState<{ url: string; duration: number } | null>(null)
   // 20e: which render plays — the final, the original, or the preview with the proposals mixed in.
   const [view, setView] = useState<'original' | 'final' | 'proposals'>('original')
-  const [preview, setPreview] = useState<{ url: string; duration: number; pieces: Piece[]; key: string } | null>(null)
+  const [preview, setPreview] = useState<{ url: string; duration: number; pieces: Piece[]; key: string; mix?: MixReport | null } | null>(null)
+  // 2026-10-20: what the last final render's mix did with each line.
+  const [finalMix, setFinalMix] = useState<MixReport | null>(null)
   const previewing = renderPending.proposals !== null
   const [error, setError] = useState<string | null>(null)
   const [projects, setProjects] = useState<ProjectSummary[]>([])
@@ -672,13 +674,13 @@ function Studio() {
 
   /** An approved edit as the transcript shows it (20g: with its level; Volt: with its speaker and voice). */
   const asRevision = (e: ApprovedEditSummary): Revision => ({
-    edit_id: e.edit_id, start: e.selection.start, end: e.selection.end, text: e.new_text, mix: e.mix, partner: e.partner ?? null, level_db: e.level_db ?? null,
+    edit_id: e.edit_id, start: e.selection.start, end: e.selection.end, text: e.new_text, mix: e.mix, partner: e.partner ?? null, role: e.role ?? 'voice', offset_db: e.offset_db ?? null,
     speaker: e.speaker ?? null, voice_profile_id: e.voice_profile_id ?? null,
   })
   /** The plan item just approved, as a revision. */
   const itemRevision = (i: PlanItem): Revision => ({
     edit_id: i.edit_id!, start: i.candidate?.plan.selection.start ?? i.selection.start,
-    end: i.candidate?.plan.selection.end ?? i.selection.end, text: i.new_text, mix: i.mix, level_db: i.candidate?.plan.level_db ?? null,
+    end: i.candidate?.plan.selection.end ?? i.selection.end, text: i.new_text, mix: i.mix, role: i.candidate?.plan.role ?? 'voice', offset_db: i.candidate?.plan.offset_db ?? null,
     speaker: i.speaker ?? null, voice_profile_id: i.candidate?.plan.voice_profile_id ?? null,
   })
 
@@ -706,24 +708,30 @@ function Studio() {
     return { changed: true, render }
   }
 
-  /** 20g: a line mixed under the words or at full level, nothing voiced again. */
-  const changeLevel = async (target: { editId?: string; candidate?: Candidate; item?: PlanItem }, levelDb: number) => {
-    if (!projectId) return
+  /** 2026-10-20: a line's role in the mix, or its fine-tune, nothing voiced again. The
+   *  only speech in its span comes back as a question for the row to ask. */
+  const changeRole = async (target: { editId?: string; candidate?: Candidate; item?: PlanItem }, change: RoleChange): Promise<RoleQuestion | null> => {
+    if (!projectId) return null
     setError(null)
     try {
       if (target.editId) {
-        const r = await setEditLevel(projectId, target.editId, levelDb)
-        setApproved((all) => all.map((rev) => (rev.edit_id === target.editId ? { ...rev, edit_id: r.edit_id, level_db: r.candidate.plan.level_db ?? null } : rev)))
+        const r = await setEditRole(projectId, target.editId, change)
+        setApproved((all) => all.map((rev) => (rev.edit_id === target.editId
+          ? { ...rev, edit_id: r.edit_id, role: r.candidate.plan.role ?? 'voice', offset_db: r.candidate.plan.offset_db ?? null } : rev)))
         setPreview(null)
         if (await runExport()) setView('final')
       } else if (target.candidate && target.item) {
-        const c = await setCandidateLevel(projectId, target.candidate.candidate_id, levelDb)
+        const c = await setCandidateRole(projectId, target.candidate.candidate_id, change)
         const id = target.item.item_id
         setPlan((p) => (p ? { ...p, items: p.items.map((i) => (i.item_id === id ? { ...i, candidate: c } : i)) } : p))
         setPreview(null)
       }
+      return null
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : 'Could not change the level.')
+      const asked = roleQuestion(e)
+      if (asked) return asked
+      setError(e instanceof ApiError ? e.message : 'Could not change how the line is mixed.')
+      return null
     }
   }
 
@@ -742,6 +750,7 @@ function Studio() {
     setSegments(result.export.segments)
     setInserts(result.export.inserts ?? [])
     setPieces(result.export.pieces ?? piecesFromInserts(result.export.inserts ?? [], project?.duration ?? 0))
+    setFinalMix(result.export.mix ?? null)
     const stem = (project?.filename ?? 'video').replace(/\.[^.]+$/, '')
     const url = artifactUrl(projectId, result.export.render.sha256)
     const download = { url, filename: `${stem}-edited.mp4` }
@@ -870,7 +879,7 @@ function Studio() {
       manifest = await exportProject(projectId, true, seq)
       if (!isLatest('proposals', seq)) return
       const url = artifactUrl(projectId, manifest.render.sha256)
-      setPreview({ url, duration: manifest.render.duration, key,
+      setPreview({ url, duration: manifest.render.duration, key, mix: manifest.mix ?? null,
         pieces: manifest.pieces ?? piecesFromInserts(manifest.inserts ?? [], project?.duration ?? 0) })
     } catch {
       if (isLatest('proposals', seq)) {
@@ -913,6 +922,7 @@ function Studio() {
       setSegments(manifest.segments)
       setInserts(manifest.inserts ?? [])
       setPieces(manifest.pieces ?? piecesFromInserts(manifest.inserts ?? [], project?.duration ?? 0))
+      setFinalMix(manifest.mix ?? null)
       const stem = (filename ?? 'video').replace(/\.[^.]+$/, '')
       const url = artifactUrl(id, manifest.render.sha256)
       const download = { url, filename: `${stem}-edited.mp4` }
@@ -1164,7 +1174,7 @@ function Studio() {
       { id: 'first-question', target: 'question', when: !!clarifying && !plan?.question?.gate },
       { id: 'first-voice-design', target: 'composer', when: messages.some((m) => m.kind === 'previews') },
       { id: 'first-undo-after-export', target: 'export', when: undoneAfterExport },
-      { id: 'first-background', target: 'transcript-row', when: approved.some((r) => (r.level_db ?? 0) < 0) },
+      { id: 'first-background', target: 'transcript-row', when: approved.some((r) => r.role === 'bed') },
       { id: 'first-just-do-it', target: 'autonomy', when: autonomy === 'draft' },
       { id: 'first-silent', target: 'composer', when: !isTutorial && firstRead && statements.length === 0 },
       { id: 'first-upload', target: 'composer', when: !isTutorial && firstRead && statements.length > 0 && !readingBusy },
@@ -1324,8 +1334,9 @@ function Studio() {
                 onDiscard={(item) => discardItem(item)}
                 onAddAll={(items) => approveAll(items)}
                 onHearTake={(_item, c) => playTake(c)}
-                onLevel={(target, levelDb) => void changeLevel(target, levelDb)}
-                backgroundDb={BACKGROUND_DB}
+                onRole={(target, change) => changeRole(target, change)}
+                mixLines={(version === 'proposals' ? preview?.mix : finalMix)?.lines ?? []}
+                bedUnderDb={project.settings?.mix?.bed_under_db ?? 15}
                 onDelivery={(item, delivery) => void takeTurn(`Voice ${item.item_id} again, said ${delivery}`)}
             onRetry={(item) => void takeTurn(`Try ${item.item_id} again (“${item.new_text}”): ${item.error ?? 'the last try failed'}`)}
                 onUndo={(id) => void revert(id)}
