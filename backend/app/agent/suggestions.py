@@ -135,7 +135,7 @@ GENERIC_SPEECH = (
 )
 GENERIC_SILENT = (
     Suggestion("Describe what the picture shows", "Write a short voice-over that describes what the picture shows, without naming any place you cannot see named.", "add", "frames"),
-    Suggestion("A calm, unhurried narration", "Write and voice a calm, unhurried narration over the quiet stretch.", "voice", "frames"),
+    Suggestion("A line for the biggest moment", "Find the biggest moment in the picture and write one line that lands on it.", "voice", "frames"),
     Suggestion("Add a line at the start", "Add one short line at the start that sets the scene.", "change", "time"),
 )
 

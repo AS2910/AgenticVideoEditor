@@ -201,6 +201,8 @@ interface VoltagePaneProps {
   /** What happened to a chip: shown, put in the box, sent (as it was, or edited first). */
   onChipEvent?: (event: 'shown' | 'clicked' | 'sent', chip: Suggestion, edited?: boolean) => void
   /** Content before the thread (the first read), and after it (the plan's record). */
+  /** 2026-10-20: what Voltage sees in the video, at the top of the thread. */
+  seeing?: ReactNode
   before?: ReactNode
   children?: ReactNode
   /** The turn is running: its latest step. */
@@ -216,7 +218,7 @@ interface VoltagePaneProps {
  *  a question as a gate card — then the chips and the composer. */
 export function VoltagePane({
   messages, projectId, state, busy, need, engine, chips = [], cap, spend, question, onAnswer, turnCap, onSubmit, placeholder = 'Say what to change…', sendLabel = 'Send',
-  inputRef, seed, suggestions = [], onChipEvent, before, children, working, empty, onShowMe,
+  inputRef, seed, suggestions = [], onChipEvent, seeing, before, children, working, empty, onShowMe,
 }: VoltagePaneProps) {
   const [prompt, setPrompt] = useState('')
   const [openTrace, setOpenTrace] = useState<number | null>(null)
@@ -311,6 +313,7 @@ export function VoltagePane({
 
       <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
         <div ref={list} onScroll={onScroll} className="pane-thread flex min-h-0 min-w-0 flex-1 flex-col gap-4.5 overflow-y-auto px-5.5 py-6 @max-[380px]:px-4" role="log" aria-live="polite" aria-relevant="additions" aria-label="The conversation">
+          {seeing}
           {before}
           {turns.length === 0 && !before && empty}
           {hidden > 0 && (

@@ -13,6 +13,7 @@ import type { LineKey } from './transcript/keys'
 import { WhatVoltageMayDo } from './components/WhatVoltageMayDo'
 import type { MayDo } from './components/WhatVoltageMayDo'
 import { WhoSpeaks } from './components/WhoSpeaks'
+import { WhatISee } from './components/WhatISee'
 import { Wordmark, Wave } from './components/Wordmark'
 import { Lanes } from './components/Lanes'
 import { AccountDot } from './pages/Shell'
@@ -37,14 +38,14 @@ import { go, hrefFor, useRoute } from './lib/route'
 import { cn } from '@/lib/utils'
 import { clock } from './transcript/format'
 import {
-  createProject, confirmPlace, exportProject, artifactUrl, pollJob, PollCancelled, ApiError, listVideos, listFolders, createFolder, startTutorial, getProject, deleteProject, getUsage, getSpend, listVoices, updateSpeaker, detectSpeakers, revertEdit, updateSettings, removeLine, dismissItem, setEditRole, setCandidateRole, roleQuestion, moveCandidate, moveEdit, getArrangement, putArrangement, undoArrangement, getPlan, approvePlan, readProject, grantConsent, getMe, postTurn, postAllowMore, getMessages, chipEvent,
+  createProject, confirmPlace, exportProject, artifactUrl, pollJob, PollCancelled, ApiError, listVideos, listFolders, createFolder, startTutorial, getProject, deleteProject, getUsage, getSpend, listVoices, updateSpeaker, detectSpeakers, revertEdit, updateSettings, removeLine, dismissItem, setEditRole, setCandidateRole, roleQuestion, moveCandidate, moveEdit, getArrangement, putArrangement, undoArrangement, getPlan, approvePlan, readProject, grantConsent, getMe, postTurn, postAllowMore, getMessages, chipEvent, getUnderstanding, correctUnderstanding, setStyle,
 } from './api'
 import type { ArrangementView, Me, PlanApproval, RoleChange, RoleQuestion } from './api'
 import type { Arrangement, Placed } from './transcript/arrange'
 import type {
   Word, Selection, Candidate, Segment, Project, ChatMessage,
   Insert, ProjectSummary, Usage, SpendSummary, Statement, Voice, Revision,
-  Plan, PlanItem, Autonomy, Reading, Piece, ProjectDetail, ApprovedEditSummary, MyVoice, ProjectFolder, ExportManifest, MixReport, Suggestion,
+  Plan, PlanItem, Autonomy, Reading, Piece, ProjectDetail, ApprovedEditSummary, MyVoice, ProjectFolder, ExportManifest, MixReport, Suggestion, Understanding,
 } from './types'
 import { piecesFromInserts, renderTimeFrom, sourceTimeFrom } from './timeline/selection'
 
@@ -125,6 +126,8 @@ function Studio() {
   const [seed, setSeed] = useState<{ text: string; id: number } | null>(null)
   // 2026-10-20: the chips above Voltage's box, from this video (the first read, then each turn).
   const [suggestions, setSuggestions] = useState<Suggestion[]>([])
+  // 2026-10-20: what Voltage sees in the video (beats, style, the user's corrections).
+  const [seen, setSeen] = useState<Understanding | null>(null)
   const [pendingTour, setPendingTour] = useState<Tour | null>(null)
   const [keysOpen, setKeysOpen] = useState(false)
   const [undoneAfterExport, setUndoneAfterExport] = useState(false)
@@ -226,6 +229,7 @@ function Studio() {
     setPlan(null)
     setReading(null)
     setSuggestions([])
+    setSeen(null)
     setReadingBusy(false)
     setShippedNote(null)
     setConsentAsk(null)
@@ -286,6 +290,7 @@ function Studio() {
   useEffect(() => {
     if (!projectId) return
     let live = true
+    getUnderstanding(projectId).then((u) => { if (live) setSeen(u) }).catch(() => {})
     getArrangement(projectId).then((a) => { if (live) setArranged(a) }).catch(() => {})
     return () => { live = false }
   }, [projectId])
@@ -305,7 +310,7 @@ function Studio() {
     readFor.current = projectId
     setReadingBusy(true)
     readProject(projectId)
-      .then((r) => { setReading(r); if (r.suggestions?.length) setSuggestions(r.suggestions) })
+      .then((r) => { setReading(r); if (r.suggestions?.length) setSuggestions(r.suggestions); void getUnderstanding(projectId).then(setSeen).catch(() => {}) })
       .catch(() => {})   // the stage still works with the plain count
       .finally(() => { setReadingBusy(false); void refreshUsage(projectId) })
   }, [projectId, reading, project?.statements?.length, refreshUsage])
@@ -1128,6 +1133,7 @@ function Studio() {
       ...approved.filter((r) => r.mix !== 'remove').map((r) => ({ at: toRender(r.start), tone: 'ink' as const, label: `In the video: ${r.text}` })),
       ...readyItems.filter((i) => i.candidate).map((i) => ({ at: toRender(i.candidate!.plan.selection.start), tone: 'volt' as const, label: `Proposed: ${i.new_text}` })),
       ...needsYou.map((i) => ({ at: toRender(i.selection.start), tone: 'warn' as const, label: `Waiting on you: ${i.new_text}` })),
+      ...(seen?.beats ?? []).filter((b) => b.kind !== 'cut').map((b) => ({ at: toRender(b.at), tone: 'beat' as const, label: `Beat: ${b.label}` })),
     ]
     // A take in hand, not yet kept, is captioned with its words too: the picture
     // shows what you are about to hear.
@@ -1386,6 +1392,15 @@ function Studio() {
               working={turnBusy ? (turnStep ?? 'Working…') : null}
               suggestions={readingBusy ? [] : suggestions}
               onChipEvent={(event, c, edited) => { if (projectId) chipEvent(projectId, event, c.kind, c.label, edited) }}
+              seeing={seen && (seen.read || seen.beats.length > 0) ? (
+                <WhatISee
+                  key={`${seen.version}-${seen.corrections.length}`}
+                  seen={seen} disabled={turnBusy || readingBusy} defaultOpen={messages.length === 0}
+                  onSeek={(t) => { const time = shown ? renderTimeFrom(t, shown.pieces) : t; setSeekRequest((r) => ({ time, id: (r?.id ?? 0) + 1 })); setCurrentTime(time) }}
+                  onCorrect={async (change) => { if (projectId) { try { setSeen(await correctUnderstanding(projectId, change)) } catch (e) { setError(e instanceof ApiError ? e.message : 'Could not save that correction.') } } }}
+                  onStyle={async (line) => { if (projectId) { try { setSeen(await setStyle(projectId, line)) } catch (e) { setError(e instanceof ApiError ? e.message : 'Could not save the style.') } } }}
+                />
+              ) : undefined}
               before={firstRead ? (
                 <div className="flex flex-col gap-3.5" data-testid="first-read">
                   {readingBusy && !reading ? (
