@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { render, screen, within } from '@testing-library/react'
+import { fireEvent, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { VoltagePane } from './VoltagePane'
 import type { ChatMessage } from '../types'
@@ -121,5 +121,134 @@ describe('VoltagePane: spend scopes in the trace', () => {
       question={{ text: 'Voice it for about $0.04?', options: ['Go', 'Not yet'], gate: true, cost_usd: 0.04, left_usd: 0.46 } as never} />)
     expect(screen.getByTestId('earlier-turn')).toHaveTextContent('$0.03')
     expect(unlabelledMoney(screen.getByRole('log'))).toEqual([])
+  })
+})
+
+describe('VoltagePane: rendering at any width (pane-render)', () => {
+  const LONG = 'Voice the shorter middle line next turn, then add all five lines together so the commentary builds to the knockdown'
+  const ASKED = {
+    text: 'The middle line is over this turn’s cap. What should I do?',
+    options: ['Add the four now', 'Voice it next turn', LONG],
+    details: ['Add the four finished lines now and leave 7 to 10 s quiet.', null, null],
+    guess: 'Voice it next turn', gate: false, left_usd: 0, cap_usd: 0.5,
+  }
+
+  it('puts Voltage’s pick first with its tag, and drops the separate “My guess is” sentence', () => {
+    render(<VoltagePane messages={THREAD} state="needs your go" need onSubmit={() => {}} question={ASKED} />)
+    const card = screen.getByTestId('clarify')
+    const buttons = within(card).getAllByRole('button')
+    expect(buttons[0]).toHaveTextContent('Voice it next turn')
+    expect(within(buttons[0]).getByTestId('pick-tag')).toHaveTextContent('Voltage\'s pick')
+    expect(within(card).getAllByTestId('pick-tag')).toHaveLength(1)
+    expect(card).not.toHaveTextContent(/my guess is/i)
+    expect(card).toHaveTextContent('Pick one, or answer in your own words.')
+  })
+
+  it('wraps every option: stacked, text-left, fit to its words, never wider than the card', () => {
+    render(<VoltagePane messages={THREAD} state="ready" onSubmit={() => {}} question={ASKED} />)
+    const stack = screen.getByTestId('clarify-options')
+    expect(stack).toHaveClass('flex-col', 'gap-2', 'w-full')
+    for (const b of within(stack).getAllByRole('button')) expect(b).toHaveClass('opt')
+  })
+
+  it('gives a long option a short label with the full sentence beneath; a given detail is used as is', () => {
+    render(<VoltagePane messages={THREAD} state="ready" onSubmit={() => {}} question={ASKED} onAnswer={() => {}} />)
+    const labels = screen.getAllByTestId('option-label').map((l) => l.textContent ?? '')
+    const details = screen.getAllByTestId('option-detail').map((d) => d.textContent)
+    expect(labels).toEqual(['Voice it next turn', 'Add the four now', expect.stringMatching(/…$/)])
+    expect([...labels[2]].length).toBeLessThanOrEqual(41)
+    expect(details).toEqual(['Add the four finished lines now and leave 7 to 10 s quiet.', LONG])
+  })
+
+  it('sends the option as Voltage gave it, not the short label', async () => {
+    const onAnswer = vi.fn()
+    render(<VoltagePane messages={THREAD} state="ready" onSubmit={() => {}} question={ASKED} onAnswer={onAnswer} />)
+    const buttons = within(screen.getByTestId('clarify')).getAllByRole('button')
+    await userEvent.click(buttons[2])
+    expect(onAnswer).toHaveBeenCalledWith(LONG)
+  })
+
+  it('says the money as one sentence: what the turn has left of its cap', () => {
+    render(<VoltagePane messages={THREAD} state="ready" onSubmit={() => {}} question={ASKED} />)
+    expect(screen.getByTestId('clarify-money')).toHaveTextContent('This turn has $0.00 left of its $0.50 cap.')
+    expect(screen.getByTestId('clarify')).not.toHaveTextContent(/left in turn/i)
+    expect(unlabelledMoney(screen.getByTestId('clarify'))).toEqual([])
+  })
+
+  it('falls back to the pane’s turn cap when the question carries none', () => {
+    const { cap_usd: _c, ...older } = ASKED
+    render(<VoltagePane messages={THREAD} state="ready" onSubmit={() => {}} question={older} turnCap={0.75} />)
+    expect(screen.getByTestId('clarify-money')).toHaveTextContent('This turn has $0.00 left of its $0.75 cap.')
+  })
+
+  it('offers the way through the turn’s cap first; picking it asks to allow more', async () => {
+    const onAnswer = vi.fn()
+    const capped = {
+      ...ASKED,
+      options: ['Go ahead, allow $0.04 more', ...ASKED.options],
+      details: ['Raises this turn’s cap to $0.54 and carries on.', ...ASKED.details],
+      turn_cap: { needed_usd: 0.04, cap_usd: 0.5 },
+    }
+    render(<VoltagePane messages={THREAD} state="needs your go" need onSubmit={() => {}} question={capped} onAnswer={onAnswer} />)
+    const buttons = within(screen.getByTestId('clarify')).getAllByRole('button')
+    expect(buttons[0]).toHaveTextContent('Go ahead, allow $0.04 more')
+    expect(buttons[0]).toHaveAttribute('data-option', 'allow-more')
+    expect(buttons[0]).toHaveClass('volt')
+    expect(buttons[1]).toHaveTextContent('Voice it next turn')
+    expect(buttons[1]).toHaveAttribute('data-option', 'pick')
+    await userEvent.click(buttons[0])
+    expect(onAnswer).toHaveBeenCalledWith('Go ahead, allow $0.04 more', true)
+    await userEvent.click(buttons[1])
+    expect(onAnswer).toHaveBeenLastCalledWith('Voice it next turn')
+    expect(unlabelledMoney(screen.getByTestId('clarify'))).toEqual([])
+  })
+
+  it('keeps the header on one line: the status truncates, the engine is behind an info button', async () => {
+    render(<VoltagePane messages={[]} state="needs your go" need engine="Opus 5.5 · High" onSubmit={() => {}} />)
+    expect(screen.getByTestId('pane-header')).toHaveClass('flex-nowrap')
+    expect(screen.getByTestId('pane-status')).toHaveClass('truncate', 'min-w-0')
+    expect(screen.getByTestId('pane-status')).toHaveAttribute('title', 'needs your go')
+    const info = screen.getByRole('button', { name: 'Model: Opus 5.5 · High' })
+    expect(screen.getByRole('tooltip', { hidden: true })).toHaveClass('hidden')
+    await userEvent.click(info)
+    expect(info).toHaveAttribute('aria-expanded', 'true')
+    expect(screen.getByRole('tooltip')).toHaveTextContent('Opus 5.5 · High')
+  })
+
+  it('folds the brief and voices chips behind a Context chip on a narrow pane', async () => {
+    render(<VoltagePane messages={[]} state="ready" chips={['Brief · Diwali 2026', '2 shared voices']} onSubmit={() => {}} />)
+    const toggle = screen.getByTestId('context-toggle')
+    expect(toggle).toHaveClass('hidden', '@max-[380px]:inline-flex')
+    for (const c of screen.getAllByTestId('context-chip')) expect(c).toHaveClass('@max-[380px]:hidden')
+    await userEvent.click(toggle)
+    for (const c of screen.getAllByTestId('context-chip')) expect(c).not.toHaveClass('@max-[380px]:hidden')
+  })
+
+  it('never scrolls sideways: the root hides x overflow and the thread scrolls in its own area', () => {
+    render(<VoltagePane messages={THREAD} state="ready" onSubmit={() => {}} />)
+    expect(screen.getByTestId('voltage-pane')).toHaveClass('pane-root', 'min-w-0')
+    expect(screen.getByRole('log')).toHaveClass('pane-thread', 'overflow-y-auto', 'min-h-0', 'flex-1')
+  })
+
+  it('scrolls new content into view only near the bottom; otherwise shows “New from Voltage ↓”', async () => {
+    const more: ChatMessage[] = [...THREAD, { role: 'assistant', text: 'One more thing.', seq: 9 }]
+    const { rerender } = render(<VoltagePane messages={THREAD} state="ready" onSubmit={() => {}} />)
+    const log = screen.getByRole('log')
+    Object.defineProperty(log, 'scrollHeight', { configurable: true, value: 2000 })
+    Object.defineProperty(log, 'clientHeight', { configurable: true, value: 400 })
+    log.scrollTop = 200                                // well above the bottom
+    fireEvent.scroll(log)
+    rerender(<VoltagePane messages={more} state="ready" onSubmit={() => {}} />)
+    expect(log.scrollTop).toBe(200)
+    const pill = screen.getByTestId('new-from-voltage')
+    expect(pill).toHaveTextContent('New from Voltage ↓')
+    await userEvent.click(pill)
+    expect(screen.queryByTestId('new-from-voltage')).toBeNull()
+
+    log.scrollTop = 1580                               // within reach of the bottom
+    fireEvent.scroll(log)
+    rerender(<VoltagePane messages={[...more, { role: 'assistant', text: 'And another.', seq: 10 }]} state="ready" onSubmit={() => {}} />)
+    expect(log.scrollTop).toBe(2000)
+    expect(screen.queryByTestId('new-from-voltage')).toBeNull()
   })
 })

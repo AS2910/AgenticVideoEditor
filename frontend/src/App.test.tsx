@@ -171,6 +171,10 @@ function agent(initial: unknown = PLAN, onTurn: (text: string) => unknown = () =
   const base = routeFetch()
   const f = vi.fn(async (url: string, init?: RequestInit) => {
     const body = typeof init?.body === 'string' ? JSON.parse(init.body) : undefined
+    if (url.endsWith('/turns/allow-more') && init?.method === 'POST') {
+      calls.push({ url, body }); current = onTurn('(allow more)')
+      return ok(JOB_ACCEPTED)
+    }
     if (url.endsWith('/turns') && init?.method === 'POST') {
       calls.push({ url, body }); current = onTurn((body as { text: string }).text)
       const p = current as { summary: string; question?: { text: string } | null }
@@ -755,13 +759,39 @@ describe('App the agent (Phase 13, 20c)', () => {
 
     const ask = await screen.findByTestId('clarify')
     expect(ask).toHaveTextContent('Who speaks for the brand?')
-    expect(ask).toHaveTextContent('My guess is The Shopkeeper.')
+    // Pane-render: the guess is the first option, tagged; no separate "My guess is" sentence.
+    const first = within(ask).getAllByRole('button')[0]
+    expect(first).toHaveTextContent('The Shopkeeper')
+    expect(within(first).getByTestId('pick-tag')).toHaveTextContent("Voltage's pick")
+    expect(ask).not.toHaveTextContent(/my guess is/i)
 
     await user.click(within(ask).getByRole('button', { name: 'The Customer' }))
 
     await waitFor(() => expect(saidTo(calls)).toEqual(['make it 30% off', 'The Customer']))
     expect(await screen.findByText('I read 1 line. One change does it.')).toBeInTheDocument()
     expect(screen.getByText('Planned')).toBeInTheDocument()   // on the transcript line
+  })
+
+  it('a question the turn cap caused offers the way through first; picking it raises the cap and carries the turn on', async () => {
+    const capped = { ...PLAN, status: 'clarifying', question: {
+      text: 'The new line would go over this turn’s $0.50 cap. What should I do?',
+      options: ['Go ahead, allow $0.04 more', 'Voice it next turn', 'Let me listen first'],
+      details: ['Raises this turn’s cap to $0.54 and carries on.', null, null],
+      guess: 'Voice it next turn', gate: false, left_usd: 0, cap_usd: 0.5, turn_cap: { needed_usd: 0.04, cap_usd: 0.5 } } }
+    const calls = agent(capped, (text) => (text === 'make it 30% off' ? capped : PLAN))
+    const user = userEvent.setup()
+    render(<App />)
+    await reachGoal(user)
+    await user.type(screen.getByRole('textbox', TEXTBOX), 'make it 30% off{Enter}')
+
+    const ask = await screen.findByTestId('clarify')
+    expect(ask).toHaveTextContent('This turn has $0.00 left of its $0.50 cap.')
+    const [way, pick] = within(ask).getAllByRole('button')
+    expect(way).toHaveTextContent('Go ahead, allow $0.04 more')
+    expect(pick).toHaveTextContent("Voltage's pick")
+    await user.click(way)
+    await waitFor(() => expect(calls.some((c) => c.url.endsWith('/videos/p1/turns/allow-more'))).toBe(true))
+    expect(saidTo(calls)).toEqual(['make it 30% off'])          // not sent as words: the cap rises, the turn carries on
   })
 
   it('Hear it on a proposal plays the take in place, over the original when nothing is rendered yet', async () => {

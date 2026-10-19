@@ -277,6 +277,8 @@ class Agent:
             if isinstance(ended, WaitingForUser):
                 out.question = {"text": ended.question, "options": list(ended.options), "guess": ended.guess, "gate": ended.gate,
                                 "cost_usd": ended.cost_usd}
+                if ended.details:
+                    out.question["details"] = list(ended.details)
                 out.reply = _text_of(content)
                 break
             if isinstance(ended, TurnStopped):

@@ -52,7 +52,7 @@ from app.orchestrator.clones import CloneService, VoiceChoice
 from app.orchestrator.pipeline import run_edit
 from app.store.db import Database
 from app.usage import (
-    Ledger, SpendCeilingReached, WHISPER_USD_PER_MINUTE, claude_usd, current_turn, month_name, month_start,
+    Ledger, SpendCeilingReached, WHISPER_USD_PER_MINUTE, claude_usd, current_turn, money, month_name, month_start,
 )
 from app import auth
 from app.store.repository import Project, ProjectRecord, ProjectRepository, LOCAL_OWNER
@@ -316,8 +316,9 @@ def _spend_summary(owner: str, video_id: str | None = None, project_id: str | No
         record = repo.get(video_id)
         last = repo.settings(video_id).get("last_turn") or {}
         if last.get("id"):
+            # A turn carried on after "allow $x more" keeps its id and its raised cap.
             out["turn"] = _scope(ledger.spent_usd_by_turn(video_id, last["id"], last.get("at")),
-                                 _settings(video_id, owner)["turn_usd"], "This turn")
+                                 last.get("cap_usd") or _settings(video_id, owner)["turn_usd"], "This turn")
         out["video"] = _scope(ledger.spent_usd(video_id), ledger.ceiling_usd, "This video")
         project = _folder_of(record) if record else None
     elif project_id is not None:
@@ -3735,27 +3736,89 @@ def take_turn(project_id: str, req: TurnRequest, owner: str = Depends(current_ow
         return replay_turn(repo, project_id, text, owner)
     if not _agent_on():
         raise HTTPException(status_code=503, detail="Voltage needs Claude for this (set AVE_AGENT=1 and an Anthropic key).")
+    return _start_turn(project_id, record, text, owner, approve=req.approve)
+
+
+def _ceiling_refusal(project_id: str, record: ProjectRecord, owner: str, more_usd: float) -> str | None:
+    """Why the turn's cap may not rise by `more_usd`: the video's ceiling, its
+    project's or the month's would be passed; the sentence names the scope."""
+    spent = ledger.spent_usd(project_id)
+    if spent + more_usd > ledger.ceiling_usd + 1e-9:
+        return (f"Allowing ${more_usd:.2f} more would take {record.source.filename or 'this video'} past its "
+                f"{money(ledger.ceiling_usd)} video ceiling (${spent:.2f} spent). Raise the video ceiling in Settings first.")
+    project = _folder_of(record)
+    if project is not None and project.ceiling_usd is not None:
+        ours = ledger.spent_usd_by_folder(project.project_id)
+        if ours + more_usd > float(project.ceiling_usd) + 1e-9:
+            return (f"Allowing ${more_usd:.2f} more would take {project.name} past its {money(float(project.ceiling_usd))} "
+                    f"project ceiling (${ours:.2f} spent). Raise it on the project page first.")
+    if settings.user_budget_usd is not None:
+        mine = ledger.spent_usd_by_owner(owner, iso(month_start()))
+        if mine + more_usd > settings.user_budget_usd + 1e-9:
+            return (f"Allowing ${more_usd:.2f} more would take you past your {money(settings.user_budget_usd)} "
+                    f"ceiling for {month_name()} (${mine:.2f} spent).")
+    return None
+
+
+@app.post("/videos/{project_id}/turns/allow-more", status_code=202)
+def allow_more(project_id: str, owner: str = Depends(current_owner)) -> dict:
+    """The way through a question the turn's cap caused: raise this turn's cap
+    by exactly what the refused step needs (worked out when the question was
+    asked) and carry the same turn on. Refused, naming the scope, when the
+    video's, the project's or the month's ceiling would be passed."""
+    record = _owned(project_id, owner)
+    plan = repo.latest_plan(project_id)
+    question = plan.question if plan is not None and plan.status == "clarifying" else None
+    cap = (question or {}).get("turn_cap")
+    if not cap:
+        raise HTTPException(status_code=409, detail="Nothing is waiting on this turn's cap.")
+    if not _agent_on():
+        raise HTTPException(status_code=503, detail="Voltage needs Claude for this (set AVE_AGENT=1 and an Anthropic key).")
+    needed = round(float(cap["needed_usd"]), 2)
+    refusal = _ceiling_refusal(project_id, record, owner, needed)
+    if refusal:
+        raise HTTPException(status_code=409, detail=refusal)
+    carry = {"turn_id": cap.get("turn_id"), "since": cap.get("since"), "cap_usd": round(float(cap["cap_usd"]) + needed, 2),
+             "needed_usd": needed}
+    return _start_turn(project_id, record, str(question["options"][0]), owner, carry=carry)
+
+
+def _start_turn(project_id: str, record: ProjectRecord, text: str, owner: str, approve: bool = False,
+                carry: dict | None = None) -> dict:
+    """Queue one turn. `carry` continues the turn a cap question ended: the
+    same turn id and start, its cap raised (`cap_usd`), the paid step approved."""
     if any(j.kind == "turn" and j.project_id == project_id and not j.done for j in jobs.all()):
         raise HTTPException(status_code=409, detail="Voltage is still on the last thing you said.")
     prefs = _settings(project_id, owner)
     autonomy = prefs["autonomy"]
     plan = _turn_plan(project_id, text)
+    asked = plan.question
     # A yes to a gate question (a paid or committing step that waited): a go word, or its first option.
-    gate = plan.question if plan.question and plan.question.get("gate") else None
-    approve = req.approve or bool(gate and (is_go(text) or text.strip().lower() == str(gate["options"][0]).lower()))
+    gate = asked if asked and asked.get("gate") else None
+    approve = approve or bool(gate and (is_go(text) or text.strip().lower() == str(gate["options"][0]).lower()))
     # Consent binds before anything synthesizes this speaker's voice: under
-    # Just do it before the turn, under Check with me at the yes.
-    if record.consent is None and (autonomy == "draft" or approve):
+    # Just do it before the turn, under Check with me at the yes (and at "allow more").
+    if record.consent is None and (autonomy == "draft" or approve or carry):
         raise HTTPException(status_code=403, detail=CONSENT_REQUIRED)
     repo.add_message(project_id, "user", text)
     repo.update_plan(project_id, plan.plan_id, status="running", question=None)
     job = jobs.create("turn", project_id)
     started_at = _now()
     # Spend scopes: the turn's id is the job's; every charge it causes carries it.
-    repo.set_settings(project_id, last_turn={"id": job.job_id, "at": started_at})
+    # A carried-on turn keeps the first one's id and start, so "this turn" is one figure.
+    turn_id = (carry or {}).get("turn_id") or job.job_id
+    since = (carry or {}).get("since") or started_at
+    cap_usd = float((carry or {}).get("cap_usd") or prefs["turn_usd"])
+    repo.set_settings(project_id, last_turn={"id": turn_id, "at": since, **({"cap_usd": cap_usd} if carry else {})})
+    # The words the user picked, with the sentence under the label when there was one.
+    picked = ""
+    if asked and asked.get("details"):
+        for label, detail in zip(asked.get("options") or [], asked["details"]):
+            if detail and str(label).strip().lower() == text.strip().lower():
+                picked = f" (They picked “{label}”: {detail})"
 
     def work(report) -> dict:
-        token = current_turn.set(job.job_id)
+        token = current_turn.set(turn_id)
         try:
             out = turn_work(report)
             return {**out, "spend": _spend_summary(owner, video_id=project_id)}
@@ -3770,9 +3833,12 @@ def take_turn(project_id: str, req: TurnRequest, owner: str = Depends(current_ow
             repo.add_message(project_id, "assistant", str(exc))
             return {"plan": _plan_dict(repo.get_plan(project_id, plan.plan_id)), "reply": str(exc), "question": None,
                     "ceiling": exc.scope}
-        budget_ = TurnBudget(usd=prefs["turn_usd"])
+        budget_ = TurnBudget(usd=cap_usd)
+        if carry:
+            # The raise is for the step the cap refused; this continuation's own thinking is not charged to it.
+            budget_.excused = lambda: ledger.spent_usd_since(project_id, started_at, vendor="anthropic")
         turn = AgentTurn(project_id=project_id, record=record, plan_id=plan.plan_id, autonomy=autonomy,
-                         spend_approved=approve or autonomy == "draft", budget=budget_, started_at=started_at,
+                         spend_approved=approve or bool(carry) or autonomy == "draft", budget=budget_, started_at=since,
                          report=report, commit_approved=approve, ask_before=prefs["ask_before"])
         lines = _lines(record)
         names = [s.name for s in repo.speakers(project_id)]
@@ -3787,11 +3853,13 @@ def take_turn(project_id: str, req: TurnRequest, owner: str = Depends(current_ow
         head = opening(repo.get_plan(project_id, plan.plan_id), duration=record.source.duration,
                        filename=record.source.filename, speakers=names, lines=len(lines), autonomy=autonomy,
                        spent_usd=ledger.spent_usd(project_id), ceiling_usd=ledger.ceiling_usd,
-                       turn_usd=prefs["turn_usd"], sight=_sight_text(project_id) if not lines else "",
+                       turn_usd=cap_usd, sight=_sight_text(project_id) if not lines else "",
                        edits=[e for e in repo.list_edits(project_id) if not e.reverted], project=_project_view(project_id),
                        understanding=understanding_mod.context_lines(repo.settings(project_id).get("understanding")))
+        allowed = (f" (They allowed ${carry['needed_usd']:.2f} more for this turn: its cap is now ${cap_usd:.2f}, "
+                   "so the step that went over it may run now. Carry on with it.)") if carry else ""
         content = [{"type": "text", "text": head}, {"type": "text", "text": f"The user says: {text}"
-                   + (" (They are answering yes to what you asked.)" if approve else "")}]
+                   + (" (They are answering yes to what you asked.)" if approve else "") + allowed + picked}]
         history = repo.turns(project_id)
 
         def on_step(step: str, cost: float, tool: str = "", data: dict | None = None) -> None:
@@ -3844,10 +3912,23 @@ def take_turn(project_id: str, req: TurnRequest, owner: str = Depends(current_ow
             repo.add_message(project_id, "assistant", "Thinking", kind="step", cost=round(thought, 4),
                              data={"tool": "thinking", "t": round(budget_.elapsed(), 1)})
         if question:
-            # The gate card shows the step's price beside what the turn has left.
-            left = prefs["turn_usd"] - ledger.spent_usd_since(project_id, started_at)
-            question = {**question, "left_usd": round(max(0.0, left), 2), "text": plain(question["text"], text),
+            # The card says what the turn has left of its cap, in one sentence.
+            spent_now = ledger.spent_usd_since(project_id, since)
+            left = budget_.usd - (spent_now - (budget_.excused() if budget_.excused else 0.0))
+            question = {**question, "left_usd": round(max(0.0, left), 2), "cap_usd": round(budget_.usd, 2),
+                        "text": plain(question["text"], text),
                         "options": [plain(o, text) for o in question.get("options") or []], "guess": plain(question.get("guess"), text)}
+            if question.get("details"):
+                question["details"] = [plain(d, text) for d in question["details"]]
+            # A question the turn's cap caused: the first option is the way through,
+            # raising this turn's cap by exactly what the refused step needs.
+            needed = budget_.needed_usd(spent_now) if not question.get("gate") else 0.0
+            if needed > 0:
+                opts = question["options"]
+                details = question.get("details") or [None] * len(opts)
+                question["options"] = [f"Go ahead, allow ${needed:.2f} more", *opts]
+                question["details"] = [f"Raises this turn's cap to ${budget_.usd + needed:.2f} and carries on.", *details]
+                question["turn_cap"] = {"needed_usd": needed, "cap_usd": round(budget_.usd, 2), "turn_id": turn_id, "since": since}
             repo.add_message(project_id, "assistant", question["text"])
             repo.append_log(project_id, plan.plan_id, f"Asked: {question['text']}")
         updated = repo.get_plan(project_id, plan.plan_id)

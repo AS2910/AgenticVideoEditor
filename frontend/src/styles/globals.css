@@ -306,6 +306,21 @@
   .sugg { font: inherit; font-size: 13px; height: 32px; padding: 0 12px; border-radius: 999px; border: 1px solid var(--pline); background: transparent; color: var(--pmuted); cursor: pointer; white-space: nowrap; }
   .sugg:hover { color: var(--ptext); border-color: var(--volt); }
   .bubble { align-self: flex-end; max-width: 88%; background: var(--psunk); border: 1px solid var(--pline); padding: 10px 14px; border-radius: 14px 14px 4px 14px; }
+  /* Pane-render (2026-10-20): the pane never scrolls sideways at any width. Every
+     flex or grid child may shrink (min-width 0, low specificity so a utility
+     still wins), and long words, file names, URLs and quoted lines wrap. */
+  .pane-root { overflow-x: hidden; overflow-wrap: anywhere; container-type: inline-size; }
+  .pane-root :where(*) { min-width: 0; }
+  .pane-root :where(pre, code) { white-space: pre-wrap; }
+  .pane-root :where(img, video, audio, table) { max-width: 100%; }
+  .pane-root .sugg { white-space: normal; height: auto; min-height: 32px; padding-block: 6px; text-align: left; max-width: 100%; }
+  /* The thread scrolls under a fixed header and composer; its top fades out instead of cutting a line in half. */
+  .pane-thread { overflow-x: hidden; overscroll-behavior: contain; mask-image: linear-gradient(to bottom, transparent 0, black 22px); }
+  /* An option on a question or gate card: its words wrap, the button grows to fit them. */
+  .pane .opt { white-space: normal; text-align: left; width: fit-content; max-width: 100%; height: auto; min-height: 32px; padding: 10px 14px; line-height: 1.35; display: inline-flex; flex-direction: column; align-items: flex-start; justify-content: center; gap: 3px; overflow-wrap: anywhere; }
+  .pane .opt .detail { font-family: var(--font-sans); font-size: 13px; font-weight: 400; opacity: .78; }
+  .pane .opt .pick { font-family: var(--font-mono); font-size: 12px; font-weight: 500; letter-spacing: .06em; text-transform: uppercase; opacity: .8; white-space: nowrap; }
+  @media (pointer: coarse) { .pane .opt { min-height: 44px; } }
   /* The avatar: slow volt bars idle, fast when working, amber when it needs you */
   .wave { display: inline-flex; align-items: center; gap: 2px; height: 20px; }
   .wave i { display: block; width: 3px; height: 20px; border-radius: 2px; background: var(--volt); animation: wv 2.2s ease-in-out infinite; transform-origin: center; }
