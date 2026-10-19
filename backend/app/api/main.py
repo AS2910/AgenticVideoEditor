@@ -29,6 +29,7 @@ from app.media.fit import speaking_rate, syllable_budget, syllables
 from app.config import load_settings
 from app.timefmt import iso, now_iso
 from app.agent.prose import plain
+from app.agent import suggestions as chips
 from app import arrange
 from app.media import frames as frames_mod, motion, shots
 from app.media import stems as stems_module
@@ -460,7 +461,7 @@ def _sight(project_id: str, record: ProjectRecord) -> Sight:
     if planner is None:
         raise HTTPException(status_code=503, detail=NEEDS_CLAUDE)
     frames = [Frame(at=f.at, path=str(f.path)) for f in _frames(record)]
-    sight = planner.look(frames, record.source.duration, meter=_meter(project_id, "looking"))
+    sight = planner.look(frames, record.source.duration, meter=_meter(project_id, "looking"), brief=_brief_text(project_id))
     repo.set_settings(project_id, sight=asdict(sight))
     return sight
 
@@ -531,6 +532,8 @@ def _project_dict(record: ProjectRecord) -> dict:
         "plan": _plan_dict(repo.latest_plan(source.project_id)),
         # UX-2: Voltage's first look at the clip, once it has had one.
         "reading": repo.settings(source.project_id).get("reading"),
+        # 2026-10-20: the chips above Voltage's box, from this video.
+        "suggestions": _chips_now(source.project_id, record)["suggestions"],
         # UX-5: a clip with no speech shows its frames where the transcript would be.
         "frames": _frames_dict(record) if not record.transcript.words and not record.transcript.statements else [],
     }
@@ -1469,6 +1472,104 @@ def detect_speakers(project_id: str, owner: str = Depends(current_owner)) -> dic
     return _project_dict(repo.get(project_id))
 
 
+# ── The chips above Voltage's box (2026-10-20) ──────────────────────────────
+
+def _brief_text(project_id: str) -> str:
+    """The project's name and brief, for the first read; empty when standalone."""
+    record = repo.get(project_id)
+    project = repo.get_project(record.folder_id) if record is not None and record.folder_id else None
+    if project is None:
+        return ""
+    return f"{project.name}: {project.brief}".strip(": ") if project.brief else project.name
+
+
+def _chip_sources(project_id: str, record: ProjectRecord) -> str:
+    """Everything a chip may name: what is said, what is on screen, the brief, the voices, the lines in the plan."""
+    parts = [st.text for st in statements_of(record.transcript)]
+    sight = repo.settings(project_id).get("sight") or {}
+    parts += [str(sight.get(k) or "") for k in ("setting", "people", "text_on_screen", "place_confirmed", "opening")]
+    parts += list(sight.get("details") or [])
+    parts.append(_brief_text(project_id))
+    parts += [s.name or "" for s in repo.speakers(project_id)]
+    parts += [v.get("name") or "" for v in repo.settings(project_id).get("made_voices") or []]
+    plan = repo.latest_plan(project_id)
+    parts += [i.new_text for i in (plan.items if plan else ())]
+    return " ".join(p for p in parts if p)
+
+
+def _clean_chips(project_id: str, record: ProjectRecord, raw) -> list[dict]:
+    return [{**c.as_dict(), "label": plain(c.label), "prompt": plain(c.prompt)} for c in chips.clean(raw, _chip_sources(project_id, record))]
+
+
+def _chips_now(project_id: str, record: ProjectRecord) -> dict:
+    """The chips to show: the last turn's, else the first read's, else a generic set by clip type."""
+    saved = repo.settings(project_id)
+    if saved.get("suggestions") is not None:
+        return {"suggestions": saved["suggestions"], "source": "turn"}
+    reading = saved.get("reading") or {}
+    if reading.get("suggestions"):
+        return {"suggestions": reading["suggestions"], "source": "reading"}
+    has_speech = bool(record.transcript.words or record.transcript.statements)
+    return {"suggestions": [c.as_dict() for c in chips.fallback(has_speech)], "source": "generic"}
+
+
+def _after_turn_chips(project_id: str, record: ProjectRecord, said: str, raw: list) -> None:
+    """After a turn the chips are Voltage's next ones; with none, the chip just used goes."""
+    fresh = _clean_chips(project_id, record, raw)
+    if fresh:
+        repo.set_settings(project_id, suggestions=fresh)
+        return
+    current = _chips_now(project_id, record)["suggestions"]
+    said_norm = " ".join((said or "").split()).lower()
+    left = [c for c in current if " ".join(c["prompt"].split()).lower() != said_norm]
+    if len(left) != len(current):
+        repo.set_settings(project_id, suggestions=left)
+
+
+@app.get("/videos/{project_id}/suggestions")
+def get_suggestions(project_id: str, owner: str = Depends(current_owner)) -> dict:
+    """The chips above Voltage's box: up to four, each {label, prompt, kind, grounded_in}, and where they came from."""
+    record = _owned(project_id, owner)
+    return _chips_now(project_id, record)
+
+
+class ChipEvent(BaseModel):
+    # shown: on screen; clicked: put in the box; sent: sent, as is or edited first.
+    event: Literal["shown", "clicked", "sent"]
+    kind: Literal["fix", "change", "add", "voice", "finish"]
+    label: str = ""
+    edited: bool = False
+
+
+CHIP_EVENTS_KEPT = 5000
+
+
+@app.post("/videos/{project_id}/suggestions/events", status_code=204)
+def chip_event(project_id: str, req: ChipEvent, owner: str = Depends(current_owner)) -> Response:
+    """What people do with the chips, by kind, so the useful ones can be told apart."""
+    _owned(project_id, owner)
+    events = repo.meta_list("chip_events")[-(CHIP_EVENTS_KEPT - 1):]
+    events.append({"video": project_id, "owner": owner, "event": req.event, "kind": req.kind,
+                   "label": req.label[:60], "edited": bool(req.edited), "at": _now()})
+    repo.set_meta_list("chip_events", events)
+    return Response(status_code=204)
+
+
+@app.get("/suggestions/stats")
+def chip_stats(owner: str = Depends(current_owner)) -> dict:
+    """Chips shown, clicked, edited before sending, and sent as they were, by kind (the caller's own)."""
+    out = {k: {"shown": 0, "clicked": 0, "edited": 0, "sent_as_is": 0} for k in chips.KINDS}
+    for e in repo.meta_list("chip_events"):
+        if e.get("owner") != owner or e.get("kind") not in out:
+            continue
+        row = out[e["kind"]]
+        if e["event"] == "sent":
+            row["edited" if e.get("edited") else "sent_as_is"] += 1
+        else:
+            row[e["event"]] += 1
+    return {"by_kind": out}
+
+
 class ReadRequest(BaseModel):
     # Read the clip again even though a reading is saved.
     again: bool = False
@@ -1496,14 +1597,15 @@ def read_project(project_id: str, req: ReadRequest, owner: str = Depends(current
             raise HTTPException(status_code=502, detail=str(exc)) from exc
         except VendorError as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
-        out = {"opening": plain(sight.opening), "roles": [], "sight": asdict(sight)}
+        out = {"opening": plain(sight.opening), "roles": [], "sight": asdict(sight),
+               "suggestions": _clean_chips(project_id, record, sight.suggestions)}
         repo.set_settings(project_id, reading=out)
         return out
     try:
         _ensure_spend(project_id)
         if planner is None:
             raise HTTPException(status_code=503, detail=NEEDS_CLAUDE)
-        reading = planner.read(lines, meter=_meter(project_id, "reading"))
+        reading = planner.read(lines, meter=_meter(project_id, "reading"), brief=_brief_text(project_id))
     except SpendCeilingReached as exc:
         raise HTTPException(status_code=402, detail=str(exc)) from exc
     except NonRetryableError as exc:
@@ -1518,6 +1620,7 @@ def read_project(project_id: str, req: ReadRequest, owner: str = Depends(current
             for r in reading.roles if r.speaker in by_name
         ],
         "at": _now(),
+        "suggestions": _clean_chips(project_id, record, reading.suggestions),
     }
     repo.set_settings(project_id, reading=out)
     return out
@@ -3577,6 +3680,10 @@ def take_turn(project_id: str, req: TurnRequest, owner: str = Depends(current_ow
                     "question": None, "spent_usd": 0.0, "calls": 0, "stopped": "error", "error": why}
         question = outcome.question
         status = "clarifying" if question else "done"
+        # 2026-10-20: the closing words may end with the next chips; the user sees the words, the box the chips.
+        words, raw_chips = chips.split_reply(outcome.reply or "")
+        outcome = replace(outcome, reply=words or None)
+        _after_turn_chips(project_id, record, text, raw_chips)
         # p60: the closing words are checked against the record; a claim it does not support is corrected.
         from app.agent.reply_check import corrections
         fixes = corrections(outcome.reply or "", repo.get_plan(project_id, plan.plan_id).items, _lines(record))
@@ -3604,7 +3711,7 @@ def take_turn(project_id: str, req: TurnRequest, owner: str = Depends(current_ow
                          estimate=_estimate(project_id, updated.items))
         return {"type": "turn", "plan": _plan_dict(repo.get_plan(project_id, plan.plan_id)), "reply": outcome.reply,
                 "question": question, "spent_usd": round(outcome.spent_usd, 4), "calls": outcome.calls,
-                "stopped": outcome.stopped}
+                "stopped": outcome.stopped, "suggestions": _chips_now(project_id, record)["suggestions"]}
 
     def failed_turn() -> None:
         repo.update_plan(project_id, plan.plan_id, status="proposed")

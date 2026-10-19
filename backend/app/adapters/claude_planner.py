@@ -45,7 +45,16 @@ noun phrase of at most six words ("tyre tracks in the sand", "a parasail at \
 the end"), `place_guess` (where this might be, at most eight words, e.g. \
 "a west-coast Indian beach, Goa or Karnataka"; empty if nothing suggests a \
 place) and `confidence` (low, medium or high), and `beats`: for each frame, \
-its time and one short note on what it shows. Describe only what is visible; \
+its time and one short note on what it shows. Return `suggestions`: three or four chips for what the person might ask \
+for first, each {label, prompt, kind, grounded_in}. label at most 40 \
+characters; prompt what they would say, more precise; kind one of fix, \
+change, add, voice, finish, at most one per kind; grounded_in frames, time \
+or brief. For a clip with no speech: describe the place or action from the \
+frames ("Introduce this beach at sunset"), a voice-over in the quiet \
+stretch with its time, a mood ("A calm, unhurried narration"). Name a \
+place, brand or person only if it is readable on screen or in the brief; \
+an unnamed beach is "this beach". Use the brief's offer or brand when there \
+is one. Describe only what is visible; \
 the person will read these as short lines on a screen, not as prose. Never use \
 em dashes in anything you write. Use commas, colons, full stops or parentheses.\
 """
@@ -69,7 +78,17 @@ once, at 0:07." Return `roles`: \
 for each speaker, by the name the transcript shows, the role they play in the \
 clip as a short noun phrase a person would call them by ("Customer", \
 "Shopkeeper", "Presenter", "Narrator", "Host", "Guest"), and `why` in one \
-short sentence. Never invent a personal name. Never use em dashes in anything you write. Use commas, colons, full stops \
+short sentence. Never invent a personal name. Return `suggestions`: three or four chips for what the person might ask \
+for first, each {label, prompt, kind, grounded_in}. label at most 40 \
+characters, in the clip's language when obvious; prompt what they would \
+say, more precise; kind one of fix (an unclear or misheard word, a line \
+that runs long), change (an offer, a wording), add (a new line), voice \
+(another voice or delivery), finish (export, a variant), at most one per \
+kind; grounded_in time, words or brief. Point each at something real: a \
+time ("Tighten the line at 0:12"), a word said ("Say Bhaji Cam clearly"), \
+a question no one answers, a brand said differently from the brief, or the \
+brief's offer ("Add the 30% Diwali offer"). Name a place, brand or person \
+only if it is in the transcript or the brief. Never use em dashes in anything you write. Use commas, colons, full stops \
 or parentheses. Exception: if the user uses em dashes or asks for them, you \
 may match them.\
 """
@@ -93,6 +112,14 @@ class _Sight(BaseModel):
     confidence: Literal["low", "medium", "high"]
     beats: list[_Beat]
     details: list[str] = Field(default_factory=list, description="Three to five things worth noticing, each a noun phrase of at most six words.")
+    suggestions: list[_Suggestion] = Field(default_factory=list)
+
+
+class _Suggestion(BaseModel):
+    label: str = Field(description="At most 40 characters.")
+    prompt: str
+    kind: Literal["fix", "change", "add", "voice", "finish"]
+    grounded_in: Literal["time", "words", "frames", "brief"]
 
 
 class _Role(BaseModel):
@@ -104,15 +131,18 @@ class _Role(BaseModel):
 class _Reading(BaseModel):
     opening: str
     roles: list[_Role]
+    suggestions: list[_Suggestion] = Field(default_factory=list)
 
 
-def render_look_request(frames: Sequence[Frame], duration: float) -> list[dict]:
+def render_look_request(frames: Sequence[Frame], duration: float, brief: str = "") -> list[dict]:
     """The frames as image blocks, each introduced by its time, then the ask."""
     content: list[dict] = []
     for f in frames:
         data = base64.standard_b64encode(Path(f.path).read_bytes()).decode("ascii")
         content.append({"type": "text", "text": f"Frame at {f.at:.1f} s:"})
         content.append({"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": data}})
+    if brief:
+        content.append({"type": "text", "text": f"The project brief (brand, offer, tone): {brief}"})
     content.append({"type": "text", "text": f"The clip is {duration:.1f} s long and has no speech. Describe what the picture shows."})
     return content
 
@@ -124,11 +154,13 @@ def to_sight(reading: _Sight) -> Sight:
         place_guess=reading.place_guess.strip(), confidence=reading.confidence,
         beats=tuple({"at": round(b.at, 2), "note": b.note.strip()} for b in reading.beats),
         details=tuple(d.strip() for d in reading.details if d.strip())[:5],
+        suggestions=tuple(c.model_dump() for c in reading.suggestions),
     )
 
 
-def render_read_request(lines: Sequence[Line]) -> str:
-    out = ["Transcript:"]
+def render_read_request(lines: Sequence[Line], brief: str = "") -> str:
+    out = [f"The project brief (brand, offer, tone): {brief}", ""] if brief else []
+    out.append("Transcript:")
     for line in lines:
         who = f" {line.speaker}:" if line.speaker else ""
         out.append(f"{line.index}. [{_mmss(line.start)}]{who} {line.text}")
@@ -148,7 +180,8 @@ def to_reading(reading: _Reading, lines: Sequence[Line]) -> Reading:
         if speaker in names and role and speaker not in seen:
             seen.add(speaker)
             roles.append(Role(speaker, role[:1].upper() + role[1:], r.why.strip()))
-    return Reading(opening=reading.opening.strip(), roles=tuple(roles))
+    return Reading(opening=reading.opening.strip(), roles=tuple(roles),
+                   suggestions=tuple(c.model_dump() for c in reading.suggestions))
 
 
 class ClaudePlanner:
@@ -180,8 +213,8 @@ class ClaudePlanner:
             meter(self._model, response.usage.input_tokens, response.usage.output_tokens)
         return response
 
-    def look(self, frames: Sequence[Frame], duration: float, meter: Meter | None = None) -> Sight:
-        response = self._parse(LOOK_SYSTEM, render_look_request(frames, duration), _Sight, "low", meter)
+    def look(self, frames: Sequence[Frame], duration: float, meter: Meter | None = None, brief: str = "") -> Sight:
+        response = self._parse(LOOK_SYSTEM, render_look_request(frames, duration, brief), _Sight, "low", meter)
         if response.stop_reason == "refusal" or response.parsed_output is None:
             return Sight(opening=f"No one speaks. {duration:.1f} s of picture.")
         return to_sight(response.parsed_output)
@@ -195,8 +228,8 @@ class ClaudePlanner:
         short = response.parsed_output.new_text.strip().strip('"').strip()
         return short if short and short != text else None
 
-    def read(self, lines: Sequence[Line], meter: Meter | None = None) -> Reading:
-        response = self._parse(READ_SYSTEM, render_read_request(lines), _Reading, "low", meter)
+    def read(self, lines: Sequence[Line], meter: Meter | None = None, brief: str = "") -> Reading:
+        response = self._parse(READ_SYSTEM, render_read_request(lines, brief), _Reading, "low", meter)
         if response.stop_reason == "refusal" or response.parsed_output is None:
             n = len(lines)
             return Reading(opening=f"{n} {'line' if n == 1 else 'lines'}.")

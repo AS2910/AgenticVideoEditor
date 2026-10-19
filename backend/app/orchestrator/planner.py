@@ -51,6 +51,7 @@ class Sight:
     beats: tuple[dict, ...] = ()   # {at, note}: what each frame shows
     details: tuple[str, ...] = ()  # three to five short things worth noticing, as noun phrases
     place_confirmed: str = ""      # the place as the user confirmed or corrected it
+    suggestions: tuple[dict, ...] = ()  # 2026-10-20: chips for the box, {label, prompt, kind, grounded_in}
 
 
 @dataclass(frozen=True)
@@ -67,12 +68,13 @@ class Reading:
     for the goal stage, and a role for each speaker."""
     opening: str
     roles: tuple[Role, ...] = ()
+    suggestions: tuple[dict, ...] = ()  # 2026-10-20: chips for the box, {label, prompt, kind, grounded_in}
 
 
 class Planner(Protocol):
     identity: str
 
-    def look(self, frames: Sequence[Frame], duration: float, meter: Meter | None = None) -> Sight:
+    def look(self, frames: Sequence[Frame], duration: float, meter: Meter | None = None, brief: str = "") -> Sight:
         """A first look at a clip with no speech: what the picture shows."""
         ...
 
@@ -82,6 +84,6 @@ class Planner(Protocol):
         it cannot offer one."""
         ...
 
-    def read(self, lines: Sequence[Line], meter: Meter | None = None) -> Reading:
+    def read(self, lines: Sequence[Line], meter: Meter | None = None, brief: str = "") -> Reading:
         """A first look at the clip: an opening line and each speaker's role."""
         ...

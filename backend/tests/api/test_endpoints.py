@@ -1340,7 +1340,7 @@ class Looks:
     def __init__(self):
         self.calls = 0
 
-    def look(self, frames, duration, meter=None):
+    def look(self, frames, duration, meter=None, **_):
         from app.orchestrator.planner import Sight
         self.calls += 1
         if meter is not None:
@@ -1357,7 +1357,7 @@ def test_reading_the_clip_names_roles_once_and_the_project_carries_it(client, pr
         identity = "claude"
         calls = 0
 
-        def read(self, lines, meter=None):
+        def read(self, lines, meter=None, **_):
             Reader.calls += 1
             meter("claude-opus-5", 300, 40)
             return Reading("One person, one line. The offer is said once, at 0:00.",
@@ -1607,7 +1607,7 @@ def test_a_person_has_a_ceiling_across_their_projects(client, sample_video, monk
     class NeverRead:
         identity = "claude"
 
-        def read(self, lines, meter=None):
+        def read(self, lines, meter=None, **_):
             raise AssertionError("Claude was asked to read past the ceiling")
 
     monkeypatch.setattr(main, "planner", NeverRead())

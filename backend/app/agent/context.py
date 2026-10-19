@@ -120,6 +120,10 @@ have nothing. When the question is really a request ("how do I make it \
 say 30% off?"), answer briefly, then offer to do it, under the usual gate.
 """
 
+from app.agent.suggestions import PROMPT_RULES as _CHIP_RULES  # noqa: E402
+
+SYSTEM = SYSTEM + "\n" + _CHIP_RULES
+
 
 def brief_block(project: dict | None) -> list[str]:
     """The project the video is in (Folders): its name and brief, the voices
