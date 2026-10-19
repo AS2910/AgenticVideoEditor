@@ -1,4 +1,4 @@
-"""Per-project ceiling on paid voice generation.
+"""Per-video ceiling on paid voice generation.
 
 Every ElevenLabs attempt — retries included — is charged *before* the call is
 made, so a flaky vendor or an agentic retry loop can never spend past the cap.
@@ -9,23 +9,23 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from app.errors import NonRetryableError
-from app.usage import Ledger
+from app.usage import Ledger, folder_of
 
 
 class BudgetExceeded(NonRetryableError):
-    """The project cannot afford this call."""
+    """The video cannot afford this call."""
 
     def __init__(self, needed: int, remaining: int) -> None:
         self.needed = needed
         self.remaining = remaining
         super().__init__(
-            f"This project's voice budget can't cover this edit: it needs {needed} "
+            f"This video's voice budget can't cover this edit: it needs {needed} "
             f"characters and {remaining} remain. Raise AVE_VOICE_BUDGET_CHARS to continue."
         )
 
 
 class VoiceBudget:
-    """ElevenLabs characters per project, read from and charged to the usage
+    """ElevenLabs characters per video, read from and charged to the usage
     ledger (Phase 9b) — so the budget survives restarts. A budget without a
     ledger keeps its own, in memory."""
 
@@ -61,10 +61,10 @@ class VoiceBudget:
             if spent + amount > self.ceiling:
                 raise BudgetExceeded(amount, self.ceiling - spent)
             c.execute(
-                "INSERT INTO usage (project_id, vendor, what, units, unit, usd, at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO usage (project_id, vendor, what, units, unit, usd, at, folder_id) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 (project_id, self.VENDOR, self.WHAT, amount, self.UNIT,
-                 amount * self.usd_per_1k / 1000, datetime.now(timezone.utc).isoformat()),
+                 amount * self.usd_per_1k / 1000, datetime.now(timezone.utc).isoformat(), folder_of(c, project_id)),
             )
 
     def refund(self, project_id: str, amount: int) -> None:

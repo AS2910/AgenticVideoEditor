@@ -4,9 +4,9 @@ import { hrefFor } from '../lib/route'
 import { cn } from '@/lib/utils'
 import { initialOf } from './fmt'
 
-export type ShellPage = 'projects' | 'voices' | 'usage' | 'settings' | 'billing'
+export type ShellPage = 'projects' | 'voices' | 'usage' | 'settings' | 'billing' | 'help'
 const NAV: { page: ShellPage; label: string }[] = [
-  { page: 'projects', label: 'Projects' }, { page: 'voices', label: 'Voices' }, { page: 'usage', label: 'Usage' }, { page: 'settings', label: 'Settings' },
+  { page: 'projects', label: 'Home' }, { page: 'voices', label: 'Voices' }, { page: 'usage', label: 'Usage' }, { page: 'settings', label: 'Settings' }, { page: 'help', label: 'Help' },
 ]
 
 /** The bolt: a volt square with an ink bolt in it. */

@@ -16,23 +16,33 @@ import { Wordmark, Wave } from './components/Wordmark'
 import { Lanes } from './components/Lanes'
 import { AccountDot } from './pages/Shell'
 import { ProjectsPage } from './pages/ProjectsPage'
+import { ProjectPage } from './pages/ProjectPage'
+import { MoveDialog } from './components/MoveDialog'
 import { VoicesPage } from './pages/VoicesPage'
 import { UsagePage } from './pages/UsagePage'
 import { SettingsPage } from './pages/SettingsPage'
 import { BillingPage } from './pages/BillingPage'
 import { LoginPage } from './pages/LoginPage'
 import { ExportPage } from './pages/ExportPage'
+import { HelpPage } from './pages/HelpPage'
+import { KeyboardSheet } from './components/KeyboardSheet'
+import { TourProvider, TourLayer, useTour } from './tour/engine'
+import { guidedRun, tourById } from './tour/tours'
+import type { Tour } from './tour/types'
+import { OnboardingProvider, useOnboarding } from './guides/onboarding'
+import { Checklist } from './guides/Checklist'
+import { Tip } from './guides/Tip'
 import { go, hrefFor, useRoute } from './lib/route'
 import { cn } from '@/lib/utils'
 import { clock } from './transcript/format'
 import {
-  createProject, confirmPlace, exportProject, artifactUrl, pollJob, PollCancelled, ApiError, listProjects, getProject, deleteProject, getUsage, listVoices, updateSpeaker, detectSpeakers, revertEdit, updateSettings, removeLine, dismissItem, setEditLevel, setCandidateLevel, BACKGROUND_DB, moveCandidate, moveEdit, shiftLine, getPlan, approvePlan, readProject, grantConsent, getMe, postTurn, getMessages,
+  createProject, confirmPlace, exportProject, artifactUrl, pollJob, PollCancelled, ApiError, listVideos, listFolders, createFolder, startTutorial, getProject, deleteProject, getUsage, listVoices, updateSpeaker, detectSpeakers, revertEdit, updateSettings, removeLine, dismissItem, setEditLevel, setCandidateLevel, BACKGROUND_DB, moveCandidate, moveEdit, shiftLine, getPlan, approvePlan, readProject, grantConsent, getMe, postTurn, getMessages,
 } from './api'
 import type { Me, PlanApproval } from './api'
 import type {
   Word, Selection, Candidate, Segment, Project, ChatMessage,
   Insert, ProjectSummary, Usage, Statement, Voice, Revision,
-  Plan, PlanItem, Autonomy, Reading, Piece, ProjectDetail, ApprovedEditSummary, MyVoice,
+  Plan, PlanItem, Autonomy, Reading, Piece, ProjectDetail, ApprovedEditSummary, MyVoice, ProjectFolder,
 } from './types'
 import { piecesFromInserts, renderTimeFrom, sourceTimeFrom } from './timeline/selection'
 
@@ -50,7 +60,30 @@ const MODEL_NAMES: Record<string, string> = {
 /** What a turn that shipped on its own left behind, for the note in the pane (replaces the ship sheet). */
 interface ShippedNote { count: number; held: number; spendUsd: number }
 
+/** The app (Tutorial map and Help, 2026-10-19): what a person has met so
+ *  far, and the tour engine shared by the guided run and every Show me. */
 export default function App() {
+  return (
+    <OnboardingProvider>
+      <ToursSaved />
+    </OnboardingProvider>
+  )
+}
+
+function ToursSaved() {
+  const { setTour } = useOnboarding()
+  return (
+    <TourProvider onProgress={setTour}>
+      <Studio />
+      <TourLayer />
+    </TourProvider>
+  )
+}
+
+/** The routes and the editor. */
+function Studio() {
+  const tour = useTour()
+  const onboarding = useOnboarding()
   const route = useRoute()
   // Who is here (Phase 9c): null until the server says.
   const [me, setMe] = useState<Me | null>(null)
@@ -81,6 +114,21 @@ export default function App() {
   const [previewing, setPreviewing] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [projects, setProjects] = useState<ProjectSummary[]>([])
+  // Help (2026-10-19): a goal put in the box for the guided run; a tour waiting for its video to open; the ? sheet.
+  const [seed, setSeed] = useState<{ text: string; id: number } | null>(null)
+  const [pendingTour, setPendingTour] = useState<Tour | null>(null)
+  const [keysOpen, setKeysOpen] = useState(false)
+  const [undoneAfterExport, setUndoneAfterExport] = useState(false)
+  // The guided run's step 5 moves on once the take was heard in place and Original was played.
+  const heard = useRef({ take: false, original: false })
+  const heardBoth = (what: 'take' | 'original') => {
+    heard.current[what] = true
+    if (heard.current.take && heard.current.original) tour.notify('heard-and-original')
+  }
+  // Folders (2026-10-19): the projects, for Home, the move dialog and the editor's crumb.
+  const [folders, setFolders] = useState<ProjectFolder[]>([])
+  const [moving, setMoving] = useState(false)
+  const [crumbMenu, setCrumbMenu] = useState(false)
   const [usage, setUsage] = useState<Usage | null>(null)
   const [voices, setVoices] = useState<Voice[]>([])
   const asVoice = (v: MyVoice): Voice => ({ voice_id: v.voice_id, name: v.name, description: 'your voice', gender: null, accent: null, age: null, category: 'mine' })
@@ -116,7 +164,9 @@ export default function App() {
 
   const refreshProjects = useCallback(async () => {
     try {
-      setProjects(await listProjects())
+      const [videos, made] = await Promise.all([listVideos({ recent: 60 }), listFolders().catch(() => [] as ProjectFolder[])])
+      setProjects(videos)
+      setFolders(made)
     } catch {
       setProjects([]) // the list is a convenience; uploading still works
     }
@@ -166,9 +216,22 @@ export default function App() {
     takeAudio.current?.pause()
   }
 
+  useEffect(() => {
+    if (!crumbMenu) return
+    const close = (e: MouseEvent) => { if (!(e.target as HTMLElement).closest('[data-crumb]')) setCrumbMenu(false) }
+    window.addEventListener('click', close)
+    return () => window.removeEventListener('click', close)
+  }, [crumbMenu])
+
   // "/" puts the cursor in the box, from anywhere that is not already typing (UX-4).
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (e.key === '?' && !e.metaKey && !e.ctrlKey && !e.altKey) {
+        const t = e.target as HTMLElement | null
+        if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return
+        if (window.location.hash.startsWith('#v/') || /^#p\d/.test(window.location.hash)) { e.preventDefault(); setKeysOpen(true) }
+        return
+      }
       if (e.key !== '/' || e.metaKey || e.ctrlKey || e.altKey) return
       const t = e.target as HTMLElement | null
       if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return
@@ -179,7 +242,7 @@ export default function App() {
     return () => window.removeEventListener('keydown', onKey)
   }, [])
 
-  const projectId = project?.project_id ?? null
+  const projectId = project?.video_id ?? null
   const signedIn = me !== null && (me.mode === 'off' || (me.user !== null && !signedOut))
 
   /** Re-reads what the project has spent; after anything that may have paid. */
@@ -231,16 +294,16 @@ export default function App() {
     // UX-7c: one workspace. A fresh project is read on arrival (a clip with
     // no speech is looked at); one with a plan or edits opens as it was.
     wantReading.current = !loaded.plan && !edited
-    opening.current = loaded.project_id
-    go({ page: 'editor', projectId: loaded.project_id })
+    opening.current = loaded.video_id
+    go({ page: 'editor', projectId: loaded.video_id })
   }
 
-  const load = async (file: File) => {
+  const load = async (file: File, projectId: string | null = null) => {
     setLoading(true)
     setUploadShare(0)
     setError(null)
     try {
-      takeIn(await createProject(file, false, setUploadShare))
+      takeIn(await createProject(file, false, setUploadShare, projectId))
     } catch (e) {
       // The backend's rejection reason is the useful part — show it verbatim.
       setError(e instanceof ApiError ? e.message : 'Could not upload that video.')
@@ -248,6 +311,28 @@ export default function App() {
       setLoading(false)
       setUploadShare(null)
     }
+  }
+
+  const startGuidedRun = async () => {
+    setError(null)
+    try {
+      const video = await startTutorial()
+      heard.current = { take: false, original: false }
+      setPendingTour(guidedRun)
+      takeIn(video)
+      setSeed({ text: 'Make the offer 30% off', id: Date.now() })
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : 'Could not start the tour.')
+    }
+  }
+  /** Show me: a short feature tour on the video that is open, else on the most recent one. */
+  const showMe = (id: string) => {
+    const t = tourById(id)
+    if (!t) return
+    if (id === 'save-voice') { go({ page: 'voices' }); window.setTimeout(() => tour.start(t, 0), 300); return }
+    if (project && (route.page === 'editor')) { tour.start(t, 0); return }
+    const recent = projects[0]
+    if (recent) { setPendingTour(t); go({ page: 'editor', projectId: recent.video_id }) } else void startGuidedRun()
   }
 
   const loadSample = async () => {
@@ -408,7 +493,7 @@ export default function App() {
       playingCandidate.current = null
       return
     }
-    audio.src = artifactUrl(project.project_id, c.audio.sha256)
+    audio.src = artifactUrl(project.video_id, c.audio.sha256)
     audio.onended = () => { setPlayingTake(null); playingCandidate.current = null }
     playingCandidate.current = c
     const span = c.plan.selection
@@ -417,11 +502,13 @@ export default function App() {
     setSeekRequest((r) => ({ time: span.start, id: (r?.id ?? 0) + 1, play: true, until: span.start + c.audio.duration + 0.3 }))
     setCurrentTime(span.start)
     setPlayingTake(c.candidate_id)
+    heardBoth('take')
     const started = audio.play() as Promise<void> | undefined
     if (started && typeof started.catch === 'function') started.catch(() => {})
   }
 
   const rememberAutonomy = async (value: Autonomy) => {
+    onboarding.markChecklist('autonomy')
     if (!projectId || value === autonomy) return
     setAutonomy(value)
     setMayDo((m) => ({ ...m, autonomy: value }))
@@ -437,6 +524,7 @@ export default function App() {
     if (!projectId) return
     if (change.autonomy) return rememberAutonomy(change.autonomy)
     setMayDo((m) => ({ ...m, ...change }))
+    onboarding.markChecklist('autonomy')
     try {
       const saved = await updateSettings(projectId, change)
       setMayDo((m) => ({ ...m, turn_usd: saved.turn_usd ?? m.turn_usd, effort: saved.effort ?? m.effort, ceiling_usd: saved.ceiling_usd ?? m.ceiling_usd }))
@@ -483,6 +571,7 @@ export default function App() {
     setTurnStep('Thinking…')
     try {
       const job = await postTurn(projectId, text)
+      tour.notify('turn-started')
       await followTurn(job.job_id)
     } catch (e) {
       setTurnBusy(false)
@@ -534,7 +623,10 @@ export default function App() {
       if (fresh) {
         setPlan(fresh)
         await takeInShipped(fresh)
+        if (fresh.question) tour.notify(fresh.question.gate ? 'gate-shown' : 'question-shown')
+        if (fresh.items.some((i) => i.status === 'ready' && i.candidate)) tour.notify('take-ready')
       }
+      if (finished.status === 'succeeded' && !project?.settings?.tutorial) onboarding.markChecklist('goal')
     } catch (e) {
       if (!(e instanceof PollCancelled)) tell('I lost track of that turn. Say it again.')
     } finally {
@@ -605,6 +697,7 @@ export default function App() {
     const fresh = result.plan.items.filter((i) => i.status === 'approved' && i.edit_id
       && !approved.some((r) => r.edit_id === i.edit_id))
     setApproved((a) => [...a, ...fresh.map(itemRevision)])
+    if (fresh.length > 0) { tour.notify('added'); onboarding.markChecklist('add') }
     if (!result.export || !projectId) return null
     setSegments(result.export.segments)
     setInserts(result.export.inserts ?? [])
@@ -696,6 +789,7 @@ export default function App() {
     setError(null)
     try {
       await revertEdit(projectId, editId)
+      if (download) setUndoneAfterExport(true)
     } catch (e) {
       setError(e instanceof ApiError ? e.message : 'Could not revert that edit.')
       return
@@ -777,7 +871,7 @@ export default function App() {
       seenSeq.current = Math.max(0, ...opened.messages.map((m) => m.seq ?? 0))
       setApproved(live.map(asRevision))
       // Approved edits are rendered again, so Play hears them straight away.
-      if (live.length > 0 && await runExport(opened.project_id, opened.filename)) {
+      if (live.length > 0 && await runExport(opened.video_id, opened.filename)) {
         setView('final')
       }
     } catch (e) {
@@ -803,13 +897,24 @@ export default function App() {
     if (!signedIn) return
     if (route.page === 'editor' || route.page === 'export') {
       if (opening.current !== route.projectId) { opening.current = route.projectId; void openProject(route.projectId) }
-    } else if (route.page === 'projects') {
+    } else if (route.page === 'projects' || route.page === 'folder') {
       if (project) { clearEditor(); opening.current = null }
       void refreshProjects()
     }
     // openProject and clearEditor are stable enough for the route's purposes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [route, signedIn])
+
+  useEffect(() => {
+    if (!pendingTour || !project || route.page !== 'editor') return
+    const t = pendingTour
+    setPendingTour(null)
+    // One frame for the rows to be on the page before the ring measures them.
+    window.setTimeout(() => tour.start(t, t.id === guidedRun.id ? undefined : 0), 50)
+  }, [pendingTour, project, route.page, tour])
+  useEffect(() => {
+    if (route.page === 'export') { tour.notify('export-opened'); onboarding.markChecklist('export') }
+  }, [route.page]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const signedOutNow = () => {
     clearEditor()
@@ -818,330 +923,417 @@ export default function App() {
     go({ page: 'projects' })
   }
 
+  const page = (() => {
   if (me === null) {
+      return (
+        <div className="flex min-h-dvh items-center justify-center gap-3 bg-background text-muted-foreground" role="status" aria-busy="true">
+          <Wave busy /><span>Opening…</span>
+        </div>
+      )
+    }
+    if (me.mode === 'google' && (!me.user || signedOut)) {
+      return <LoginPage error={signedOut ? 'Your session ended. Sign in again to continue.' : null} />
+    }
+    if (route.page === 'projects') {
+      return (
+        <ProjectsPage
+          me={me}
+          projects={projects}
+          folders={folders}
+          onOpen={(id) => go({ page: 'editor', projectId: id })}
+          onUpload={(file, pid) => void load(file, pid)}
+          onSample={() => void loadSample()}
+          onDelete={(id) => void removeProject(id)}
+          onNewFolder={async (name) => { const made = await createFolder(name); await refreshProjects(); return made }}
+          onMoved={() => void refreshProjects()}
+          banner={onboarding.loaded && !onboarding.onboarding.tour.finished && !onboarding.onboarding.tour.skipped ? (
+            <div className="rise flex flex-wrap items-center gap-4 rounded-xl bg-pane px-5 py-4 text-ptext shadow-volt" data-testid="tour-offer">
+              <span className="flex flex-1 basis-[260px] flex-col gap-0.5">
+                <span className="disp text-lg font-bold">New here? Make one real edit in three minutes.</span>
+                <span className="pm text-sm">On our sample ad, free: nothing is voiced or spent.</span>
+              </span>
+              <button type="button" className="btn volt sm shine" onClick={() => void startGuidedRun()}>⚡ Start the tour</button>
+              <button type="button" className="btn ghost sm" onClick={() => onboarding.setTour({ ...onboarding.onboarding.tour, skipped: true })}>Not now</button>
+            </div>
+          ) : undefined}
+          uploading={loading}
+          progress={uploadShare}
+          error={error}
+        />
+      )
+    }
+    if (route.page === 'folder') {
+      return <ProjectPage me={me} projectId={route.projectId} onUpload={(file, pid) => void load(file, pid)} uploading={loading} error={error} onDeleted={() => void refreshProjects()} />
+    }
+    if (route.page === 'help') {
+      return <HelpPage me={me} initialSlug={route.slug ?? null} onReplay={() => void startGuidedRun()} onAsk={() => { const recent = projects[0]; if (recent) go({ page: 'editor', projectId: recent.video_id }); else go({ page: 'projects' }) }} onShowMe={showMe} />
+    }
+    if (route.page === 'voices') return <VoicesPage me={me} />
+    if (route.page === 'usage') return <UsagePage me={me} />
+    if (route.page === 'settings') return <SettingsPage me={me} onSignedOut={signedOutNow} />
+    if (route.page === 'billing') return <BillingPage me={me} />
+    if (route.page === 'export') {
+      return <ExportPage projectId={route.projectId} me={me} onBack={() => go({ page: 'editor', projectId: route.projectId })} />
+    }
+    if (!project) {
+      return (
+        <div className="flex min-h-dvh flex-col items-center justify-center gap-4 bg-background px-4 text-center" role={error ? undefined : 'status'} aria-busy={!error || undefined}>
+          {error ? (
+            <>
+              <p className="disp m-0 text-xl font-bold" role="alert">{error}</p>
+              <a className="btn sm" href={hrefFor({ page: 'projects' })}>← Projects</a>
+            </>
+          ) : <><Wave busy /><span className="text-muted-foreground">Opening {route.page === 'editor' ? route.projectId : 'the video'}…</span></>}
+        </div>
+      )
+    }
+  
+    const speakers = project.speakers ?? []
+    // 20f: the spoken lines only; added lines and proposals are rows of their own in LineDoc.
+    const statements: Statement[] = project.statements ?? []
+  
+    // Where things stand line by line: the plan's items, and nothing else.
+    const planItems = plan?.items.filter((i) => i.kind === 'planned' && i.enabled) ?? []
+    const pendingLines: PendingLine[] = planItems
+      .filter((i) => ['planned', 'working', 'ready', 'needs-you', 'failed'].includes(i.status))
+      .map((i) => ({ selection: i.selection, status: i.status, text: i.new_text, mix: i.mix }))
+    const readyItems = plan?.items.filter((i) => i.kind === 'planned' && i.status === 'ready') ?? []
+    // 20e: which render plays. "With proposals" is a preview render keyed by the takes it carries.
+    const previewKey = readyItems.map((i) => i.candidate?.candidate_id ?? i.item_id).join(',')
+    const previewReady = preview !== null && preview.key === previewKey
+    const shown = view === 'final' && rendered ? { url: rendered.url, duration: rendered.duration, pieces }
+      : view === 'proposals' && previewReady ? { url: preview!.url, duration: preview!.duration, pieces: preview!.pieces }
+      : null
+    const clarifying = plan?.status === 'clarifying'
+    const needsYou = planItems.filter((i) => i.status === 'needs-you')
+    const stateWord = clarifying ? 'needs your go'
+      : turnBusy ? 'working'
+      : readingBusy ? 'reading'
+      : editingLine ? 'standing by'
+      : readyItems.length > 0 ? `${readyItems.length} proposed`
+      : 'ready'
+    const sendLabel = clarifying ? 'Answer' : 'Send'
+    const placeholder = clarifying ? 'Answer, or tell Voltage anything else'
+      : selection && precise ? 'Ask for a change, e.g. say "30% off" instead'
+      : plan ? 'Say what to change, or ask for another take'
+      : 'What should this video say?'
+    // The first read (Volt): nothing said yet — the opening line, who speaks, the examples.
+    const firstRead = !plan && messages.length === 0
+    const engine = [project.settings?.model ? (MODEL_NAMES[project.settings.model] ?? project.settings.model) : null, mayDo.effort].filter(Boolean).join(' · ')
+  
+    const sourceClock = shown ? sourceTimeFrom(currentTime, shown.pieces) : currentTime
+    const voiceLine = usage?.lines.find((l) => l.vendor === 'elevenlabs' && l.units > 0)
+    const usdPerChar = voiceLine ? voiceLine.usd / voiceLine.units : null
+    const playingMix = playingTake
+      ? (playingCandidate.current?.candidate_id === playingTake ? playingCandidate.current.plan.mix : null)
+        ?? plan?.items.find((i) => i.candidate?.candidate_id === playingTake)?.candidate?.plan.mix ?? 'replace'
+      : null
+    // UX-7b: the monitor's clock follows the version that plays: an insert in
+    // the edited render pushes everything after it later.
+    const toRender = (t: number) => (shown ? renderTimeFrom(t, shown.pieces) : t)
+    // Volt: the scrubber's marks — a proposal (volt), a line in the video (ink), a step waiting on you (amber).
+    const markers: Marker[] = [
+      ...approved.filter((r) => r.mix !== 'remove').map((r) => ({ at: toRender(r.start), tone: 'ink' as const, label: `In the video: ${r.text}` })),
+      ...readyItems.filter((i) => i.candidate).map((i) => ({ at: toRender(i.candidate!.plan.selection.start), tone: 'volt' as const, label: `Proposed: ${i.new_text}` })),
+      ...needsYou.map((i) => ({ at: toRender(i.selection.start), tone: 'warn' as const, label: `Waiting on you: ${i.new_text}` })),
+    ]
+    // A take in hand, not yet kept, is captioned with its words too: the picture
+    // shows what you are about to hear.
+    const takesInHand: CaptionPending[] = readyItems.flatMap((i) => (
+      i.candidate ? [{ selection: i.candidate.plan.selection, text: i.candidate.plan.new_text, mix: i.candidate.plan.mix }] : []
+    ))
+    const captionRuns = captionAt(sourceClock, statements, approved, [...pendingLines, ...takesInHand], transcript, rendered !== null && view === 'original')
+    // A take playing in place with word times (the polish pass): its words, lit as they are said.
+    const spoken = playingTake && playingCandidate.current?.candidate_id === playingTake && playingCandidate.current.words?.length
+      ? takeCaption(playingCandidate.current.words, currentTime - playingCandidate.current.plan.selection.start)
+      : null
+    const caption = spoken
+      ? spoken.map((w, k) => <Fragment key={k}>{k > 0 && ' '}<ins data-said={w.said || undefined}>{w.text}</ins></Fragment>)
+      : captionRuns?.map((r, k) => <Fragment key={k}>{k > 0 && ' '}{r.kind === 'ins' ? <ins>{r.text}</ins> : r.text}</Fragment>)
+  
+    const views = [
+      ...(rendered ? [['final', 'Final'] as const] : []),
+      ...(readyItems.length > 0 ? [['proposals', 'With proposals'] as const] : []),
+      ['original', 'Original'] as const,
+    ]
+    const badge = views.length > 1 ? views.find(([v]) => v === view)?.[1] : undefined
+    const scanning = turnBusy ? (turnStep ?? 'Voltage is working') : readingBusy ? 'Voltage is reading the clip' : null
+    const spent = usage?.spent_usd ?? 0
+    const ceiling = usage?.ceiling_usd ?? mayDo.ceiling_usd
+    const isTutorial = !!project.settings?.tutorial
+    const tipCandidates: { id: string; target: string; when: boolean }[] = [
+      { id: 'first-failed-take', target: 'transcript-row', when: planItems.some((i) => i.status === 'failed') },
+      { id: 'first-ceiling', target: 'spend', when: !!error && /ceiling/i.test(error) },
+      { id: 'first-question', target: 'question', when: !!clarifying && !plan?.question?.gate },
+      { id: 'first-voice-design', target: 'composer', when: messages.some((m) => m.kind === 'previews') },
+      { id: 'first-undo-after-export', target: 'export', when: undoneAfterExport },
+      { id: 'first-background', target: 'transcript-row', when: approved.some((r) => (r.level_db ?? 0) < 0) },
+      { id: 'first-just-do-it', target: 'autonomy', when: autonomy === 'draft' },
+      { id: 'first-silent', target: 'composer', when: !isTutorial && firstRead && statements.length === 0 },
+      { id: 'first-upload', target: 'composer', when: !isTutorial && firstRead && statements.length > 0 && !readingBusy },
+    ]
+    const firstTip = tour.tour || !onboarding.loaded ? null : tipCandidates.find((t) => t.when && !onboarding.onboarding.tips.includes(t.id)) ?? null
+    const folderOf = project.project_id ? folders.find((f) => f.project_id === project.project_id) ?? null : null
+    // The pane says what project context Voltage is reading, so its choices are never a mystery.
+    const contextChips = project.project_id
+      ? [`Brief · ${project.project_name ?? 'project'}`, ...(folderOf?.voices ? [`${folderOf.voices} shared ${folderOf.voices === 1 ? 'voice' : 'voices'}`] : []), ...(folderOf?.files ? [`${folderOf.files} ${folderOf.files === 1 ? 'file' : 'files'}`] : [])]
+      : []
+    const sight = reading?.sight ?? null
+    const place = sight ? (sight.place_confirmed ?? sight.place_guess) : null
+  
     return (
-      <div className="flex min-h-dvh items-center justify-center gap-3 bg-background text-muted-foreground" role="status" aria-busy="true">
-        <Wave busy /><span>Opening…</span>
-      </div>
-    )
-  }
-  if (me.mode === 'google' && (!me.user || signedOut)) {
-    return <LoginPage error={signedOut ? 'Your session ended. Sign in again to continue.' : null} />
-  }
-  if (route.page === 'projects') {
-    return (
-      <ProjectsPage
-        me={me}
-        projects={projects}
-        onOpen={(id) => go({ page: 'editor', projectId: id })}
-        onUpload={(file) => void load(file)}
-        onSample={() => void loadSample()}
-        onDelete={(id) => void removeProject(id)}
-        uploading={loading}
-        progress={uploadShare}
-        error={error}
-      />
-    )
-  }
-  if (route.page === 'voices') return <VoicesPage me={me} />
-  if (route.page === 'usage') return <UsagePage me={me} />
-  if (route.page === 'settings') return <SettingsPage me={me} onSignedOut={signedOutNow} />
-  if (route.page === 'billing') return <BillingPage me={me} />
-  if (route.page === 'export') {
-    return <ExportPage projectId={route.projectId} me={me} onBack={() => go({ page: 'editor', projectId: route.projectId })} />
-  }
-  if (!project) {
-    return (
-      <div className="flex min-h-dvh flex-col items-center justify-center gap-4 bg-background px-4 text-center" role={error ? undefined : 'status'} aria-busy={!error || undefined}>
-        {error ? (
-          <>
-            <p className="disp m-0 text-xl font-bold" role="alert">{error}</p>
-            <a className="btn sm" href={hrefFor({ page: 'projects' })}>← Projects</a>
-          </>
-        ) : <><Wave busy /><span className="text-muted-foreground">Opening {route.projectId}…</span></>}
-      </div>
-    )
-  }
-
-  const speakers = project.speakers ?? []
-  // 20f: the spoken lines only; added lines and proposals are rows of their own in LineDoc.
-  const statements: Statement[] = project.statements ?? []
-
-  // Where things stand line by line: the plan's items, and nothing else.
-  const planItems = plan?.items.filter((i) => i.kind === 'planned' && i.enabled) ?? []
-  const pendingLines: PendingLine[] = planItems
-    .filter((i) => ['planned', 'working', 'ready', 'needs-you', 'failed'].includes(i.status))
-    .map((i) => ({ selection: i.selection, status: i.status, text: i.new_text, mix: i.mix }))
-  const readyItems = plan?.items.filter((i) => i.kind === 'planned' && i.status === 'ready') ?? []
-  // 20e: which render plays. "With proposals" is a preview render keyed by the takes it carries.
-  const previewKey = readyItems.map((i) => i.candidate?.candidate_id ?? i.item_id).join(',')
-  const previewReady = preview !== null && preview.key === previewKey
-  const shown = view === 'final' && rendered ? { url: rendered.url, duration: rendered.duration, pieces }
-    : view === 'proposals' && previewReady ? { url: preview!.url, duration: preview!.duration, pieces: preview!.pieces }
-    : null
-  const clarifying = plan?.status === 'clarifying'
-  const needsYou = planItems.filter((i) => i.status === 'needs-you')
-  const stateWord = clarifying ? 'needs your go'
-    : turnBusy ? 'working'
-    : readingBusy ? 'reading'
-    : editingLine ? 'standing by'
-    : readyItems.length > 0 ? `${readyItems.length} proposed`
-    : 'ready'
-  const sendLabel = clarifying ? 'Answer' : 'Send'
-  const placeholder = clarifying ? 'Answer, or tell Voltage anything else'
-    : selection && precise ? 'Ask for a change, e.g. say "30% off" instead'
-    : plan ? 'Say what to change, or ask for another take'
-    : 'What should this video say?'
-  // The first read (Volt): nothing said yet — the opening line, who speaks, the examples.
-  const firstRead = !plan && messages.length === 0
-  const engine = [project.settings?.model ? (MODEL_NAMES[project.settings.model] ?? project.settings.model) : null, mayDo.effort].filter(Boolean).join(' · ')
-
-  const sourceClock = shown ? sourceTimeFrom(currentTime, shown.pieces) : currentTime
-  const voiceLine = usage?.lines.find((l) => l.vendor === 'elevenlabs' && l.units > 0)
-  const usdPerChar = voiceLine ? voiceLine.usd / voiceLine.units : null
-  const playingMix = playingTake
-    ? (playingCandidate.current?.candidate_id === playingTake ? playingCandidate.current.plan.mix : null)
-      ?? plan?.items.find((i) => i.candidate?.candidate_id === playingTake)?.candidate?.plan.mix ?? 'replace'
-    : null
-  // UX-7b: the monitor's clock follows the version that plays: an insert in
-  // the edited render pushes everything after it later.
-  const toRender = (t: number) => (shown ? renderTimeFrom(t, shown.pieces) : t)
-  // Volt: the scrubber's marks — a proposal (volt), a line in the video (ink), a step waiting on you (amber).
-  const markers: Marker[] = [
-    ...approved.filter((r) => r.mix !== 'remove').map((r) => ({ at: toRender(r.start), tone: 'ink' as const, label: `In the video: ${r.text}` })),
-    ...readyItems.filter((i) => i.candidate).map((i) => ({ at: toRender(i.candidate!.plan.selection.start), tone: 'volt' as const, label: `Proposed: ${i.new_text}` })),
-    ...needsYou.map((i) => ({ at: toRender(i.selection.start), tone: 'warn' as const, label: `Waiting on you: ${i.new_text}` })),
-  ]
-  // A take in hand, not yet kept, is captioned with its words too: the picture
-  // shows what you are about to hear.
-  const takesInHand: CaptionPending[] = readyItems.flatMap((i) => (
-    i.candidate ? [{ selection: i.candidate.plan.selection, text: i.candidate.plan.new_text, mix: i.candidate.plan.mix }] : []
-  ))
-  const captionRuns = captionAt(sourceClock, statements, approved, [...pendingLines, ...takesInHand], transcript, rendered !== null && view === 'original')
-  // A take playing in place with word times (the polish pass): its words, lit as they are said.
-  const spoken = playingTake && playingCandidate.current?.candidate_id === playingTake && playingCandidate.current.words?.length
-    ? takeCaption(playingCandidate.current.words, currentTime - playingCandidate.current.plan.selection.start)
-    : null
-  const caption = spoken
-    ? spoken.map((w, k) => <Fragment key={k}>{k > 0 && ' '}<ins data-said={w.said || undefined}>{w.text}</ins></Fragment>)
-    : captionRuns?.map((r, k) => <Fragment key={k}>{k > 0 && ' '}{r.kind === 'ins' ? <ins>{r.text}</ins> : r.text}</Fragment>)
-
-  const views = [
-    ...(rendered ? [['final', 'Final'] as const] : []),
-    ...(readyItems.length > 0 ? [['proposals', 'With proposals'] as const] : []),
-    ['original', 'Original'] as const,
-  ]
-  const badge = views.length > 1 ? views.find(([v]) => v === view)?.[1] : undefined
-  const scanning = turnBusy ? (turnStep ?? 'Voltage is working') : readingBusy ? 'Voltage is reading the clip' : null
-  const spent = usage?.spent_usd ?? 0
-  const ceiling = usage?.ceiling_usd ?? mayDo.ceiling_usd
-  const sight = reading?.sight ?? null
-  const place = sight ? (sight.place_confirmed ?? sight.place_guess) : null
-
-  return (
-    <div className="flex h-dvh flex-col bg-background text-foreground max-[960px]:h-auto max-[960px]:min-h-dvh">
-      <a className="skip" href="#main" onClick={(e) => { e.preventDefault(); document.getElementById('main')?.focus() }}>Skip to the transcript</a>
-      {/* Volt: the editor's header — the wordmark, the file, the play switch, the autonomy, the spend, Export, the account. */}
-      <header className="flex min-h-[62px] flex-wrap items-center gap-x-4 gap-y-2 border-b-[1.5px] border-foreground bg-card px-4 py-2 sm:px-6">
-        <Wordmark />
-        <span className="text-faint max-sm:hidden" aria-hidden="true">/</span>
-        <h1 className="disp m-0 min-w-0 max-w-[28ch] truncate text-[15px] font-semibold" title={project.filename}>{project.filename}</h1>
-        <span className="tag text-faint">{timecode(project.duration)}{speakers.length > 0 ? ` · ${speakers.length} ${speakers.length === 1 ? 'voice' : 'voices'}` : ''}</span>
-        {views.length > 1 && (
-          <div className="segs" role="group" aria-label="Play">
-            {views.map(([v, label]) => (
-              <button key={v} type="button" className="seg" aria-pressed={view === v} onClick={() => { setView(v); setCurrentTime(0); if (v === 'proposals') void ensurePreview() }}>
-                {v === 'proposals' && !previewReady && previewing ? `${label}…` : label}
+      <div className="flex h-dvh flex-col bg-background text-foreground max-[960px]:h-auto max-[960px]:min-h-dvh">
+        <a className="skip" href="#main" onClick={(e) => { e.preventDefault(); document.getElementById('main')?.focus() }}>Skip to the transcript</a>
+        {/* Volt: the editor's header — the wordmark, the file, the play switch, the autonomy, the spend, Export, the account. */}
+        <header className="flex min-h-[62px] flex-wrap items-center gap-x-4 gap-y-2 border-b-[1.5px] border-foreground bg-card px-4 py-2 sm:px-6">
+          <Wordmark />
+          <span className="text-faint max-sm:hidden" aria-hidden="true">/</span>
+          {/* Folders: the project the video is in, with its menu; or a dashed "No project" that opens the move dialog. */}
+          <div className="relative" data-crumb>
+            {project.project_id ? (
+              <button type="button" className="inline-flex h-[34px] items-center gap-2 rounded-lg border-[1.5px] border-line2 bg-card px-2.5 font-semibold hover:border-foreground" aria-haspopup="menu" aria-expanded={crumbMenu} onClick={() => setCrumbMenu((m) => !m)} data-testid="crumb">
+                <span aria-hidden="true" className="h-3 w-4 rounded-[3px] border-[1.5px] border-ink bg-volt" />{project.project_name ?? 'Project'}<span aria-hidden="true" className="text-xs">▾</span>
               </button>
-            ))}
-          </div>
-        )}
-        <span className="flex-1" />
-        <button type="button" className="act" onClick={() => setMayDoOpen(true)} aria-haspopup="dialog" aria-label={`${autonomy === 'ask' ? 'Check with me' : 'Just do it'}. What Voltage may do`}>
-          <span className="tag">{autonomy === 'ask' ? 'Check with me' : 'Just do it'}</span>
-          <svg width="12" height="12" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>
-        </button>
-        <a className="tnum flex items-center gap-2 rounded-md px-2 py-1.5 text-[13px] text-foreground no-underline hover:bg-sunk" href={hrefFor({ page: 'usage' })} aria-label={`Spent $${spent.toFixed(2)} of $${ceiling} on this project. Usage`} data-testid="spend">
-          ${spent.toFixed(2)}
-          <span className="h-2 w-12 overflow-hidden rounded-sm bg-line" aria-hidden="true"><span className="block h-full bg-foreground" style={{ width: `${Math.min(100, ceiling > 0 ? (spent / ceiling) * 100 : 0)}%` }} /></span>
-          <span className="text-faint">${Number.isInteger(ceiling) ? ceiling : ceiling.toFixed(2)}</span>
-        </a>
-        <a className={cn('btn ink sm', exporting && 'opacity-70')} href={hrefFor({ page: 'export', projectId: project.project_id })} aria-busy={exporting || undefined}>
-          {exporting ? 'Rendering…' : 'Export'}
-        </a>
-        <AccountDot me={me} />
-        <WhatVoltageMayDo open={mayDoOpen} value={mayDo} onChange={(c) => void changeMayDo(c)} onClose={() => setMayDoOpen(false)} />
-      </header>
-
-      <div className="flex min-h-0 flex-1 max-[960px]:flex-col">
-        {/* The picture, the transport, the transcript. */}
-        <main id="main" tabIndex={-1} className="min-w-0 flex-1 overflow-y-auto outline-none max-[960px]:overflow-visible" aria-busy={turnBusy || undefined}>
-          <div className="mx-auto flex w-full max-w-[820px] flex-col gap-4 px-4 py-5 sm:px-6">
-            <Player
-              src={shown ? shown.url : artifactUrl(project.project_id, project.media.sha256)}
-              duration={shown ? shown.duration : project.duration}
-              currentTime={currentTime}
-              onSeek={setCurrentTime}
-              onTimeUpdate={setCurrentTime}
-              seekRequest={seekRequest}
-              caption={caption}
-              muted={playingTake !== null && playingMix === 'replace'}
-              badge={badge}
-              scanning={scanning}
-              markers={markers}
-              bigPlay={firstRead}
-            >
-              <button type="button" className="act" aria-expanded={tracksOpen} aria-controls="tracks" onClick={() => setTracksOpen((t) => !t)}>
-                <span className="tag">Tracks</span>
-                <svg width="12" height="12" viewBox="0 0 16 16" aria-hidden="true" className={cn('transition-transform', tracksOpen && 'rotate-180')}><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>
+            ) : (
+              <button type="button" className="inline-flex h-[34px] items-center gap-2 rounded-lg border-[1.5px] border-dashed border-line2 bg-card px-2.5 font-medium text-muted-foreground hover:border-foreground" onClick={() => setMoving(true)} data-testid="crumb">
+                <span aria-hidden="true" className="h-3 w-4 rounded-[3px] border-[1.5px] border-dashed border-current" />No project · Add to project
               </button>
-            </Player>
-            {tracksOpen && (
-              <section id="tracks" className="flex flex-col gap-3 rounded-xl border-[1.5px] border-line2 bg-card p-4" aria-label="Tracks">
-                <Lanes
-                  duration={project.duration}
-                  currentTime={sourceClock}
-                  statements={statements}
-                  speakers={speakers}
-                  revisions={approved}
-                  items={planItems}
-                  pieces={shown?.pieces ?? pieces}
-                  onSeek={(t) => { const time = shown ? renderTimeFrom(t, shown.pieces) : t; setSeekRequest((r) => ({ time, id: (r?.id ?? 0) + 1 })); setCurrentTime(time) }}
-                  placing={placing}
-                  onPlace={(start) => setPlacing((p) => (p ? { ...p, start } : p))}
-                />
-                <div className="flex flex-wrap items-center gap-2">
-                  <button type="button" className="pill" aria-pressed={precise} onClick={() => setPrecise((p) => !p)}>Precise</button>
-                  <span className="meta">{precise ? 'Pick words on the timeline; the box then talks about that moment.' : 'Word by word, when you need it.'}</span>
-                  <span className="flex-1" />
-                  <span className="tag text-faint" role="status" aria-busy={previewing || undefined} data-testid="retime">
-                    {view === 'proposals' && !previewReady ? (previewing ? 'Rendering with the proposals…' : 'The proposals changed; rendering again…')
-                      : view === 'proposals' ? `Preview mix · ${readyItems.length} proposed ${readyItems.length === 1 ? 'take' : 'takes'}`
-                      : view === 'final' && rendered ? 'The final' : 'The original'}
-                    {shown && shown.pieces.some((p) => p.kind === 'flex' && p.factor != null && Math.abs(p.factor - 1) > 0.005) && ' · picture flexed'}
-                  </span>
+            )}
+            {crumbMenu && project.project_id && (
+              <div role="menu" className="rise absolute left-0 z-20 mt-1 flex w-80 flex-col rounded-xl border-[1.5px] border-ink bg-card p-2 shadow-volt" data-testid="crumb-menu">
+                <a role="menuitem" className="act justify-start gap-2.5" href={hrefFor({ page: 'folder', projectId: project.project_id })} onClick={() => setCrumbMenu(false)}>
+                  <span aria-hidden="true" className="h-3 w-4 rounded-[3px] border-[1.5px] border-current" /><span className="flex-1">Open {project.project_name}</span>
+                  {folderOf && <span className="tag text-faint">{folderOf.video_count ?? 0} {folderOf.video_count === 1 ? 'video' : 'videos'}</span>}
+                </a>
+                <button type="button" role="menuitem" className="act justify-start gap-2.5" onClick={() => { setCrumbMenu(false); setMoving(true) }}><span aria-hidden="true" className="w-4 text-center">↗</span>Move to project…</button>
+                <div className="mx-1 mt-1.5 mb-1 flex flex-col gap-1 rounded-lg bg-sunk p-2.5">
+                  <span className="tag text-faint">Brief Voltage is using</span>
+                  <span className="line-clamp-3 text-[13px]">{folderOf?.brief?.trim() ? folderOf.brief : 'No brief yet.'}</span>
+                  <a className="tag text-foreground no-underline" href={hrefFor({ page: 'folder', projectId: project.project_id })} onClick={() => setCrumbMenu(false)}>Edit brief →</a>
                 </div>
-                {precise && (
-                  <Timeline key={project.project_id} words={transcript} duration={project.duration} selection={selection} currentTime={sourceClock} onSelect={setSelection} />
-                )}
-              </section>
-            )}
-            {error && <div className="rounded-lg border-[1.5px] border-warn bg-card px-3.5 py-2.5 text-sm" role="alert">{error}</div>}
-            {firstRead && speakers.length > 0 && (
-              <WhoSpeaks speakers={speakers} statements={statements} reading={readingBusy ? null : reading} onName={(label, name) => void changeSpeaker(label, { name })} />
-            )}
-            {firstRead && speakers.length === 0 && statements.length > 0 && (
-              <div className="flex items-center gap-3 rounded-xl border-[1.5px] border-line2 bg-card p-4">
-                <span className="meta flex-1">Voltage hasn't told the speakers apart yet.</span>
-                <button type="button" className="btn sm" onClick={() => void findSpeakers()} disabled={detecting} aria-busy={detecting || undefined}>{detecting ? 'Listening…' : 'Find who speaks'}</button>
               </div>
             )}
-            <LineDoc
-              statements={statements}
-              words={transcript}
-              speakers={speakers}
-              voices={voices}
-              revisions={approved}
-              selection={selection}
-              currentTime={sourceClock}
-              pendingLines={pendingLines}
-              items={planItems}
-              disabled={turnBusy}
-              usdPerChar={usdPerChar}
-              playing={playingTake}
-              onSeek={seekToStatement}
-              onHear={hearLine}
-              onAdd={(item) => addItem(item)}
-              onDiscard={(item) => discardItem(item)}
-              onAddAll={(items) => approveAll(items)}
-              onHearTake={(_item, c) => playTake(c)}
-              onLevel={(target, levelDb) => void changeLevel(target, levelDb)}
-              backgroundDb={BACKGROUND_DB}
-              onDelivery={(item, delivery) => void takeTurn(`Voice ${item.item_id} again, said ${delivery}`)}
-              onUndo={(id) => void revert(id)}
-              onRemove={(s) => void removeStatement(s)}
-              onShift={(s, to) => void shiftStatement(s, to)}
-              onMove={(item, c, start) => void moveTake(item, c, start)}
-              onMoveKept={(id, start) => void moveKept(id, start)}
-              placing={placing}
-              onPlacing={setPlacing}
-              onEditingChange={setEditingLine}
-              duration={project.duration}
-            />
           </div>
-        </main>
-
-        {/* Voltage: black in both themes. */}
-        <aside className="pane flex min-h-0 w-[400px] shrink-0 flex-col max-[960px]:min-h-[60dvh] max-[960px]:w-auto" aria-label="Voltage" aria-busy={turnBusy || undefined}>
-          <VoltagePane
-            messages={messages}
-            projectId={project.project_id}
-            state={stateWord}
-            busy={turnBusy || readingBusy}
-            need={clarifying}
-            engine={engine}
-            cap={`Turn cap $${mayDo.turn_usd.toFixed(2)}`}
-            question={clarifying ? plan?.question ?? null : null}
-            onAnswer={(o) => void clarify(o)}
-            onSubmit={submitComposer}
-            inputRef={composerRef}
-            placeholder={placeholder}
-            sendLabel={sendLabel}
-            working={turnBusy ? (turnStep ?? 'Working…') : null}
-            suggestions={firstRead && !readingBusy ? (statements.length > 0 ? EXAMPLES : SILENT_EXAMPLES) : undefined}
-            before={firstRead ? (
-              <div className="flex flex-col gap-3.5" data-testid="first-read">
-                {readingBusy && !reading ? (
-                  <p className="pm m-0 text-[15px]" role="status">Taking the clip in…</p>
-                ) : reading ? (
-                  <p className="m-0 text-[15px] leading-relaxed">{reading.opening}</p>
-                ) : (
-                  <p className="m-0 text-[15px] leading-relaxed">
-                    {statements.length > 0 ? `${statements.length} ${statements.length === 1 ? 'line' : 'lines'} of speech, ${timecode(project.duration)} long. Tell me what the video should say.` : `${timecode(project.duration)} with no speech. Tell me what it should say, or ask me to look at it.`}
-                  </p>
-                )}
-                {sight && (
-                  <div className="flex flex-col gap-2 rounded-lg border border-pline bg-psunk p-3.5" data-testid="sight">
-                    <span className="tag text-pmuted">What I saw</span>
-                    <p className="m-0 text-sm leading-relaxed">{sight.setting} · {sight.mood}{sight.text_on_screen ? ` · on screen: “${sight.text_on_screen}”` : ''}</p>
-                    {placeDraft === null ? (
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span className="text-sm">The place: <strong>{place}</strong>{sight.place_confirmed ? '' : ` (${sight.confidence})`}</span>
-                        {!sight.place_confirmed && <button type="button" className="btn volt sm" onClick={() => void confirmThePlace(sight.place_guess)}>Looks right</button>}
-                        <button type="button" className="act" onClick={() => setPlaceDraft(place ?? '')}>{sight.place_confirmed ? 'Change it' : 'Correct it'}</button>
-                      </div>
-                    ) : (
-                      <form className="flex flex-wrap items-center gap-2" onSubmit={(e) => { e.preventDefault(); if (placeDraft.trim()) void confirmThePlace(placeDraft.trim()) }}>
-                        <input className="h-8 min-w-0 flex-1 rounded-md border border-pline bg-pane px-2 text-sm text-ptext outline-none focus-visible:border-volt" aria-label="The place" value={placeDraft} autoFocus onChange={(e) => setPlaceDraft(e.target.value)} />
-                        <button type="submit" className="btn volt sm">Keep</button>
-                        <button type="button" className="act" onClick={() => setPlaceDraft(null)}>Cancel</button>
-                      </form>
-                    )}
+          <span className="text-faint max-sm:hidden" aria-hidden="true">/</span>
+          <h1 className="disp m-0 min-w-0 max-w-[28ch] truncate text-[15px] font-semibold" title={project.filename}>{project.filename}</h1>
+          <span className="tag text-faint">{timecode(project.duration)}{speakers.length > 0 ? ` · ${speakers.length} ${speakers.length === 1 ? 'voice' : 'voices'}` : ''}</span>
+          {views.length > 1 && (
+            <div className="segs" role="group" aria-label="Play" data-tour="playback-switch">
+              {views.map(([v, label]) => (
+                <button key={v} type="button" className="seg" aria-pressed={view === v} onClick={() => { setView(v); setCurrentTime(0); if (v === 'proposals') void ensurePreview(); if (v === 'original') heardBoth('original') }}>
+                  {v === 'proposals' && !previewReady && previewing ? `${label}…` : label}
+                </button>
+              ))}
+            </div>
+          )}
+          <span className="flex-1" />
+          <button type="button" className="act" onClick={() => { setMayDoOpen(true); tour.notify('autonomy-opened') }} data-tour="autonomy" data-tour-action="autonomy" aria-haspopup="dialog" aria-label={`${autonomy === 'ask' ? 'Check with me' : 'Just do it'}. What Voltage may do`}>
+            <span className="tag">{autonomy === 'ask' ? 'Check with me' : 'Just do it'}</span>
+            <svg width="12" height="12" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>
+          </button>
+          <a className="tnum flex items-center gap-2 rounded-md px-2 py-1.5 text-[13px] text-foreground no-underline hover:bg-sunk" href={hrefFor({ page: 'usage' })} aria-label={`Spent $${spent.toFixed(2)} of $${ceiling} on this video${usage?.project_ceiling_usd ? `, $${(usage.project_spent_usd ?? 0).toFixed(2)} of $${usage.project_ceiling_usd} on the project` : ''}. Usage`} data-testid="spend" data-tour="spend">
+            ${spent.toFixed(2)}
+            <span className="h-2 w-12 overflow-hidden rounded-sm bg-line" aria-hidden="true"><span className="block h-full bg-foreground" style={{ width: `${Math.min(100, ceiling > 0 ? (spent / ceiling) * 100 : 0)}%` }} /></span>
+            <span className="text-faint">{project.project_id && usage?.project_ceiling_usd ? `video · $${(usage.project_spent_usd ?? 0).toFixed(2)}/$${usage.project_ceiling_usd} project` : `$${Number.isInteger(ceiling) ? ceiling : ceiling.toFixed(2)}`}</span>
+          </a>
+          <a className={cn('btn ink sm', exporting && 'opacity-70')} href={hrefFor({ page: 'export', projectId: project.video_id })} aria-busy={exporting || undefined} data-tour="export" data-tour-action="export">
+            {exporting ? 'Rendering…' : 'Export'}
+          </a>
+          <AccountDot me={me} />
+          <WhatVoltageMayDo open={mayDoOpen} value={mayDo} onChange={(c) => void changeMayDo(c)} onClose={() => setMayDoOpen(false)} />
+        </header>
+  
+        <div className="flex min-h-0 flex-1 max-[960px]:flex-col">
+          {/* The picture, the transport, the transcript. */}
+          <main id="main" tabIndex={-1} className="min-w-0 flex-1 overflow-y-auto outline-none max-[960px]:overflow-visible" aria-busy={turnBusy || undefined}>
+            <div className="mx-auto flex w-full max-w-[820px] flex-col gap-4 px-4 py-5 sm:px-6">
+              <Player
+                src={shown ? shown.url : artifactUrl(project.video_id, project.media.sha256)}
+                duration={shown ? shown.duration : project.duration}
+                currentTime={currentTime}
+                onSeek={setCurrentTime}
+                onTimeUpdate={setCurrentTime}
+                seekRequest={seekRequest}
+                caption={caption}
+                muted={playingTake !== null && playingMix === 'replace'}
+                badge={badge}
+                scanning={scanning}
+                markers={markers}
+                bigPlay={firstRead}
+              >
+                <button type="button" className="act" aria-expanded={tracksOpen} aria-controls="tracks" onClick={() => setTracksOpen((t) => !t)}>
+                  <span className="tag">Tracks</span>
+                  <svg width="12" height="12" viewBox="0 0 16 16" aria-hidden="true" className={cn('transition-transform', tracksOpen && 'rotate-180')}><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>
+                </button>
+              </Player>
+              {tracksOpen && (
+                <section id="tracks" className="flex flex-col gap-3 rounded-xl border-[1.5px] border-line2 bg-card p-4" aria-label="Tracks">
+                  <Lanes
+                    duration={project.duration}
+                    currentTime={sourceClock}
+                    statements={statements}
+                    speakers={speakers}
+                    revisions={approved}
+                    items={planItems}
+                    pieces={shown?.pieces ?? pieces}
+                    onSeek={(t) => { const time = shown ? renderTimeFrom(t, shown.pieces) : t; setSeekRequest((r) => ({ time, id: (r?.id ?? 0) + 1 })); setCurrentTime(time) }}
+                    placing={placing}
+                    onPlace={(start) => setPlacing((p) => (p ? { ...p, start } : p))}
+                  />
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button type="button" className="pill" aria-pressed={precise} onClick={() => setPrecise((p) => !p)}>Precise</button>
+                    <span className="meta">{precise ? 'Pick words on the timeline; the box then talks about that moment.' : 'Word by word, when you need it.'}</span>
+                    <span className="flex-1" />
+                    <span className="tag text-faint" role="status" aria-busy={previewing || undefined} data-testid="retime">
+                      {view === 'proposals' && !previewReady ? (previewing ? 'Rendering with the proposals…' : 'The proposals changed; rendering again…')
+                        : view === 'proposals' ? `Preview mix · ${readyItems.length} proposed ${readyItems.length === 1 ? 'take' : 'takes'}`
+                        : view === 'final' && rendered ? 'The final' : 'The original'}
+                      {shown && shown.pieces.some((p) => p.kind === 'flex' && p.factor != null && Math.abs(p.factor - 1) > 0.005) && ' · picture flexed'}
+                    </span>
                   </div>
-                )}
-              </div>
-            ) : undefined}
-            empty={!firstRead ? <span className="pm">Nothing said yet.</span> : undefined}
-          >
-            {shippedNote && (
-              <div className="flex flex-col gap-2 rounded-lg border border-pline bg-psunk p-3.5" role="status" data-testid="shipped">
-                <span className="tag text-pmuted">In the video</span>
-                <span className="text-sm">{shippedNote.count} {shippedNote.count === 1 ? 'line' : 'lines'} went in on this turn{shippedNote.held > 0 ? `; ${shippedNote.held} ${shippedNote.held === 1 ? 'is' : 'are'} proposed and waiting` : ''}. Hear it in the player, or take a line out from its row.</span>
-                <div className="flex flex-wrap items-center gap-2">
-                  <a className="btn volt sm" href={hrefFor({ page: 'export', projectId: project.project_id })}>Export →</a>
-                  {download && <a className="act" href={download.url} download={download.filename}>Download the file</a>}
+                  {precise && (
+                    <Timeline key={project.video_id} words={transcript} duration={project.duration} selection={selection} currentTime={sourceClock} onSelect={setSelection} />
+                  )}
+                </section>
+              )}
+              {error && <div className="rounded-lg border-[1.5px] border-warn bg-card px-3.5 py-2.5 text-sm" role="alert">{error}</div>}
+              {firstRead && speakers.length > 0 && (
+                <WhoSpeaks speakers={speakers} statements={statements} reading={readingBusy ? null : reading} onName={(label, name) => void changeSpeaker(label, { name })} />
+              )}
+              {firstRead && speakers.length === 0 && statements.length > 0 && (
+                <div className="flex items-center gap-3 rounded-xl border-[1.5px] border-line2 bg-card p-4">
+                  <span className="meta flex-1">Voltage hasn't told the speakers apart yet.</span>
+                  <button type="button" className="btn sm" onClick={() => void findSpeakers()} disabled={detecting} aria-busy={detecting || undefined}>{detecting ? 'Listening…' : 'Find who speaks'}</button>
                 </div>
-              </div>
-            )}
-            {editingLine && !turnBusy && (
-              <p className="pm m-0 text-sm" role="status">You're on {clock(editingLine.start)}. Voltage stays out of the way while you write; Enter brings the line to it.</p>
-            )}
-          </VoltagePane>
-        </aside>
+              )}
+              <LineDoc
+                statements={statements}
+                words={transcript}
+                speakers={speakers}
+                voices={voices}
+                revisions={approved}
+                selection={selection}
+                currentTime={sourceClock}
+                pendingLines={pendingLines}
+                items={planItems}
+                disabled={turnBusy}
+                usdPerChar={usdPerChar}
+                playing={playingTake}
+                onSeek={seekToStatement}
+                onHear={hearLine}
+                onAdd={(item) => addItem(item)}
+                onDiscard={(item) => discardItem(item)}
+                onAddAll={(items) => approveAll(items)}
+                onHearTake={(_item, c) => playTake(c)}
+                onLevel={(target, levelDb) => void changeLevel(target, levelDb)}
+                backgroundDb={BACKGROUND_DB}
+                onDelivery={(item, delivery) => void takeTurn(`Voice ${item.item_id} again, said ${delivery}`)}
+                onUndo={(id) => void revert(id)}
+                onRemove={(s) => void removeStatement(s)}
+                onShift={(s, to) => void shiftStatement(s, to)}
+                onMove={(item, c, start) => void moveTake(item, c, start)}
+                onMoveKept={(id, start) => void moveKept(id, start)}
+                placing={placing}
+                onPlacing={setPlacing}
+                onEditingChange={setEditingLine}
+                duration={project.duration}
+              />
+            </div>
+          </main>
+  
+          {/* Voltage: black in both themes. */}
+          <aside className="pane flex min-h-0 w-[400px] shrink-0 flex-col max-[960px]:min-h-[60dvh] max-[960px]:w-auto" aria-label="Voltage" aria-busy={turnBusy || undefined}>
+            <VoltagePane
+              messages={messages}
+              projectId={project.video_id}
+              state={stateWord}
+              busy={turnBusy || readingBusy}
+              need={clarifying}
+              engine={engine}
+              chips={contextChips}
+              cap={`Turn cap $${mayDo.turn_usd.toFixed(2)}`}
+              question={clarifying ? plan?.question ?? null : null}
+              onAnswer={(o) => void clarify(o)}
+              onSubmit={submitComposer}
+              inputRef={composerRef}
+              seed={seed}
+              onShowMe={showMe}
+              placeholder={placeholder}
+              sendLabel={sendLabel}
+              working={turnBusy ? (turnStep ?? 'Working…') : null}
+              suggestions={firstRead && !readingBusy ? (statements.length > 0 ? EXAMPLES : SILENT_EXAMPLES) : undefined}
+              before={firstRead ? (
+                <div className="flex flex-col gap-3.5" data-testid="first-read">
+                  {readingBusy && !reading ? (
+                    <p className="pm m-0 text-[15px]" role="status">Taking the clip in…</p>
+                  ) : reading ? (
+                    <p className="m-0 text-[15px] leading-relaxed">{reading.opening}</p>
+                  ) : (
+                    <p className="m-0 text-[15px] leading-relaxed">
+                      {statements.length > 0 ? `${statements.length} ${statements.length === 1 ? 'line' : 'lines'} of speech, ${timecode(project.duration)} long. Tell me what the video should say.` : `${timecode(project.duration)} with no speech. Tell me what it should say, or ask me to look at it.`}
+                    </p>
+                  )}
+                  {sight && (
+                    <div className="flex flex-col gap-2 rounded-lg border border-pline bg-psunk p-3.5" data-testid="sight">
+                      <span className="tag text-pmuted">What I saw</span>
+                      <p className="m-0 text-sm leading-relaxed">{sight.setting} · {sight.mood}{sight.text_on_screen ? ` · on screen: “${sight.text_on_screen}”` : ''}</p>
+                      {placeDraft === null ? (
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="text-sm">The place: <strong>{place}</strong>{sight.place_confirmed ? '' : ` (${sight.confidence})`}</span>
+                          {!sight.place_confirmed && <button type="button" className="btn volt sm" onClick={() => void confirmThePlace(sight.place_guess)}>Looks right</button>}
+                          <button type="button" className="act" onClick={() => setPlaceDraft(place ?? '')}>{sight.place_confirmed ? 'Change it' : 'Correct it'}</button>
+                        </div>
+                      ) : (
+                        <form className="flex flex-wrap items-center gap-2" onSubmit={(e) => { e.preventDefault(); if (placeDraft.trim()) void confirmThePlace(placeDraft.trim()) }}>
+                          <input className="h-8 min-w-0 flex-1 rounded-md border border-pline bg-pane px-2 text-sm text-ptext outline-none focus-visible:border-volt" aria-label="The place" value={placeDraft} autoFocus onChange={(e) => setPlaceDraft(e.target.value)} />
+                          <button type="submit" className="btn volt sm">Keep</button>
+                          <button type="button" className="act" onClick={() => setPlaceDraft(null)}>Cancel</button>
+                        </form>
+                      )}
+                    </div>
+                  )}
+                </div>
+              ) : undefined}
+              empty={!firstRead ? <span className="pm">Nothing said yet.</span> : undefined}
+            >
+              {shippedNote && (
+                <div className="flex flex-col gap-2 rounded-lg border border-pline bg-psunk p-3.5" role="status" data-testid="shipped">
+                  <span className="tag text-pmuted">In the video</span>
+                  <span className="text-sm">{shippedNote.count} {shippedNote.count === 1 ? 'line' : 'lines'} went in on this turn{shippedNote.held > 0 ? `; ${shippedNote.held} ${shippedNote.held === 1 ? 'is' : 'are'} proposed and waiting` : ''}. Hear it in the player, or take a line out from its row.</span>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <a className="btn volt sm" href={hrefFor({ page: 'export', projectId: project.video_id })}>Export →</a>
+                    {download && <a className="act" href={download.url} download={download.filename}>Download the file</a>}
+                  </div>
+                </div>
+              )}
+              {editingLine && !turnBusy && (
+                <p className="pm m-0 text-sm" role="status">You're on {clock(editingLine.start)}. Voltage stays out of the way while you write; Enter brings the line to it.</p>
+              )}
+            </VoltagePane>
+          </aside>
+        </div>
+        {consentAsk && (
+          <ConsentSheet who={consentAsk.who} busy={consenting} onConfirm={() => void confirmConsent()} onCancel={() => setConsentAsk(null)} />
+        )}
+        {firstTip && <Tip key={firstTip.id} id={firstTip.id} target={firstTip.target} />}
+        <KeyboardSheet open={keysOpen} onClose={() => setKeysOpen(false)} />
+        {moving && (
+          <MoveDialog
+            video={project}
+            folders={folders}
+            onClose={() => setMoving(false)}
+            onFolderMade={() => void refreshProjects()}
+            onMoved={(pid, pname) => { setMoving(false); setProject((p) => (p ? { ...p, project_id: pid, project_name: pname } : p)); void refreshProjects(); void refreshUsage(projectId) }}
+          />
+        )}
       </div>
-      {consentAsk && (
-        <ConsentSheet who={consentAsk.who} busy={consenting} onConfirm={() => void confirmConsent()} onCancel={() => setConsentAsk(null)} />
-      )}
-    </div>
+    )
+  })()
+  const showChecklist = me !== null && !(me.mode === 'google' && (!me.user || signedOut)) && !project?.settings?.tutorial
+  return (
+    <>
+      {page}
+      {showChecklist && <Checklist onShowMe={showMe} />}
+    </>
   )
 }

@@ -46,7 +46,7 @@ export function WhatVoltageMayDo({ open, value, onChange, onClose }: {
   const chip = (on: boolean) => cn('rounded-full', on && 'border-changed/40 bg-changed-soft text-changed hover:bg-changed-soft hover:text-changed dark:border-changed/40 dark:bg-changed-soft dark:hover:bg-changed-soft')
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) onClose() }}>
-      <DialogContent className="max-w-md" data-testid="may-do">
+      <DialogContent className="max-w-md" data-testid="may-do" data-tour="autonomy-sheet">
         <DialogTitle>What Voltage may do</DialogTitle>
         <DialogDescription>On this project. Each choice is saved as you make it.</DialogDescription>
         <div className="flex flex-col gap-5 text-sm">

@@ -27,7 +27,7 @@ def client():
 def upload(client, path, name="ad.mp4", content_type="video/mp4", consent=True):
     with open(path, "rb") as handle:
         return client.post(
-            "/projects",
+            "/videos",
             files={"file": (name, handle, content_type)},
             data={"consent": str(consent).lower()},
         )
@@ -107,7 +107,7 @@ def take(_id="c", text="Get 30% off today only.", voice_id="mock", line=1, start
 
 def send(client, text, approve=False, project_id="p1"):
     """One turn, waited for; returns the job's result."""
-    resp = client.post(f"/projects/{project_id}/turns", json={"text": text, "approve": approve})
+    resp = client.post(f"/videos/{project_id}/turns", json={"text": text, "approve": approve})
     assert resp.status_code == 202, resp.text
     job = await_job(client, resp.json()["job_id"])
     assert job["status"] == "succeeded", job
@@ -117,7 +117,7 @@ def send(client, text, approve=False, project_id="p1"):
 def turn(client, monkeypatch, responses, text="make it 30% off", autonomy="draft"):
     """A scripted turn of Voltage under `autonomy`; returns the job's result."""
     import app.api.main as main
-    client.put("/projects/p1/settings", json={"autonomy": autonomy})
+    client.put("/videos/p1/settings", json={"autonomy": autonomy})
     _agent_on(monkeypatch, main, responses)
     return send(client, text)
 
@@ -138,7 +138,7 @@ def speechless(monkeypatch, main, transcript):
 # ── ingest ───────────────────────────────────────────────────────────────────
 
 def test_upload_returns_id_transcript_and_probed_duration(project):
-    assert project["project_id"] == "p1"
+    assert project["video_id"] == "p1"
     assert project["filename"] == "ad.mp4"
     assert project["transcript"][0]["text"] == "Get"
     # Measured by ffprobe, not supplied by the client.
@@ -216,9 +216,9 @@ def test_uploading_without_consent_is_allowed_but_records_none(project_without_c
 def test_generation_is_refused_without_consent(client, project_without_consent, monkeypatch):
     # Under Just do it a turn may voice the speaker, so it is refused before it starts.
     import app.api.main as main
-    client.put("/projects/p1/settings", json={"autonomy": "draft"})
+    client.put("/videos/p1/settings", json={"autonomy": "draft"})
     scripted = _agent_on(monkeypatch, main, [])
-    resp = client.post("/projects/p1/turns", json={"text": "make it 30% off"})
+    resp = client.post("/videos/p1/turns", json={"text": "make it 30% off"})
     assert resp.status_code == 403
     assert "right to edit and clone" in resp.json()["detail"]
     assert scripted.calls == []
@@ -226,9 +226,9 @@ def test_generation_is_refused_without_consent(client, project_without_consent, 
 
 def test_no_job_is_created_when_consent_is_missing(client, project_without_consent, monkeypatch):
     import app.api.main as main
-    client.put("/projects/p1/settings", json={"autonomy": "draft"})
+    client.put("/videos/p1/settings", json={"autonomy": "draft"})
     _agent_on(monkeypatch, main, [])
-    client.post("/projects/p1/turns", json={"text": "make it 30% off"})
+    client.post("/videos/p1/turns", json={"text": "make it 30% off"})
     # The refusal happens before any work is queued.
     assert client.get("/jobs/j1").status_code == 404
 
@@ -236,11 +236,11 @@ def test_no_job_is_created_when_consent_is_missing(client, project_without_conse
 def test_granting_consent_afterwards_unblocks_generation(client, project_without_consent, monkeypatch):
     import app.api.main as main
     from tests.agent.conftest import reply, text as said
-    client.put("/projects/p1/settings", json={"autonomy": "draft"})
+    client.put("/videos/p1/settings", json={"autonomy": "draft"})
     _agent_on(monkeypatch, main, [reply(take(), stop="tool_use"), reply(said("Hear it."))])
-    assert client.post("/projects/p1/turns", json={"text": "make it 30% off"}).status_code == 403
+    assert client.post("/videos/p1/turns", json={"text": "make it 30% off"}).status_code == 403
 
-    granted = client.post("/projects/p1/consent")
+    granted = client.post("/videos/p1/consent")
     assert granted.status_code == 200
     assert granted.json()["consent"]["granted_at"]
 
@@ -249,20 +249,20 @@ def test_granting_consent_afterwards_unblocks_generation(client, project_without
 
 
 def test_re_confirming_consent_does_not_restamp_it(client, project):
-    first = client.post("/projects/p1/consent").json()["consent"]["granted_at"]
-    second = client.post("/projects/p1/consent").json()["consent"]["granted_at"]
+    first = client.post("/videos/p1/consent").json()["consent"]["granted_at"]
+    second = client.post("/videos/p1/consent").json()["consent"]["granted_at"]
     assert first == second
 
 
 def test_consent_for_an_unknown_project_is_404(client):
-    assert client.post("/projects/nope/consent").status_code == 404
+    assert client.post("/videos/nope/consent").status_code == 404
 
 
 # ── serving ──────────────────────────────────────────────────────────────────
 
 def test_source_media_is_served_back(client, project):
     sha = project["media"]["sha256"]
-    resp = client.get(f"/projects/p1/artifacts/{sha}")
+    resp = client.get(f"/videos/p1/artifacts/{sha}")
     assert resp.status_code == 200
     assert resp.headers["content-type"] == "video/mp4"
     assert len(resp.content) > 0
@@ -270,24 +270,24 @@ def test_source_media_is_served_back(client, project):
 
 def test_media_supports_range_requests_so_the_player_can_seek(client, project):
     sha = project["media"]["sha256"]
-    resp = client.get(f"/projects/p1/artifacts/{sha}", headers={"Range": "bytes=0-99"})
+    resp = client.get(f"/videos/p1/artifacts/{sha}", headers={"Range": "bytes=0-99"})
     assert resp.status_code == 206
     assert len(resp.content) == 100
     assert resp.headers["content-range"].startswith("bytes 0-99/")
 
 
 def test_unknown_artifact_is_404(client, project):
-    assert client.get(f"/projects/p1/artifacts/{'a' * 64}").status_code == 404
+    assert client.get(f"/videos/p1/artifacts/{'a' * 64}").status_code == 404
 
 
 def test_artifact_of_an_unknown_project_is_404(client, project):
     sha = project["media"]["sha256"]
-    assert client.get(f"/projects/nope/artifacts/{sha}").status_code == 404
+    assert client.get(f"/videos/nope/artifacts/{sha}").status_code == 404
 
 
 @pytest.mark.parametrize("bad", ["../../etc/passwd", "not-hex", "A" * 64, "a" * 63])
 def test_malformed_artifact_addresses_are_refused(client, project, bad):
-    assert client.get(f"/projects/p1/artifacts/{bad}").status_code == 404
+    assert client.get(f"/videos/p1/artifacts/{bad}").status_code == 404
 
 
 # ── edit lifecycle ───────────────────────────────────────────────────────────
@@ -311,7 +311,7 @@ def test_preview_returns_addressable_artifacts_without_leaking_paths(client, pro
 
 def test_candidate_media_is_servable(client, project):
     body = generate()
-    resp = client.get(f"/projects/p1/artifacts/{body['frames']['sha256']}")
+    resp = client.get(f"/videos/p1/artifacts/{body['frames']['sha256']}")
     assert resp.status_code == 200
     assert resp.headers["content-type"] == "video/mp4"
 
@@ -324,7 +324,7 @@ def test_each_take_gets_its_own_candidate_id(client, project):
 def test_a_turn_on_an_unknown_project_is_404(client, monkeypatch):
     import app.api.main as main
     _agent_on(monkeypatch, main, [])
-    assert client.post("/projects/nope/turns", json={"text": "hi"}).status_code == 404
+    assert client.post("/videos/nope/turns", json={"text": "hi"}).status_code == 404
 
 
 # ── async job model ──────────────────────────────────────────────────────────
@@ -333,12 +333,12 @@ def test_a_turn_accepts_immediately_and_hands_back_a_job(client, project, monkey
     import app.api.main as main
     from tests.agent.conftest import reply, text as said
     _agent_on(monkeypatch, main, [reply(said("Nothing to do."))])
-    resp = client.post("/projects/p1/turns", json={"text": "hi"})
+    resp = client.post("/videos/p1/turns", json={"text": "hi"})
     assert resp.status_code == 202
     job = resp.json()
     assert job["job_id"] == "j1"
     assert job["kind"] == "turn"
-    assert job["project_id"] == "p1"
+    assert job["video_id"] == "p1"
     assert job["status"] in ("queued", "running")
     assert job["result"] is None
     await_job(client, job["job_id"])
@@ -347,9 +347,9 @@ def test_a_turn_accepts_immediately_and_hands_back_a_job(client, project, monkey
 def test_polling_a_job_through_to_the_candidate(client, project, monkeypatch):
     import app.api.main as main
     from tests.agent.conftest import reply, text as said
-    client.put("/projects/p1/settings", json={"autonomy": "draft"})
+    client.put("/videos/p1/settings", json={"autonomy": "draft"})
     _agent_on(monkeypatch, main, [reply(take(), stop="tool_use"), reply(said("Hear it."))])
-    job = await_job(client, client.post("/projects/p1/turns", json={"text": "make it 30% off"}).json()["job_id"])
+    job = await_job(client, client.post("/videos/p1/turns", json={"text": "make it 30% off"}).json()["job_id"])
 
     assert job["status"] == "succeeded"
     assert job["progress"] == 1.0
@@ -365,7 +365,7 @@ def test_a_finished_job_stays_readable(client, project, monkeypatch):
     import app.api.main as main
     from tests.agent.conftest import reply, text as said
     _agent_on(monkeypatch, main, [reply(said("Nothing to do."))])
-    job_id = client.post("/projects/p1/turns", json={"text": "hi"}).json()["job_id"]
+    job_id = client.post("/videos/p1/turns", json={"text": "hi"}).json()["job_id"]
     await_job(client, job_id)
     # Polling after completion must keep returning the result, not 404.
     again = client.get(f"/jobs/{job_id}")
@@ -410,10 +410,10 @@ def test_a_vendor_failure_fails_the_take_not_the_turn_and_commits_nothing(client
     [item] = done["plan"]["items"]
     assert item["status"] == "failed" and "ElevenLabs is unavailable" in item["error"]
     assert done["plan"]["status"] == "done" and done["reply"].startswith("ElevenLabs is down")
-    steps = [m["text"] for m in client.get("/projects/p1/messages").json() if m["kind"] == "step"]
+    steps = [m["text"] for m in client.get("/videos/p1/messages").json() if m["kind"] == "step"]
     assert any(s.startswith("Could not voice") for s in steps)
     # Nothing half-finished was committed.
-    assert client.post("/projects/p1/edits", json={"candidate_id": "c1"}).status_code == 404
+    assert client.post("/videos/p1/edits", json={"candidate_id": "c1"}).status_code == 404
 
 
 def test_the_api_stays_usable_after_a_failed_take(client, project, monkeypatch):
@@ -431,7 +431,7 @@ def test_the_candidate_a_turn_reports_is_the_one_approval_commits(client, projec
     # targets must agree, or approval would commit the wrong media.
     candidate_id = voiced(client, monkeypatch)["plan"]["items"][0]["candidate"]["candidate_id"]
 
-    approve = client.post("/projects/p1/edits", json={"candidate_id": candidate_id})
+    approve = client.post("/videos/p1/edits", json={"candidate_id": candidate_id})
     assert approve.status_code == 200
     assert approve.json()["candidate_id"] == candidate_id
 
@@ -439,12 +439,12 @@ def test_the_candidate_a_turn_reports_is_the_one_approval_commits(client, projec
 def test_approve_commits_the_previewed_candidate_and_export_shows_it(client, project):
     candidate = generate()
 
-    approve = client.post("/projects/p1/edits", json={"candidate_id": candidate["candidate_id"]})
+    approve = client.post("/videos/p1/edits", json={"candidate_id": candidate["candidate_id"]})
     assert approve.status_code == 200
     assert approve.json()["edit_id"] == "e1"
     assert approve.json()["candidate_id"] == "c1"
 
-    segments = client.post("/projects/p1/export").json()["segments"]
+    segments = client.post("/videos/p1/export").json()["segments"]
     assert [s["kind"] for s in segments] == ["original", "edited", "original"]
 
     # The exported span carries the very artifact the user heard.
@@ -455,9 +455,9 @@ def test_approve_commits_the_previewed_candidate_and_export_shows_it(client, pro
 
 def test_export_originals_point_at_the_uploaded_source(client, project):
     candidate = generate()
-    client.post("/projects/p1/edits", json={"candidate_id": candidate["candidate_id"]})
+    client.post("/videos/p1/edits", json={"candidate_id": candidate["candidate_id"]})
 
-    segments = client.post("/projects/p1/export").json()["segments"]
+    segments = client.post("/videos/p1/export").json()["segments"]
     originals = [s for s in segments if s["kind"] == "original"]
     assert all(s["artifact"]["sha256"] == project["media"]["sha256"] for s in originals)
 
@@ -467,9 +467,9 @@ def test_approving_one_of_several_candidates_picks_the_right_media(client, proje
     second = generate(text="50% off")
     assert first["frames"]["sha256"] != second["frames"]["sha256"]
 
-    client.post("/projects/p1/edits", json={"candidate_id": second["candidate_id"]})
+    client.post("/videos/p1/edits", json={"candidate_id": second["candidate_id"]})
 
-    segments = client.post("/projects/p1/export").json()["segments"]
+    segments = client.post("/videos/p1/export").json()["segments"]
     edited = next(s for s in segments if s["kind"] == "edited")
     assert edited["artifact"]["sha256"] == second["frames"]["sha256"]
 
@@ -478,7 +478,7 @@ def test_approve_rejected_when_continuity_fails(client, project):
     candidate = generate(voice_id="unknown")
     assert candidate["continuity"]["passed"] is False
 
-    resp = client.post("/projects/p1/edits", json={"candidate_id": candidate["candidate_id"]})
+    resp = client.post("/videos/p1/edits", json={"candidate_id": candidate["candidate_id"]})
     assert resp.status_code == 422
     assert resp.json()["detail"] == "continuity check failed"
 
@@ -487,7 +487,7 @@ def test_a_failing_candidate_can_be_approved_on_purpose_and_is_marked(client, pr
     candidate = generate(voice_id="unknown")
 
     resp = client.post(
-        "/projects/p1/edits", json={"candidate_id": candidate["candidate_id"], "override": True},
+        "/videos/p1/edits", json={"candidate_id": candidate["candidate_id"], "override": True},
     )
 
     assert resp.status_code == 200
@@ -499,17 +499,17 @@ def test_a_failing_candidate_can_be_approved_on_purpose_and_is_marked(client, pr
 def test_a_passing_candidate_is_not_marked_overridden(client, project):
     candidate = generate()
     resp = client.post(
-        "/projects/p1/edits", json={"candidate_id": candidate["candidate_id"], "override": True},
+        "/videos/p1/edits", json={"candidate_id": candidate["candidate_id"], "override": True},
     )
     assert resp.json()["overridden"] is False
 
 
 def test_approve_unknown_candidate_is_404(client, project):
-    assert client.post("/projects/p1/edits", json={"candidate_id": "c99"}).status_code == 404
+    assert client.post("/videos/p1/edits", json={"candidate_id": "c99"}).status_code == 404
 
 
 def test_export_unknown_project_is_404(client):
-    assert client.post("/projects/nope/export").status_code == 404
+    assert client.post("/videos/nope/export").status_code == 404
 
 
 # ── voice budget (Phase 4a) ──────────────────────────────────────────────────
@@ -602,7 +602,7 @@ def test_the_chat_is_kept_with_the_project(client, project, monkeypatch):
     send(client, "make it white")
     send(client, "Layer it")
 
-    messages = [m for m in client.get("/projects/p1").json()["messages"] if m["kind"] == "say"]   # the steps aside
+    messages = [m for m in client.get("/videos/p1").json()["messages"] if m["kind"] == "say"]   # the steps aside
 
     assert [{"role": m["role"], "text": m["text"]} for m in messages] == [
         {"role": "user", "text": "make it white"}, {"role": "assistant", "text": "Speech only."},
@@ -618,7 +618,7 @@ def test_claude_calls_are_recorded_with_their_estimated_cost(client, project, mo
     from tests.agent.conftest import reply, text as said
     turn(client, monkeypatch, [reply(said("Nothing to change."))], text="hi")
 
-    usage = client.get("/projects/p1/usage").json()
+    usage = client.get("/videos/p1/usage").json()
     [line] = usage["lines"]
     assert (line["vendor"], line["what"], line["units"], line["calls"]) == ("anthropic", "agent", 120, 1)
     assert line["usd"] == pytest.approx(claude_usd(main._agent_instance.model, 100, 20))   # the scripted reply's tokens
@@ -633,7 +633,7 @@ def test_voice_characters_count_toward_spend(client, project, monkeypatch):
     monkeypatch.setattr(main, "budget", budget)
     budget.charge("p1", 40)
 
-    usage = client.get("/projects/p1/usage").json()
+    usage = client.get("/videos/p1/usage").json()
 
     assert usage["voice_characters"] == 40
     assert usage["spent_usd"] == pytest.approx(0.012)
@@ -654,17 +654,17 @@ def test_no_new_paid_work_once_the_ceiling_is_reached(client, project, monkeypat
 # ── projects persist, are listed, reopened and deleted (Phase 9a) ────────────
 
 def test_projects_are_listed_newest_first(client, project, sample_video):
-    second = upload(client, sample_video).json()["project_id"]
-    listed = client.get("/projects").json()["projects"]
-    assert [p["project_id"] for p in listed] == [second, "p1"]
+    second = upload(client, sample_video).json()["video_id"]
+    listed = client.get("/videos").json()["videos"]
+    assert [p["video_id"] for p in listed] == [second, "p1"]
     assert listed[1]["filename"] == "ad.mp4" and listed[1]["edits"] == 0
 
 
 def test_a_project_reopens_with_its_approved_edits(client, project):
     candidate = generate()
-    client.post("/projects/p1/edits", json={"candidate_id": candidate["candidate_id"]})
+    client.post("/videos/p1/edits", json={"candidate_id": candidate["candidate_id"]})
 
-    reopened = client.get("/projects/p1").json()
+    reopened = client.get("/videos/p1").json()
 
     assert reopened["transcript"][1]["text"] == "20%"
     assert [e["new_text"] for e in reopened["edits"]] == ["30% off"]
@@ -675,24 +675,24 @@ def test_deleting_a_project_removes_it_and_its_media(client, project):
     media_dir = main.artifacts.root / "p1"
     assert media_dir.is_dir()
 
-    assert client.delete("/projects/p1").status_code == 204
+    assert client.delete("/videos/p1").status_code == 204
 
-    assert client.get("/projects/p1").status_code == 404
+    assert client.get("/videos/p1").status_code == 404
     assert not media_dir.exists()
-    assert client.get("/projects").json()["projects"] == []
+    assert client.get("/videos").json()["videos"] == []
 
 
 def test_someone_elses_project_is_not_found(client, project, monkeypatch):
     import app.api.main as main
     main.app.dependency_overrides[main.current_owner] = lambda: "someone-else"
     try:
-        assert client.get("/projects/p1").status_code == 404
-        assert client.post("/projects/p1/export").status_code == 404
-        assert client.delete("/projects/p1").status_code == 404
-        assert client.get("/projects").json()["projects"] == []
+        assert client.get("/videos/p1").status_code == 404
+        assert client.post("/videos/p1/export").status_code == 404
+        assert client.delete("/videos/p1").status_code == 404
+        assert client.get("/videos").json()["videos"] == []
     finally:
         main.app.dependency_overrides.clear()
-    assert client.get("/projects/p1").status_code == 200
+    assert client.get("/videos/p1").status_code == 200
 
 
 def test_projects_survive_a_restart(tmp_path):
@@ -749,30 +749,30 @@ def test_health_reports_the_continuity_engine(client, monkeypatch):
 
 def test_export_renders_a_real_mp4_you_can_download(client, project):
     candidate = generate()
-    client.post("/projects/p1/edits", json={"candidate_id": candidate["candidate_id"]})
+    client.post("/videos/p1/edits", json={"candidate_id": candidate["candidate_id"]})
 
-    body = client.post("/projects/p1/export").json()
+    body = client.post("/videos/p1/export").json()
     rendered = body["render"]
     assert rendered["kind"] == "video" and rendered["container"] == "mp4"
     assert rendered["duration"] == pytest.approx(project["duration"], abs=0.05)
 
-    download = client.get(f"/projects/p1/artifacts/{rendered['sha256']}")
+    download = client.get(f"/videos/p1/artifacts/{rendered['sha256']}")
     assert download.status_code == 200
     assert download.headers["content-type"] == "video/mp4"
 
 
 def test_export_with_no_edits_still_renders_a_clean_copy(client, project):
-    rendered = client.post("/projects/p1/export").json()["render"]
+    rendered = client.post("/videos/p1/export").json()["render"]
     assert rendered["duration"] == pytest.approx(project["duration"], abs=0.05)
 
 
 def test_re_approving_a_span_exports_one_edit_not_two(client, project):
     first = generate()
-    client.post("/projects/p1/edits", json={"candidate_id": first["candidate_id"]})
+    client.post("/videos/p1/edits", json={"candidate_id": first["candidate_id"]})
     second = generate(text="40% off")
-    client.post("/projects/p1/edits", json={"candidate_id": second["candidate_id"]})
+    client.post("/videos/p1/edits", json={"candidate_id": second["candidate_id"]})
 
-    segments = client.post("/projects/p1/export").json()["segments"]
+    segments = client.post("/videos/p1/export").json()["segments"]
     edited = [s for s in segments if s["kind"] == "edited"]
     assert len(edited) == 1
     assert edited[0]["ref"] == second["frames"]["sha256"]
@@ -787,7 +787,7 @@ def test_voices_are_listed_with_the_default(client):
 # ── speakers and their voices (Phase 11) ─────────────────────────────────────
 
 def detected(client):
-    resp = client.post("/projects/p1/speakers/detect")
+    resp = client.post("/videos/p1/speakers/detect")
     assert resp.status_code == 200, resp.text
     return resp.json()
 
@@ -801,21 +801,21 @@ def test_speakers_can_be_detected_for_an_older_project(client, project):
 
 def test_a_speaker_can_be_renamed_and_given_a_voice(client, project):
     detected(client)
-    resp = client.put("/projects/p1/speakers/A", json={"name": "Shopkeeper", "voice_id": "nPczCjzI2devNBz1zQrb"})
+    resp = client.put("/videos/p1/speakers/A", json={"name": "Shopkeeper", "voice_id": "nPczCjzI2devNBz1zQrb"})
     assert resp.json()["speakers"] == [
         {"label": "A", "name": "Shopkeeper", "voice_id": "nPczCjzI2devNBz1zQrb"}]
-    resp = client.put("/projects/p1/speakers/A", json={"clear_voice": True})
+    resp = client.put("/videos/p1/speakers/A", json={"clear_voice": True})
     assert resp.json()["speakers"][0]["voice_id"] is None
     assert resp.json()["speakers"][0]["name"] == "Shopkeeper"
 
 
 def test_an_unknown_speaker_is_404(client, project):
-    assert client.put("/projects/p1/speakers/Z", json={"name": "x"}).status_code == 404
+    assert client.put("/videos/p1/speakers/Z", json={"name": "x"}).status_code == 404
 
 
 def test_a_speakers_line_is_spoken_in_their_voice(client, project, monkeypatch):
     detected(client)
-    client.put("/projects/p1/speakers/A", json={"voice_id": "nPczCjzI2devNBz1zQrb"})
+    client.put("/videos/p1/speakers/A", json={"voice_id": "nPczCjzI2devNBz1zQrb"})
     result = voiced(client, monkeypatch, voice_id="")      # line 1 is A's; an empty voice is their own
     assert result["plan"]["items"][0]["candidate"]["plan"]["voice_profile_id"] == "nPczCjzI2devNBz1zQrb"
 
@@ -828,8 +828,8 @@ def test_without_a_speaker_voice_the_default_voice_is_used(client, project, monk
 
 def test_speaker_settings_survive_reopening(client, project):
     detected(client)
-    client.put("/projects/p1/speakers/A", json={"name": "Shopkeeper"})
-    reopened = client.get("/projects/p1").json()
+    client.put("/videos/p1/speakers/A", json={"name": "Shopkeeper"})
+    reopened = client.get("/videos/p1").json()
     assert reopened["speakers"][0]["name"] == "Shopkeeper"
 
 
@@ -837,21 +837,21 @@ def test_speaker_settings_survive_reopening(client, project):
 
 def test_a_reverted_edit_is_marked_skipped_by_the_render_and_not_counted(client, project):
     candidate = generate()
-    client.post("/projects/p1/edits", json={"candidate_id": candidate["candidate_id"]})
-    assert client.get("/projects").json()["projects"][0]["edits"] == 1
+    client.post("/videos/p1/edits", json={"candidate_id": candidate["candidate_id"]})
+    assert client.get("/videos").json()["videos"][0]["edits"] == 1
 
-    resp = client.post("/projects/p1/edits/e1/revert")
+    resp = client.post("/videos/p1/edits/e1/revert")
 
     assert resp.status_code == 200 and resp.json() == {"edit_id": "e1", "reverted": True}
-    reopened = client.get("/projects/p1").json()
+    reopened = client.get("/videos/p1").json()
     assert [(e["edit_id"], e["reverted"]) for e in reopened["edits"]] == [("e1", True)]
-    segments = client.post("/projects/p1/export").json()["segments"]
+    segments = client.post("/videos/p1/export").json()["segments"]
     assert [s["kind"] for s in segments] == ["original"]
-    assert client.get("/projects").json()["projects"][0]["edits"] == 0
+    assert client.get("/videos").json()["videos"][0]["edits"] == 0
 
 
 def test_reverting_an_unknown_edit_is_404(client, project):
-    assert client.post("/projects/p1/edits/e9/revert").status_code == 404
+    assert client.post("/videos/p1/edits/e9/revert").status_code == 404
 
 
 def test_settings_say_what_voltage_may_do_and_round_trip(client, project):
@@ -865,19 +865,19 @@ def test_settings_say_what_voltage_may_do_and_round_trip(client, project):
         "ask_before": {"ship": False, "clone": False, "design": False}, "model": main.settings.agent_model,
     }
 
-    resp = client.put("/projects/p1/settings", json={"turn_usd": 0.2, "effort": "xhigh"})
+    resp = client.put("/videos/p1/settings", json={"turn_usd": 0.2, "effort": "xhigh"})
 
     assert resp.status_code == 200
     assert (resp.json()["settings"]["turn_usd"], resp.json()["settings"]["effort"]) == (0.2, "xhigh")
-    saved = client.get("/projects/p1").json()["settings"]
+    saved = client.get("/videos/p1").json()["settings"]
     assert (saved["autonomy"], saved["turn_usd"], saved["effort"]) == ("ask", 0.2, "xhigh")
     # The cap is clamped to a cent and to the project's ceiling.
-    assert client.put("/projects/p1/settings", json={"turn_usd": 0.001}).json()["settings"]["turn_usd"] == 0.01
-    assert client.put("/projects/p1/settings", json={"turn_usd": 1e9}).json()["settings"]["turn_usd"] == round(main.ledger.ceiling_usd, 2)
-    assert client.get("/projects/p1").json()["settings"]["effort"] == "xhigh"      # untouched by the cap changes
-    assert client.put("/projects/p1/settings", json={"effort": "low"}).status_code == 422
-    assert client.put("/projects/p1/settings", json={"turn_usd": "a lot"}).status_code == 422
-    assert client.put("/projects/p1/settings", json={"autonomy": "yolo"}).status_code == 422
+    assert client.put("/videos/p1/settings", json={"turn_usd": 0.001}).json()["settings"]["turn_usd"] == 0.01
+    assert client.put("/videos/p1/settings", json={"turn_usd": 1e9}).json()["settings"]["turn_usd"] == round(main.ledger.ceiling_usd, 2)
+    assert client.get("/videos/p1").json()["settings"]["effort"] == "xhigh"      # untouched by the cap changes
+    assert client.put("/videos/p1/settings", json={"effort": "low"}).status_code == 422
+    assert client.put("/videos/p1/settings", json={"turn_usd": "a lot"}).status_code == 422
+    assert client.put("/videos/p1/settings", json={"autonomy": "yolo"}).status_code == 422
 
 
 # ── plans: made by the agent's tools, shipped by approve ─────────────────────
@@ -908,7 +908,7 @@ def make_plan(client, items=(("Get 30% off today only.", "replace", "Offer"),), 
     repo.save_plan(plan)
     n = len([i for i in built if i.kind == "planned"])
     repo.append_log(project_id, plan_id, f"Planned {n} {'change' if n == 1 else 'changes'}")
-    return client.get(f"/projects/{project_id}/plans/{plan_id}").json()
+    return client.get(f"/videos/{project_id}/plans/{plan_id}").json()
 
 
 def test_a_saved_plan_comes_back_with_the_project_and_by_its_id(client, project):
@@ -921,14 +921,14 @@ def test_a_saved_plan_comes_back_with_the_project_and_by_its_id(client, project)
     assert plan["items"][0]["selection"] == {"start": 0.0, "end": 2.3}
     assert plan["estimate"]["items"] == 1 and plan["estimate"]["seconds"] > 0
     # The plan comes back with the project, and by its id.
-    reopened = client.get("/projects/p1").json()
+    reopened = client.get("/videos/p1").json()
     assert reopened["plan"]["plan_id"] == "plan1"
-    assert client.get("/projects/p1/plans/plan1").json()["goal"] == GOAL
+    assert client.get("/videos/p1/plans/plan1").json()["goal"] == GOAL
 
 
 def test_an_unknown_plan_is_404(client, project):
-    assert client.get("/projects/p1/plans/plan9").status_code == 404
-    assert client.post("/projects/p1/plans/plan9/approve", json={}).status_code == 404
+    assert client.get("/videos/p1/plans/plan9").status_code == 404
+    assert client.post("/videos/p1/plans/plan9/approve", json={}).status_code == 404
 
 
 # ── UX-5: a clip with no speech ──────────────────────────────────────────────
@@ -939,13 +939,13 @@ def test_a_silent_clip_shows_its_frames_where_the_transcript_would_be(client, pr
     import app.api.main as main
     from app.domain.models import Transcript
     speechless(monkeypatch, main, Transcript(words=()))
-    frames = client.get("/projects/p1/frames").json()
+    frames = client.get("/videos/p1/frames").json()
     assert [f["index"] for f in frames] == [0, 1, 2]
     assert frames[0]["at"] == pytest.approx(0.3)
-    frame = client.get("/projects/p1/frames/0")
+    frame = client.get("/videos/p1/frames/0")
     assert frame.status_code == 200 and frame.headers["content-type"] == "image/jpeg"
-    assert client.get("/projects/p1/frames/9").status_code == 404
-    assert client.get("/projects/p1").json()["frames"] == frames
+    assert client.get("/videos/p1/frames/9").status_code == 404
+    assert client.get("/videos/p1").json()["frames"] == frames
 
 
 def test_a_turn_voices_the_line_then_approve_all_exports(client, project, monkeypatch):
@@ -957,7 +957,7 @@ def test_a_turn_voices_the_line_then_approve_all_exports(client, project, monkey
     assert item["candidate"]["candidate_id"] == "c1" and item["candidate"]["continuity"]["passed"] is True
     assert any(e["text"].startswith("Voiced “Get 30% off") for e in done["plan"]["log"])
 
-    resp = client.post(f"/projects/p1/plans/{plan_id}/approve", json={})
+    resp = client.post(f"/videos/p1/plans/{plan_id}/approve", json={})
     body = resp.json()
     assert resp.status_code == 200
     assert body["approved"] == [{"item_id": "i1", "edit_id": "e1", "overridden": False, "speaker": None, "voice_profile_id": "mock"}]
@@ -965,28 +965,28 @@ def test_a_turn_voices_the_line_then_approve_all_exports(client, project, monkey
     assert [s["kind"] for s in body["export"]["segments"]] == ["edited"]
     assert body["plan"]["items"][0]["status"] == "approved" and body["plan"]["items"][0]["edit_id"] == "e1"
     assert body["plan"]["log"][-1]["text"] == "Rendered the edited video"
-    assert [e["edit_id"] for e in client.get("/projects/p1").json()["edits"]] == ["e1"]
+    assert [e["edit_id"] for e in client.get("/videos/p1").json()["edits"]] == ["e1"]
 
 
 def test_a_failing_take_is_skipped_by_approve_all_unless_overridden(client, project, monkeypatch):
-    client.post("/projects/p1/speakers/detect")
-    client.put("/projects/p1/speakers/A", json={"voice_id": "unknown"})   # the mock engine fails this voice
+    client.post("/videos/p1/speakers/detect")
+    client.put("/videos/p1/speakers/A", json={"voice_id": "unknown"})   # the mock engine fails this voice
     done = voiced(client, monkeypatch, voice_id="")                        # A's own voice: the one picked for them
     plan_id = done["plan"]["plan_id"]
     assert done["plan"]["items"][0]["candidate"]["continuity"]["passed"] is False
 
-    body = client.post(f"/projects/p1/plans/{plan_id}/approve", json={}).json()
+    body = client.post(f"/videos/p1/plans/{plan_id}/approve", json={}).json()
     assert body["approved"] == [] and body["skipped"] == [{"item_id": "i1", "reason": "continuity check failed"}]
     assert body["export"] is None
 
-    body = client.post(f"/projects/p1/plans/{plan_id}/approve", json={"override": True}).json()
+    body = client.post(f"/videos/p1/plans/{plan_id}/approve", json={"override": True}).json()
     assert body["approved"] == [{"item_id": "i1", "edit_id": "e1", "overridden": True, "speaker": "A", "voice_profile_id": "unknown"}]
 
 
 def test_approving_a_plan_items_take_through_the_edit_route_marks_the_item(client, project, monkeypatch):
     done = voiced(client, monkeypatch)
-    client.post("/projects/p1/edits", json={"candidate_id": done["plan"]["items"][0]["candidate"]["candidate_id"]})
-    item = client.get(f"/projects/p1/plans/{done['plan']['plan_id']}").json()["items"][0]
+    client.post("/videos/p1/edits", json={"candidate_id": done["plan"]["items"][0]["candidate"]["candidate_id"]})
+    item = client.get(f"/videos/p1/plans/{done['plan']['plan_id']}").json()["items"][0]
     assert (item["status"], item["edit_id"]) == ("approved", "e1")
 
 
@@ -1041,8 +1041,8 @@ def test_a_redone_take_says_why_it_is_being_redone(client, project, monkeypatch)
 def test_an_added_line_is_spoken_by_the_speaker_it_is_given_to(client, project):
     import app.api.main as main
     from app.domain.models import Selection
-    client.post("/projects/p1/speakers/detect")
-    client.put("/projects/p1/speakers/A", json={"name": "Presenter", "voice_id": "nPczCjzI2devNBz1zQrb"})
+    client.post("/videos/p1/speakers/detect")
+    client.put("/videos/p1/speakers/A", json={"name": "Presenter", "voice_id": "nPczCjzI2devNBz1zQrb"})
     record = main.repo.get("p1")
 
     choice = main._voice_for("p1", record, Selection(2.3, 2.3), "mock", speaker="A")   # no words there: A is named
@@ -1101,7 +1101,7 @@ def test_an_added_line_holds_the_picture_when_there_is_no_room(client, project):
 
 
 def test_removing_a_line_is_a_proposal_that_ships_to_room_tone_and_can_be_undone(client, project):
-    resp = client.post("/projects/p1/lines/remove", json={"start": 0.5, "end": 1.0})
+    resp = client.post("/videos/p1/lines/remove", json={"start": 0.5, "end": 1.0})
     assert resp.status_code == 200
     body = resp.json()
     # 20e: a removal is proposed like a take — a ready plan item with the room's sound as its take.
@@ -1109,26 +1109,26 @@ def test_removing_a_line_is_a_proposal_that_ships_to_room_tone_and_can_be_undone
     assert body["selection"] == {"start": 0.4, "end": 1.3}
     item = body["plan"]["items"][0]
     assert (item["status"], item["mix"], item["old_text"], item["new_text"]) == ("ready", "remove", "20% off", "")
-    assert client.get("/projects/p1").json()["edits"] == []
+    assert client.get("/videos/p1").json()["edits"] == []
     # With proposals, the preview render carries it; the final does not.
-    preview = client.post("/projects/p1/export", json={"with_proposals": True}).json()
+    preview = client.post("/videos/p1/export", json={"with_proposals": True}).json()
     assert preview["proposals"] == ["i1"] and [s["kind"] for s in preview["segments"]] == ["original", "edited", "original"]
-    assert [s["kind"] for s in client.post("/projects/p1/export").json()["segments"]] == ["original"]
+    assert [s["kind"] for s in client.post("/videos/p1/export").json()["segments"]] == ["original"]
     # Add it: approving the item makes the edit.
     plan_id = body["plan"]["plan_id"]
-    shipped = client.post(f"/projects/p1/plans/{plan_id}/approve", json={"items": ["i1"]}).json()
+    shipped = client.post(f"/videos/p1/plans/{plan_id}/approve", json={"items": ["i1"]}).json()
     assert [a["edit_id"] for a in shipped["approved"]] == ["e1"]
-    edits = client.get("/projects/p1").json()["edits"]
+    edits = client.get("/videos/p1").json()["edits"]
     assert edits[0]["mix"] == "remove" and edits[0]["new_text"] == ""
-    export = client.post("/projects/p1/export").json()
+    export = client.post("/videos/p1/export").json()
     edited = [s for s in export["segments"] if s["kind"] == "edited"]
     assert len(edited) == 1 and edited[0]["start"] == pytest.approx(0.4) and edited[0]["end"] == pytest.approx(1.3)
-    assert client.post("/projects/p1/edits/e1/revert").status_code == 200
-    assert [s["kind"] for s in client.post("/projects/p1/export").json()["segments"]] == ["original"]
+    assert client.post("/videos/p1/edits/e1/revert").status_code == 200
+    assert [s["kind"] for s in client.post("/videos/p1/export").json()["segments"]] == ["original"]
 
 
 def test_removing_nothing_is_refused(client, project):
-    assert client.post("/projects/p1/lines/remove", json={"start": 5.0, "end": 5.0}).status_code == 422
+    assert client.post("/videos/p1/lines/remove", json={"start": 5.0, "end": 5.0}).status_code == 422
 
 
 def test_a_delivery_reaches_the_voice_and_the_candidate(client, project, monkeypatch):
@@ -1159,50 +1159,50 @@ def test_a_delivery_reaches_the_voice_and_the_candidate(client, project, monkeyp
 
 def test_a_take_can_be_moved_without_voicing_it_again(client, project):
     first = generate()
-    moved = client.post(f"/projects/p1/candidates/{first['candidate_id']}/move", json={"start": 1.0}).json()
+    moved = client.post(f"/videos/p1/candidates/{first['candidate_id']}/move", json={"start": 1.0}).json()
     assert moved["candidate_id"] != first["candidate_id"]
     assert moved["audio"]["sha256"] == first["audio"]["sha256"]           # the same audio
     assert moved["plan"]["selection"] == {"start": 1.0, "end": pytest.approx(1.0 + first["audio"]["duration"], abs=0.01)}
     assert moved["plan"]["fit"] == "start" and moved["fit_notes"][-1] == "moved to 0:01"
-    assert client.get("/projects/p1/usage").json()["voice_characters"] == 0
+    assert client.get("/videos/p1/usage").json()["voice_characters"] == 0
 
 
 def test_a_move_can_change_how_it_meets_the_sound(client, project):
     first = generate()
-    layered = client.post(f"/projects/p1/candidates/{first['candidate_id']}/move", json={"start": 0.2, "mix": "layer"}).json()
+    layered = client.post(f"/videos/p1/candidates/{first['candidate_id']}/move", json={"start": 0.2, "mix": "layer"}).json()
     assert layered["plan"]["mix"] == "layer"
-    held = client.post(f"/projects/p1/candidates/{first['candidate_id']}/move", json={"start": 2.0, "mix": "concatenate"}).json()
+    held = client.post(f"/videos/p1/candidates/{first['candidate_id']}/move", json={"start": 2.0, "mix": "concatenate"}).json()
     assert held["plan"]["mix"] == "concatenate" and held["plan"]["selection"] == {"start": 2.0, "end": 2.0}
 
 
 def test_a_move_is_clamped_to_the_video(client, project):
     first = generate()
-    moved = client.post(f"/projects/p1/candidates/{first['candidate_id']}/move", json={"start": 9.0}).json()
+    moved = client.post(f"/videos/p1/candidates/{first['candidate_id']}/move", json={"start": 9.0}).json()
     assert moved["plan"]["selection"]["start"] == pytest.approx(2.3)
-    assert client.post("/projects/p1/candidates/c99/move", json={"start": 1.0}).status_code == 404
+    assert client.post("/videos/p1/candidates/c99/move", json={"start": 1.0}).status_code == 404
 
 
 def test_a_kept_line_moves_in_one_step(client, project):
     first = generate()
-    client.post("/projects/p1/edits", json={"candidate_id": first["candidate_id"]})
+    client.post("/videos/p1/edits", json={"candidate_id": first["candidate_id"]})
 
-    resp = client.post("/projects/p1/edits/e1/move", json={"start": 1.3})
+    resp = client.post("/videos/p1/edits/e1/move", json={"start": 1.3})
 
     assert resp.status_code == 200
     body = resp.json()
     assert body["reverted"] == "e1" and body["edit_id"] == "e2"
-    edits = client.get("/projects/p1").json()["edits"]
+    edits = client.get("/videos/p1").json()["edits"]
     assert [(e["edit_id"], e["reverted"]) for e in edits] == [("e1", True), ("e2", False)]
     assert edits[1]["selection"]["start"] == pytest.approx(1.3)
-    segments = client.post("/projects/p1/export").json()["segments"]
+    segments = client.post("/videos/p1/export").json()["segments"]
     edited = [s for s in segments if s["kind"] == "edited"]
     assert len(edited) == 1 and edited[0]["start"] == pytest.approx(1.3)
 
 
 def test_a_removal_cannot_be_moved(client, project):
-    rm = client.post("/projects/p1/lines/remove", json={"start": 0.5, "end": 1.0}).json()
-    shipped = client.post(f"/projects/p1/plans/{rm['plan']['plan_id']}/approve", json={"items": [rm["item_id"]]}).json()
-    assert client.post(f"/projects/p1/edits/{shipped['approved'][0]['edit_id']}/move", json={"start": 1.0}).status_code == 422
+    rm = client.post("/videos/p1/lines/remove", json={"start": 0.5, "end": 1.0}).json()
+    shipped = client.post(f"/videos/p1/plans/{rm['plan']['plan_id']}/approve", json={"items": [rm["item_id"]]}).json()
+    assert client.post(f"/videos/p1/edits/{shipped['approved'][0]['edit_id']}/move", json={"start": 1.0}).status_code == 422
 
 
 def test_a_line_can_be_mixed_as_background_before_and_after_it_is_added(client, project, monkeypatch):
@@ -1214,31 +1214,31 @@ def test_a_line_can_be_mixed_as_background_before_and_after_it_is_added(client, 
     assert item["status"] == "ready" and item["candidate"]["plan"]["level_db"] == -12.0
     plan_id = result["plan"]["plan_id"]
     # Louder as a proposal: a new take, the item follows it.
-    up = client.post(f"/projects/p1/candidates/{item['candidate']['candidate_id']}/level", json={"level_db": 0}).json()
+    up = client.post(f"/videos/p1/candidates/{item['candidate']['candidate_id']}/level", json={"level_db": 0}).json()
     assert up["plan"]["level_db"] is None and up["candidate_id"] != item["candidate"]["candidate_id"]
-    assert client.get(f"/projects/p1/plans/{plan_id}").json()["items"][0]["candidate"]["candidate_id"] == up["candidate_id"]
+    assert client.get(f"/videos/p1/plans/{plan_id}").json()["items"][0]["candidate"]["candidate_id"] == up["candidate_id"]
     # Added, then softer in the video: the old edit reverted, the same take approved at -12.
-    shipped = client.post(f"/projects/p1/plans/{plan_id}/approve", json={"items": ["i1"]}).json()
+    shipped = client.post(f"/videos/p1/plans/{plan_id}/approve", json={"items": ["i1"]}).json()
     edit_id = shipped["approved"][0]["edit_id"]
-    down = client.post(f"/projects/p1/edits/{edit_id}/level", json={"level_db": -12}).json()
+    down = client.post(f"/videos/p1/edits/{edit_id}/level", json={"level_db": -12}).json()
     assert down["reverted"] == edit_id and down["candidate"]["plan"]["level_db"] == -12.0
-    edits = client.get("/projects/p1").json()["edits"]
+    edits = client.get("/videos/p1").json()["edits"]
     live = [x for x in edits if not x["reverted"]]
     assert [x["edit_id"] for x in live] == [down["edit_id"]] and live[0]["level_db"] == -12.0
-    assert client.post("/projects/p1/edits/nope/level", json={"level_db": -12}).status_code == 404
+    assert client.post("/videos/p1/edits/nope/level", json={"level_db": -12}).status_code == 404
 
 
 def test_a_line_taken_out_says_so_on_its_row_until_it_is_added_again(client, project):
     """20h: Take it out leaves a proposal whose note says what Add it and Discard now do; adding it again clears the note."""
     import app.api.main as main
-    rm = client.post("/projects/p1/lines/remove", json={"start": 0.5, "end": 1.0}).json()
+    rm = client.post("/videos/p1/lines/remove", json={"start": 0.5, "end": 1.0}).json()
     plan_id = rm["plan"]["plan_id"]
-    shipped = client.post(f"/projects/p1/plans/{plan_id}/approve", json={"items": ["i1"]}).json()
-    client.post(f"/projects/p1/edits/{shipped['approved'][0]['edit_id']}/revert")
-    item = client.get(f"/projects/p1/plans/{plan_id}").json()["items"][0]
+    shipped = client.post(f"/videos/p1/plans/{plan_id}/approve", json={"items": ["i1"]}).json()
+    client.post(f"/videos/p1/edits/{shipped['approved'][0]['edit_id']}/revert")
+    item = client.get(f"/videos/p1/plans/{plan_id}").json()["items"][0]
     assert item["status"] == "ready" and item["note"] == main.TAKEN_OUT
-    client.post(f"/projects/p1/plans/{plan_id}/approve", json={"items": ["i1"]})
-    assert client.get(f"/projects/p1/plans/{plan_id}").json()["items"][0]["note"] is None
+    client.post(f"/videos/p1/plans/{plan_id}/approve", json={"items": ["i1"]})
+    assert client.get(f"/videos/p1/plans/{plan_id}").json()["items"][0]["note"] is None
 
 
 def test_your_own_voice_is_uploaded_under_a_name_listed_and_deleted(client, tmp_path):
@@ -1269,15 +1269,15 @@ def test_your_own_voice_is_uploaded_under_a_name_listed_and_deleted(client, tmp_
 
 
 def test_a_proposal_can_be_discarded_but_a_shipped_line_cannot(client, project):
-    rm = client.post("/projects/p1/lines/remove", json={"start": 0.5, "end": 1.0}).json()
+    rm = client.post("/videos/p1/lines/remove", json={"start": 0.5, "end": 1.0}).json()
     plan_id = rm["plan"]["plan_id"]
-    assert client.post(f"/projects/p1/plans/{plan_id}/items/nope/dismiss").status_code == 404
-    plan = client.post(f"/projects/p1/plans/{plan_id}/items/i1/dismiss").json()
+    assert client.post(f"/videos/p1/plans/{plan_id}/items/nope/dismiss").status_code == 404
+    plan = client.post(f"/videos/p1/plans/{plan_id}/items/i1/dismiss").json()
     assert plan["items"][0]["status"] == "dismissed" and plan["items"][0]["enabled"] is False
     assert plan["log"][-1]["text"] == "You discarded the line at 0:00"
-    rm2 = client.post("/projects/p1/lines/remove", json={"start": 0.5, "end": 1.0}).json()
-    client.post(f"/projects/p1/plans/{plan_id}/approve", json={"items": [rm2["item_id"]]})
-    assert client.post(f"/projects/p1/plans/{plan_id}/items/{rm2['item_id']}/dismiss").status_code == 409
+    rm2 = client.post("/videos/p1/lines/remove", json={"start": 0.5, "end": 1.0}).json()
+    client.post(f"/videos/p1/plans/{plan_id}/approve", json={"items": [rm2["item_id"]]})
+    assert client.post(f"/videos/p1/plans/{plan_id}/items/{rm2['item_id']}/dismiss").status_code == 409
 
 
 # ── UX-2: the panel does one job ─────────────────────────────────────────────
@@ -1314,22 +1314,22 @@ def test_reading_the_clip_names_roles_once_and_the_project_carries_it(client, pr
                            (Role("Speaker A", "Presenter", "Carries the whole clip."), Role("Nobody", "Ghost")))
 
     monkeypatch.setattr(main, "planner", Reader())
-    client.post("/projects/p1/speakers/detect")
-    assert client.get("/projects/p1").json()["reading"] is None
+    client.post("/videos/p1/speakers/detect")
+    assert client.get("/videos/p1").json()["reading"] is None
 
-    reading = client.post("/projects/p1/reading", json={}).json()
+    reading = client.post("/videos/p1/reading", json={}).json()
 
     assert reading["opening"] == "One person, one line. The offer is said once, at 0:00."
     assert reading["roles"] == [{"label": "A", "role": "Presenter", "why": "Carries the whole clip."}]
-    assert client.post("/projects/p1/reading", json={}).json()["opening"] == reading["opening"]
+    assert client.post("/videos/p1/reading", json={}).json()["opening"] == reading["opening"]
     assert Reader.calls == 1                                   # saved; read once
-    assert client.get("/projects/p1").json()["reading"]["roles"][0]["role"] == "Presenter"
-    client.post("/projects/p1/reading", json={"again": True})
+    assert client.get("/videos/p1").json()["reading"]["roles"][0]["role"] == "Presenter"
+    client.post("/videos/p1/reading", json={"again": True})
     assert Reader.calls == 2
-    usage = client.get("/projects/p1/usage").json()
+    usage = client.get("/videos/p1/usage").json()
     assert any(line["what"] == "reading" and line["calls"] == 2 for line in usage["lines"])
     # Confirming a role names the speaker through the usual route.
-    named = client.put("/projects/p1/speakers/A", json={"name": "Presenter"}).json()
+    named = client.put("/videos/p1/speakers/A", json={"name": "Presenter"}).json()
     assert named["speakers"][0]["name"] == "Presenter"
 
 
@@ -1341,15 +1341,15 @@ def test_reading_a_silent_clip_looks_at_the_picture_instead(client, project, mon
     speechless(monkeypatch, main, Transcript(words=()))
     looks = Looks()
     monkeypatch.setattr(main, "planner", looks)
-    resp = client.post("/projects/p1/reading", json={})
+    resp = client.post("/videos/p1/reading", json={})
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["opening"] == "No one speaks. 2.3 s of picture, 3 frames."
     assert body["roles"] == []
     assert body["sight"]["opening"] == body["opening"] and body["sight"]["place_guess"] == "Goa, India"
-    assert client.get("/projects/p1").json()["reading"] == body
-    assert client.post("/projects/p1/reading", json={}).json() == body and looks.calls == 1   # looked once
-    assert any(line["what"] == "looking" for line in client.get("/projects/p1/usage").json()["lines"])
+    assert client.get("/videos/p1").json()["reading"] == body
+    assert client.post("/videos/p1/reading", json={}).json() == body and looks.calls == 1   # looked once
+    assert any(line["what"] == "looking" for line in client.get("/videos/p1/usage").json()["lines"])
 
 
 def test_reading_without_claude_says_so(client, project, monkeypatch):
@@ -1358,27 +1358,27 @@ def test_reading_without_claude_says_so(client, project, monkeypatch):
     import app.api.main as main
     from app.domain.models import Transcript
     assert main.planner is None                               # the suite blanks the key
-    resp = client.post("/projects/p1/reading", json={})
+    resp = client.post("/videos/p1/reading", json={})
     assert resp.status_code == 503 and "needs Claude" in resp.json()["detail"]
     speechless(monkeypatch, main, Transcript(words=()))
-    resp = client.post("/projects/p1/reading", json={})
+    resp = client.post("/videos/p1/reading", json={})
     assert resp.status_code == 503 and "needs Claude" in resp.json()["detail"]
-    assert client.get("/projects/p1").json()["reading"] is None
+    assert client.get("/videos/p1").json()["reading"] is None
 
 
 # ── UX-3: review, ship, return ───────────────────────────────────────────────
 
 def test_the_project_list_shows_each_projects_frame_state_and_last_change(client, project, monkeypatch):
-    listed = client.get("/projects").json()["projects"][0]
+    listed = client.get("/videos").json()["videos"][0]
     assert listed["state"] == "new" and listed["last_change"] == "Nothing changed yet"
     assert listed["media"]["sha256"] == project["media"]["sha256"] and listed["variant_of"] is None
 
     done = voiced(client, monkeypatch)
-    listed = client.get("/projects").json()["projects"][0]
+    listed = client.get("/videos").json()["videos"][0]
     assert listed["state"] == "draft" and listed["last_change"].startswith("Voiced “Get 30% off")
 
-    client.post(f"/projects/p1/plans/{done['plan']['plan_id']}/approve", json={})
-    listed = client.get("/projects").json()["projects"][0]
+    client.post(f"/videos/p1/plans/{done['plan']['plan_id']}/approve", json={})
+    listed = client.get("/videos").json()["videos"][0]
     assert listed["state"] == "shipped" and listed["edits"] == 1 and listed["last_change"] == "Rendered the edited video"
 
 
@@ -1391,31 +1391,31 @@ def test_shipping_some_lines_holds_the_rest_and_undo_returns_a_line_to_a_draft(c
     plan_id = done["plan"]["plan_id"]
     assert [i["status"] for i in done["plan"]["items"]] == ["ready", "ready"]
 
-    shipped = client.post(f"/projects/p1/plans/{plan_id}/approve", json={"items": ["i1"]}).json()
+    shipped = client.post(f"/videos/p1/plans/{plan_id}/approve", json={"items": ["i1"]}).json()
 
     assert [a["item_id"] for a in shipped["approved"]] == ["i1"]
     assert [i["status"] for i in shipped["plan"]["items"]] == ["approved", "ready"]   # the second is held
     assert shipped["export"] is not None
 
-    client.post("/projects/p1/edits/e1/revert")
+    client.post("/videos/p1/edits/e1/revert")
 
-    plan = client.get(f"/projects/p1/plans/{plan_id}").json()
+    plan = client.get(f"/videos/p1/plans/{plan_id}").json()
     assert [(i["status"], i["edit_id"]) for i in plan["items"]] == [("ready", None), ("ready", None)]
     assert plan["items"][0]["candidate"]["candidate_id"] is not None       # the take is kept, as a draft
     assert plan["log"][-1]["text"] == "You undid the line at 0:00"
-    assert client.get("/projects").json()["projects"][0]["state"] == "draft"
+    assert client.get("/videos").json()["videos"][0]["state"] == "draft"
 
 
 def test_a_variant_is_the_same_clip_with_the_plan_as_a_draft(client, project, monkeypatch):
-    client.post("/projects/p1/speakers/detect")
-    client.put("/projects/p1/speakers/A", json={"name": "Presenter", "voice_id": "nPczCjzI2devNBz1zQrb"})
-    client.put("/projects/p1/settings", json={"effort": "xhigh"})
+    client.post("/videos/p1/speakers/detect")
+    client.put("/videos/p1/speakers/A", json={"name": "Presenter", "voice_id": "nPczCjzI2devNBz1zQrb"})
+    client.put("/videos/p1/settings", json={"effort": "xhigh"})
     done = voiced(client, monkeypatch)
-    client.post(f"/projects/p1/plans/{done['plan']['plan_id']}/approve", json={})
+    client.post(f"/videos/p1/plans/{done['plan']['plan_id']}/approve", json={})
 
-    variant = client.post("/projects/p1/variants").json()
+    variant = client.post("/videos/p1/variants").json()
 
-    assert variant["project_id"] == "p2" and variant["filename"] == "ad.mp4"
+    assert variant["video_id"] == "p2" and variant["filename"] == "ad.mp4"
     assert variant["media"]["sha256"] == project["media"]["sha256"]
     assert variant["consent"] is not None and variant["settings"]["effort"] == "xhigh"
     assert variant["speakers"] == [{"label": "A", "name": "Presenter", "voice_id": "nPczCjzI2devNBz1zQrb"}]
@@ -1425,15 +1425,15 @@ def test_a_variant_is_the_same_clip_with_the_plan_as_a_draft(client, project, mo
         ("Get 30% off today only.", "planned", None, None)]
     assert plan["estimate"]["items"] == 1
     assert plan["log"][-1]["text"] == "Made as a variant of ad.mp4, with its plan as a draft"
-    assert client.get("/projects/p2/artifacts/" + variant["media"]["sha256"]).status_code == 200
-    listed = client.get("/projects").json()["projects"]
-    assert [(p["project_id"], p["state"], p["variant_of"]) for p in listed] == [("p2", "draft", "p1"), ("p1", "shipped", None)]
+    assert client.get("/videos/p2/artifacts/" + variant["media"]["sha256"]).status_code == 200
+    listed = client.get("/videos").json()["videos"]
+    assert [(p["video_id"], p["state"], p["variant_of"]) for p in listed] == [("p2", "draft", "p1"), ("p1", "shipped", None)]
     # The original is untouched.
     assert done["plan"]["items"][0]["candidate"] is not None
-    assert client.get(f"/projects/p1/plans/{done['plan']['plan_id']}").json()["items"][0]["status"] == "approved"
+    assert client.get(f"/videos/p1/plans/{done['plan']['plan_id']}").json()["items"][0]["status"] == "approved"
     # Deleting the variant leaves the original's media alone.
-    client.delete("/projects/p2")
-    assert client.get("/projects/p1/artifacts/" + project["media"]["sha256"]).status_code == 200
+    client.delete("/videos/p2")
+    assert client.get("/videos/p1/artifacts/" + project["media"]["sha256"]).status_code == 200
 
 
 # ── Phase 9c: sign-in ────────────────────────────────────────────────────────
@@ -1481,8 +1481,8 @@ def login(client):
 def test_with_sign_in_on_nothing_is_reachable_until_you_sign_in(client, sample_video, monkeypatch):
     fake = signed_in(monkeypatch)
     assert client.get("/auth/me").json() == {"mode": "google", "user": None}
-    assert client.get("/projects").status_code == 401
-    assert client.get("/projects").json()["detail"] == "Sign in to continue."
+    assert client.get("/videos").status_code == 401
+    assert client.get("/videos").json()["detail"] == "Sign in to continue."
     assert client.get("/health").status_code == 200          # the health check stays open
 
     sent = client.get("/auth/login", follow_redirects=False)
@@ -1494,21 +1494,21 @@ def test_with_sign_in_on_nothing_is_reachable_until_you_sign_in(client, sample_v
     assert back.status_code == 302 and back.headers["location"] == "http://localhost:5173/"
     assert fake.exchanged[0][0] == "c0de" and fake.exchanged[0][1] == "http://localhost:5173/api/auth/callback"
     assert client.get("/auth/me").json()["user"] == {"sub": "42", "email": "ash@example.com", "name": "Ash", "picture": None}
-    assert client.get("/projects").json() == {"projects": []}
+    assert client.get("/videos").json() == {"videos": []}
 
     # A write needs the header a cross-site form cannot send.
     resp = upload(client, sample_video)
     assert resp.status_code == 403 and "did not come from Voltage" in resp.json()["detail"]
     with open(sample_video, "rb") as handle:
-        resp = client.post("/projects", files={"file": ("ad.mp4", handle, "video/mp4")}, data={"consent": "true"}, headers=HEADERS)
+        resp = client.post("/videos", files={"file": ("ad.mp4", handle, "video/mp4")}, data={"consent": "true"}, headers=HEADERS)
     assert resp.status_code == 200
     # ...and it belongs to the person who signed in.
-    assert [p["project_id"] for p in client.get("/projects").json()["projects"]] == ["p1"]
+    assert [p["video_id"] for p in client.get("/videos").json()["videos"]] == ["p1"]
     assert main_owner_of("p1") == "google:42"
 
     client.post("/auth/logout", headers=HEADERS)
     assert client.get("/auth/me").json()["user"] is None
-    assert client.get("/projects").status_code == 401
+    assert client.get("/videos").status_code == 401
 
 
 def main_owner_of(project_id):
@@ -1539,12 +1539,12 @@ def test_each_person_sees_only_their_own_projects(client, sample_video, monkeypa
     signed_in(monkeypatch, who=("1", "a@x.y", "A", None))
     login(client)
     with open(sample_video, "rb") as handle:
-        client.post("/projects", files={"file": ("ad.mp4", handle, "video/mp4")}, data={"consent": "true"}, headers=HEADERS)
+        client.post("/videos", files={"file": ("ad.mp4", handle, "video/mp4")}, data={"consent": "true"}, headers=HEADERS)
     signed_in(monkeypatch, who=("2", "b@x.y", "B", None))
     login(client)
-    assert client.get("/projects").json()["projects"] == []
-    assert client.get("/projects/p1").status_code == 404
-    assert client.post("/projects/p1/export", headers=HEADERS).status_code == 404
+    assert client.get("/videos").json()["videos"] == []
+    assert client.get("/videos/p1").status_code == 404
+    assert client.post("/videos/p1/export", headers=HEADERS).status_code == 404
 
 
 def test_a_person_has_a_ceiling_across_their_projects(client, sample_video, monkeypatch):
@@ -1563,66 +1563,66 @@ def test_a_person_has_a_ceiling_across_their_projects(client, sample_video, monk
     monkeypatch.setattr(main, "planner", NeverRead())
     login(client)
     with open(sample_video, "rb") as handle:
-        client.post("/projects", files={"file": ("ad.mp4", handle, "video/mp4")}, data={"consent": "true"}, headers=HEADERS)
+        client.post("/videos", files={"file": ("ad.mp4", handle, "video/mp4")}, data={"consent": "true"}, headers=HEADERS)
     main.ledger.record("p1", "elevenlabs", "speech", 100, "characters", 0.06)
-    usage = client.get("/projects/p1/usage").json()
+    usage = client.get("/videos/p1/usage").json()
     assert usage["user_spent_usd"] == 0.06 and usage["user_ceiling_usd"] == 0.05
-    resp = client.post("/projects/p1/turns", json={"text": "make it 30% off"}, headers=HEADERS)
+    resp = client.post("/videos/p1/turns", json={"text": "make it 30% off"}, headers=HEADERS)
     assert resp.status_code == 202
     job = await_job(client, resp.json()["job_id"])
-    assert job["status"] == "succeeded" and "across your projects" in job["result"]["reply"]
+    assert job["status"] == "succeeded" and "across your videos" in job["result"]["reply"]
     assert scripted.calls == []                               # Claude was never called
-    assert client.post("/projects/p1/reading", json={}, headers=HEADERS).status_code == 402
+    assert client.post("/videos/p1/reading", json={}, headers=HEADERS).status_code == 402
 
 
 def test_with_sign_in_off_everything_is_as_before(client, project):
     assert client.get("/auth/me").json() == {"mode": "off", "user": None}
     assert client.get("/auth/login").status_code == 404
-    assert client.get("/projects/p1/usage").json()["user_ceiling_usd"] is None
+    assert client.get("/videos/p1/usage").json()["user_ceiling_usd"] is None
 
 
 # ── UX-1c: shift a line of the original speech ──────────────────────────────
 
 def test_a_line_can_be_shifted_to_another_time_without_voicing_it(client, project):
-    moved = client.post("/projects/p1/lines/shift", json={"start": 0.5, "end": 1.0, "to": 1.5}).json()
+    moved = client.post("/videos/p1/lines/shift", json={"start": 0.5, "end": 1.0, "to": 1.5}).json()
 
     assert moved["mix"] == "layer" and moved["from"] == {"start": 0.4, "end": 1.3}      # snapped to the words "20% off"
     assert moved["selection"]["start"] == 1.5 and moved["selection"]["end"] == pytest.approx(2.3, abs=0.01)   # clamped to the clip
     assert moved["candidate"]["plan"]["new_text"] == "20% off" and moved["candidate"]["fit_notes"] == ["moved from 0:00"]
     assert moved["candidate"]["audio"]["duration"] == pytest.approx(0.9, abs=0.02)      # the original words, cut out
-    edits = client.get("/projects/p1").json()["edits"]
+    edits = client.get("/videos/p1").json()["edits"]
     assert [(e["edit_id"], e["mix"], e["partner"], e["reverted"]) for e in edits] == [
         ("e1", "remove", "e2", False), ("e2", "layer", "e1", False)]
     # Rendered: room tone where the words were, the words over the picture at 1.5.
-    manifest = client.post("/projects/p1/export").json()
+    manifest = client.post("/videos/p1/export").json()
     kinds = [(s["kind"], s["start"]) for s in manifest["segments"]]
     assert ("edited", 0.4) in kinds and ("edited", 1.5) in kinds
-    assert client.get("/projects/p1").json()["messages"][-1]["text"] == "Moved the line at 0:00 to 0:01"
+    assert client.get("/videos/p1").json()["messages"][-1]["text"] == "Moved the line at 0:00 to 0:01"
 
 
 def test_undoing_a_shifted_line_undoes_both_halves(client, project):
-    moved = client.post("/projects/p1/lines/shift", json={"start": 0.5, "end": 1.0, "to": 1.5}).json()
-    client.post(f"/projects/p1/edits/{moved['removed_edit_id']}/revert")
-    edits = client.get("/projects/p1").json()["edits"]
+    moved = client.post("/videos/p1/lines/shift", json={"start": 0.5, "end": 1.0, "to": 1.5}).json()
+    client.post(f"/videos/p1/edits/{moved['removed_edit_id']}/revert")
+    edits = client.get("/videos/p1").json()["edits"]
     assert [e["reverted"] for e in edits] == [True, True]
-    assert [s["kind"] for s in client.post("/projects/p1/export").json()["segments"]] == ["original"]
+    assert [s["kind"] for s in client.post("/videos/p1/export").json()["segments"]] == ["original"]
 
 
 def test_a_shifted_line_can_be_moved_again_and_stays_paired(client, project):
-    moved = client.post("/projects/p1/lines/shift", json={"start": 0.5, "end": 1.0, "to": 1.5}).json()
-    again = client.post(f"/projects/p1/edits/{moved['edit_id']}/move", json={"start": 1.2}).json()
-    edits = {e["edit_id"]: e for e in client.get("/projects/p1").json()["edits"]}
+    moved = client.post("/videos/p1/lines/shift", json={"start": 0.5, "end": 1.0, "to": 1.5}).json()
+    again = client.post(f"/videos/p1/edits/{moved['edit_id']}/move", json={"start": 1.2}).json()
+    edits = {e["edit_id"]: e for e in client.get("/videos/p1").json()["edits"]}
     assert edits["e2"]["reverted"] is True
     assert edits["e3"]["partner"] == "e1" and edits["e1"]["partner"] == "e3" and edits["e3"]["selection"]["start"] == 1.2
-    client.post("/projects/p1/edits/e1/revert")
-    assert all(e["reverted"] for e in client.get("/projects/p1").json()["edits"].__iter__())
+    client.post("/videos/p1/edits/e1/revert")
+    assert all(e["reverted"] for e in client.get("/videos/p1").json()["edits"].__iter__())
 
 
 def test_shifting_silence_is_refused(client, project, monkeypatch):
     import app.api.main as main
     from app.domain.models import Transcript, Word
     speechless(monkeypatch, main, Transcript(words=(Word("Get", 0.0, 0.4),)))
-    assert client.post("/projects/p1/lines/shift", json={"start": 1.5, "end": 2.0, "to": 0.1}).status_code == 422
+    assert client.post("/videos/p1/lines/shift", json={"start": 1.5, "end": 2.0, "to": 0.1}).status_code == 422
 
 
 def test_the_place_voltage_guessed_can_be_confirmed_or_corrected(client, project, monkeypatch):
@@ -1632,11 +1632,11 @@ def test_the_place_voltage_guessed_can_be_confirmed_or_corrected(client, project
     from app.domain.models import Transcript
     speechless(monkeypatch, main, Transcript(words=()))
     monkeypatch.setattr(main, "planner", Looks())
-    client.post("/projects/p1/reading", json={})
-    body = client.put("/projects/p1/sight", json={"place": "Morjim, Goa"}).json()
+    client.post("/videos/p1/reading", json={})
+    body = client.put("/videos/p1/sight", json={"place": "Morjim, Goa"}).json()
     assert body["place_confirmed"] == "Morjim, Goa"
-    assert client.get("/projects/p1").json()["reading"]["sight"]["place_confirmed"] == "Morjim, Goa"
-    assert client.put("/projects/p1/sight", json={"place": ""}).json()["place_confirmed"] == ""
+    assert client.get("/videos/p1").json()["reading"]["sight"]["place_confirmed"] == "Morjim, Goa"
+    assert client.put("/videos/p1/sight", json={"place": ""}).json()["place_confirmed"] == ""
 
 
 def test_export_describes_the_output_as_pieces_and_nothing_is_held(client, project):
@@ -1644,8 +1644,8 @@ def test_export_describes_the_output_as_pieces_and_nothing_is_held(client, proje
     pause to stretch after the added line; the tail of the line itself is the living window,
     and no frame is frozen."""
     candidate = generate(text="Hurry!", mix="concatenate", start=0.4, end=1.3)
-    assert client.post("/projects/p1/edits", json={"candidate_id": candidate["candidate_id"]}).status_code == 200
-    export = client.post("/projects/p1/export").json()
+    assert client.post("/videos/p1/edits", json={"candidate_id": candidate["candidate_id"]}).status_code == 200
+    export = client.post("/videos/p1/export").json()
     pieces = export["pieces"]
     assert [p["kind"] for p in pieces] == ["copy", "living", "copy"]
     assert pieces[0]["out_start"] == 0.0 and pieces[-1]["out_end"] == pytest.approx(export["render"]["duration"], abs=0.1)
@@ -1656,13 +1656,13 @@ def test_export_describes_the_output_as_pieces_and_nothing_is_held(client, proje
     [insert] = export["inserts"]
     assert insert["held"] == 0.0
     # The cuts were looked for once and kept with the project.
-    assert client.get("/projects/p1").json()  # still fine
-    export_again = client.post("/projects/p1/export").json()
+    assert client.get("/videos/p1").json()  # still fine
+    export_again = client.post("/videos/p1/export").json()
     assert export_again["pieces"] == pieces
 
 
 def test_a_plan_without_edits_exports_copies_only(client, project):
-    export = client.post("/projects/p1/export").json()
+    export = client.post("/videos/p1/export").json()
     assert [p["kind"] for p in export["pieces"]] == ["copy"]
     assert export["inserts"] == []
 
@@ -1670,8 +1670,8 @@ def test_a_plan_without_edits_exports_copies_only(client, project):
 # ── 15e: a voice the goal asks for ────────────────────────────────────────────
 
 def test_an_asked_voice_speaks_the_line_ahead_of_the_speakers_own(client, project, monkeypatch):
-    client.post("/projects/p1/speakers/detect")
-    client.put("/projects/p1/speakers/A", json={"voice_id": "picked-for-A-on-purpose"})
+    client.post("/videos/p1/speakers/detect")
+    client.put("/videos/p1/speakers/A", json={"voice_id": "picked-for-A-on-purpose"})
     result = voiced(client, monkeypatch, voice_id="mock")    # the voice Voltage names, not A's
     assert result["plan"]["items"][0]["candidate"]["plan"]["voice_profile_id"] == "mock"
 
@@ -1683,7 +1683,7 @@ def test_without_the_flag_a_turn_says_voltage_needs_claude(client, project, monk
     from dataclasses import replace
     # The flag is on by default now (20c); a key alone must not open the route with it off.
     monkeypatch.setattr(main, "settings", replace(main.settings, agent=False, anthropic_api_key="k"))
-    resp = client.post("/projects/p1/turns", json={"text": "make it 30% off"})
+    resp = client.post("/videos/p1/turns", json={"text": "make it 30% off"})
     assert resp.status_code == 503 and "AVE_AGENT" in resp.json()["detail"]
 
 
@@ -1696,9 +1696,9 @@ def test_a_turn_voices_a_line_through_the_tools_and_the_thread_shows_each_step(c
                   direction="brisk and confident", mix=None, item_id=None), stop="tool_use"),
         reply(text("Line 1 now says 30% off, brisk. Hear it; say ship when you're happy.")),
     ])
-    assert client.get("/projects/p1").json()["agent"] is True
-    client.put("/projects/p1/settings", json={"autonomy": "draft"})
-    resp = client.post("/projects/p1/turns", json={"text": "make it 30% off"})
+    assert client.get("/videos/p1").json()["agent"] is True
+    client.put("/videos/p1/settings", json={"autonomy": "draft"})
+    resp = client.post("/videos/p1/turns", json={"text": "make it 30% off"})
     assert resp.status_code == 202, resp.text
     job = await_job(client, resp.json()["job_id"])
     result = job["result"]
@@ -1709,14 +1709,14 @@ def test_a_turn_voices_a_line_through_the_tools_and_the_thread_shows_each_step(c
     [item] = plan["items"]
     assert (item["status"], item["new_text"], item["old_text"], item["delivery"]) == ("ready", "Get 30% off today only.", "Get 20% off today only.", "firmer")
     assert item["candidate"]["plan"]["voice_profile_id"] == "mock"
-    messages = client.get("/projects/p1/messages").json()
+    messages = client.get("/videos/p1/messages").json()
     kinds = [(m["role"], m["kind"], m["text"]) for m in messages]
     assert kinds[0] == ("user", "say", "make it 30% off")
     assert ("assistant", "step", "Read all 1 line") in kinds and ("assistant", "step", "Looked through 1 voices") in kinds
     voiced_ = next(m for m in messages if m["kind"] == "step" and m["text"].startswith("Voiced “Get 30% off"))
     assert voiced_["text"] == "Voiced “Get 30% off today only.” with Test tone — brisk and confident"
     assert kinds[-2] == ("assistant", "say", result["reply"]) and kinds[-1][:2] == ("assistant", "step")   # then "Thinking", its own cost
-    later = client.get("/projects/p1/messages", params={"after": messages[-3]["seq"]}).json()
+    later = client.get("/videos/p1/messages", params={"after": messages[-3]["seq"]}).json()
     assert [m["text"] for m in later] == [result["reply"], "Thinking"]
     # The model's thread is kept as it saw it, append-only.
     turns = main.repo.turns("p1")
@@ -1728,7 +1728,7 @@ def test_a_turn_voices_a_line_through_the_tools_and_the_thread_shows_each_step(c
 def test_under_check_with_me_the_turn_ends_with_a_question_and_go_resumes_it(client, project, monkeypatch):
     import app.api.main as main
     from tests.agent.conftest import reply, text, use
-    client.put("/projects/p1/settings", json={"autonomy": "ask"})
+    client.put("/videos/p1/settings", json={"autonomy": "ask"})
     take_ = use("synthesize_take", "c", text="Get 30% off today only.", voice_id="mock", line=1, start=None, end=None,
                 direction=None, mix=None, item_id=None)
     scripted = _agent_on(monkeypatch, main, [
@@ -1737,14 +1737,14 @@ def test_under_check_with_me_the_turn_ends_with_a_question_and_go_resumes_it(cli
                                              direction=None, mix=None, item_id=None), stop="tool_use"),
         reply(text("Done. Hear it below.")),
     ])
-    resp = client.post("/projects/p1/turns", json={"text": "make it 30% off"})
+    resp = client.post("/videos/p1/turns", json={"text": "make it 30% off"})
     job = await_job(client, resp.json()["job_id"])
     result = job["result"]
     assert result["question"]["text"] == "Voice “Get 30% off today only.” in Test tone's voice, about $0.00?"
     assert result["plan"]["status"] == "clarifying" and result["plan"]["question"]["options"] == ["Go ahead", "Not yet"]
     assert result["plan"]["items"] == []
     # A second turn while the first is still open is refused; "go" resumes with the same thread.
-    resp = client.post("/projects/p1/turns", json={"text": "go"})
+    resp = client.post("/videos/p1/turns", json={"text": "go"})
     job = await_job(client, resp.json()["job_id"])
     result = job["result"]
     assert result["reply"] == "Done. Hear it below." and result["plan"]["status"] == "done"
@@ -1759,7 +1759,7 @@ def test_under_check_with_me_the_yes_to_a_paid_step_needs_consent(client, projec
     with me runs without consent; the yes that would voice them does not."""
     import app.api.main as main
     from tests.agent.conftest import reply, text as said
-    client.put("/projects/p1/settings", json={"autonomy": "ask"})
+    client.put("/videos/p1/settings", json={"autonomy": "ask"})
     scripted = _agent_on(monkeypatch, main, [
         reply(take("c"), stop="tool_use"),
         reply(said("Voicing it now."), take("d"), stop="tool_use"),
@@ -1768,14 +1768,14 @@ def test_under_check_with_me_the_yes_to_a_paid_step_needs_consent(client, projec
     result = send(client, "make it 30% off")
     assert result["question"]["gate"] is True and result["plan"]["status"] == "clarifying"
 
-    resp = client.post("/projects/p1/turns", json={"text": "go"})
+    resp = client.post("/videos/p1/turns", json={"text": "go"})
 
     assert resp.status_code == 403 and "right to edit and clone" in resp.json()["detail"]
-    assert client.post("/projects/p1/turns", json={"text": "do it", "approve": True}).status_code == 403
+    assert client.post("/videos/p1/turns", json={"text": "do it", "approve": True}).status_code == 403
     assert len(scripted.calls) == 1                                  # nothing ran
-    assert client.get("/projects/p1").json()["plan"]["status"] == "clarifying"   # still waiting for the yes
+    assert client.get("/videos/p1").json()["plan"]["status"] == "clarifying"   # still waiting for the yes
 
-    client.post("/projects/p1/consent")
+    client.post("/videos/p1/consent")
     result = send(client, "go")
     assert result["reply"] == "Done. Hear it below." and [i["status"] for i in result["plan"]["items"]] == ["ready"]
 
@@ -1785,7 +1785,7 @@ def test_a_turn_refused_at_the_ceiling_or_while_another_runs(client, project, mo
     from tests.agent.conftest import reply, text
     _agent_on(monkeypatch, main, [reply(text("Nothing to do."))])
     main.ledger.record("p1", "elevenlabs", "take", 1, "characters", 5.0)
-    resp = client.post("/projects/p1/turns", json={"text": "anything"})
+    resp = client.post("/videos/p1/turns", json={"text": "anything"})
     job = await_job(client, resp.json()["job_id"])
     assert "ceiling" in job["result"]["reply"].lower() or "spend" in job["result"]["reply"].lower()
     assert job["result"]["plan"]["status"] == "proposed"
@@ -1797,7 +1797,7 @@ def test_a_previews_card_reaches_the_thread_with_its_facts(client, project):
     main.repo.add_message("p1", "assistant", "3 voices designed from “an older woman”", kind="previews",
                           data={"description": "an older woman", "previews": [{"n": 1, "generated_voice_id": "g1", "sha256": "a" * 64, "duration": 25.2}]})
     main.repo.add_message("p1", "assistant", "Say which one.")
-    card, said = client.get("/projects/p1/messages").json()[-2:]
+    card, said = client.get("/videos/p1/messages").json()[-2:]
     assert card["kind"] == "previews" and card["data"]["previews"][0]["generated_voice_id"] == "g1"
     assert said == {"role": "assistant", "text": "Say which one.", "kind": "say", "seq": card["seq"] + 1}
 
@@ -1807,7 +1807,7 @@ def test_a_turn_after_a_finished_turn_keeps_working_on_the_lines_not_yet_shipped
     lines; the next turn works on them rather than starting empty."""
     import app.api.main as main
     from tests.agent.conftest import reply, text, use
-    client.put("/projects/p1/settings", json={"autonomy": "draft"})
+    client.put("/videos/p1/settings", json={"autonomy": "draft"})
     _agent_on(monkeypatch, main, [
         reply(use("synthesize_take", "c", text="Get 30% off today only.", voice_id="mock", line=1, start=None, end=None,
                   direction=None, mix=None, item_id=None, model=None, settings=None), stop="tool_use"),
@@ -1815,9 +1815,9 @@ def test_a_turn_after_a_finished_turn_keeps_working_on_the_lines_not_yet_shipped
         reply(use("project_state", "d"), stop="tool_use"),
         reply(text("Still there.")),
     ])
-    first = await_job(client, client.post("/projects/p1/turns", json={"text": "make it 30% off"}).json()["job_id"])["result"]
+    first = await_job(client, client.post("/videos/p1/turns", json={"text": "make it 30% off"}).json()["job_id"])["result"]
     assert first["plan"]["status"] == "done" and [i["status"] for i in first["plan"]["items"]] == ["ready"]
-    second = await_job(client, client.post("/projects/p1/turns", json={"text": "and then?"}).json()["job_id"])["result"]
+    second = await_job(client, client.post("/videos/p1/turns", json={"text": "and then?"}).json()["job_id"])["result"]
     assert second["plan"]["plan_id"] == first["plan"]["plan_id"]
     assert [i["status"] for i in second["plan"]["items"]] == ["ready"]
     # The model saw the line in its state.
@@ -1830,10 +1830,10 @@ def test_moving_a_take_by_hand_carries_its_plan_item_along(client, project, monk
     """20d: the row's Move on a take Voltage made updates the item that holds
     it, so Keep ships the moved take and the plan shows where it sits now."""
     voiced(client, monkeypatch)
-    [item] = client.get("/projects/p1/plans/plan1").json()["items"] if client.get("/projects/p1/plans/plan1").status_code == 200 else client.get("/projects/p1").json()["plan"]["items"]
+    [item] = client.get("/videos/p1/plans/plan1").json()["items"] if client.get("/videos/p1/plans/plan1").status_code == 200 else client.get("/videos/p1").json()["plan"]["items"]
     assert item["status"] == "ready" and item["candidate"]
-    moved = client.post(f"/projects/p1/candidates/{item['candidate']['candidate_id']}/move", json={"start": 1.0}).json()
-    [after] = client.get("/projects/p1").json()["plan"]["items"]
+    moved = client.post(f"/videos/p1/candidates/{item['candidate']['candidate_id']}/move", json={"start": 1.0}).json()
+    [after] = client.get("/videos/p1").json()["plan"]["items"]
     assert after["candidate"]["candidate_id"] == moved["candidate_id"]
     assert after["selection"]["start"] == 1.0 and after["candidate"]["fit_notes"][-1] == "moved to 0:01"
 
@@ -1842,11 +1842,11 @@ def test_a_turn_ends_with_what_voltages_own_thinking_cost_as_a_step(client, proj
     """20d: the tools say what they spent; the turn's Claude cost is a step of
     its own after Voltage's words, so the thread's total is the turn's total."""
     voiced(client, monkeypatch)
-    messages = client.get("/projects/p1/messages").json()
+    messages = client.get("/videos/p1/messages").json()
     last = messages[-1]
     assert last["kind"] == "step" and last["text"] == "Thinking" and last["cost"] > 0
     assert messages[-2]["text"] == "Hear it."
-    usage = client.get("/projects/p1/usage").json()
+    usage = client.get("/videos/p1/usage").json()
     claude = sum(u["usd"] for u in usage["lines"] if u["vendor"] == "anthropic")
     assert last["cost"] == pytest.approx(claude, abs=1e-4)
 
@@ -1868,10 +1868,10 @@ def test_my_defaults_round_trip_and_a_new_project_starts_from_them(client, sampl
     assert made["settings"]["autonomy"] == "draft" and made["settings"]["ask_before"]["ship"] is True
     assert made["settings"]["model"] == main.settings.agent_model
     client.put("/me/settings", json={"autonomy": "ask"})
-    assert client.get("/projects/p1/settings").json()["settings"]["autonomy"] == "draft"
+    assert client.get("/videos/p1/settings").json()["settings"]["autonomy"] == "draft"
     # A variant keeps the original's settings; the defaults fill only what it never set.
-    client.put("/projects/p1/settings", json={"effort": "xhigh"})
-    variant = client.post("/projects/p1/variants").json()
+    client.put("/videos/p1/settings", json={"effort": "xhigh"})
+    variant = client.post("/videos/p1/variants").json()
     assert (variant["settings"]["effort"], variant["settings"]["autonomy"], variant["settings"]["ask_before"]["ship"]) == ("xhigh", "draft", True)
 
 
@@ -1879,11 +1879,11 @@ def test_project_settings_carry_ask_before_and_the_model(client, project):
     import app.api.main as main
     assert project["settings"]["ask_before"] == {"ship": False, "clone": False, "design": False}
     assert project["settings"]["model"] == main.settings.agent_model
-    resp = client.put("/projects/p1/settings", json={"ask_before": {"design": True, "other": True}})
+    resp = client.put("/videos/p1/settings", json={"ask_before": {"design": True, "other": True}})
     assert resp.json()["settings"]["ask_before"] == {"ship": False, "clone": False, "design": True}
-    assert client.get("/projects/p1/settings").json()["settings"]["ask_before"]["design"] is True
-    assert client.put("/projects/p1/settings", json={"ask_before": {"ship": "maybe"}}).status_code == 422
-    assert client.get("/projects/p9/settings").status_code == 404
+    assert client.get("/videos/p1/settings").json()["settings"]["ask_before"]["design"] is True
+    assert client.put("/videos/p1/settings", json={"ask_before": {"ship": "maybe"}}).status_code == 422
+    assert client.get("/videos/p9/settings").status_code == 404
 
 
 def test_under_just_do_it_a_step_the_user_chose_to_be_asked_about_waits_for_their_yes(client, project, monkeypatch):
@@ -1891,7 +1891,7 @@ def test_under_just_do_it_a_step_the_user_chose_to_be_asked_about_waits_for_thei
     gate question says what the step costs and what the turn has left."""
     import app.api.main as main
     from tests.agent.conftest import reply, text as said, use
-    client.put("/projects/p1/settings", json={"autonomy": "draft", "ask_before": {"ship": True}})
+    client.put("/videos/p1/settings", json={"autonomy": "draft", "ask_before": {"ship": True}})
     _agent_on(monkeypatch, main, [
         reply(take("c"), stop="tool_use"),
         reply(use("ship", "d", item_ids=[], anyway=False), stop="tool_use"),
@@ -1902,18 +1902,18 @@ def test_under_just_do_it_a_step_the_user_chose_to_be_asked_about_waits_for_thei
     question = result["question"]
     assert question["text"] == "Ship 1 change and render the video?" and question["gate"] is True
     assert question["cost_usd"] is None
-    spent = client.get("/projects/p1/usage").json()["spent_usd"]
+    spent = client.get("/videos/p1/usage").json()["spent_usd"]
     assert question["left_usd"] == round(main.settings.agent_turn_usd - spent, 2)
     assert result["plan"]["status"] == "clarifying" and result["plan"]["question"]["left_usd"] == question["left_usd"]
-    assert client.get("/projects/p1").json()["edits"] == []
+    assert client.get("/videos/p1").json()["edits"] == []
     result = send(client, "go")
-    assert result["reply"] == "Shipped." and [e["edit_id"] for e in client.get("/projects/p1").json()["edits"]] == ["e1"]
+    assert result["reply"] == "Shipped." and [e["edit_id"] for e in client.get("/videos/p1").json()["edits"]] == ["e1"]
 
 
 def test_a_paid_gate_question_carries_the_steps_price(client, project, monkeypatch):
     import app.api.main as main
     _agent_on(monkeypatch, main, [reply_take_under_ask()])
-    client.put("/projects/p1/settings", json={"autonomy": "ask"})
+    client.put("/videos/p1/settings", json={"autonomy": "ask"})
     result = send(client, "make it 30% off")
     assert result["question"]["cost_usd"] == 0.0 and 0 < result["question"]["left_usd"] <= main.settings.agent_turn_usd
 
@@ -1926,7 +1926,7 @@ def reply_take_under_ask():
 def test_steps_carry_their_tool_and_time_in_the_turn(client, project, monkeypatch):
     """Volt: the trace shows which tool each step was and when it landed."""
     voiced(client, monkeypatch)
-    steps = [m for m in client.get("/projects/p1/messages").json() if m["kind"] == "step"]
+    steps = [m for m in client.get("/videos/p1/messages").json() if m["kind"] == "step"]
     assert [s["data"]["tool"] for s in steps] == ["synthesize_take", "thinking"]
     assert all(isinstance(s["data"]["t"], float) and s["data"]["t"] >= 0 for s in steps)
     assert steps[0]["data"]["t"] <= steps[1]["data"]["t"]
@@ -1934,18 +1934,18 @@ def test_steps_carry_their_tool_and_time_in_the_turn(client, project, monkeypatc
 
 def test_an_edit_says_who_it_is_for_and_whose_voice_says_it(client, project, monkeypatch):
     """Volt: the rows show "+ New line · Riya" and the stand-in voice from the edit itself."""
-    client.post("/projects/p1/speakers/detect")
+    client.post("/videos/p1/speakers/detect")
     done = voiced(client, monkeypatch, voice_id="")        # line 1 is A's; the mock cannot clone, so the default speaks
     plan_id = done["plan"]["plan_id"]
-    shipped = client.post(f"/projects/p1/plans/{plan_id}/approve", json={}).json()
+    shipped = client.post(f"/videos/p1/plans/{plan_id}/approve", json={}).json()
     assert [(a["speaker"], a["voice_profile_id"]) for a in shipped["approved"]] == [("A", "mock")]
-    [edit] = client.get("/projects/p1").json()["edits"]
+    [edit] = client.get("/videos/p1").json()["edits"]
     assert (edit["speaker"], edit["voice_profile_id"]) == ("A", "mock")
     # A removal has no voice; approving a take by hand says the same.
-    removed = client.post("/projects/p1/lines/remove", json={"start": 1.3, "end": 1.8}).json()
-    by_hand = client.post("/projects/p1/edits", json={"candidate_id": removed["candidate_id"]}).json()
+    removed = client.post("/videos/p1/lines/remove", json={"start": 1.3, "end": 1.8}).json()
+    by_hand = client.post("/videos/p1/edits", json={"candidate_id": removed["candidate_id"]}).json()
     assert (by_hand["speaker"], by_hand["voice_profile_id"]) == (None, None)
-    assert [(e["speaker"], e["voice_profile_id"]) for e in client.get("/projects/p1").json()["edits"]] == [("A", "mock"), (None, None)]
+    assert [(e["speaker"], e["voice_profile_id"]) for e in client.get("/videos/p1").json()["edits"]] == [("A", "mock"), (None, None)]
 
 
 # ── Volt: usage across projects ──────────────────────────────────────────────
@@ -1959,15 +1959,15 @@ def test_usage_across_projects_counts_turns_takes_and_money_in_the_period(client
         c.execute("INSERT INTO usage (project_id, vendor, what, units, unit, usd, at) VALUES (?, ?, ?, ?, ?, ?, ?)",
                   ("p1", "openai", "transcription", 1.0, "minutes", 0.006, "2000-01-01T00:00:00+00:00"))
     month = client.get("/usage").json()
-    claude = sum(u["usd"] for u in client.get("/projects/p1/usage").json()["lines"] if u["vendor"] == "anthropic")
+    claude = sum(u["usd"] for u in client.get("/videos/p1/usage").json()["lines"] if u["vendor"] == "anthropic")
     assert (month["period"], month["turns"], month["takes"], month["voices_made"]) == ("month", 1, 1, 0)
     assert month["spent_usd"] == pytest.approx(claude + 0.012, abs=1e-4) and month["avg_turn_usd"] == pytest.approx(claude, abs=1e-4)
     assert (month["ceiling_usd"], month["project_cap_usd"]) == (main.settings.user_budget_usd, main.ledger.ceiling_usd)
     assert [(v["vendor"], v["label"]) for v in month["by_vendor"]] == [
         ("anthropic", "Voltage thinking"), ("elevenlabs", "Voices and takes"), ("openai", "Transcription")]
     assert next(v["usd"] for v in month["by_vendor"] if v["vendor"] == "openai") == 0.0
-    [p1] = month["by_project"]
-    assert (p1["project_id"], p1["filename"], p1["turns"], p1["voice_characters"], p1["cap_usd"]) == ("p1", "ad.mp4", 1, 40, main.ledger.ceiling_usd)
+    [p1] = month["by_video"]
+    assert (p1["video_id"], p1["filename"], p1["turns"], p1["voice_characters"], p1["cap_usd"]) == ("p1", "ad.mp4", 1, 40, main.ledger.ceiling_usd)
     assert p1["spent_usd"] == pytest.approx(month["spent_usd"], abs=1e-4)
     everything = client.get("/usage", params={"period": "all"}).json()
     assert everything["spent_usd"] == pytest.approx(month["spent_usd"] + 0.006, abs=1e-4)
@@ -1976,7 +1976,7 @@ def test_usage_across_projects_counts_turns_takes_and_money_in_the_period(client
     # Someone else sees nothing of it.
     main.app.dependency_overrides[main.current_owner] = lambda: "someone-else"
     try:
-        assert client.get("/usage").json()["by_project"] == [] and client.get("/usage").json()["spent_usd"] == 0.0
+        assert client.get("/usage").json()["by_video"] == [] and client.get("/usage").json()["spent_usd"] == 0.0
     finally:
         main.app.dependency_overrides.clear()
 
@@ -2026,14 +2026,14 @@ def test_a_speaker_with_enough_speech_can_become_one_of_my_voices(client, tmp_pa
     assert upload(client, _mux(video, audio, tmp_path / "talk.mp4"), name="talk.mp4").status_code == 200
     words = tuple(Word(f"w{i}", float(i), i + 0.9, speaker="A") for i in range(11)) + (Word("hm", 11.0, 11.9, speaker="B"),)
     main.repo.update_transcript("p1", Transcript(words=words))
-    client.put("/projects/p1/speakers/A", json={"name": "Presenter"})
+    client.put("/videos/p1/speakers/A", json={"name": "Presenter"})
     assert client.get("/voices/speakers").json() == {"speakers": [
-        {"project_id": "p1", "filename": "talk.mp4", "label": "A", "name": "Presenter", "seconds": 10.9}]}
-    ask = {"project_id": "p1", "label": "A", "name": "Presenter", "consent": True}
+        {"video_id": "p1", "filename": "talk.mp4", "label": "A", "name": "Presenter", "seconds": 10.9}]}
+    ask = {"video_id": "p1", "label": "A", "name": "Presenter", "consent": True}
     assert client.post("/voices/mine/from-speaker", json={**ask, "consent": False}).status_code == 403
     assert client.post("/voices/mine/from-speaker", json={**ask, "label": "B"}).status_code == 422
     assert client.post("/voices/mine/from-speaker", json={**ask, "label": "Z"}).status_code == 404
-    assert client.post("/voices/mine/from-speaker", json={**ask, "project_id": "p9"}).status_code == 404
+    assert client.post("/voices/mine/from-speaker", json={**ask, "video_id": "p9"}).status_code == 404
     made = client.post("/voices/mine/from-speaker", json=ask)
     assert made.status_code == 201, made.text
     body = made.json()
@@ -2041,7 +2041,7 @@ def test_a_speaker_with_enough_speech_can_become_one_of_my_voices(client, tmp_pa
     assert client.get(f"/voices/sample/{body['sample_sha']}").status_code == 200
     assert client.post("/voices/mine/from-speaker", json=ask).status_code == 409
     # The sample is the owner's now: the project can go.
-    client.delete("/projects/p1")
+    client.delete("/videos/p1")
     assert client.get(f"/voices/sample/{body['sample_sha']}").status_code == 200
 
 
@@ -2064,8 +2064,8 @@ def test_a_voice_made_for_a_clip_can_be_kept_as_mine_and_then_outlives_the_proje
     voice = Remembering(main.artifacts)
     monkeypatch.setattr(main, "voice", voice)
     monkeypatch.setattr(main, "clones", CloneService(main.repo, main.artifacts, voice))
-    client.post("/projects/p1/speakers/detect")
-    client.put("/projects/p1/speakers/A", json={"name": "Presenter"})
+    client.post("/videos/p1/speakers/detect")
+    client.put("/videos/p1/speakers/A", json={"name": "Presenter"})
     main.repo.set_settings("p1", made_voices=[
         {"voice_id": "DESIGNED1", "name": "Dusk", "kind": "designed", "description": "an older woman", "at": main._now()},
         {"voice_id": "LIB1", "name": "Riya", "kind": "library", "at": main._now()}])
@@ -2074,7 +2074,7 @@ def test_a_voice_made_for_a_clip_can_be_kept_as_mine_and_then_outlives_the_proje
     assert [(v["voice_id"], v["name"], v["kind"], v["kept"]) for v in made] == [
         ("DESIGNED1", "Dusk", "designed", False), ("LIB1", "Riya", "library", False), ("CLONEA", "Presenter", "cloned", False)]
     assert made[0]["description"] == "an older woman" and made[0]["seconds"] is None and made[2]["seconds"] == 2.3
-    assert all(v["project_id"] == "p1" and v["filename"] == "ad.mp4" for v in made)
+    assert all(v["video_id"] == "p1" and v["filename"] == "ad.mp4" for v in made)
 
     kept = client.post("/voices/mine/keep", json={"voice_id": "DESIGNED1"})
     assert kept.status_code == 201, kept.text
@@ -2088,7 +2088,7 @@ def test_a_voice_made_for_a_clip_can_be_kept_as_mine_and_then_outlives_the_proje
     assert [(v["voice_id"], v["kept"]) for v in client.get("/voices/made").json()["voices"]] == [("LIB1", False), ("CLONEA", True)]
     assert [v["name"] for v in client.get("/voices").json()["mine"]] == ["Dusk", "My presenter"]
     # Deleting the project takes the voice it still owns with it; the kept ones stay at the vendor.
-    assert client.delete("/projects/p1").status_code == 204
+    assert client.delete("/videos/p1").status_code == 204
     assert voice.deleted == ["LIB1"]
     assert [v["name"] for v in client.get("/voices").json()["mine"]] == ["Dusk", "My presenter"]
 
@@ -2126,7 +2126,7 @@ def test_deleting_the_account_removes_every_project_voice_and_default(client, pr
     deleted = []
     monkeypatch.setattr(main.voice, "delete_voice", deleted.append)
     assert client.delete("/account").status_code == 204
-    assert client.get("/projects").json()["projects"] == [] and client.get("/projects/p1").status_code == 404
+    assert client.get("/videos").json()["videos"] == [] and client.get("/videos/p1").status_code == 404
     assert client.get("/voices").json()["mine"] == [] and deleted == [mine["voice_id"]]
     assert client.get(f"/voices/sample/{mine['sample_sha']}").status_code == 404
     assert client.get("/me/settings").json()["autonomy"] == "ask"
@@ -2136,28 +2136,28 @@ def test_deleting_the_account_removes_every_project_voice_and_default(client, pr
 # ── Volt: the Export page's receipt ──────────────────────────────────────────
 
 def test_the_receipt_sums_up_the_project_for_the_export_page(client, project, monkeypatch):
-    assert client.get("/projects/p1/receipt").json() == {"turns": 0, "takes": 0, "spent_usd": 0.0, "changes": [], "drafts": 0, "render": None}
+    assert client.get("/videos/p1/receipt").json() == {"turns": 0, "takes": 0, "spent_usd": 0.0, "changes": [], "drafts": 0, "render": None}
     done = voiced(client, monkeypatch)
-    before = client.get("/projects/p1/receipt").json()
+    before = client.get("/videos/p1/receipt").json()
     assert (before["turns"], before["takes"], before["drafts"], before["render"]) == (1, 1, 1, None)
-    assert before["spent_usd"] == pytest.approx(client.get("/projects/p1/usage").json()["spent_usd"])
-    client.post(f"/projects/p1/plans/{done['plan']['plan_id']}/approve", json={})
-    receipt = client.get("/projects/p1/receipt").json()
+    assert before["spent_usd"] == pytest.approx(client.get("/videos/p1/usage").json()["spent_usd"])
+    client.post(f"/videos/p1/plans/{done['plan']['plan_id']}/approve", json={})
+    receipt = client.get("/videos/p1/receipt").json()
     assert (receipt["turns"], receipt["takes"], receipt["drafts"]) == (1, 1, 0)
     assert receipt["changes"] == [{"edit_id": "e1", "start": 0.0, "text": "Get 30% off today only.", "kind": "changed", "note": "in Test tone's voice"}]
     render = receipt["render"]
     assert render["filename"] == "ad-voltage.mp4" and len(render["sha256"]) == 64 and render["duration"] > 0 and render["at"]
-    assert client.get(f"/projects/p1/artifacts/{render['sha256']}").status_code == 200
+    assert client.get(f"/videos/p1/artifacts/{render['sha256']}").status_code == 200
     # A removal is a draft until it ships, and never a take; a preview render is not the render.
-    removed = client.post("/projects/p1/lines/remove", json={"start": 1.3, "end": 1.8}).json()
-    client.post("/projects/p1/export", json={"with_proposals": True})
-    again = client.get("/projects/p1/receipt").json()
+    removed = client.post("/videos/p1/lines/remove", json={"start": 1.3, "end": 1.8}).json()
+    client.post("/videos/p1/export", json={"with_proposals": True})
+    again = client.get("/videos/p1/receipt").json()
     assert (again["takes"], again["drafts"], again["render"]["sha256"]) == (1, 1, render["sha256"])
-    client.post("/projects/p1/edits/e1/revert")
-    client.post(f"/projects/p1/plans/{removed['plan']['plan_id']}/approve", json={})
-    assert client.get("/projects/p1/receipt").json()["changes"] == [
+    client.post("/videos/p1/edits/e1/revert")
+    client.post(f"/videos/p1/plans/{removed['plan']['plan_id']}/approve", json={})
+    assert client.get("/videos/p1/receipt").json()["changes"] == [
         {"edit_id": "e2", "start": 1.3, "text": "", "kind": "removed", "note": "room tone in its place"}]
-    assert client.get("/projects/p9/receipt").status_code == 404
+    assert client.get("/videos/p9/receipt").status_code == 404
 
 
 def test_a_change_note_says_whose_voice_and_how_it_meets_the_picture(client, project, monkeypatch):

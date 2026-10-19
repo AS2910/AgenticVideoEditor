@@ -25,25 +25,25 @@ def test_full_journey_ingest_turn_approve_export(sample_video, monkeypatch):
     # 1. Ingest a real file; its duration is measured, not claimed
     with open(sample_video, "rb") as handle:
         created = client.post(
-            "/projects",
+            "/videos",
             files={"file": ("summer-sale.mp4", handle, "video/mp4")},
             data={"consent": "true"},  # the UI gates on this before upload
         ).json()
-    project_id = created["project_id"]
+    project_id = created["video_id"]
     assert created["duration"] == pytest.approx(2.3, abs=0.05)
     assert created["consent"] is not None
 
     # The uploaded video is served straight back, seekable
-    media = client.get(f"/projects/{project_id}/artifacts/{created['media']['sha256']}")
+    media = client.get(f"/videos/{project_id}/artifacts/{created['media']['sha256']}")
     assert media.status_code == 200
 
     # 2. Say what you want; Voltage voices the line through its tools (Just do it)
-    client.put(f"/projects/{project_id}/settings", json={"autonomy": "draft"})
+    client.put(f"/videos/{project_id}/settings", json={"autonomy": "draft"})
     _agent_on(monkeypatch, main, [
         reply(take(text="Get 30% off today only."), stop="tool_use"),
         reply(text("Line 1 now says 30% off. Hear it; say ship when you're happy.")),
     ])
-    accepted = client.post(f"/projects/{project_id}/turns", json={"text": 'change "20% off" to "30% off"'})
+    accepted = client.post(f"/videos/{project_id}/turns", json={"text": 'change "20% off" to "30% off"'})
     assert accepted.status_code == 202
     job_id = accepted.json()["job_id"]
 
@@ -65,12 +65,12 @@ def test_full_journey_ingest_turn_approve_export(sample_video, monkeypatch):
 
     # 3. Approve that exact take
     approved = client.post(
-        f"/projects/{project_id}/edits", json={"candidate_id": candidate["candidate_id"]},
+        f"/videos/{project_id}/edits", json={"candidate_id": candidate["candidate_id"]},
     ).json()
     assert approved["edit_id"] == "e1"
 
     # 4. Export shows the edited span; the line is the whole clip, so it is the whole output
-    segments = client.post(f"/projects/{project_id}/export").json()["segments"]
+    segments = client.post(f"/videos/{project_id}/export").json()["segments"]
     edited = [s for s in segments if s["kind"] == "edited"]
     assert len(edited) == 1
     assert edited[0]["start"] == 0.0 and edited[0]["end"] == 2.3

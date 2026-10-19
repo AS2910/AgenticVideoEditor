@@ -40,13 +40,14 @@ CONTEXT_MANAGEMENT = {"edits": [{"type": "clear_tool_uses_20250919", "trigger": 
 
 # (model, input, output, cache_read, cache_write) tokens of one request.
 Meter = Callable[[str, int, int, int, int], None]
-# (step, cost_usd, tool name); a callback that takes only the first two still works.
+# (step, cost_usd, tool name, data); a callback that takes only the first two or three still works.
 OnStep = Callable[..., None]
 
 
-def _narrator(on_step: OnStep | None) -> Callable[[str, float, str], None] | None:
-    """`on_step` as a three-argument call. The trace wants the tool behind
-    each step; callers written for (step, cost) keep working."""
+def _narrator(on_step: OnStep | None) -> Callable[[str, float, str, Any], None] | None:
+    """`on_step` as a four-argument call. The trace wants the tool behind
+    each step and what the step carries (search_help's articles); callers
+    written for (step, cost) or (step, cost, tool) keep working."""
     if on_step is None:
         return None
     try:
@@ -54,9 +55,11 @@ def _narrator(on_step: OnStep | None) -> Callable[[str, float, str], None] | Non
     except (TypeError, ValueError):
         return on_step
     positional = [p for p in params if p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD)]
-    if len(positional) >= 3 or any(p.kind == p.VAR_POSITIONAL for p in params):
+    if len(positional) >= 4 or any(p.kind == p.VAR_POSITIONAL for p in params):
         return on_step
-    return lambda step, cost, tool: on_step(step, cost)
+    if len(positional) == 3:
+        return lambda step, cost, tool, data: on_step(step, cost, tool)
+    return lambda step, cost, tool, data: on_step(step, cost)
 
 
 @dataclass
@@ -267,7 +270,7 @@ class Agent:
                 if result.step:
                     out.steps.append(result.step)
                     if narrate:
-                        narrate(result.step, result.cost_usd, use["name"])
+                        narrate(result.step, result.cost_usd, use["name"], result.data)
                 if result.card and on_card:
                     on_card(result.card["text"], result.card["data"])
             append("user", results)

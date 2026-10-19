@@ -1,0 +1,342 @@
+import { useEffect, useRef, useState } from 'react'
+import type { DragEvent } from 'react'
+import type { ProjectDetailFolder, ProjectFolder, ProjectSummary, MyVoice, MadeVoice } from '../types'
+import type { Me } from '../api'
+import { ApiError, answerSuggestion, deleteFolder, deleteFolderFile, frameUrl, getFolder, listMadeVoices, listVoices, shareVoice, unshareVoice, updateFolder, uploadFolderFile } from '../api'
+import { go, hrefFor } from '../lib/route'
+import { clock } from '../transcript/format'
+import { cn } from '@/lib/utils'
+import { Shell } from './Shell'
+import { usd, usdShort, whenLabel } from './fmt'
+
+interface ProjectPageProps {
+  me: Me | null
+  projectId: string
+  /** A file dropped on the page goes into this project. */
+  onUpload: (file: File, projectId: string) => void
+  uploading?: boolean
+  error?: string | null
+  /** The project is gone (deleted); the caller leaves. */
+  onDeleted?: () => void
+}
+
+const STATE_WORD: Record<NonNullable<ProjectSummary['state']>, string> = { new: 'New', draft: 'Draft', shipped: 'Exported' }
+const AUTONOMY_WORD: Record<string, string> = { ask: 'Check with me', draft: 'Just do it' }
+
+/** The video's first frame; a plain dark block when there is none to fetch. */
+function Frame({ id }: { id: string }) {
+  const [broken, setBroken] = useState(false)
+  if (broken) return <span className="absolute inset-0 block bg-pic" aria-hidden="true" />
+  return <img className="absolute inset-0 size-full object-cover" src={frameUrl(id, 0)} alt="" loading="lazy" decoding="async" onError={() => setBroken(true)} />
+}
+
+/** A project (folders, 2026-10-19): its videos, and what they share — the
+ *  brief Voltage reads in every turn (with its suggestions to accept), the
+ *  shared voices, the reference files, the defaults and the ceiling. */
+export function ProjectPage({ me, projectId, onUpload, uploading, error, onDeleted }: ProjectPageProps) {
+  const [detail, setDetail] = useState<ProjectDetailFolder | null>(null)
+  const [missing, setMissing] = useState<string | null>(null)
+  const [brief, setBrief] = useState('')
+  const [savedAt, setSavedAt] = useState<number | null>(null)
+  const [menu, setMenu] = useState(false)
+  const [renaming, setRenaming] = useState(false)
+  const [name, setName] = useState('')
+  const [deleting, setDeleting] = useState(false)
+  const [ceilingDraft, setCeilingDraft] = useState<string | null>(null)
+  const [adding, setAdding] = useState(false)
+  const [mine, setMine] = useState<(MyVoice | MadeVoice)[]>([])
+  const [busy, setBusy] = useState<string | null>(null)
+  const [note, setNote] = useState<string | null>(null)
+  const [over, setOver] = useState(false)
+  const fileInput = useRef<HTMLInputElement>(null)
+  const refInput = useRef<HTMLInputElement>(null)
+  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const load = async () => {
+    try {
+      const d = await getFolder(projectId)
+      setDetail(d)
+      setBrief(d.project.brief)
+      setName(d.project.name)
+    } catch (e) {
+      setMissing(e instanceof ApiError && e.status === 404 ? 'That project is gone.' : e instanceof Error ? e.message : 'Could not open the project.')
+    }
+  }
+  useEffect(() => { void load() /* eslint-disable-line react-hooks/exhaustive-deps */ }, [projectId])
+  useEffect(() => () => { if (saveTimer.current) clearTimeout(saveTimer.current) }, [])
+  useEffect(() => {
+    if (!menu) return
+    const close = (e: MouseEvent) => { if (!(e.target as HTMLElement).closest('[data-menu]')) setMenu(false) }
+    window.addEventListener('click', close)
+    return () => window.removeEventListener('click', close)
+  }, [menu])
+
+  const project = detail?.project
+  const say = (e: unknown, fallback: string) => setNote(e instanceof Error ? e.message : fallback)
+
+  /** The brief saves itself a moment after typing stops; a change reaches every video in the project. */
+  const editBrief = (text: string) => {
+    setBrief(text)
+    if (saveTimer.current) clearTimeout(saveTimer.current)
+    saveTimer.current = setTimeout(() => {
+      saveTimer.current = null
+      updateFolder(projectId, { brief: text }).then((p) => { setDetail((d) => (d ? { ...d, project: p } : d)); setSavedAt(Date.now()) }).catch((e) => say(e, 'Could not save the brief.'))
+    }, 600)
+  }
+  const rename = async () => {
+    const n = name.trim()
+    if (!n || !project) return
+    try {
+      const p = await updateFolder(projectId, { name: n })
+      setDetail((d) => (d ? { ...d, project: p } : d))
+      setRenaming(false)
+    } catch (e) { say(e, 'Could not rename the project.') }
+  }
+  const remove = async (videos: 'delete' | 'keep') => {
+    setBusy('delete')
+    try {
+      await deleteFolder(projectId, videos)
+      onDeleted?.()
+      go({ page: 'projects' })
+    } catch (e) { say(e, 'Could not delete the project.') } finally { setBusy(null); setDeleting(false) }
+  }
+  const saveCeiling = async () => {
+    if (ceilingDraft === null) return
+    const n = ceilingDraft.trim() === '' ? null : Number(ceilingDraft)
+    if (n !== null && !(n > 0)) { setNote('A ceiling is a number of dollars, or empty for none.'); return }
+    try {
+      const p = await updateFolder(projectId, { ceiling_usd: n })
+      setDetail((d) => (d ? { ...d, project: p } : d))
+      setCeilingDraft(null)
+    } catch (e) { say(e, 'Could not set the ceiling.') }
+  }
+  const setDefault = async (change: Partial<NonNullable<ProjectFolder['settings']>>) => {
+    if (!project) return
+    try {
+      const p = await updateFolder(projectId, { settings: { ...(project.settings ?? { autonomy: 'ask' }), ...change } })
+      setDetail((d) => (d ? { ...d, project: p } : d))
+    } catch (e) { say(e, 'Could not change the default.') }
+  }
+  const answer = async (sid: string, what: 'accept' | 'dismiss') => {
+    setBusy(sid)
+    try {
+      const d = await answerSuggestion(projectId, sid, what)
+      setDetail(d)
+      setBrief(d.project.brief)
+    } catch (e) { say(e, 'Could not answer that.') } finally { setBusy(null) }
+  }
+  const openAdd = async () => {
+    setAdding(true)
+    try {
+      const [v, made] = await Promise.all([listVoices(), listMadeVoices().then((r) => r.voices).catch(() => [] as MadeVoice[])])
+      const have = new Set((detail?.voices ?? []).map((x) => x.voice_id))
+      setMine([...(v.mine ?? []), ...made].filter((x) => !have.has(x.voice_id)))
+    } catch (e) { say(e, 'Could not list your voices.') }
+  }
+  const share = async (voiceId: string) => {
+    setBusy(voiceId)
+    try {
+      const voices = await shareVoice(projectId, voiceId)
+      setDetail((d) => (d ? { ...d, voices } : d))
+      setAdding(false)
+    } catch (e) { say(e, 'Could not share that voice.') } finally { setBusy(null) }
+  }
+  const unshare = async (voiceId: string) => {
+    setBusy(voiceId)
+    try {
+      await unshareVoice(projectId, voiceId)
+      setDetail((d) => (d ? { ...d, voices: d.voices.filter((v) => v.voice_id !== voiceId) } : d))
+    } catch (e) { say(e, 'Could not remove that voice.') } finally { setBusy(null) }
+  }
+  const addFile = async (file: File | undefined) => {
+    if (!file) return
+    setBusy('file')
+    try {
+      const entry = await uploadFolderFile(projectId, file)
+      setDetail((d) => (d ? { ...d, files: [...d.files.filter((f) => f.sha256 !== entry.sha256), entry] } : d))
+    } catch (e) { say(e, 'Could not add that file.') } finally { setBusy(null) }
+  }
+  const dropFile = async (sha: string) => {
+    setBusy(sha)
+    try {
+      await deleteFolderFile(projectId, sha)
+      setDetail((d) => (d ? { ...d, files: d.files.filter((f) => f.sha256 !== sha) } : d))
+    } catch (e) { say(e, 'Could not remove that file.') } finally { setBusy(null) }
+  }
+  const onDrop = (e: DragEvent) => { e.preventDefault(); setOver(false); const f = e.dataTransfer?.files?.[0]; if (f && !uploading) onUpload(f, projectId) }
+
+  if (missing) {
+    return (
+      <Shell active="projects" me={me} mainClassName="mx-auto flex w-full max-w-[720px] flex-col items-start gap-4 px-6 py-16">
+        <p className="disp m-0 text-2xl font-bold" role="alert">{missing}</p>
+        <a className="btn sm" href={hrefFor({ page: 'projects' })}>← Home</a>
+      </Shell>
+    )
+  }
+  if (!detail || !project) {
+    return <Shell active="projects" me={me} mainClassName="mx-auto w-full max-w-[1200px] px-6 py-16"><p className="m-0 text-muted-foreground" role="status">Opening the project…</p></Shell>
+  }
+  const voiceKind: Record<string, string> = { designed: 'Designed', cloned: 'Cloned', recorded: 'Recorded', library: 'Library' }
+  const ceiling = project.ceiling_usd
+  const share_ = ceiling && ceiling > 0 ? Math.min(1, project.spent_usd / ceiling) : 0
+  const tagLine = [`${detail.videos.length} ${detail.videos.length === 1 ? 'video' : 'videos'}`, `${detail.voices.length} shared ${detail.voices.length === 1 ? 'voice' : 'voices'}`, `${detail.files.length} ${detail.files.length === 1 ? 'file' : 'files'}`, ceiling ? `${usd(project.spent_usd)} of the ${usdShort(ceiling)} project ceiling` : `${usd(project.spent_usd)} spent · no project ceiling`].join(' · ')
+
+  return (
+    <Shell active="projects" me={me} mainClassName="mx-auto flex w-full max-w-[1200px] flex-col gap-7 px-4 pt-9 pb-20 sm:px-6">
+      <div className="flex flex-col gap-2.5">
+        <a href={hrefFor({ page: 'projects' })} className="tag text-faint no-underline">← Home / Projects</a>
+        <div className="flex flex-wrap items-end gap-[18px]">
+          <div className="flex min-w-0 flex-[1_1_420px] flex-col gap-1.5">
+            {renaming ? (
+              <form className="flex flex-wrap items-center gap-2" onSubmit={(e) => { e.preventDefault(); void rename() }}>
+                <input className="disp h-14 min-w-0 flex-1 rounded-lg border-[1.5px] border-foreground bg-card px-3 text-[32px] font-bold outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50" aria-label="Project name" value={name} autoFocus onChange={(e) => setName(e.target.value)} onKeyDown={(e) => { if (e.key === 'Escape') { setRenaming(false); setName(project.name) } }} />
+                <button type="submit" className="btn sm" disabled={!name.trim()}>Save</button>
+                <button type="button" className="act" onClick={() => { setRenaming(false); setName(project.name) }}>Cancel</button>
+              </form>
+            ) : (
+              <h1 className="disp rise m-0 truncate text-[clamp(36px,5vw,56px)] leading-none font-bold">{project.name}</h1>
+            )}
+            <span className="tag text-muted-foreground">{tagLine}</span>
+          </div>
+          <div className="relative" data-menu>
+            <button type="button" className="btn" aria-label="More for this project" aria-haspopup="menu" aria-expanded={menu} onClick={() => setMenu((m) => !m)}>•••</button>
+            {menu && (
+              <div role="menu" className="rise absolute right-0 z-10 mt-1 flex w-56 flex-col rounded-xl border-[1.5px] border-ink bg-card p-1.5 shadow-volt">
+                <button type="button" role="menuitem" className="act justify-start" onClick={() => { setMenu(false); setRenaming(true) }}>Rename…</button>
+                <button type="button" role="menuitem" className="act justify-start" onClick={() => { setMenu(false); setDeleting(true) }}>Delete project…</button>
+              </div>
+            )}
+          </div>
+          <button type="button" className="btn volt shine" onClick={() => fileInput.current?.click()} disabled={uploading}>{uploading ? 'Uploading…' : '+ Upload to this project'}</button>
+          <input ref={fileInput} className="sr-only" type="file" accept="video/*" aria-label="Choose a video for this project" tabIndex={-1} onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) onUpload(f, projectId) }} />
+        </div>
+        {deleting && (
+          <div className="flex flex-wrap items-center gap-3 rounded-xl border-[1.5px] border-destructive bg-card p-4" role="group" aria-label={`Delete ${project.name}?`} data-testid="delete-project">
+            <span className="flex-1 text-sm">Delete <strong>{project.name}</strong>? Its {detail.videos.length} {detail.videos.length === 1 ? 'video' : 'videos'} can go with it, or stay as standalone videos. Project voices go unless kept in your voices.</span>
+            <button type="button" className="btn sm" onClick={() => setDeleting(false)} disabled={busy === 'delete'}>Keep the project</button>
+            <button type="button" className="btn sm" onClick={() => void remove('keep')} disabled={busy === 'delete'}>Delete, keep the videos</button>
+            <button type="button" className="btn sm border-destructive text-destructive" onClick={() => void remove('delete')} disabled={busy === 'delete'}>Delete the videos too</button>
+          </div>
+        )}
+        {(error || note) && <div className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive" role="alert">{error ?? note}</div>}
+      </div>
+
+      <div className="flex flex-wrap items-start gap-7">
+        <section aria-label="Videos" className="flex min-w-0 flex-[999_1_560px] flex-col gap-3.5">
+          <h2 className="disp m-0 text-2xl font-bold">Videos</h2>
+          <div className="-mx-3 grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-2.5">
+            {detail.videos.map((v, i) => {
+              const state = v.state ?? 'new'
+              return (
+                <a key={v.video_id} href={hrefFor({ page: 'editor', projectId: v.video_id })} className="rise flex flex-col gap-2.5 rounded-xl border-[1.5px] border-transparent p-3 text-foreground no-underline transition-all duration-200 hover:-translate-x-0.5 hover:-translate-y-0.5 hover:border-foreground hover:bg-card hover:shadow-ink focus-visible:border-foreground" style={{ animationDelay: `${Math.min(i, 6) * 80}ms` }}>
+                  <span className="relative block aspect-[16/10] overflow-hidden rounded-[10px] border-[1.5px] border-ink bg-pic">
+                    <Frame id={v.video_id} />
+                    <span className={cn('stamp absolute top-2 left-2', state !== 'draft' && 'bg-ink/70 text-ptext')}>{v.last_change && /proposed/i.test(v.last_change) ? v.last_change : STATE_WORD[state]}</span>
+                    <span className="tnum absolute right-2 bottom-2 rounded bg-ink/60 px-1.5 text-xs text-ptext">{clock(v.duration)}</span>
+                  </span>
+                  <span className="truncate font-semibold">{v.filename}</span>
+                  <span className="truncate text-[13px] text-muted-foreground">{v.last_change ?? (v.edits > 0 ? `${v.edits} ${v.edits === 1 ? 'change' : 'changes'} in the file` : 'Nothing changed yet')}</span>
+                </a>
+              )
+            })}
+            <div
+              role="group" aria-label="Drop a video here" data-over={over || undefined}
+              className={cn('m-3 grid min-h-[200px] cursor-pointer place-items-center rounded-xl border-[1.5px] border-dashed border-foreground p-5 text-center text-muted-foreground transition-colors hover:bg-sunk', over && 'bg-sunk')}
+              onClick={() => fileInput.current?.click()}
+              onDragOver={(e) => { e.preventDefault(); if (!uploading) setOver(true) }} onDragLeave={() => setOver(false)} onDrop={onDrop}
+            >
+              <span><span className="disp block text-lg font-bold text-foreground">Drop a video here</span>It joins {project.name} with its brief and voices.</span>
+            </div>
+          </div>
+          <div className="flex items-center gap-3 rounded-xl bg-pane px-4 py-3.5 text-ptext">
+            <span className="tag text-volt">Later</span>
+            <span className="flex-1 text-sm">One goal across every video here, like “make all three 25% off”, is planned as a batch turn.</span>
+          </div>
+        </section>
+
+        <aside aria-label="Shared with every video" className="flex min-w-0 flex-[1_1_340px] flex-col gap-3.5">
+          <div className="rise flex flex-col gap-3 rounded-xl border-[1.5px] border-foreground bg-card p-[18px] shadow-volt-lg" data-testid="brief">
+            <div className="flex flex-wrap items-center gap-2"><span className="disp text-xl font-bold">Brief</span><span className="tag text-faint">Voltage reads this in every turn</span><span className="flex-1" />{savedAt && <span className="tag text-faint" role="status">Saved</span>}</div>
+            <label htmlFor="brief" className="sr-only">Project brief</label>
+            <textarea id="brief" rows={5} className="w-full resize-y rounded-lg border-[1.5px] border-line2 bg-background p-3 text-[14.5px] leading-[1.55] outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50" value={brief} placeholder="What every video here should know: the brand and how it is said, the offer, the tone." onChange={(e) => editBrief(e.target.value)} />
+            {detail.suggestions.map((s) => (
+              <div key={s.id} className="rise flex flex-col gap-2 rounded-lg bg-pane p-3 text-ptext" data-testid="suggestion">
+                <span className="tag text-volt">Voltage suggests adding</span>
+                <span className="text-sm">“{s.text}”{s.filename ? ` It came up in ${s.filename} and applies to every video.` : ''}{s.why ? ` ${s.why}` : ''}</span>
+                <div className="flex gap-2"><button type="button" className="btn volt sm" onClick={() => void answer(s.id, 'accept')} disabled={busy === s.id}>Add to brief</button><button type="button" className="btn ghost sm" onClick={() => void answer(s.id, 'dismiss')} disabled={busy === s.id}>Not now</button></div>
+              </div>
+            ))}
+          </div>
+
+          <div className="rise d1 flex flex-col gap-2 rounded-xl border-[1.5px] border-foreground bg-card p-[18px]" data-testid="shared-voices">
+            <div className="flex items-center gap-2"><span className="disp text-xl font-bold">Shared voices</span><span className="flex-1" /><button type="button" className="btn sm" onClick={() => void openAdd()} aria-expanded={adding}>+ Add</button></div>
+            {detail.voices.length === 0 && !adding && <span className="text-[13px] text-muted-foreground">Share one of your voices and every video here can ask for it by name.</span>}
+            {detail.voices.map((v) => (
+              <div key={v.voice_id} className="flex items-center gap-2.5 border-t border-line py-2">
+                <span className={cn('stamp', v.kind === 'designed' ? 'inkd' : v.kind === 'cloned' ? '' : 'in')}>{voiceKind[v.kind ?? 'recorded'] ?? v.kind}</span>
+                <span className="flex-1 truncate font-semibold">{v.name}</span>
+                <span className="tag text-faint">{v.used_in_project ? `${v.used_in_project} ${v.used_in_project === 1 ? 'video' : 'videos'}` : v.consent ? `consent ${whenLabel(v.consent)}` : ''}</span>
+                <button type="button" className="act" onClick={() => void unshare(v.voice_id)} disabled={busy === v.voice_id} aria-label={`Remove ${v.name} from the project`}>Remove</button>
+              </div>
+            ))}
+            {adding && (
+              <div className="flex flex-col gap-1.5 rounded-lg bg-sunk p-2.5" role="group" aria-label="Your voices">
+                {mine.length === 0 && <span className="text-[13px] text-muted-foreground">Nothing to share yet. Keep a voice on the Voices page first.</span>}
+                {mine.map((v) => (
+                  <button key={v.voice_id} type="button" className="flex items-center gap-2.5 rounded-md px-2 py-1.5 text-left hover:bg-card" onClick={() => void share(v.voice_id)} disabled={busy === v.voice_id}>
+                    <span className="flex-1 truncate font-medium">{v.name}</span><span className="tag text-faint">{'kind' in v && v.kind ? voiceKind[v.kind] ?? v.kind : ''}</span>
+                  </button>
+                ))}
+                <button type="button" className="act self-start" onClick={() => setAdding(false)}>Close</button>
+              </div>
+            )}
+          </div>
+
+          <div className="rise d2 flex flex-col gap-2 rounded-xl border-[1.5px] border-foreground bg-card p-[18px]" data-testid="files">
+            <div className="flex items-center gap-2"><span className="disp text-xl font-bold">Reference files</span><span className="flex-1" /><button type="button" className="btn sm" onClick={() => refInput.current?.click()} disabled={busy === 'file'}>{busy === 'file' ? 'Adding…' : '+ Add'}</button></div>
+            <input ref={refInput} className="sr-only" type="file" aria-label="Choose a reference file" tabIndex={-1} onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; void addFile(f) }} />
+            {detail.files.length === 0 && <span className="text-[13px] text-muted-foreground">A script, a brand guide, a clip of how the name is said. Voltage can read them.</span>}
+            {detail.files.map((f) => (
+              <div key={f.sha256} className="flex items-center gap-2.5 border-t border-line py-2">
+                <span className="tnum text-xs text-faint uppercase">{f.kind}</span>
+                <span className="flex-1 truncate">{f.name}</span>
+                <button type="button" className="act" onClick={() => void dropFile(f.sha256)} disabled={busy === f.sha256} aria-label={`Remove ${f.name}`}>Remove</button>
+              </div>
+            ))}
+          </div>
+
+          <div className="rise d3 flex flex-col gap-2 rounded-xl border-[1.5px] border-foreground bg-card p-[18px]" data-testid="defaults">
+            <span className="disp text-xl font-bold">Defaults for new videos</span>
+            <div className="flex items-center gap-2.5 border-t border-line py-2">
+              <span className="flex-1">How much Voltage may do</span>
+              <div className="segs" role="group" aria-label="How much Voltage may do">
+                {(['ask', 'draft'] as const).map((a) => <button key={a} type="button" className="seg" aria-pressed={(project.settings?.autonomy ?? 'ask') === a} onClick={() => void setDefault({ autonomy: a })}>{AUTONOMY_WORD[a]}</button>)}
+              </div>
+            </div>
+            <div className="flex items-center gap-2.5 border-t border-line py-2">
+              <span className="flex-1">Money per turn</span>
+              <label className="flex items-center gap-1.5"><span className="sr-only">Money per turn, dollars</span><span className="tnum">$</span>
+                <input className="tnum h-8 w-20 rounded-md border-[1.5px] border-line2 bg-background px-2 text-right outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50" type="number" step="0.1" min="0.1" defaultValue={(project.settings?.turn_usd ?? 0.5).toFixed(2)} aria-label="Money per turn" onBlur={(e) => { const n = Number(e.target.value); if (n > 0 && n !== project.settings?.turn_usd) void setDefault({ turn_usd: n }) }} />
+              </label>
+            </div>
+            <div className="flex items-center gap-2.5 border-t border-line py-2">
+              <span className="flex-1">Project ceiling</span>
+              {ceilingDraft === null ? (
+                <button type="button" className="act tnum font-semibold" onClick={() => setCeilingDraft(ceiling ? String(ceiling) : '')} aria-label="Change the project ceiling">{ceiling ? `${usd(project.spent_usd)} / ${usdShort(ceiling)}` : 'None · set one'}</button>
+              ) : (
+                <form className="flex items-center gap-1.5" onSubmit={(e) => { e.preventDefault(); void saveCeiling() }}>
+                  <span className="tnum">$</span>
+                  <input className="tnum h-8 w-20 rounded-md border-[1.5px] border-line2 bg-background px-2 text-right outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50" type="number" step="1" min="0" value={ceilingDraft} aria-label="Project ceiling, dollars; empty for none" autoFocus onChange={(e) => setCeilingDraft(e.target.value)} />
+                  <button type="submit" className="btn sm">Set</button>
+                  <button type="button" className="act" onClick={() => setCeilingDraft(null)}>Cancel</button>
+                </form>
+              )}
+            </div>
+            {ceiling ? <div className="h-2 overflow-hidden rounded-[3px] border-[1.5px] border-foreground" role="meter" aria-label="Spent against the project ceiling" aria-valuemin={0} aria-valuemax={ceiling} aria-valuenow={project.spent_usd}><span className="fillin block h-full bg-volt" style={{ width: `${share_ * 100}%` }} /></div> : null}
+            <span className="text-[13px] text-muted-foreground">Each video keeps its own settings; these are what a new one starts with. The lowest ceiling wins.</span>
+          </div>
+        </aside>
+      </div>
+    </Shell>
+  )
+}

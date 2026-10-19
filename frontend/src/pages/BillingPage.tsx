@@ -19,7 +19,7 @@ export function BillingPage({ me }: { me: Me | null }) {
     return () => { live = false }
   }, [])
   const share = report && report.ceiling_usd > 0 ? report.spent_usd / report.ceiling_usd : 0
-  const top = report?.by_project.reduce<UsageReport['by_project'][number] | null>((a, b) => (a === null || b.spent_usd > a.spent_usd ? b : a), null) ?? null
+  const top = report?.by_video.reduce<UsageReport['by_video'][number] | null>((a, b) => (a === null || b.spent_usd > a.spent_usd ? b : a), null) ?? null
   const card = 'rounded-xl border-[1.5px] border-foreground bg-card p-[22px]'
   const cell = 'flex flex-col gap-2 rounded-[10px] bg-sunk p-4'
 

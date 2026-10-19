@@ -7,7 +7,7 @@ const ok = (body: unknown) => ({ ok: true, status: 200, json: async () => body, 
 const report = (period: string) => ({
   period, spent_usd: period === 'week' ? 1.12 : 2.06, ceiling_usd: 10, project_cap_usd: 2, turns: period === 'week' ? 9 : 16, takes: 14, voices_made: 3, avg_turn_usd: 0.14,
   by_vendor: [{ vendor: 'Claude', label: 'Voltage thinking', usd: 1.31 }, { vendor: 'ElevenLabs', label: 'Voices and takes', usd: 0.7 }],
-  by_project: [{ project_id: 'p2', filename: 'bhaji-cam-ad.mp4', turns: 5, voice_characters: 612, spent_usd: 1.07, cap_usd: 2 }],
+  by_video: [{ video_id: 'p2', filename: 'bhaji-cam-ad.mp4', turns: 5, voice_characters: 612, spent_usd: 1.07, cap_usd: 2 }],
 })
 function routeFetch() {
   const f = vi.fn(async (url: string) => {
@@ -37,7 +37,7 @@ describe('UsagePage', () => {
     expect(screen.getByText('Avg turn', { selector: 'div' }).nextElementSibling).toHaveTextContent('$0.14')
     expect(screen.getByText('Voltage thinking')).toBeInTheDocument()
     expect(screen.getByText('$1.31')).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: 'bhaji-cam-ad.mp4' })).toHaveAttribute('href', '#p2')
+    expect(screen.getByRole('link', { name: 'bhaji-cam-ad.mp4' })).toHaveAttribute('href', '#v/p2')
     expect(screen.getByText('612')).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Raise the ceiling' })).toHaveAttribute('href', '#billing')
     expect(screen.getByRole('link', { name: 'Usage' })).toHaveAttribute('aria-current', 'page')

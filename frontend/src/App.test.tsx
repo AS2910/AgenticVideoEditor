@@ -10,7 +10,8 @@ const SOURCE_MEDIA = {
 const PROJECT = {
   statements: [{ text: 'Get 20% off today only.', start: 0.0, end: 2.3 }],
   consent: { granted_at: '2026-09-26T08:00:00Z' },
-  project_id: 'p1',
+  video_id: 'p1',
+  project_id: null,
   filename: 'sample-ad.mp4',
   duration: 2.3,
   media: SOURCE_MEDIA,
@@ -123,8 +124,10 @@ function routeFetch(job: unknown = JOB_TURN) {
       return ok({ spent_usd: 0.01, ceiling_usd: 2, voice_characters: 7,
         voice_characters_ceiling: 2000, lines: [] })
     }
-    if (url.endsWith('/projects/p1') && !_init?.method) return ok({ ...PROJECT, created_at: '2026-09-26T08:00:00Z', edits: [], messages: [] })
-    if (url.endsWith('/projects')) return ok(_init?.method === 'POST' ? PROJECT : { projects: [] })
+    if (url.endsWith('/videos/p1') && !_init?.method) return ok({ ...PROJECT, created_at: '2026-09-26T08:00:00Z', edits: [], messages: [] })
+    if (url.endsWith('/videos') && _init?.method === 'POST') return ok(PROJECT)
+    if (/\/videos(\?|$)/.test(url) && !_init?.method) return ok({ videos: [] })
+    if (url.endsWith('/projects') && !_init?.method) return ok({ projects: [] })
     // The sample clip is fetched from /public, then uploaded like any file.
     if (url.endsWith('/sample-ad.mp4')) {
       return { ok: true, status: 200, blob: async () => new Blob(['mp4-bytes']) } as Response
@@ -156,7 +159,7 @@ function agent(initial: unknown = PLAN, onTurn: (text: string) => unknown = () =
     }
     if (/\/plans\/plan1$/.test(url)) return ok(current)
     // The project as the server has it: the plan's approved items are its live edits (20g: the panel syncs edits after a turn).
-    if (url.endsWith('/projects/p1') && !init?.method) {
+    if (url.endsWith('/videos/p1') && !init?.method) {
       const p = current as { items?: { status: string; edit_id: string | null; selection: { start: number; end: number }; new_text: string; mix: string; candidate: { candidate_id: string } | null }[] } | null
       const edits = (p?.items ?? []).filter((i) => i.status === 'approved' && i.edit_id).map((i) => ({
         edit_id: i.edit_id, candidate_id: i.candidate?.candidate_id ?? 'c1', selection: i.selection, new_text: i.new_text, mix: i.mix, old_text: '', reverted: false,
@@ -219,7 +222,7 @@ describe('App full journey', () => {
     await user.type(screen.getByRole('textbox', TEXTBOX), 'change "20% off" to "30% off"{Enter}')
 
     // Everything goes through one door.
-    expect(calls[0]).toMatchObject({ url: '/api/projects/p1/turns', body: { text: 'change "20% off" to "30% off"' } })
+    expect(calls[0]).toMatchObject({ url: '/api/videos/p1/turns', body: { text: 'change "20% off" to "30% off"' } })
     await waitFor(() => expect(screen.getAllByTestId('take').some((t) => t.textContent?.includes("Brian's voice"))).toBe(true))
     await waitFor(() => expect(screen.getByTestId('spend')).toHaveTextContent('$0.01'))
     // 20e: the proposal is a row in the one transcript, with its verbs; nothing to ship in the panel.
@@ -231,7 +234,7 @@ describe('App full journey', () => {
 
     // Volt: the line is in the video; the file is on the export page.
     await waitFor(() => expect(screen.getByText('✓ In the video')).toBeInTheDocument())
-    expect(screen.getByRole('link', { name: 'Export' })).toHaveAttribute('href', '#p1/export')
+    expect(screen.getByRole('link', { name: 'Export' })).toHaveAttribute('href', '#v/p1/export')
   })
 
   it("says in the thread when a turn fails on Voltage's side, and stops waiting", async () => {
@@ -252,7 +255,7 @@ describe('App full journey', () => {
     const base = fetch as unknown as (url: string, init?: RequestInit) => Promise<Response>
     const granted: string[] = []
     const f = vi.fn(async (url: string, init?: RequestInit) => {
-      if (url.endsWith('/projects') && init?.method === 'POST') return ok({ ...PROJECT, consent: null })
+      if (url.endsWith('/videos') && init?.method === 'POST') return ok({ ...PROJECT, consent: null })
       if (url.endsWith('/consent')) { granted.push(url); return ok({ project_id: 'p1', consent: { granted_at: '2026-10-04T10:00:00Z' } }) }
       if (url.endsWith('/turns') && granted.length === 0) {
         return { ok: false, status: 403, json: async () => ({ detail: refusal }), text: async () => JSON.stringify({ detail: refusal }) } as Response
@@ -264,7 +267,7 @@ describe('App full journey', () => {
     render(<App />)
     await reachGoal(user)
 
-    const upload = f.mock.calls.find(([url, init]) => String(url).endsWith('/projects') && init?.method === 'POST')
+    const upload = f.mock.calls.find(([url, init]) => String(url).endsWith('/videos') && init?.method === 'POST')
     expect((upload![1]!.body as FormData).get('consent')).toBe('false')
 
     await user.type(screen.getByRole('textbox', TEXTBOX), 'change "20% off" to "30% off"{Enter}')
@@ -320,13 +323,13 @@ describe('App playback after shipping', () => {
     await user.click(within(screen.getByRole('group', { name: 'Proposal at 0:00' })).getByRole('button', { name: 'Add it' }))
 
     const video = () => container.querySelector('video') as HTMLVideoElement
-    const renderUrl = `/api/projects/p1/artifacts/${'r'.repeat(64)}`
+    const renderUrl = `/api/videos/p1/artifacts/${'r'.repeat(64)}`
     await waitFor(() => expect(video().getAttribute('src')).toBe(renderUrl))
     expect(screen.getByRole('button', { name: 'Final' })).toHaveAttribute('aria-pressed', 'true')
     expect(screen.queryByRole('button', { name: 'With proposals' })).toBeNull()   // nothing is proposed any more
 
     await user.click(screen.getByRole('button', { name: 'Original' }))
-    expect(video().getAttribute('src')).toBe(`/api/projects/p1/artifacts/${'s'.repeat(64)}`)
+    expect(video().getAttribute('src')).toBe(`/api/videos/p1/artifacts/${'s'.repeat(64)}`)
   })
 })
 
@@ -345,14 +348,14 @@ describe('App projects (Phase 9a)', () => {
   function withProjects() {
     const base = routeFetch()
     const f = vi.fn(async (url: string, init?: RequestInit) => {
-      if (url.endsWith('/projects') && init?.method !== 'POST') {
-        return ok({ projects: [{ project_id: 'p1', filename: 'sample-ad.mp4', duration: 2.3,
+      if (/\/videos(\?|$)/.test(url) && init?.method !== 'POST') {
+        return ok({ videos: [{ video_id: 'p1', project_id: null, filename: 'sample-ad.mp4', duration: 2.3,
           created_at: '2026-09-26T08:00:00Z', edits: 1 }] })
       }
-      if (url.endsWith('/projects/p1') && init?.method === 'DELETE') {
+      if (url.endsWith('/videos/p1') && init?.method === 'DELETE') {
         return { ok: true, status: 204, text: async () => '' } as Response
       }
-      if (url.endsWith('/projects/p1')) return ok(DETAIL)
+      if (url.endsWith('/videos/p1')) return ok(DETAIL)
       return base(url, init)
     })
     vi.stubGlobal('fetch', f)
@@ -377,7 +380,7 @@ describe('App projects (Phase 9a)', () => {
     expect(screen.getByTestId('revision')).toHaveTextContent('Get 20% 30% off today only.')
     expect(screen.getAllByText('20%').length).toBeGreaterThan(0)
     await waitFor(() => expect((container.querySelector('video') as HTMLVideoElement)
-      .getAttribute('src')).toBe(`/api/projects/p1/artifacts/${'r'.repeat(64)}`))
+      .getAttribute('src')).toBe(`/api/videos/p1/artifacts/${'r'.repeat(64)}`))
     expect(f.mock.calls.some(([url]) => String(url).endsWith('/export'))).toBe(true)
   })
 
@@ -387,12 +390,13 @@ describe('App projects (Phase 9a)', () => {
     render(<App />)
     await toLoadScreen(user)
 
-    await user.click(await screen.findByRole('button', { name: 'Delete sample-ad.mp4' }))
+    await user.click(await screen.findByRole('button', { name: 'More for sample-ad.mp4' }))
+    await user.click(screen.getByRole('menuitem', { name: 'Delete…' }))
     await user.click(screen.getByRole('button', { name: /delete for good/i }))
 
     // The delete waits five seconds behind "Deleted · Undo" before it goes through (UX-6).
     await waitFor(() => expect(f.mock.calls.some(
-      ([url, init]) => String(url).endsWith('/projects/p1') && init?.method === 'DELETE')).toBe(true), { timeout: 7000 })
+      ([url, init]) => String(url).endsWith('/videos/p1') && init?.method === 'DELETE')).toBe(true), { timeout: 7000 })
   }, 12000)
 
   it('goes back to the project list from the editor', async () => {
@@ -445,7 +449,7 @@ describe('App goal stage shows the clip (UX-2)', () => {
     const base = routeFetch()
     const reads: string[] = []
     vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
-      if (url.endsWith('/projects') && init?.method === 'POST') {
+      if (url.endsWith('/videos') && init?.method === 'POST') {
         return ok({ ...PROJECT, statements: [{ ...PROJECT.statements[0], speaker: 'A' }],
           speakers: [{ label: 'A', name: 'Speaker A', voice_id: null }] })
       }
@@ -508,7 +512,7 @@ describe('App reopening from the URL (redesign)', () => {
   it('opens the project named in the URL, skipping the upload screens', async () => {
     const base = routeFetch()
     vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
-      if (url.endsWith('/projects/p1')) {
+      if (url.endsWith('/videos/p1')) {
         return ok({ ...PROJECT, created_at: '2026-09-26T08:00:00Z', edits: [], messages: [] })
       }
       return base(url, init)
@@ -539,7 +543,7 @@ describe('App undo (Phase 12)', () => {
   it('reverts an approved edit: the line reads as shot and the original plays', async () => {
     const base = routeFetch()
     const f = vi.fn(async (url: string, init?: RequestInit) => {
-      if (url.endsWith('/projects/p1') && init?.method !== 'DELETE') return ok(DETAIL)
+      if (url.endsWith('/videos/p1') && init?.method !== 'DELETE') return ok(DETAIL)
       return base(url, init)
     })
     vi.stubGlobal('fetch', f)
@@ -549,14 +553,14 @@ describe('App undo (Phase 12)', () => {
     // A reverted edit from before is not shown.
     expect(screen.queryByText('gone')).not.toBeInTheDocument()
     const video = () => container.querySelector('video') as HTMLVideoElement
-    await waitFor(() => expect(video().getAttribute('src')).toBe(`/api/projects/p1/artifacts/${'r'.repeat(64)}`))
+    await waitFor(() => expect(video().getAttribute('src')).toBe(`/api/videos/p1/artifacts/${'r'.repeat(64)}`))
 
     await userEvent.setup().click(screen.getByRole('button', { name: 'Take it out' }))
 
     await waitFor(() => expect(f.mock.calls.some(
       ([url, init]) => String(url).endsWith('/edits/e1/revert') && init?.method === 'POST')).toBe(true))
     await waitFor(() => expect(screen.queryByTestId('revision')).not.toBeInTheDocument())
-    expect(video().getAttribute('src')).toBe(`/api/projects/p1/artifacts/${'s'.repeat(64)}`)
+    expect(video().getAttribute('src')).toBe(`/api/videos/p1/artifacts/${'s'.repeat(64)}`)
   })
 })
 
@@ -591,10 +595,10 @@ describe('App the agent (Phase 13, 20c)', () => {
     await user.click(within(verbs).getByRole('button', { name: 'Add it' }))
 
     await waitFor(() => expect((container.querySelector('video') as HTMLVideoElement).getAttribute('src'))
-      .toBe(`/api/projects/p1/artifacts/${'r'.repeat(64)}`))
+      .toBe(`/api/videos/p1/artifacts/${'r'.repeat(64)}`))
     expect(calls.some((c) => c.url.endsWith('/plans/plan1/approve'))).toBe(true)
     await waitFor(() => expect(screen.getByText('✓ In the video')).toBeInTheDocument())
-    expect(screen.getByRole('link', { name: 'Export' })).toHaveAttribute('href', '#p1/export')
+    expect(screen.getByRole('link', { name: 'Export' })).toHaveAttribute('href', '#v/p1/export')
   })
 
   it('"ship it" in the composer is a turn, and the panel holds no ship card (15e, 20e)', async () => {
@@ -632,8 +636,8 @@ describe('App the agent (Phase 13, 20c)', () => {
         return ok({ approved: [{ item_id: 'i1', edit_id: 'e1', overridden: false }], skipped: [], export: { segments: SEGMENTS, render: RENDER }, plan: partly })
       }
       if (url.endsWith('/revert')) { calls.push({ url, body }); return ok({ edit_id: 'e1', reverted: true }) }
-      if (url.endsWith('/variants')) { calls.push({ url, body }); return ok({ ...PROJECT, project_id: 'p2', plan: PLAN }) }
-      if (url.endsWith('/projects/p2')) return ok({ ...PROJECT, project_id: 'p2', plan: PLAN, created_at: '2026-10-04T10:00:00Z', edits: [], messages: [] })
+      if (url.endsWith('/variants')) { calls.push({ url, body }); return ok({ ...PROJECT, video_id: 'p2', plan: PLAN }) }
+      if (url.endsWith('/videos/p2')) return ok({ ...PROJECT, video_id: 'p2', plan: PLAN, created_at: '2026-10-04T10:00:00Z', edits: [], messages: [] })
       return base(url, init)
     })
     vi.stubGlobal('fetch', f)
@@ -707,11 +711,11 @@ describe('App the agent (Phase 13, 20c)', () => {
     await user.type(screen.getByRole('textbox', TEXTBOX), 'make it 30% off and ship it{Enter}')
 
     await waitFor(() => expect((container.querySelector('video') as HTMLVideoElement).getAttribute('src'))
-      .toBe(`/api/projects/p1/artifacts/${'r'.repeat(64)}`))
+      .toBe(`/api/videos/p1/artifacts/${'r'.repeat(64)}`))
     expect(calls.some((c) => c.url.endsWith('/approve'))).toBe(false)   // Voltage shipped; the panel only rendered
     const note = await screen.findByTestId('shipped')
     expect(note).toHaveTextContent('1 line went in on this turn')
-    expect(within(note).getByRole('link', { name: 'Export →' })).toHaveAttribute('href', '#p1/export')
+    expect(within(note).getByRole('link', { name: 'Export →' })).toHaveAttribute('href', '#v/p1/export')
     expect(within(note).getByRole('link', { name: 'Download the file' })).toHaveAttribute('download', 'sample-ad-edited.mp4')
     expect(screen.getByText('✓ In the video')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /^Ship/ })).not.toBeInTheDocument()
@@ -785,7 +789,7 @@ describe('App the agent (Phase 13, 20c)', () => {
   it('reopens a project with its plan', async () => {
     const base = routeFetch()
     vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
-      if (url.endsWith('/projects/p1')) {
+      if (url.endsWith('/videos/p1')) {
         return ok({ ...PROJECT, created_at: '2026-10-02T08:00:00Z', edits: [], messages: [{ role: 'user', text: 'make it 30% off' }],
           settings: { autonomy: 'ask' }, plan: PLAN_DONE })
       }
@@ -820,7 +824,7 @@ describe('App: a fresh upload after another project', () => {
     const calls = agent(PLAN_DONE)
     const base = fetch as unknown as (url: string, init?: RequestInit) => Promise<Response>
     const f = vi.fn(async (url: string, init?: RequestInit) => {
-      if (url.endsWith('/projects/p1') && !init?.method) {
+      if (url.endsWith('/videos/p1') && !init?.method) {
         return ok({ ...PROJECT, created_at: '2026-10-02T08:00:00Z', edits: [], settings: { autonomy: 'ask' },
           messages: [1, 2, 3, 4, 5].map((seq) => ({ role: seq % 2 ? 'user' : 'assistant', text: `earlier ${seq}`, kind: 'say', seq })) })
       }
@@ -848,7 +852,7 @@ describe('App: audio lines coexist (20f)', () => {
     const calls = agent(detail.plan)
     const base = fetch as unknown as (url: string, init?: RequestInit) => Promise<Response>
     vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
-      if (url.endsWith('/projects/p1') && !init?.method) return ok(detail)
+      if (url.endsWith('/videos/p1') && !init?.method) return ok(detail)
       return base(url, init)
     }))
     window.location.hash = 'p1'
@@ -885,7 +889,7 @@ describe('App: the server\'s edits win after a turn, and a line can be mixed und
     const calls = agent({ ...PLAN, status: 'done', items: [] }, () => { edits = [e1, { ...e2, reverted: true }]; return { ...PLAN, status: 'done', items: [] } })
     const base = fetch as unknown as (url: string, init?: RequestInit) => Promise<Response>
     const f = vi.fn(async (url: string, init?: RequestInit) => {
-      if (url.endsWith('/projects/p1') && !init?.method) return ok({ ...silent, edits })
+      if (url.endsWith('/videos/p1') && !init?.method) return ok({ ...silent, edits })
       if (url.endsWith('/export')) { calls.push({ url, body: null }); return ok({ segments: SEGMENTS, render: RENDER }) }
       return base(url, init)
     })
@@ -905,7 +909,7 @@ describe('App: the server\'s edits win after a turn, and a line can be mixed und
   it('Make it background relevels an added line: the row swaps to the new edit and the video renders again', async () => {
     const base = routeFetch()
     const f = vi.fn(async (url: string, init?: RequestInit) => {
-      if (url.endsWith('/projects/p1') && !init?.method) return ok({ ...silent, edits: [e1, e2] })
+      if (url.endsWith('/videos/p1') && !init?.method) return ok({ ...silent, edits: [e1, e2] })
       if (url.endsWith('/edits/e2/level')) {
         expect(JSON.parse(String(init?.body))).toEqual({ level_db: -12 })
         return ok({ edit_id: 'e3', reverted: 'e2', candidate: { ...CANDIDATE, candidate_id: 'c3', plan: { ...CANDIDATE.plan, selection: { start: 0.4, end: 1.8 }, new_text: 'Woohoo!', mix: 'layer', level_db: -12 } } })
@@ -927,7 +931,7 @@ describe('App panel order', () => {
   it('opens a clip with no speech in the workspace: Voltage says what it saw, the place editor is the transcript (UX-5, UX-7c)', async () => {
     const base = routeFetch()
     vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
-      if (url.endsWith('/projects') && init?.method === 'POST') return ok({ ...PROJECT, transcript: [], statements: [], frames: [{ index: 0, at: 0.3 }, { index: 1, at: 1.2 }, { index: 2, at: 2.0 }] })
+      if (url.endsWith('/videos') && init?.method === 'POST') return ok({ ...PROJECT, transcript: [], statements: [], frames: [{ index: 0, at: 0.3 }, { index: 1, at: 1.2 }, { index: 2, at: 2.0 }] })
       if (url.endsWith('/reading')) return ok({ opening: 'No one speaks. A beach at dusk.', roles: [], sight: { opening: 'No one speaks. A beach at dusk.', setting: 'A wide beach at dusk', mood: 'calm', people: 'two, far off', text_on_screen: '', place_guess: 'Goa', confidence: 'medium', beats: [] } })
       return base(url, init)
     }))
@@ -949,7 +953,7 @@ describe('App panel order', () => {
     const calls = agent()
     const base = fetch as unknown as (url: string, init?: RequestInit) => Promise<Response>
     vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
-      if (url.endsWith('/projects') && init?.method === 'POST') return ok({ ...PROJECT, transcript: [], statements: [], frames: [{ index: 0, at: 0.3 }] })
+      if (url.endsWith('/videos') && init?.method === 'POST') return ok({ ...PROJECT, transcript: [], statements: [], frames: [{ index: 0, at: 0.3 }] })
       return base(url, init)
     }))
     const user = userEvent.setup()
@@ -975,7 +979,7 @@ describe('App with Voltage as an agent (Phase 20a)', () => {
     const calls: { url: string; body: unknown }[] = []
     const f = vi.fn(async (url: string, init?: RequestInit) => {
       const body = typeof init?.body === 'string' ? JSON.parse(init.body) : undefined
-      if (url.endsWith('/projects/p1') || (url.endsWith('/projects') && init?.method === 'POST')) return ok({ ...PROJECT, edits: [], messages: [] })
+      if (url.endsWith('/videos/p1') || (url.endsWith('/videos') && init?.method === 'POST')) return ok({ ...PROJECT, edits: [], messages: [] })
       if (url.endsWith('/turns') && init?.method === 'POST') { calls.push({ url, body }); return ok(JOB_ACCEPTED) }
       if (url.includes('/jobs/')) return ok({ ...JOB_TURN, result: { type: 'turn', plan: PLAN_DONE, reply: STEPS[3].text, question: null } })
       if (url.includes('/messages?after=')) {
@@ -997,7 +1001,7 @@ describe('App with Voltage as an agent (Phase 20a)', () => {
     expect(screen.queryByText('Default voice')).toBeNull()
 
     await user.type(screen.getByRole('textbox', TEXTBOX), 'Describe the place in an Indian voice{Enter}')
-    expect(calls).toEqual([{ url: '/api/projects/p1/turns', body: { text: 'Describe the place in an Indian voice' } }])
+    expect(calls).toEqual([{ url: '/api/videos/p1/turns', body: { text: 'Describe the place in an Indian voice' } }])
     expect(screen.getByText('Describe the place in an Indian voice')).toBeInTheDocument()
 
     const list = await screen.findByRole('list', { name: 'What Voltage did' })
@@ -1221,7 +1225,7 @@ describe('App: moving audio on the timeline (UX-1b)', () => {
     await user.clear(field)
     await user.type(field, '1.5{Enter}')
 
-    await waitFor(() => expect(calls).toEqual([{ url: '/api/projects/p1/candidates/c1/move', body: { start: 1.5 } }]))
+    await waitFor(() => expect(calls).toEqual([{ url: '/api/videos/p1/candidates/c1/move', body: { start: 1.5 } }]))
     await waitFor(() => expect(screen.getByTestId('place')).toHaveTextContent('Starts at 0:01.50'))
     expect(screen.queryByRole('slider', { name: 'Where the take starts' })).not.toBeInTheDocument()
   })
@@ -1234,7 +1238,7 @@ describe('App: moving audio on the timeline (UX-1b)', () => {
         calls.push(String(init?.body))
         return ok({ edit_id: 'e2', reverted: 'e1', candidate: { ...CANDIDATE, candidate_id: 'c3', plan: { ...CANDIDATE.plan, selection: { start: 1.3, end: 1.8 } } } })
       }
-      if (url.endsWith('/projects/p1')) {
+      if (url.endsWith('/videos/p1')) {
         return ok({ ...PROJECT, created_at: '2026-10-02T08:00:00Z', messages: [{ role: 'user', text: 'x' }], settings: { autonomy: 'ask' },
           edits: [{ edit_id: 'e1', candidate_id: 'c1', new_text: '30% off', selection: { start: 0.4, end: 0.9 }, mix: 'replace', overridden: false, reverted: false }] })
       }
@@ -1293,7 +1297,7 @@ describe('App sign-in (Phase 9c)', () => {
     expect(await screen.findByRole('link', { name: 'Account' })).toHaveTextContent('A')
     await user.click(await screen.findByRole('button', { name: /sample ad/i }))
     await screen.findByText('Get 20% off today only.')
-    const upload = calls.find((c) => c.url.endsWith('/projects') && c.init?.method === 'POST')
+    const upload = calls.find((c) => c.url.endsWith('/videos') && c.init?.method === 'POST')
     expect((upload!.init!.headers as Record<string, string>)['X-Requested-With']).toBe('voltage')
 
     // Volt: Sign out is on the Settings page.
@@ -1308,7 +1312,7 @@ describe('App sign-in (Phase 9c)', () => {
     const gone = { ok: false, status: 401, json: async () => ({ detail: 'Sign in to continue.' }), text: async () => JSON.stringify({ detail: 'Sign in to continue.' }) } as Response
     vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
       if (url.endsWith('/auth/me')) return ok(ME)
-      if (url.endsWith('/projects') && init?.method === 'POST') return gone
+      if (url.endsWith('/videos') && init?.method === 'POST') return gone
       return base(url, init)
     }))
     const user = userEvent.setup()
@@ -1337,5 +1341,40 @@ describe('App: what Voltage may do (20d)', () => {
     await user.click(within(sheet).getByRole('button', { name: 'Just do it' }))
     await waitFor(() => expect(calls.filter((c) => c.url.endsWith('/settings')).map((c) => c.body)).toContainEqual({ autonomy: 'draft' }))
     expect(screen.getByRole('group', { name: 'How much Voltage does on its own' })).toBeInTheDocument()
+  })
+})
+
+describe('App: the guided run and the keyboard sheet (Tutorial map and Help)', () => {
+  it('offers the tour on Home; Start opens the sample as a tutorial video with the goal in the box and the welcome card', async () => {
+    const base = routeFetch()
+    const calls: string[] = []
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.endsWith('/tutorial') && init?.method === 'POST') { calls.push(url); return ok({ ...PROJECT, settings: { autonomy: 'ask', tutorial: true }, reading: READING }) }
+      if (url.endsWith('/videos/p1') && !init?.method) return ok({ ...PROJECT, settings: { autonomy: 'ask', tutorial: true }, reading: READING, created_at: '2026-10-19T08:00:00Z', edits: [], messages: [] })
+      if (url.includes('/me/onboarding')) return ok({ tour: { step: 0, finished: false, skipped: false }, tips: [], checklist: [], checklist_hidden: false })
+      return base(url, init)
+    }))
+    const user = userEvent.setup()
+    render(<App />)
+    const offer = await screen.findByTestId('tour-offer')
+    await user.click(within(offer).getByRole('button', { name: '⚡ Start the tour' }))
+    await waitFor(() => expect(calls).toEqual(['/api/tutorial']))
+    await waitFor(() => expect(window.location.hash).toBe('#v/p1'))
+    await waitFor(() => expect(screen.getByRole('textbox', TEXTBOX)).toHaveValue('Make the offer 30% off'))
+    expect(await screen.findByRole('dialog', { name: /welcome|change what a video/i })).toBeInTheDocument()
+    // The checklist stays out of the tutorial video.
+    expect(screen.queryByRole('button', { name: /get started/i })).toBeNull()
+  })
+
+  it('opens the keyboard sheet on ? in the editor, and closes it on Escape', async () => {
+    vi.stubGlobal('fetch', routeFetch())
+    const user = userEvent.setup()
+    render(<App />)
+    await reachGoal(user)
+    await user.click(document.body)
+    await user.keyboard('?')
+    expect(await screen.findByRole('dialog', { name: 'Keyboard' })).toBeInTheDocument()
+    await user.keyboard('{Escape}')
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Keyboard' })).toBeNull())
   })
 })

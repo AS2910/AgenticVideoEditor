@@ -1,4 +1,4 @@
-"""The SQLite database behind projects, chat and spend (Phase 9).
+"""The SQLite database behind videos, projects (folders), chat and spend (Phase 9).
 
 One connection, shared across request and job-worker threads under a lock —
 the write volume is a handful of rows per edit, so contention is not a
@@ -17,7 +17,7 @@ CREATE TABLE IF NOT EXISTS meta (
     key   TEXT PRIMARY KEY,
     value TEXT NOT NULL
 );
-CREATE TABLE IF NOT EXISTS projects (
+CREATE TABLE IF NOT EXISTS videos (
     id                TEXT PRIMARY KEY,
     owner             TEXT NOT NULL,
     created_at        TEXT NOT NULL,
@@ -26,7 +26,18 @@ CREATE TABLE IF NOT EXISTS projects (
     consent_at        TEXT,
     candidate_counter INTEGER NOT NULL DEFAULT 0,
     speakers          TEXT NOT NULL DEFAULT '{}',  -- JSON: label -> {name, voice_id}
-    settings          TEXT NOT NULL DEFAULT '{}'   -- JSON: per-project preferences
+    settings          TEXT NOT NULL DEFAULT '{}',  -- JSON: per-video preferences
+    project_id        TEXT                         -- the folder it is in (Folders), NULL = standalone
+);
+CREATE INDEX IF NOT EXISTS videos_by_owner ON videos (owner, created_at);
+CREATE TABLE IF NOT EXISTS projects (
+    id          TEXT PRIMARY KEY,                  -- f<n>
+    owner       TEXT NOT NULL,
+    name        TEXT NOT NULL,
+    brief       TEXT NOT NULL DEFAULT '',
+    settings    TEXT NOT NULL DEFAULT '{}',        -- JSON: defaults for new videos
+    ceiling_usd REAL,
+    created_at  TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS projects_by_owner ON projects (owner, created_at);
 CREATE TABLE IF NOT EXISTS candidates (
@@ -72,22 +83,45 @@ CREATE TABLE IF NOT EXISTS usage (
     units      REAL NOT NULL,
     unit       TEXT NOT NULL,          -- "minutes" | "characters" | "tokens"
     usd        REAL NOT NULL,          -- estimated
-    at         TEXT NOT NULL
+    at         TEXT NOT NULL,
+    folder_id  TEXT                    -- the video's project at the time of the charge (Folders)
 );
 CREATE INDEX IF NOT EXISTS usage_by_project ON usage (project_id);
 """
 
+# The tables keyed by a video's id (their `project_id` column is the video id,
+# from before projects were folders).
 PROJECT_TABLES = ("candidates", "edits", "messages", "usage", "plans", "turns")
 
 # Columns added after a table first shipped: (table, column, definition).
 # Applied to databases created before them; new databases get them from SCHEMA.
 MIGRATIONS = (
-    ("projects", "speakers", "TEXT NOT NULL DEFAULT '{}'"),   # Phase 11
-    ("projects", "settings", "TEXT NOT NULL DEFAULT '{}'"),   # Phase 12
+    ("videos", "speakers", "TEXT NOT NULL DEFAULT '{}'"),     # Phase 11
+    ("videos", "settings", "TEXT NOT NULL DEFAULT '{}'"),     # Phase 12
     ("messages", "kind", "TEXT NOT NULL DEFAULT 'say'"),      # Phase 20: "say" | "step"
     ("messages", "cost", "REAL"),                             # Phase 20: what a step cost, in dollars
     ("messages", "data", "TEXT"),                             # Phase 20b: a card's facts (voice previews), JSON
+    ("videos", "project_id", "TEXT"),                         # Folders: the folder a video is in
+    ("usage", "folder_id", "TEXT"),                           # Folders: the folder at the time of the charge
 )
+
+
+def _tables(conn: sqlite3.Connection) -> set[str]:
+    return {r["name"] for r in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
+
+
+def _migrate_projects_to_videos(conn: sqlite3.Connection) -> bool:
+    """Folders: the `projects` table of a database made before projects were
+    folders holds videos. Renamed once, before the schema makes the new
+    `projects` (folder) table; every row becomes a standalone video. True
+    when the rename happened."""
+    have = _tables(conn)
+    if "videos" in have or "projects" not in have:
+        return False
+    conn.execute("ALTER TABLE projects RENAME TO videos")
+    # The old index keeps its name across the rename; the schema makes the new one.
+    conn.execute("DROP INDEX IF EXISTS projects_by_owner")
+    return True
 
 
 class Database:
@@ -104,6 +138,7 @@ class Database:
             # a script) holds a write lock for a moment; wait up to 5 s rather
             # than failing the request with "database is locked".
             self._conn.execute("PRAGMA busy_timeout=5000")
+            self.migrated_projects_to_videos = _migrate_projects_to_videos(self._conn)
             self._conn.executescript(SCHEMA)
             for table, column, definition in MIGRATIONS:
                 have = {r["name"] for r in self._conn.execute(f"PRAGMA table_info({table})")}
@@ -125,5 +160,5 @@ class Database:
     def reset(self) -> None:
         """Empty every table. Intended for test isolation."""
         with self.tx() as c:
-            for table in ("meta", "projects", *PROJECT_TABLES):
+            for table in ("meta", "videos", "projects", *PROJECT_TABLES):
                 c.execute(f"DELETE FROM {table}")

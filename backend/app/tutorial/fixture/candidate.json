@@ -1,0 +1,86 @@
+{
+ "candidate_id": "c1",
+ "plan": {
+  "selection": {
+   "start": 0.0,
+   "end": 1.8200000524520874
+  },
+  "new_text": "Get 30% off today only.",
+  "voice_profile_id": "EXAVITQu4vr4xnSDxMaL",
+  "fit": null,
+  "mix": "replace",
+  "delivery": "more excited",
+  "flex": 1.12,
+  "voice_settings": {
+   "stability": 0.5
+  },
+  "model": "v4",
+  "flex_max": null,
+  "level_db": null
+ },
+ "audio": {
+  "kind": "audio",
+  "sha256": "8464a3f0177c8f0ac40bddec78399365bdb5a2abb9ca34c2c7c444661a5ba236",
+  "duration": 2.038,
+  "container": "wav"
+ },
+ "frames": {
+  "kind": "video",
+  "sha256": "6493db5c20968de919fca10053bcf6d6d72e2e00dc8e29be816275b4d9a23b31",
+  "duration": 1.84,
+  "container": "mp4"
+ },
+ "continuity": {
+  "voice_match": null,
+  "prosody": null,
+  "audio_integration": null,
+  "lip_sync": null,
+  "passed": true,
+  "warnings": [
+   "Not enough surrounding speech to check continuity.",
+   "Stock voice: only 1.4 s of Speaker A's voice, 10 s needed to clone it."
+  ],
+  "measured": [
+   "naturalness"
+  ],
+  "naturalness": 4.278648376464844
+ },
+ "fit_notes": [
+  "nearest of 3 takes",
+  "trimmed 40 ms of pauses",
+  "the picture at 1.12\u00d7",
+  "speech at 1.24\u00d7 speed"
+ ],
+ "words": [
+  {
+   "text": "Get",
+   "start": 0.0,
+   "end": 0.1941,
+   "speaker": null
+  },
+  {
+   "text": "30%",
+   "start": 0.2265,
+   "end": 0.7442,
+   "speaker": null
+  },
+  {
+   "text": "off",
+   "start": 0.8412,
+   "end": 0.9383,
+   "speaker": null
+  },
+  {
+   "text": "today",
+   "start": 1.003,
+   "end": 1.3266,
+   "speaker": null
+  },
+  {
+   "text": "only.",
+   "start": 1.456,
+   "end": 2.1031,
+   "speaker": null
+  }
+ ]
+}

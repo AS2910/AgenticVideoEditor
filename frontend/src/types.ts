@@ -15,7 +15,7 @@ export type Effort = 'medium' | 'high' | 'xhigh'
 
 /** Per-project preferences, remembered on the server. */
 /** What Voltage may do on a project (20d): the autonomy, what one turn may spend, how hard it thinks; the ceiling is read-only. */
-export interface ProjectSettings { autonomy: Autonomy; turn_usd?: number; effort?: Effort; ceiling_usd?: number; /** Volt: which commits still ask under Just do it, and the model Voltage runs on. */ ask_before?: AskBefore; model?: string }
+export interface ProjectSettings { autonomy: Autonomy; turn_usd?: number; effort?: Effort; ceiling_usd?: number; /** Volt: which commits still ask under Just do it, and the model Voltage runs on. */ ask_before?: AskBefore; model?: string; /** The guided run's sample video: its turns replay a recording, free. */ tutorial?: boolean }
 
 /** Where a plan item stands. */
 export type ItemStatus =
@@ -165,7 +165,11 @@ export interface Candidate {
 export interface ConsentRecord { granted_at: string }
 
 export interface Project {
-  project_id: string
+  /** The video's own id (folders, 2026-10-19). */
+  video_id: string
+  /** The folder it is in, or null. */
+  project_id?: string | null
+  project_name?: string | null
   filename: string
   /** Measured server-side by ffprobe — the client never asserts this. */
   duration: number
@@ -215,6 +219,9 @@ export interface FrameRef { index: number; at: number }
 export interface Usage {
   spent_usd: number
   ceiling_usd: number
+  /** Folders (2026-10-19): the project's ceiling and spend, when the video is in one. */
+  project_ceiling_usd?: number | null
+  project_spent_usd?: number | null
   /** With sign-in on: the person's spend across every project, and their cap. */
   user_spent_usd?: number | null
   user_ceiling_usd?: number | null
@@ -225,7 +232,11 @@ export interface Usage {
 
 /** A row of the start screen's project list. */
 export interface ProjectSummary {
-  project_id: string
+  /** The video's own id (folders, 2026-10-19). */
+  video_id: string
+  /** The folder it is in, or null. */
+  project_id?: string | null
+  project_name?: string | null
   filename: string
   duration: number
   created_at: string
@@ -293,7 +304,7 @@ export interface ChatMessage {
   kind?: 'say' | 'step' | 'previews'
   cost?: number
   seq?: number
-  data?: { description?: string; previews?: VoicePreview[]; /** Volt: a step message's tool and clock. */ tool?: string; t?: number }
+  data?: { description?: string; previews?: VoicePreview[]; /** Volt: a step message's tool and clock. */ tool?: string; t?: number; /** Help (2026-10-19): the articles a search_help step used. */ help?: HelpRef[] }
 }
 
 export interface QuestionOption {
@@ -354,13 +365,15 @@ export interface UsageReport {
   voices_made: number
   avg_turn_usd: number
   by_vendor: { vendor: string; label: string; usd: number }[]
-  by_project: { project_id: string; filename: string; turns: number; voice_characters: number; spent_usd: number; cap_usd: number }[]
+  by_video: { video_id: string; filename: string; turns: number; voice_characters: number; spent_usd: number; cap_usd: number }[]
+  /** Folders (2026-10-19). */
+  by_project: { project_id: string; name: string; videos: number; turns: number; spent_usd: number; ceiling_usd: number | null }[]
 }
 
 /** A voice made inside one of your projects (designed, added from the library, or a speaker's clone); deleted with the project unless kept. */
-export interface MadeVoice { voice_id: string; name: string; kind: 'designed' | 'library' | 'cloned'; project_id: string; filename: string; description?: string | null; seconds?: number | null; kept?: boolean }
+export interface MadeVoice { voice_id: string; name: string; kind: 'designed' | 'library' | 'cloned'; video_id: string; filename: string; description?: string | null; seconds?: number | null; kept?: boolean }
 /** A speaker in one of your projects with enough speech to clone. */
-export interface CloneableSpeaker { project_id: string; filename: string; label: string; name: string; seconds: number }
+export interface CloneableSpeaker { video_id: string; filename: string; label: string; name: string; seconds: number }
 /** A preview of a voice designed from words, outside any project. */
 export interface DesignedPreview { generated_voice_id: string; sha256: string; duration: number; text: string }
 
@@ -373,3 +386,41 @@ export interface Receipt {
   drafts: number
   render: { sha256: string; duration: number; filename: string } | null
 }
+
+/** Projects as folders (2026-10-19): a folder of videos with what they share. */
+export interface ProjectFolder {
+  project_id: string
+  name: string
+  brief: string
+  settings?: ProjectSettings
+  ceiling_usd: number | null
+  spent_usd: number
+  created_at: string
+  last_at?: string | null
+  video_count?: number
+  voices?: number
+  files?: number
+}
+export interface ProjectFile { name: string; sha256: string; size: number; kind: string; at: string }
+export interface BriefSuggestion { id: string; text: string; why?: string | null; video_id?: string | null; filename?: string | null; at: string }
+export interface ProjectVoice extends MyVoice { project_id?: string; project_name?: string; used_in_project?: number; consent?: string | null }
+export interface ProjectDetailFolder {
+  project: ProjectFolder
+  videos: ProjectSummary[]
+  voices: ProjectVoice[]
+  files: ProjectFile[]
+  suggestions: BriefSuggestion[]
+}
+
+/** Help articles (Tutorial map and Help, 2026-10-19): one Markdown file each, read by the Help page and by Voltage's search_help. */
+export interface HelpArticle { slug: string; section: string; title: string; summary: string; body: string; order?: number; tour?: string | null }
+/** What a person has met so far: the tour, the tips seen, the checklist. */
+export interface Onboarding {
+  tour: { step: number; finished: boolean; skipped: boolean }
+  tips: string[]
+  checklist: string[]
+  checklist_hidden: boolean
+}
+
+/** An article a search_help step used, as the pane links it. */
+export interface HelpRef { slug: string; title: string; section: string; tour?: string | null }

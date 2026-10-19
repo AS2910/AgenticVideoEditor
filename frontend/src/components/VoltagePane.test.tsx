@@ -76,4 +76,18 @@ describe('VoltagePane: the composer and the gate', () => {
     expect(onAnswer).toHaveBeenCalledWith('Keep Brian')
     expect(screen.getByTestId('wave')).toHaveAttribute('data-state', 'need')
   })
+
+  it('closes a how-to answer with the Help article it used: Show me starts its tour, Read more opens it', async () => {
+    const onShowMe = vi.fn()
+    render(<VoltagePane messages={[
+      { role: 'user', text: 'How do I use the Diwali voice in my next project?', seq: 1 },
+      { role: 'assistant', text: 'Looked in Help', kind: 'step', seq: 2, data: { tool: 'search_help', t: 0.8, help: [{ slug: 'saving-and-reusing-your-voices', title: 'Saving and reusing your voices', section: 'Voices', tour: 'save-voice' }] } },
+      { role: 'assistant', text: 'Keep it in your voices first.', seq: 3 },
+    ]} state="ready" onSubmit={() => {}} onShowMe={onShowMe} />)
+    const card = screen.getByTestId('from-help')
+    expect(card).toHaveTextContent('From Help · Voices')
+    expect(within(card).getByRole('link', { name: 'Read more' })).toHaveAttribute('href', '#help/saving-and-reusing-your-voices')
+    await userEvent.click(within(card).getByRole('button', { name: '⚡ Show me' }))
+    expect(onShowMe).toHaveBeenCalledWith('save-voice')
+  })
 })

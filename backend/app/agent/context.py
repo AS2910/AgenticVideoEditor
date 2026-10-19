@@ -88,20 +88,54 @@ thinking is metered by the editor and shown as its own line in the thread \
 after your words, so do not guess it or call the turn free.
 - When you need one thing from the user, use the `ask` tool with two or \
 three options and your own guess, so they can just say go.
+
+Projects and help
+- A video may sit in a project: a folder with a brief, shared voices, \
+reference files and sister videos. The Brief block at the top of the turn \
+is what the project asks of every video in it; follow it unless the user \
+says otherwise. list_project_videos shows the sisters (what each shipped, \
+in which voice), read_project_files searches the reference files, and \
+suggest_brief records something the brief should say — the brief itself \
+changes only when the user accepts it on the project page.
+- A turn changes only its own video. Read the sisters; never edit, ship or \
+delete them, and never speak of doing so.
+- A "how do I…" question is answered from the help articles: call \
+search_help, answer from what it returns and name the article you used. \
+Never guess at a feature the articles do not describe; say so when they \
+have nothing. When the question is really a request ("how do I make it \
+say 30% off?"), answer briefly, then offer to do it — under the usual gate.
 """
+
+
+def brief_block(project: dict | None) -> list[str]:
+    """The project the video is in (Folders): its name and brief, the voices
+    shared in it, the sister videos. Nothing when the video is standalone."""
+    if not project:
+        return []
+    out = [f"Brief · {project.get('name') or 'the project'}: " + (project.get("brief") or "(no brief written yet)")]
+    voices = [v.get("name") or v.get("voice_id") for v in project.get("voices") or []]
+    out.append("Shared voices in this project: " + (", ".join(voices) if voices else "none") + ".")
+    sisters = [f"{v.get('filename')} ({float(v.get('duration') or 0):.1f} s)" for v in project.get("videos") or []]
+    out.append("Sister videos in this project: " + (", ".join(sisters) if sisters else "none") + ".")
+    files = [f.get("name") for f in project.get("files") or []]
+    if files:
+        out.append("Reference files: " + ", ".join(files) + " (read_project_files searches them).")
+    return out
 
 
 def opening(plan: Plan | None, *, duration: float, filename: str, speakers: Sequence[str],
             lines: int, autonomy: str, spent_usd: float, ceiling_usd: float, turn_usd: float,
-            sight: str = "", edits: Sequence[Any] = ()) -> str:
-    """The project as it stands, at the top of a turn."""
+            sight: str = "", edits: Sequence[Any] = (), project: dict | None = None) -> str:
+    """The video as it stands, at the top of a turn; the project's Brief
+    block first when it is in one."""
     who = (f"{len(speakers)} speakers ({', '.join(speakers)})" if len(speakers) > 1
            else f"one speaker ({speakers[0]})" if speakers else "no speech")
-    out = [f"The clip: {filename}, {duration:.1f} s, {who}, {lines} {'line' if lines == 1 else 'lines'}."]
+    out = brief_block(project)
+    out.append(f"The clip: {filename}, {duration:.1f} s, {who}, {lines} {'line' if lines == 1 else 'lines'}.")
     if sight:
         out.append(f"What you noted when you first looked: {sight}")
     out.append(f"Autonomy: {'Check with me' if autonomy == 'ask' else 'Just do it'}. "
-               f"Spent on this project so far ${spent_usd:.2f} of a ${ceiling_usd:.2f} ceiling; "
+               f"Spent on this video so far ${spent_usd:.2f} of a ${ceiling_usd:.2f} ceiling; "
                f"this turn may spend up to ${turn_usd:.2f}.")
     if plan is not None and plan.items:
         out.append("The plan so far:")

@@ -77,6 +77,15 @@ Header: the wave, **Voltage** (display 18), the state word (`ready` · `working`
 
 **The first read** (nothing said yet): the picture with a big volt play, **Who's speaking** (Voltage's guess per speaker, lines and seconds, Rename, ✓ Looks right), the transcript; the pane carries the opening line, what Voltage saw on a silent clip (the place, Looks right / Correct it) and the example chips. **While Voltage works**: the scan line sweeps the picture with the step beside it, the row it is on reads `Waiting on you` (dashed) when it stops for you.
 
+## Folders, tours and help (2026-10-19)
+
+- **Home** keeps a 260 px sidebar of projects (folder glyph, count; "Standalone videos" dashed). Video cards carry a project chip (dashed "No project"). The ••• menu is a small card with an ink border and a volt offset shadow.
+- **Project page**: the brief card has the volt offset shadow (it is the project's one primary surface); the other side cards are plain ink-bordered panels; Voltage's suggestion sits on the black pane colour inside the brief card.
+- **Move dialog**: radio rows; the chosen one is volt with ink text; the voice question is a sunk panel with an ink border.
+- **Editor crumb**: a 34 px chip with a volt folder (dashed and muted when standalone); its menu shows the brief Voltage is using. The pane shows context chips under its header (first one volt).
+- **Tour**: a dimmed backdrop of four panels (no blur), a 2 px volt ring around the target, the coach card with a volt offset shadow; the highlighted control stays usable. **Tips** are black cards with a volt offset shadow and one Got it. The **Get started** pill is ink with volt text, bottom left.
+- **Keyboard sheet** and **Help** use `.kbd` keycaps and the article reader as a right-hand drawer.
+
 ## Interaction rules
 
 - Every change is a proposal first; nothing is in the video until **Add it**. The user's next action is the last element of whatever it acts on.

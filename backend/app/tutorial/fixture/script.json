@@ -1,0 +1,70 @@
+{
+ "source": "One real run on the sample ad, 2026-10-19 (video p57, $0.14). Replayed free: no vendor is called.",
+ "item": {
+  "item_id": "i1",
+  "selection": {
+   "start": 0.0,
+   "end": 1.8200000524520874
+  },
+  "old_text": "Get 20% off today only.",
+  "new_text": "Get 30% off today only.",
+  "speaker": "A",
+  "mix": "replace",
+  "delivery": "more excited",
+  "reason": "Match the original read: upbeat ad delivery, same pace and energy, weight on \"thirty percent\".",
+  "kind": "planned",
+  "enabled": true,
+  "status": "planned",
+  "fit": null,
+  "candidate_id": null,
+  "edit_id": null,
+  "question": null,
+  "error": null,
+  "note": null,
+  "progress": null
+ },
+ "turns": [
+  {
+   "steps": [
+    {
+     "text": "Read all 1 line",
+     "tool": "read_transcript",
+     "t": 3.7
+    },
+    {
+     "text": "Thinking",
+     "tool": "thinking",
+     "t": 10.1
+    }
+   ],
+   "question": {
+    "text": "Voice “Get 30% off today only.” in Speaker A's own voice, about $0.02?",
+    "options": [
+     "Go ahead",
+     "Not yet"
+    ],
+    "guess": "Go ahead",
+    "gate": true,
+    "cost_usd": 0.0,
+    "left_usd": 0.5
+   },
+   "reply": null
+  },
+  {
+   "steps": [
+    {
+     "text": "Voiced “Get 30% off today only.” with Sarah — Match the original read: upbeat ad delivery, same pace and energy, weight on \"thirty percent\".",
+     "tool": "synthesize_take",
+     "t": 10.9
+    },
+    {
+     "text": "Thinking",
+     "tool": "thinking",
+     "t": 17.2
+    }
+   ],
+   "question": null,
+   "reply": "The clip has only 1.4 s of Speaker A's voice, and cloning needs about 10 s, so the take you can hear now says \"Get 30% off today only.\" in a stock voice (Sarah), not the original speaker. It passed the sound check but had to be sped up 1.24× to fit, and the picture runs 1.12× under it."
+  }
+ ]
+}

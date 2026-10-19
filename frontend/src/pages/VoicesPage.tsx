@@ -1,12 +1,15 @@
 import { useEffect, useId, useRef, useState } from 'react'
 import type { DragEvent, KeyboardEvent } from 'react'
-import type { CloneableSpeaker, DesignedPreview, MadeVoice, MyVoice, Voice } from '../types'
+import type { CloneableSpeaker, DesignedPreview, MadeVoice, MyVoice, Voice, ProjectVoice } from '../types'
 import type { Me } from '../api'
 import {
   cloneSpeakerToMine, deleteMyVoice, designVoicePreviews, keepDesignedVoice, keepVoice,
   listCloneableSpeakers, listMadeVoices, listVoices, uploadMyVoice, voiceSampleUrl,
 } from '../api'
 import { cn } from '@/lib/utils'
+import { useOnboarding } from '../guides/onboarding'
+import { useTour } from '../tour/engine'
+import { hrefFor } from '../lib/route'
 import { Bolt, PlayGlyph, Shell, StopGlyph } from './Shell'
 import { barsFor, firstName, said, whenLabel } from './fmt'
 
@@ -57,12 +60,18 @@ interface VoicesPageProps { me: Me | null }
 /** Your voices: kept across projects, made inside one, and the catalogue; and on the
  *  black pane, three ways to add one to keep. */
 export function VoicesPage({ me }: VoicesPageProps) {
+  const onboarding = useOnboarding()
+  const tour = useTour()
+  /** A voice is now yours: the checklist's Save a voice is done, and a Show me tour waiting on it moves on. */
+  const voiceIsYours = () => { onboarding.markChecklist('save-voice'); tour.notify('voice-kept') }
   const uid = useId()
   const [tab, setTab] = useState<Tab>('all')
   const [mine, setMine] = useState<MyVoice[]>([])
   const [catalogue, setCatalogue] = useState<Voice[]>([])
   const [slots, setSlots] = useState<{ used: number; limit: number } | null>(null)
   const [made, setMade] = useState<MadeVoice[]>([])
+  // Folders (2026-10-19): voices shared in one of your projects, between the video's and yours.
+  const [inProject, setInProject] = useState<ProjectVoice[]>([])
   const [speakers, setSpeakers] = useState<CloneableSpeaker[]>([])
   const [loaded, setLoaded] = useState(false)
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -87,6 +96,7 @@ export function VoicesPage({ me }: VoicesPageProps) {
       if (!live) return
       if (v.status === 'fulfilled') {
         setMine(v.value.mine ?? [])
+        setInProject(v.value.project ?? [])
         setCatalogue(v.value.voices.filter((x) => x.category !== 'mine'))
         setSlots(v.value.slots ?? null)
       } else setLoadError(said(v.reason, 'Your voices could not be read.'))
@@ -118,6 +128,7 @@ export function VoicesPage({ me }: VoicesPageProps) {
     setBusyVoice(mv.voice_id); setListError(null)
     try {
       const v = await keepVoice(mv.voice_id)
+        voiceIsYours()
       kept(v)
       setMade((all) => all.map((x) => (x.voice_id === mv.voice_id ? { ...x, kept: true } : x)))
     } catch (e) { setListError(said(e, `${mv.name} could not be kept.`)) } finally { setBusyVoice(null) }
@@ -177,13 +188,13 @@ export function VoicesPage({ me }: VoicesPageProps) {
   const stopRecording = () => recorder.current?.stop()
   const tookFile = (files: FileList | null) => { const f = files?.[0]; if (f) { setFile(f); setFormError(null) } }
 
-  const speaker = speakers.find((s) => `${s.project_id}:${s.label}` === speakerKey) ?? null
+  const speaker = speakers.find((s) => `${s.video_id}:${s.label}` === speakerKey) ?? null
   const pickSpeaker = (key: string) => {
     setSpeakerKey(key)
-    const s = speakers.find((x) => `${x.project_id}:${x.label}` === key)
+    const s = speakers.find((x) => `${x.video_id}:${x.label}` === key)
     if (s && (cloneName.trim() === '' || cloneName === speaker?.name)) setCloneName(s.name)
   }
-  useEffect(() => { if (!speakerKey && speakers[0]) { setSpeakerKey(`${speakers[0].project_id}:${speakers[0].label}`); setCloneName((n) => n || speakers[0].name) } }, [speakers, speakerKey])
+  useEffect(() => { if (!speakerKey && speakers[0]) { setSpeakerKey(`${speakers[0].video_id}:${speakers[0].label}`); setCloneName((n) => n || speakers[0].name) } }, [speakers, speakerKey])
 
   const cta = way === 'record'
     ? { label: 'Clone and keep', cost: 'free · 1 slot', ready: file !== null && recName.trim() !== '' }
@@ -200,6 +211,7 @@ export function VoicesPage({ me }: VoicesPageProps) {
     try {
       if (way === 'record' && file) {
         const v = await uploadMyVoice(recName.trim(), file)
+        voiceIsYours()
         kept(v); setFile(null); setNote(`Kept ${v.name} in your voices.`)
       } else if (way === 'describe' && !previews) {
         const r = await designVoicePreviews(desc.trim())
@@ -208,9 +220,11 @@ export function VoicesPage({ me }: VoicesPageProps) {
         const p = previews.find((x) => x.generated_voice_id === chosen)
         if (!p) return
         const v = await keepDesignedVoice(p.generated_voice_id, descName.trim(), p.sha256, desc.trim())
+        voiceIsYours()
         kept(v); setPreviews(null); setChosen(null); setDesc(''); setDescName(''); setNote(`Kept ${v.name} in your voices.`)
       } else if (way === 'clone' && speaker) {
-        const v = await cloneSpeakerToMine(speaker.project_id, speaker.label, cloneName.trim())
+        const v = await cloneSpeakerToMine(speaker.video_id, speaker.label, cloneName.trim())
+        voiceIsYours()
         kept(v); setNote(`Kept ${v.name} in your voices.`)
       }
     } catch (e) { setFormError(said(e, 'That did not work.')) } finally { setBusy(false) }
@@ -308,12 +322,27 @@ export function VoicesPage({ me }: VoicesPageProps) {
                 </section>
               )}
 
+              {showProject && inProject.length > 0 && (
+                <section className="flex flex-col gap-3.5" aria-labelledby={`${uid}-shared`} data-testid="in-project">
+                  <div className="flex flex-wrap items-baseline gap-2.5"><h2 id={`${uid}-shared`} className="disp m-0 text-2xl font-bold">In a project</h2><span className="tag text-faint">shared with every video there</span></div>
+                  {inProject.map((pv) => (
+                    <div key={`${pv.project_id}:${pv.voice_id}`} className="rise grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3.5 rounded-[10px] border border-line bg-card px-3.5 py-3">
+                      <span className="stamp in">{pv.kind ? (KIND_WORD as Record<string, string>)[pv.kind] ?? pv.kind : 'Shared'}</span>
+                      <div className="flex min-w-0 flex-col">
+                        <span className="disp text-base font-semibold">{pv.name}</span>
+                        <span className="text-[13px] text-muted-foreground">{pv.description ?? 'Ask for it by name in any video of the project.'}</span>
+                      </div>
+                      <a href={hrefFor({ page: 'folder', projectId: pv.project_id ?? '' })} className="tag text-foreground no-underline">{pv.project_name ?? 'the project'} →</a>
+                    </div>
+                  ))}
+                </section>
+              )}
               {showProject && (
-                <section className="flex flex-col gap-3.5" aria-labelledby={`${uid}-made`}>
+                <section className="flex flex-col gap-3.5" aria-labelledby={`${uid}-made`} data-tour="voices-made">
                   <div className="flex flex-wrap items-baseline gap-2.5"><h2 id={`${uid}-made`} className="disp m-0 text-2xl font-bold">Made inside a project</h2><span className="tag text-faint">deleted with the project unless you keep them</span></div>
                   {made.length === 0 ? (
                     <p className="m-0 text-muted-foreground">Nothing yet. A voice Voltage designs or clones inside a project shows here, with a way to keep it.</p>
-                  ) : made.map((mv) => (
+                  ) : made.map((mv, mi) => (
                     <div key={mv.voice_id} className="rise grid grid-cols-[auto_minmax(0,1fr)] items-center gap-3.5 rounded-[10px] border border-line bg-card px-3.5 py-3 sm:grid-cols-[auto_minmax(0,1fr)_auto]">
                       <span className="stamp in">{KIND_WORD[mv.kind]}</span>
                       <div className="flex min-w-0 flex-col">
@@ -322,7 +351,7 @@ export function VoicesPage({ me }: VoicesPageProps) {
                       </div>
                       {mv.kept
                         ? <button type="button" className="btn sm col-span-2 justify-self-start sm:col-span-1" disabled aria-disabled="true">✓ Kept in yours</button>
-                        : <button type="button" className="btn volt sm col-span-2 justify-self-start sm:col-span-1" onClick={() => void keep(mv)} disabled={busyVoice === mv.voice_id}>{busyVoice === mv.voice_id ? 'Keeping…' : 'Keep in my voices'}</button>}
+                        : <button type="button" className="btn volt sm col-span-2 justify-self-start sm:col-span-1" data-tour={mi === made.findIndex((x) => !x.kept) ? 'keep-voice' : undefined} onClick={() => void keep(mv)} disabled={busyVoice === mv.voice_id}>{busyVoice === mv.voice_id ? 'Keeping…' : 'Keep in my voices'}</button>}
                     </div>
                   ))}
                 </section>
@@ -436,7 +465,7 @@ export function VoicesPage({ me }: VoicesPageProps) {
               <span className="text-[13px] text-pmuted">No project speaker has enough speech to clone yet.</span>
             ) : (
               <select id={`${uid}-vspk`} className={cn(field, 'px-2.5')} value={speakerKey} onChange={(e) => pickSpeaker(e.target.value)}>
-                {speakers.map((s) => <option key={`${s.project_id}:${s.label}`} value={`${s.project_id}:${s.label}`}>{s.name} · {s.filename.replace(/\.[^.]+$/, '')} · {Math.round(s.seconds)} s</option>)}
+                {speakers.map((s) => <option key={`${s.video_id}:${s.label}`} value={`${s.video_id}:${s.label}`}>{s.name} · {s.filename.replace(/\.[^.]+$/, '')} · {Math.round(s.seconds)} s</option>)}
               </select>
             )}
             <span className="text-[13px] text-pmuted">Cloned from everything they say in the clip.</span>

@@ -25,6 +25,7 @@ class ToolResult:
     step: str | None = None                     # the line the thread shows; None = silent
     cost_usd: float = 0.0
     card: dict | None = None                    # {text, data}: a card the thread shows after the step (voice previews)
+    data: dict | None = None                    # facts the step message carries (search_help: the articles found)
 
 
 @dataclass
@@ -68,6 +69,12 @@ class Workbench:
     # 20g: a line mixed louder or softer, nothing voiced again.
     relevel_take: Callable[[str, Any, float], Any] | None = None          # (project_id, candidate, level_db) -> candidate
     relevel_edit: Callable[[str, str, float], dict | None] | None = None  # (project_id, edit_id, level_db) -> {edit_id, reverted, candidate}
+    # Folders: the project the video is in — {project_id, name, brief, voices: [entries], videos: [sisters], files: [{name, text}]} — or None.
+    project: Callable[[str], dict | None] = lambda video_id: None
+    # Folders: record a brief suggestion for the project page -> its id, or None when the video is in no project.
+    suggest: Callable[[str, str, str], str | None] | None = None          # (video_id, addition, why)
+    # Help: the articles, best match first -> [{slug, section, title, summary, body, tour}]
+    help_search: Callable[[str], Sequence[dict]] = lambda query: []
 
 
 @dataclass
@@ -225,6 +232,11 @@ def _list_voices(wb: Workbench, turn: Turn, args: dict) -> ToolResult:
         return ToolResult("No voices are available.", step="Looked for voices — none")
     made = {m["voice_id"]: m for m in _made_voices(wb, turn)}
     out = ["Voices that can speak a line (voice_id · name · who · how they sound):"]
+    shared = _project_voices(wb, turn)
+    for v in shared:
+        # Folders: the project's voices first; one that carries consent needs no new consent here.
+        out.append(f"- {v['voice_id']} · {v['name']} · in this project" + (f" · {v['description']}" if v.get("description") else "")
+                   + (" · consent given" if v.get("consent") else ""))
     for v in voices:
         who = ", ".join(str(x).replace("_", " ") for x in (v.get("gender"), v.get("accent"), v.get("age")) if x)
         tag = ""
@@ -239,7 +251,12 @@ def _list_voices(wb: Workbench, turn: Turn, args: dict) -> ToolResult:
             out.append(f"- {v['voice_id']} · {v['name']} · yours, {v.get('seconds', 0):.0f} s of reference")
     out.append(f"The default is {wb.default_voice()}. If none fits, search the library (add_voice_from_library) "
                "or design one from words (design_voice).")
-    return ToolResult("\n".join(out), step=f"Looked through {len(voices) + len(mine)} voices")
+    return ToolResult("\n".join(out), step=f"Looked through {len(voices) + len(mine) + len(shared)} voices")
+
+
+def _project_voices(wb: Workbench, turn: Turn) -> list[dict]:
+    project = wb.project(turn.project_id)
+    return list((project or {}).get("voices") or [])
 
 
 def _search_library(wb: Workbench, turn: Turn, args: dict) -> ToolResult:
@@ -305,6 +322,115 @@ def shipped_lines(edits: Sequence[Any]) -> list[str]:
     return out
 
 
+# ── free: the project around the video (Folders), and Help ───────────────────
+
+def _list_project_videos(wb: Workbench, turn: Turn, args: dict) -> ToolResult:
+    project = wb.project(turn.project_id)
+    if not project:
+        return ToolResult("This video is in no project; it has no sister videos.", step="Looked for sister videos — none")
+    sisters = list(project.get("videos") or [])
+    if not sisters:
+        return ToolResult(f"{project.get('name')} holds no other video yet.", step="Looked for sister videos — none")
+    out = [f"The other videos in {project.get('name')} (read only — this turn changes only its own video):"]
+    for v in sisters:
+        shipped = list(v.get("shipped") or [])
+        said = "; ".join(f"“{e.get('text')}”" + (f" in {e['voice']}" if e.get("voice") else "") for e in shipped if e.get("text"))
+        out.append(f"- {v.get('filename')} ({float(v.get('duration') or 0):.1f} s, {v.get('state', 'new')}): "
+                   + (f"shipped {said}" if said else "nothing shipped yet"))
+    return ToolResult("\n".join(out), step=f"Read the {len(sisters)} sister {'video' if len(sisters) == 1 else 'videos'}")
+
+
+MAX_PASSAGES = 6
+PASSAGE_CHARS = 240
+
+
+def passages_of(files: Sequence[dict], query: str, limit: int = MAX_PASSAGES, width: int = PASSAGE_CHARS) -> list[tuple[str, str]]:
+    """Passages of the files' text around the query's words, with the file
+    name: the whole query first, then any of its words."""
+    words = [w for w in re.findall(r"[\w'-]+", query.lower()) if len(w) > 2]
+    needles = [query.strip().lower()] + words if query.strip() else words
+    out: list[tuple[str, str]] = []
+    seen: set[tuple[str, int]] = set()
+    for needle in needles:
+        if not needle:
+            continue
+        for f in files:
+            text = f.get("text") or ""
+            lowered = text.lower()
+            at = lowered.find(needle)
+            while at != -1 and len(out) < limit:
+                start = max(0, at - width // 2)
+                key = (f.get("name", ""), start // width)
+                if key not in seen:
+                    seen.add(key)
+                    piece = " ".join(text[start:start + width].split())
+                    out.append((f.get("name", ""), ("…" if start else "") + piece + ("…" if start + width < len(text) else "")))
+                at = lowered.find(needle, at + len(needle))
+            if len(out) >= limit:
+                return out
+    return out
+
+
+def _read_project_files(wb: Workbench, turn: Turn, args: dict) -> ToolResult:
+    project = wb.project(turn.project_id)
+    if not project:
+        return ToolResult("This video is in no project; there are no reference files.", step="Looked for reference files — none")
+    files = list(project.get("files") or [])
+    if not files:
+        return ToolResult(f"{project.get('name')} has no reference files yet.", step="Looked for reference files — none")
+    query = (args.get("query") or "").strip()
+    unread = [f["name"] for f in files if not (f.get("text") or "").strip()]
+    if not query:
+        return ToolResult("The reference files: " + ", ".join(f["name"] for f in files) + ". Say what to look for."
+                          + (f" No text could be read from {', '.join(unread)}." if unread else ""), step="Listed the reference files")
+    found = passages_of(files, query)
+    if not found:
+        return ToolResult(f"Nothing in the reference files mentions “{query}”. The files: " + ", ".join(f["name"] for f in files) + "."
+                          + (f" No text could be read from {', '.join(unread)}." if unread else ""),
+                          step=f"Searched the reference files for “{query[:40]}” — nothing")
+    out = [f"Passages about “{query}” (file · passage):"]
+    out.extend(f"- {name} · {piece}" for name, piece in found)
+    return ToolResult("\n".join(out), step=f"Searched the reference files for “{query[:40]}” — {len(found)} found")
+
+
+def _suggest_brief(wb: Workbench, turn: Turn, args: dict) -> ToolResult:
+    addition = (args.get("addition") or "").strip()
+    why = (args.get("why") or "").strip()
+    if not addition:
+        return ToolResult("Say what the brief should add.")
+    if wb.suggest is None or not wb.project(turn.project_id):
+        return ToolResult("This video is in no project, so there is no brief to add to.")
+    sid = wb.suggest(turn.project_id, addition, why)
+    if sid is None:
+        return ToolResult("This video is in no project, so there is no brief to add to.")
+    return ToolResult(f"Suggested for the brief ({sid}): “{addition}”. The brief changes only when the user accepts it on the project page.",
+                      step=f"Suggested for the brief: “{addition[:48]}{'…' if len(addition) > 48 else ''}”")
+
+
+HELP_EXCERPT = 600
+
+
+def _search_help(wb: Workbench, turn: Turn, args: dict) -> ToolResult:
+    query = (args.get("query") or "").strip()
+    if not query:
+        return ToolResult("Say what to look for in Help.")
+    try:
+        hits = list(wb.help_search(query))[:3]
+    except Exception as exc:  # noqa: BLE001 — Help that cannot be read is said, not raised
+        return ToolResult(f"Help could not be searched ({exc}).", step="Looked in Help — unavailable")
+    if not hits:
+        return ToolResult(f"Help has no article about “{query}”. Say so rather than guess at a feature.",
+                          step=f"Looked in Help for “{query[:40]}” — nothing")
+    out = [f"Help articles about “{query}” (name the one you answer from):"]
+    for h in hits:
+        body = " ".join((h.get("body") or "").split())
+        excerpt = body[:HELP_EXCERPT] + ("…" if len(body) > HELP_EXCERPT else "")
+        out.append(f"- {h.get('slug')} · {h.get('section')} / {h.get('title')}" + (f" · {h['summary']}" if h.get("summary") else "")
+                   + (f" · shows the user: {h['tour']}" if h.get("tour") else "") + f"\n  {excerpt}")
+    data = {"help": [{"slug": h.get("slug"), "title": h.get("title"), "section": h.get("section"), "tour": h.get("tour")} for h in hits]}
+    return ToolResult("\n".join(out), step=f"Looked in Help: {hits[0].get('title')}", data=data)
+
+
 # ── spend: a take ─────────────────────────────────────────────────────────────
 
 # Free-text direction → the vendor settings the adapter knows (20b replaces
@@ -329,7 +455,8 @@ def delivery_of(direction: str | None) -> str | None:
 
 def _voice_name(wb: Workbench, voice_id: str, turn: Turn | None = None) -> str:
     mine = wb.mine(getattr(turn.record, "owner", "")) if turn is not None else ()
-    return next((v["name"] for v in [*wb.voices(), *mine] if v["voice_id"] == voice_id), voice_id)
+    shared = _project_voices(wb, turn) if turn is not None else ()
+    return next((v["name"] for v in [*wb.voices(), *mine, *shared] if v["voice_id"] == voice_id), voice_id)
 
 
 # An audio tag in the words: "[sighs]", "[whispers]", "[long pause]".
@@ -386,7 +513,7 @@ def _synthesize_take(wb: Workbench, turn: Turn, args: dict) -> ToolResult:
         return ToolResult("There are no words to voice.")
     voice_id = (args.get("voice_id") or "").strip()
     own = voice_id in ("", "own")          # the speaker's own voice when the line has a speaker, else the default
-    known = [*wb.voices(), *wb.mine(getattr(turn.record, "owner", ""))]
+    known = [*wb.voices(), *wb.mine(getattr(turn.record, "owner", "")), *_project_voices(wb, turn)]
     if not own and voice_id != wb.default_voice() and not any(v["voice_id"] == voice_id for v in known):
         return ToolResult(f"{voice_id} is not a voice in the catalogue. Use list_voices and pick one of its ids, "
                           "or leave it empty for the speaker's own voice.")
@@ -872,6 +999,15 @@ TOOLS: tuple[Tool, ...] = (
          _schema({"text": {"type": "string", "description": "The words."}}), Guard.FREE, _estimate),
     Tool("project_state", "Where things stand: the plan's items and their states, and the money.",
          _schema({}), Guard.FREE, _project_state),
+    Tool("list_project_videos", "The other videos in this video's project (Folders): each one's name, length, state, and the lines and voices it shipped. Read only; a turn changes only its own video.",
+         _schema({}), Guard.FREE, _list_project_videos),
+    Tool("read_project_files", "Search the project's reference files (a brief, a script, notes) for a word or phrase; returns the matching passages with the file name. Empty lists the files.",
+         _schema({"query": {"type": "string", "description": "What to look for; empty to list the files."}}), Guard.FREE, _read_project_files),
+    Tool("suggest_brief", "Suggest something the project's brief should say, with why. Recorded for the project page; the brief changes only when the user accepts it.",
+         _schema({"addition": {"type": "string", "description": "The sentence or two to add."},
+                  "why": {"type": "string", "description": "Why, in a few words."}}), Guard.FREE, _suggest_brief),
+    Tool("search_help", "Look up how Voltage works in the help articles: up to three with slug, title, section, summary, an excerpt and what the tour can show. Answer how-do-I questions from these, naming the article; never guess at a feature.",
+         _schema({"query": {"type": "string", "description": "The question, in the user's words."}}), Guard.FREE, _search_help),
     Tool("synthesize_take",
          "Voice a line and place it, as a take the user can hear. Costs money (see estimate). Either replace a transcript line (give `line`) "
          "or place new words by time (give `start` and `end`; `mix` layer = over the picture and sound, concatenate = the picture waits). "

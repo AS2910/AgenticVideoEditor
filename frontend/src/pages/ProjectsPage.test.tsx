@@ -1,95 +1,112 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { ProjectsPage } from './ProjectsPage'
 
-const ok = (body: unknown) => ({ ok: true, status: 200, json: async () => body, text: async () => '' }) as Response
-const REPORT = { period: 'month', spent_usd: 2.06, ceiling_usd: 10, project_cap_usd: 2, turns: 16, takes: 14, voices_made: 3, avg_turn_usd: 0.14, by_vendor: [], by_project: [] }
+const ok = (body: unknown, status = 200) => ({ ok: status < 400, status, json: async () => body, text: async () => JSON.stringify(body) }) as Response
+const REPORT = { period: 'month', spent_usd: 2.06, ceiling_usd: 10, project_cap_usd: 2, turns: 16, takes: 14, voices_made: 3, avg_turn_usd: 0.14, by_vendor: [], by_video: [], by_project: [] }
 const ME = { mode: 'google' as const, user: { sub: '1', email: 'ashish@example.com', name: 'Ashish Sinha', picture: null } }
 const OFF = { mode: 'off' as const, user: null }
-const PROJECTS = [
-  { project_id: 'p2', filename: 'bhaji-cam-ad.mp4', duration: 48.9, created_at: new Date().toISOString(), edits: 1, state: 'draft' as const, last_change: 'Line 2 redone in the Customer’s own voice' },
-  { project_id: 'p1', filename: 'goa-beach.mov', duration: 7, created_at: '2025-03-04T08:00:00Z', edits: 0, state: 'shipped' as const },
+const FOLDERS = [
+  { project_id: 'f1', name: 'Diwali 2026', brief: 'Brand is Bhaji Cam.', ceiling_usd: 10, spent_usd: 1.94, created_at: '2026-10-18T08:00:00Z', video_count: 1 },
+  { project_id: 'f2', name: 'Goa tourism', brief: '', ceiling_usd: null, spent_usd: 0, created_at: '2026-10-17T08:00:00Z', video_count: 0 },
+]
+const VIDEOS = [
+  { video_id: 'p2', project_id: 'f1', project_name: 'Diwali 2026', filename: 'bhaji-cam-ad.mp4', duration: 48.9, created_at: new Date().toISOString(), edits: 1, state: 'draft' as const, last_change: 'Line 2 redone in the Customer’s own voice' },
+  { video_id: 'p1', project_id: null, filename: 'goa-beach.mov', duration: 7, created_at: '2025-03-04T08:00:00Z', edits: 0, state: 'shipped' as const },
 ]
 
-/** Routes by URL: the page itself only asks for this month's spend. */
-function routeFetch() {
-  return vi.fn(async (url: string) => {
+/** Routes by URL: the page asks for this month's spend; the move dialog moves a video. */
+function routeFetch(moves: { url: string; body: unknown }[] = [], conflict = false) {
+  return vi.fn(async (url: string, init?: RequestInit) => {
     if (url.includes('/usage?period=month')) return ok(REPORT)
+    if (url.endsWith('/videos/p2') && init?.method === 'PATCH') {
+      const body = JSON.parse(String(init.body))
+      moves.push({ url, body })
+      if (conflict && !body.voice) return ok({ detail: 'This video uses a project voice.', voices: [{ voice_id: 'v9', name: 'Diwali Narrator' }] }, 409)
+      return ok({ ...VIDEOS[0], project_id: body.project_id, project_name: body.project_id === 'f2' ? 'Goa tourism' : null })
+    }
     throw new Error(`unexpected url ${url}`)
   })
 }
 function setup(props: Partial<Parameters<typeof ProjectsPage>[0]> = {}) {
-  const onOpen = vi.fn(), onUpload = vi.fn(), onSample = vi.fn(), onDelete = vi.fn()
-  render(<ProjectsPage me={ME} projects={PROJECTS} onOpen={onOpen} onUpload={onUpload} onSample={onSample} onDelete={onDelete} uploading={false} {...props} />)
-  return { onOpen, onUpload, onSample, onDelete }
+  const onOpen = vi.fn(), onUpload = vi.fn(), onSample = vi.fn(), onDelete = vi.fn(), onNewFolder = vi.fn(), onMoved = vi.fn()
+  render(<ProjectsPage me={ME} projects={VIDEOS} folders={FOLDERS} onOpen={onOpen} onUpload={onUpload} onSample={onSample} onDelete={onDelete} onNewFolder={onNewFolder} onMoved={onMoved} uploading={false} {...props} />)
+  return { onOpen, onUpload, onSample, onDelete, onNewFolder, onMoved }
 }
 
-describe('ProjectsPage', () => {
+describe('Home (projects as folders)', () => {
   beforeEach(() => vi.stubGlobal('fetch', routeFetch()))
   afterEach(() => { vi.unstubAllGlobals(); window.location.hash = '' })
 
-  it('greets by name, shows the nav and the account initial, and this month’s spend', async () => {
+  it('shows the nav with Home current, the account initial, this month’s spend, and the projects down the side', async () => {
     setup()
-    expect(screen.getByText(/^Good (morning|afternoon|evening), Ashish$/)).toBeInTheDocument()
     expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('What should your next video say?')
-    expect(screen.getByRole('link', { name: 'Projects' })).toHaveAttribute('aria-current', 'page')
-    expect(screen.getByRole('link', { name: 'Voices' })).not.toHaveAttribute('aria-current')
+    expect(screen.getByRole('link', { name: 'Home' })).toHaveAttribute('aria-current', 'page')
     expect(screen.getByRole('link', { name: 'Account' })).toHaveTextContent('A')
     expect(await screen.findByTestId('month-spend')).toHaveTextContent(/\$2\.06of \$10 · [A-Z][a-z]{2}/)
+    const side = screen.getByTestId('projects-side')
+    expect(within(side).getByRole('link', { name: /Diwali 2026/ })).toHaveAttribute('href', '#p/f1')
+    expect(within(side).getByRole('link', { name: /Goa tourism/ })).toBeInTheDocument()
+    expect(within(side).getByRole('button', { name: /Standalone videos/ })).toHaveTextContent('1')
   })
 
-  it('lists the recent projects as cards linking to the editor', async () => {
+  it('lists the recent videos as cards with a project chip, filtered by the tabs', async () => {
     const { onOpen } = setup()
-    expect(screen.getByText('2 projects')).toBeInTheDocument()
-    expect(screen.getByText('Draft')).toBeInTheDocument()
-    expect(screen.getByText('Exported')).toBeInTheDocument()
-    expect(screen.getByText('Line 2 redone in the Customer’s own voice')).toBeInTheDocument()
-    expect(screen.getByText('Nothing changed yet')).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: 'All · 2' })).toHaveAttribute('aria-selected', 'true')
+    const chips = screen.getAllByTestId('project-chip').map((c) => c.textContent)
+    expect(chips).toEqual(['Diwali 2026', 'No project'])
     expect(screen.getByText(/^Today · \d{1,2}:\d{2}$/)).toBeInTheDocument()
-    expect(screen.getByText(/^4 Mar( 2025)?$/)).toBeInTheDocument()
     const card = screen.getByRole('link', { name: /bhaji-cam-ad\.mp4/ })
-    expect(card).toHaveAttribute('href', '#p2')
-    expect(card.querySelector('img')).toHaveAttribute('src', '/api/projects/p2/frames/0')
+    expect(card).toHaveAttribute('href', '#v/p2')
+    expect(card.querySelector('img')).toHaveAttribute('src', '/api/videos/p2/frames/0')
     await userEvent.click(card)
     expect(onOpen).toHaveBeenCalledWith('p2')
+    await userEvent.click(screen.getByRole('tab', { name: 'No project · 1' }))
+    expect(screen.queryByRole('link', { name: /bhaji-cam-ad\.mp4/ })).toBeNull()
+    expect(screen.getByRole('link', { name: /goa-beach\.mov/ })).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('tab', { name: 'In projects · 1' }))
+    expect(screen.queryByRole('link', { name: /goa-beach\.mov/ })).toBeNull()
   })
 
-  it('falls back to a plain block when a frame does not load', () => {
-    setup()
-    const img = screen.getByRole('link', { name: /goa-beach\.mov/ }).querySelector('img')!
-    fireEvent.error(img)
-    expect(screen.getAllByTestId('frame-fallback')).toHaveLength(1)
-  })
-
-  it('hands a chosen or dropped file to onUpload, and the sample to onSample', async () => {
+  it('hands a chosen or dropped file to onUpload with the project picked under Add to', async () => {
     const { onUpload, onSample } = setup()
     const file = new File(['video-bytes'], 'my-ad.mp4', { type: 'video/mp4' })
+    expect(screen.getByTestId('dest-note')).toHaveTextContent('It will be a standalone video.')
     await userEvent.upload(screen.getByLabelText('Choose a video'), file)
-    expect(onUpload).toHaveBeenCalledWith(file)
+    expect(onUpload).toHaveBeenCalledWith(file, null)
+    await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Add to' }), 'f1')
+    expect(screen.getByTestId('dest-note')).toHaveTextContent("It joins Diwali 2026 and Voltage reads that project's brief and voices from the first turn.")
     const zone = screen.getByTestId('drop-zone')
     fireEvent.dragOver(zone)
     expect(zone).toHaveAttribute('data-over', 'true')
     fireEvent.drop(zone, { dataTransfer: { files: [file] } })
-    expect(onUpload).toHaveBeenCalledTimes(2)
+    expect(onUpload).toHaveBeenLastCalledWith(file, 'f1')
     expect(zone).not.toHaveAttribute('data-over')
     await userEvent.click(screen.getByRole('button', { name: 'Try the sample ad' }))
     expect(onSample).toHaveBeenCalledOnce()
+  })
+
+  it('makes a new project from the side', async () => {
+    const { onNewFolder } = setup()
+    await userEvent.click(screen.getByRole('button', { name: '+ New project' }))
+    await userEvent.type(screen.getByRole('textbox', { name: 'Name the project' }), 'Brand interviews{Enter}')
+    await waitFor(() => expect(onNewFolder).toHaveBeenCalledWith('Brand interviews'))
   })
 
   it('says how the upload is going and shows the rejection reason', () => {
     const { onUpload } = setup({ uploading: true, progress: 0.4, error: 'That file has no video track.' })
     expect(screen.getByRole('status')).toHaveTextContent('Uploading, 40%.')
     expect(screen.getByRole('button', { name: 'Uploading…' })).toBeDisabled()
-    expect(screen.getByRole('button', { name: 'Try the sample ad' })).toBeDisabled()
     expect(screen.getByRole('alert')).toHaveTextContent('That file has no video track.')
     fireEvent.drop(screen.getByTestId('drop-zone'), { dataTransfer: { files: [new File(['x'], 'x.mp4', { type: 'video/mp4' })] } })
     expect(onUpload).not.toHaveBeenCalled()
   })
 
-  it('asks once more before deleting, then waits with Undo', async () => {
+  it('deletes from the card’s menu: asks once more, then waits with Undo', async () => {
     const { onDelete } = setup({ undoMs: 50 })
-    await userEvent.click(screen.getByRole('button', { name: 'Delete goa-beach.mov' }))
+    await userEvent.click(screen.getByRole('button', { name: 'More for goa-beach.mov' }))
+    await userEvent.click(screen.getByRole('menuitem', { name: 'Delete…' }))
     expect(onDelete).not.toHaveBeenCalled()
     expect(screen.getByRole('button', { name: 'Keep' })).toHaveFocus()
     await userEvent.click(screen.getByRole('button', { name: 'Delete for good' }))
@@ -97,23 +114,44 @@ describe('ProjectsPage', () => {
     await waitFor(() => expect(onDelete).toHaveBeenCalledWith('p1'))
   })
 
-  it('can keep the project, or undo within the grace period', async () => {
-    const { onDelete } = setup()
-    await userEvent.click(screen.getByRole('button', { name: 'Delete goa-beach.mov' }))
-    await userEvent.click(screen.getByRole('button', { name: 'Keep' }))
-    expect(screen.queryByRole('button', { name: 'Delete for good' })).not.toBeInTheDocument()
-    await userEvent.click(screen.getByRole('button', { name: 'Delete goa-beach.mov' }))
-    await userEvent.click(screen.getByRole('button', { name: 'Delete for good' }))
-    await userEvent.click(screen.getByRole('button', { name: 'Undo' }))
-    expect(screen.getByRole('link', { name: /goa-beach\.mov/ })).toBeInTheDocument()
-    expect(onDelete).not.toHaveBeenCalled()
+  it('moves a video from the card’s menu: the dialog lists the projects and No project, and a toast says where it went', async () => {
+    const moves: { url: string; body: unknown }[] = []
+    vi.stubGlobal('fetch', routeFetch(moves))
+    const { onMoved } = setup()
+    await userEvent.click(screen.getByRole('button', { name: 'More for bhaji-cam-ad.mp4' }))
+    await userEvent.click(screen.getByRole('menuitem', { name: '↗ Move to project…' }))
+    const dialog = screen.getByRole('dialog', { name: 'Move to project' })
+    expect(dialog).toHaveTextContent('Now in Diwali 2026.')
+    expect(within(dialog).getByRole('radio', { name: /Diwali 2026/ })).toHaveAttribute('aria-checked', 'true')
+    expect(within(dialog).getByRole('button', { name: 'Keep it here' })).toBeInTheDocument()
+    await userEvent.click(within(dialog).getByRole('radio', { name: /No project/ }))
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Remove from project' }))
+    await waitFor(() => expect(moves).toEqual([{ url: '/api/videos/p2', body: { project_id: null } }]))
+    expect(await screen.findByRole('status')).toHaveTextContent('bhaji-cam-ad.mp4 is now a standalone video.')
+    expect(onMoved).toHaveBeenCalledWith('p2', null)
   })
 
-  it('says hello and shows V when sign-in is off, and where projects will appear when there are none', () => {
-    setup({ me: OFF, projects: [] })
-    expect(screen.getByText('Hello')).toBeInTheDocument()
+  it('asks about a project voice when the server says one is in use, and answers with the choice', async () => {
+    const moves: { url: string; body: unknown }[] = []
+    vi.stubGlobal('fetch', routeFetch(moves, true))
+    setup()
+    await userEvent.click(screen.getByRole('button', { name: 'More for bhaji-cam-ad.mp4' }))
+    await userEvent.click(screen.getByRole('menuitem', { name: '↗ Move to project…' }))
+    const dialog = screen.getByRole('dialog', { name: 'Move to project' })
+    await userEvent.click(within(dialog).getByRole('radio', { name: /Goa tourism/ }))
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Move to Goa tourism' }))
+    const ask = await screen.findByTestId('voice-question')
+    expect(ask).toHaveTextContent('This video uses Diwali Narrator, a voice that belongs to Diwali 2026.')
+    await userEvent.click(within(ask).getByRole('radio', { name: 'Keep it in my voices, for any project' }))
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Move to Goa tourism' }))
+    await waitFor(() => expect(moves.at(-1)?.body).toEqual({ project_id: 'f2', voice: 'keep' }))
+    expect(await screen.findByRole('status')).toHaveTextContent('Moved bhaji-cam-ad.mp4 to Goa tourism.')
+  })
+
+  it('shows V when sign-in is off, and where videos will appear when there are none', () => {
+    setup({ me: OFF, projects: [], folders: [] })
     expect(screen.getByRole('link', { name: 'Account' })).toHaveTextContent('V')
-    expect(screen.getByText('0 projects')).toBeInTheDocument()
-    expect(screen.getByText(/your projects will show here/i)).toBeInTheDocument()
+    expect(screen.getByText(/your videos will show here/i)).toBeInTheDocument()
+    expect(screen.getByText(/A project holds videos that share/)).toBeInTheDocument()
   })
 })

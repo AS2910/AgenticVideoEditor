@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import type { ReactNode, RefObject } from 'react'
-import type { ChatMessage, PlanQuestion } from '../types'
+import type { ChatMessage, HelpRef, PlanQuestion } from '../types'
 import { artifactUrl } from '../api'
 import { ArrowUp } from 'lucide-react'
 import { cn } from '@/lib/utils'
@@ -23,6 +23,13 @@ function turnsOf(messages: ChatMessage[]): Turn[] {
   return turns
 }
 
+/** The articles a turn's search_help steps used, once each; shown after Voltage's answer. */
+function helpOf(t: Turn): HelpRef[] {
+  const seen = new Map<string, HelpRef>()
+  for (const s of t.steps) for (const h of s.data?.help ?? []) if (!seen.has(h.slug)) seen.set(h.slug, h)
+  return [...seen.values()].slice(0, 1)
+}
+
 const mmss = (s: number) => `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(Math.floor(s % 60)).padStart(2, '0')}`
 const money = (n: number) => `$${n.toFixed(2)}`
 
@@ -33,7 +40,7 @@ function Trace({ steps, open, onToggle }: { steps: ChatMessage[]; open: boolean;
   const seconds = typeof last?.data?.t === 'number' ? last.data.t : null
   const shown = open || steps.length <= 5 ? steps : steps.slice(-5)
   return (
-    <div className="flex flex-col gap-2.5 rounded-[10px] border border-pline px-3.5 py-3" data-testid="trace">
+    <div className="flex flex-col gap-2.5 rounded-[10px] border border-pline px-3.5 py-3" data-testid="trace" data-tour="trace">
       <div className="flex items-center gap-2">
         <span className="tag pm">Trace · {steps.length} {steps.length === 1 ? 'step' : 'steps'}{seconds !== null ? ` · ${Math.round(seconds)} s` : ''}</span>
         <span className="flex-1" />
@@ -92,6 +99,8 @@ interface VoltagePaneProps {
   need?: boolean
   /** The model and effort tag on the right of the header ("Opus 5.5 · high"). */
   engine?: string
+  /** Folders: what project context Voltage is reading ("Brief · Diwali 2026", "2 shared voices"). */
+  chips?: string[]
   /** What one turn may spend, under the composer. */
   cap?: string
   question?: PlanQuestion | null
@@ -110,14 +119,16 @@ interface VoltagePaneProps {
   working?: string | null
   /** What stands when nothing has been said yet. */
   empty?: ReactNode
+  /** Help (2026-10-19): "Show me" on an answer from Help starts that article's feature tour. */
+  onShowMe?: (tour: string) => void
 }
 
 /** Voltage's pane (Volt, 2026-10-18): black in both themes. The avatar and the
  *  state word, the thread as turns — your bubble, the trace, Voltage's words,
  *  a question as a gate card — then the chips and the composer. */
 export function VoltagePane({
-  messages, projectId, state, busy, need, engine, cap, question, onAnswer, onSubmit, placeholder = 'Say what to change…', sendLabel = 'Send',
-  inputRef, seed, suggestions = [], before, children, working, empty,
+  messages, projectId, state, busy, need, engine, chips = [], cap, question, onAnswer, onSubmit, placeholder = 'Say what to change…', sendLabel = 'Send',
+  inputRef, seed, suggestions = [], before, children, working, empty, onShowMe,
 }: VoltagePaneProps) {
   const [prompt, setPrompt] = useState('')
   const [openTrace, setOpenTrace] = useState<number | null>(null)
@@ -152,6 +163,11 @@ export function VoltagePane({
         <span className="flex-1" />
         {engine && <span className="tag pm">{engine}</span>}
       </div>
+      {chips.length > 0 && (
+        <div className="flex flex-wrap gap-1.5 border-b border-pline px-5.5 py-2.5" data-testid="context-chips">
+          {chips.map((c, i) => <span key={c} className={cn('tag rounded-full px-2 py-[3px]', i === 0 ? 'bg-volt text-ink' : 'border border-pline pm')}>{c}</span>)}
+        </div>
+      )}
 
       <div ref={list} className="flex min-h-0 flex-1 flex-col gap-4.5 overflow-y-auto px-5.5 py-6" role="log" aria-live="polite" aria-relevant="additions" aria-label="The conversation">
         {before}
@@ -183,6 +199,16 @@ export function VoltagePane({
                   {t.said.map((m, k) => <div key={m.seq ?? k}><span className="sr-only">Voltage: </span><Markdown text={m.text} /></div>)}
                 </div>
               )}
+              {helpOf(t).map((h) => (
+                <div key={h.slug} className="rise flex flex-col gap-2.5 rounded-xl border-[1.5px] border-volt p-3.5" data-testid="from-help">
+                  <span className="tag pm">From Help · {h.section}</span>
+                  <span className="disp text-lg font-semibold">{h.title}</span>
+                  <div className="flex flex-wrap gap-2">
+                    {h.tour && onShowMe && <button type="button" className="btn volt sm" onClick={() => onShowMe(h.tour!)}>⚡ Show me</button>}
+                    <a className="btn ghost sm" href={`#help/${h.slug}`}>Read more</a>
+                  </div>
+                </div>
+              ))}
             </div>
           )
         })}
@@ -192,7 +218,7 @@ export function VoltagePane({
           </div>
         )}
         {question && (
-          <div className={cn(question.gate ? 'gate' : 'flex flex-col gap-3.5 rounded-xl border border-pline p-4')} data-testid="clarify" role="group" aria-label={question.gate ? 'Your go is needed' : 'One question'}>
+          <div className={cn(question.gate ? 'gate' : 'flex flex-col gap-3.5 rounded-xl border border-pline p-4')} data-testid="clarify" data-tour={question.gate ? 'gate' : 'question'} role="group" aria-label={question.gate ? 'Your go is needed' : 'One question'}>
             <span className={cn('tag', question.gate ? 'text-volt' : 'pm')}>{question.gate ? '⚡ Your go is needed' : 'One question'}</span>
             <p className="m-0 text-[15px] leading-relaxed"><strong className="font-medium">{question.text}</strong></p>
             {(question.cost_usd != null || question.left_usd != null) && (
@@ -203,7 +229,7 @@ export function VoltagePane({
             )}
             <div className="flex flex-wrap gap-2">
               {question.options.map((o, k) => (
-                <button key={o} type="button" className={cn('btn sm', k === 0 && question.gate ? 'volt shine' : o === question.guess && !question.gate ? 'volt' : 'ghost', /^not yet$/i.test(o) && 'border-transparent pm')} onClick={() => onAnswer?.(o)}>{o}</button>
+                <button key={o} type="button" className={cn('btn sm', k === 0 && question.gate ? 'volt shine' : o === question.guess && !question.gate ? 'volt' : 'ghost', /^not yet$/i.test(o) && 'border-transparent pm')} onClick={() => onAnswer?.(o)} data-tour-action={k === 0 && question.gate ? 'gate' : undefined}>{o}</button>
               ))}
             </div>
             <span className="pm text-xs" role="status">{question.gate ? 'Say go, or pick one.' : `${question.guess ? `My guess is ${question.guess}. ` : ''}Pick one, or answer in your own words.`}</span>
@@ -219,7 +245,7 @@ export function VoltagePane({
           </div>
         )}
         <label htmlFor="ask-voltage" className="sr-only">Describe a change</label>
-        <div className={cn('flex flex-col gap-2 rounded-xl border-[1.5px] bg-psunk py-3 pr-3 pl-3.5', turns.length === 0 ? 'border-volt' : 'border-pline')}>
+        <div className={cn('flex flex-col gap-2 rounded-xl border-[1.5px] bg-psunk py-3 pr-3 pl-3.5', turns.length === 0 ? 'border-volt' : 'border-pline')} data-tour="composer">
           <textarea
             id="ask-voltage"
             ref={inputRef}
@@ -235,7 +261,7 @@ export function VoltagePane({
             <span className="tag pm">{cap ?? 'Nothing is spent until you say go'}</span>
             <span className="flex-1" />
             <span className="kbd pm hidden sm:inline" aria-hidden="true">/</span>
-            <button type="button" className="btn volt sm w-[34px] p-0" onClick={submit} disabled={disabled} aria-label={sendLabel} title={sendLabel}>
+            <button type="button" className="btn volt sm w-[34px] p-0" onClick={submit} disabled={disabled} aria-label={sendLabel} title={sendLabel} data-tour-action="composer">
               <ArrowUp size={14} aria-hidden="true" />
             </button>
           </div>

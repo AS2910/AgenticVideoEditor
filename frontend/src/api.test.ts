@@ -17,7 +17,7 @@ beforeEach(() => { vi.restoreAllMocks() })
 afterEach(() => { vi.restoreAllMocks() })
 
 describe('api client', () => {
-  it('createProject uploads the file as multipart to /api/projects', async () => {
+  it('createProject uploads the file as multipart to /api/videos', async () => {
     const f = mockFetch(200, { project_id: 'p1', transcript: [] })
     vi.stubGlobal('fetch', f)
     const file = new File(['bytes'], 'ad.mp4', { type: 'video/mp4' })
@@ -26,7 +26,7 @@ describe('api client', () => {
     expect(project.project_id).toBe('p1')
 
     const [url, opts] = f.mock.calls[0]
-    expect(url).toBe('/api/projects')
+    expect(url).toBe('/api/videos')
     expect(opts.method).toBe('POST')
     expect(opts.body).toBeInstanceOf(FormData)
     expect((opts.body as FormData).get('file')).toBe(file)
@@ -54,8 +54,8 @@ describe('api client', () => {
     ).rejects.toMatchObject({ status: 422, message: 'That file has no video track.' })
   })
 
-  it('artifactUrl addresses stored media under the project', () => {
-    expect(artifactUrl('p1', 'abc')).toBe('/api/projects/p1/artifacts/abc')
+  it('artifactUrl addresses stored media under the video', () => {
+    expect(artifactUrl('p1', 'abc')).toBe('/api/videos/p1/artifacts/abc')
   })
 
   describe('pollJob', () => {
@@ -123,7 +123,7 @@ describe('api client', () => {
     const f = mockFetch(200, { segments: [], render: null })
     vi.stubGlobal('fetch', f)
     await exportProject('p1')
-    expect(f.mock.calls[0][0]).toBe('/api/projects/p1/export')
+    expect(f.mock.calls[0][0]).toBe('/api/videos/p1/export')
   })
 
   it('throws ApiError with status and the detail on non-2xx', async () => {

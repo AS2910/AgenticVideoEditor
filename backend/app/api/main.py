@@ -8,7 +8,7 @@ from pathlib import Path
 import shutil
 
 from fastapi import Depends, FastAPI, HTTPException, File, Form, Request, Response, UploadFile
-from fastapi.responses import FileResponse, RedirectResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from pydantic import BaseModel
 
 from typing import Literal
@@ -43,7 +43,7 @@ from app.orchestrator.pipeline import run_edit
 from app.store.db import Database
 from app.usage import Ledger, SpendCeilingReached, WHISPER_USD_PER_MINUTE, claude_usd
 from app import auth
-from app.store.repository import ProjectRecord, ProjectRepository, LOCAL_OWNER
+from app.store.repository import Project, ProjectRecord, ProjectRepository, LOCAL_OWNER
 from app.store.artifacts import ArtifactStore
 from app.render.renderer import render
 from app.render.compose import compose
@@ -53,6 +53,18 @@ from app.jobs.runner import JobRunner
 from app.agent import loop as agent_loop
 from app.agent.guards import TurnBudget, is_go
 from app.agent.tools import Turn as AgentTurn, Workbench
+
+# The coordinator's modules (Help, the tutorial, onboarding). Each is optional
+# at import so the app boots while one is still being written.
+try:
+    from app.help import search as search_help_articles
+except ImportError:  # pragma: no cover - until app.help lands
+    def search_help_articles(query: str, limit: int = 3) -> list[dict]:
+        return []
+try:
+    from app.tutorial import is_tutorial, replay_turn
+except ImportError:  # pragma: no cover - until app.tutorial lands
+    is_tutorial = replay_turn = None  # type: ignore[assignment]
 
 app = FastAPI(title="Agentic Video Editor")
 log = logging.getLogger(__name__)
@@ -229,12 +241,19 @@ def current_owner(request: Request) -> str:
 
 
 def _ensure_spend(project_id: str) -> None:
-    """The project's ceiling, and with sign-in the person's across projects."""
+    """The video's ceiling, its project's when one is set (Folders), and
+    with sign-in the person's across videos; the lowest wins."""
     record = repo.get(project_id)
+    folder = None
+    if record is not None and record.folder_id:
+        project = repo.get_project(record.folder_id)
+        if project is not None and project.ceiling_usd is not None:
+            folder = (project.project_id, float(project.ceiling_usd), project.name)
     ledger.ensure_can_spend(
         project_id,
         owner=record.owner if record and settings.auth_mode != "off" else None,
         owner_ceiling_usd=settings.user_budget_usd if settings.auth_mode != "off" else None,
+        folder=folder,
     )
 
 
@@ -315,12 +334,24 @@ def auth_logout(response: Response) -> dict:
 
 
 def _owned(project_id: str, owner: str) -> ProjectRecord:
-    """The caller's project, or 404. Someone else's project is indistinguishable
+    """The caller's video, or 404. Someone else's video is indistinguishable
     from a missing one, so ids leak nothing."""
     record = repo.get(project_id)
     if record is None or record.owner != owner:
-        raise HTTPException(status_code=404, detail="project not found")
+        raise HTTPException(status_code=404, detail="video not found")
     return record
+
+
+def _owned_project(project_id: str, owner: str) -> Project:
+    """The caller's project (a folder, Folders), or 404."""
+    project = repo.get_project(project_id)
+    if project is None or project.owner != owner:
+        raise HTTPException(status_code=404, detail="project not found")
+    return project
+
+
+def _folder_of(record: ProjectRecord) -> Project | None:
+    return repo.get_project(record.folder_id) if record.folder_id else None
 
 
 # ── UX-5: the picture, for a clip with no speech ─────────────────────────────
@@ -357,7 +388,8 @@ class SightRequest(BaseModel):
     place: str = ""
 
 
-@app.put("/projects/{project_id}/sight")
+@app.put("/videos/{project_id}/sight")
+@app.put("/projects/{project_id}/sight", deprecated=True)
 def confirm_sight(project_id: str, req: SightRequest, owner: str = Depends(current_owner)) -> dict:
     """UX-5: the user confirms the place Voltage guessed, or names the real
     one. The plan then uses that name and never guesses."""
@@ -372,14 +404,16 @@ def confirm_sight(project_id: str, req: SightRequest, owner: str = Depends(curre
     return asdict(sight)
 
 
-@app.get("/projects/{project_id}/frames")
+@app.get("/videos/{project_id}/frames")
+@app.get("/projects/{project_id}/frames", deprecated=True)
 def list_frames(project_id: str, owner: str = Depends(current_owner)) -> list[dict]:
     """The clip's frames, by index and time; each is served at /frames/{index}."""
     record = _owned(project_id, owner)
     return _frames_dict(record)
 
 
-@app.get("/projects/{project_id}/frames/{index}")
+@app.get("/videos/{project_id}/frames/{index}")
+@app.get("/projects/{project_id}/frames/{index}", deprecated=True)
 def get_frame(project_id: str, index: int, owner: str = Depends(current_owner)) -> FileResponse:
     record = _owned(project_id, owner)
     frames = _frames(record)
@@ -389,9 +423,14 @@ def get_frame(project_id: str, index: int, owner: str = Depends(current_owner)) 
 
 
 def _project_dict(record: ProjectRecord) -> dict:
+    """A video record. `video_id` is its own id; `project_id` the folder it
+    is in, or null (Folders)."""
     source = record.source
+    folder = _folder_of(record)
     return {
-        "project_id": source.project_id,
+        "video_id": source.project_id,
+        "project_id": folder.project_id if folder else None,
+        "project_name": folder.name if folder else None,
         "filename": source.filename,
         "duration": source.duration,
         "media": _artifact_dict(source.media),
@@ -445,11 +484,30 @@ def _prefs(owner: str) -> dict:
     }
 
 
-def _starting_settings(owner: str) -> dict:
-    """What a new project starts with: the owner's defaults, copied in, so a
-    later change to the defaults leaves the project as it was set."""
+SETTING_KEYS = ("autonomy", "turn_usd", "effort", "ask_before")
+
+
+def _defaults_for(owner: str, folder: Project | None) -> dict:
+    """The defaults a video reads when it has not set a key itself: the
+    project's (Folders) over the owner's."""
     prefs = _prefs(owner)
-    return {k: prefs[k] for k in ("autonomy", "turn_usd", "effort", "ask_before")}
+    saved = (folder.settings or {}) if folder else {}
+    if saved.get("autonomy") in ("ask", "draft"):
+        prefs["autonomy"] = saved["autonomy"]
+    if saved.get("turn_usd"):
+        prefs["turn_usd"] = _clamp_turn_usd(float(saved["turn_usd"]))
+    if saved.get("effort") in EFFORTS:
+        prefs["effort"] = saved["effort"]
+    if isinstance(saved.get("ask_before"), dict):
+        prefs["ask_before"] = _ask_before({**prefs["ask_before"], **saved["ask_before"]})
+    return prefs
+
+
+def _starting_settings(owner: str, folder: Project | None = None) -> dict:
+    """What a new video starts with: the project's defaults over the owner's,
+    copied in, so a later change to the defaults leaves the video as it was set."""
+    defaults = _defaults_for(owner, folder)
+    return {k: defaults[k] for k in SETTING_KEYS}
 
 
 class PrefsUpdate(BaseModel):
@@ -485,25 +543,26 @@ def update_my_settings(req: PrefsUpdate, owner: str = Depends(current_owner)) ->
 
 
 def _settings(project_id: str, owner: str | None = None) -> dict:
-    """What Voltage may do on this project (20d): the autonomy, what one
+    """What Voltage may do on this video (20d): the autonomy, what one
     turn may spend, how hard it thinks, and which steps still ask under Just
-    do it; the project's ceiling and the model are read-only. A project made
-    before it had its own `ask_before` reads its owner's."""
+    do it; the video's ceiling and the model are read-only. A key the video
+    never set reads its project's default, then its owner's (Folders)."""
     saved = repo.settings(project_id)
-    ask = saved.get("ask_before")
-    if ask is None:
-        if owner is None:
-            record = repo.get(project_id)
-            owner = record.owner if record else LOCAL_OWNER
-        ask = _prefs(owner)["ask_before"]
-    return {
-        "autonomy": saved.get("autonomy", DEFAULT_AUTONOMY),
-        "turn_usd": float(saved.get("turn_usd") or settings.agent_turn_usd),
-        "effort": saved.get("effort") or settings.agent_effort,
+    record = repo.get(project_id)
+    if owner is None:
+        owner = record.owner if record else LOCAL_OWNER
+    defaults = _defaults_for(owner, _folder_of(record) if record else None)
+    out = {
+        "autonomy": saved.get("autonomy") or defaults["autonomy"],
+        "turn_usd": float(saved.get("turn_usd") or defaults["turn_usd"]),
+        "effort": saved.get("effort") or defaults["effort"],
         "ceiling_usd": ledger.ceiling_usd,
-        "ask_before": _ask_before(ask),
+        "ask_before": _ask_before(saved["ask_before"]) if saved.get("ask_before") is not None else defaults["ask_before"],
         "model": settings.agent_model,
     }
+    if saved.get("tutorial"):
+        out["tutorial"] = True   # the guided run's sample video (its turns replay a recording)
+    return out
 
 
 def _speakers(project_id: str) -> list[dict]:
@@ -520,12 +579,16 @@ def _record_diarization(project_id: str, duration: float) -> None:
                       minutes * WHISPER_USD_PER_MINUTE)
 
 
-@app.post("/projects")
+@app.post("/videos")
 async def create_project(
     file: UploadFile = File(...),
     consent: bool = Form(False),
+    project_id: str | None = Form(None),
     owner: str = Depends(current_owner),
 ) -> dict:
+    """Upload a video (Folders: into a project when `project_id` names one
+    of the caller's; it then starts with the project's defaults)."""
+    folder = _owned_project(project_id, owner) if project_id else None
     filename = Path(file.filename or "upload.mp4").name
     container = (Path(filename).suffix.lstrip(".") or "mp4").lower()
 
@@ -559,8 +622,8 @@ async def create_project(
         ) from exc
 
     granted = Consent(granted_at=_now()) if consent else None
-    repo.create(source, transcript, granted, owner=owner)
-    repo.set_settings(project_id, **_starting_settings(owner))
+    repo.create(source, transcript, granted, owner=owner, folder_id=folder.project_id if folder else None)
+    repo.set_settings(project_id, **_starting_settings(owner, folder))
     if transcriber_label.startswith("openai"):
         minutes = source.duration / 60
         ledger.record(project_id, "openai", "transcription", minutes, "minutes",
@@ -602,11 +665,13 @@ def _set_designs(owner: str, designs: dict) -> None:
 
 
 def _kept_voice_ids() -> set[str]:
-    """Every voice anyone kept as their own. A project's deletion leaves
-    these at the vendor: they outlive the clip they were made from."""
+    """Every voice anyone kept as their own, or shared into a project
+    (Folders). A video's deletion leaves these at the vendor: they outlive
+    the clip they were made from."""
     out: set[str] = set()
-    for value in repo.meta_with_prefix("my_voices:").values():
-        out.update(v["voice_id"] for v in json.loads(value))
+    for prefix in ("my_voices:", "project_voices:"):
+        for value in repo.meta_with_prefix(prefix).values():
+            out.update(v["voice_id"] for v in json.loads(value))
     return out
 
 
@@ -665,13 +730,16 @@ def list_voices(owner: str = Depends(current_owner)) -> dict:
     """The voices a new line can be spoken in, which one is the default, the
     caller's own voices (20i) with where each is used, and the vendor's slots."""
     mine = _my_voices(owner)
-    for v in mine:
+    shared = [(p, v) for p in repo.list_projects(owner) for v in _project_voices(p.project_id)]
+    for v in [*mine, *(v for _, v in shared)]:
         getattr(voice, "register_clone", lambda vid: None)(v["voice_id"])
-    used = _voices_in_use(owner) if mine else {}
+    used = _voices_in_use(owner) if mine or shared else {}
     return {
         "default": voice.default_voice,
         "voices": [{**v, "preview_url": v.get("preview_url")} for v in voice.voices()],
         "mine": [_voice_entry(v, used.get(v["voice_id"], 0)) for v in mine],
+        # Folders: the voices shared in the caller's projects.
+        "project": [{**_voice_entry(v, used.get(v["voice_id"], 0)), "project_id": p.project_id, "project_name": p.name} for p, v in shared],
         "slots": _slots(),
     }
 
@@ -733,13 +801,13 @@ def _made_voices_of(owner: str) -> list[dict]:
         pid, filename = r.source.project_id, r.source.filename
         for m in repo.settings(pid).get("made_voices") or []:
             out.append({"voice_id": m["voice_id"], "name": m.get("name") or m["voice_id"], "kind": m.get("kind") or "designed",
-                        "project_id": pid, "filename": filename, "description": m.get("description"), "seconds": None,
+                        "video_id": pid, "filename": filename, "description": m.get("description"), "seconds": None,
                         "kept": m["voice_id"] in kept})
         names = {s.label: s.name for s in repo.speakers(pid)}
         for key, voice_id in repo.clones(pid).items():
             whole = key == ProjectRepository.WHOLE_CLIP
             out.append({"voice_id": voice_id, "name": "The speaker" if whole else names.get(key, f"Speaker {key}"), "kind": "cloned",
-                        "project_id": pid, "filename": filename, "description": None,
+                        "video_id": pid, "filename": filename, "description": None,
                         "seconds": round(speech_seconds(r.transcript, None if whole else key), 1), "kept": voice_id in kept})
     return out
 
@@ -769,13 +837,13 @@ def keep_made_voice(req: KeepRequest, owner: str = Depends(current_owner)) -> di
         raise HTTPException(status_code=404, detail="No such voice was made in your projects.")
     label = _voice_name_or_422(req.name or found["name"])
     _no_voice_called(owner, label)
-    pid = found["project_id"]
+    pid = found["video_id"]
     made = repo.settings(pid).get("made_voices") or []
     if any(m["voice_id"] == req.voice_id for m in made):
         repo.set_settings(pid, made_voices=[m for m in made if m["voice_id"] != req.voice_id])
     entry = {"voice_id": req.voice_id, "name": label, "seconds": float(found.get("seconds") or 0.0), "at": _now(),
              "kind": found["kind"], "sample_sha": None, "description": found.get("description"),
-             "source": {"project_id": pid, "filename": found["filename"]}}
+             "source": {"video_id": pid, "filename": found["filename"]}}
     _set_my_voices(owner, [*mine, entry])
     getattr(voice, "register_clone", lambda vid: None)(req.voice_id)
     return _voice_entry(entry)
@@ -790,13 +858,13 @@ def list_speakers_with_a_voice(owner: str = Depends(current_owner)) -> dict:
         for spk in repo.speakers(pid):
             seconds = speech_seconds(r.transcript, spk.label)
             if seconds >= MIN_MY_VOICE_SECONDS:
-                out.append({"project_id": pid, "filename": r.source.filename, "label": spk.label, "name": spk.name,
+                out.append({"video_id": pid, "filename": r.source.filename, "label": spk.label, "name": spk.name,
                             "seconds": round(seconds, 1)})
     return {"speakers": out}
 
 
 class FromSpeakerRequest(BaseModel):
-    project_id: str
+    video_id: str
     label: str
     name: str
     consent: bool = False
@@ -812,8 +880,8 @@ def add_my_voice_from_speaker(req: FromSpeakerRequest, owner: str = Depends(curr
     _voices_can_be_made()
     label = _voice_name_or_422(req.name)
     _no_voice_called(owner, label)
-    record = _owned(req.project_id, owner)
-    spk = next((s for s in repo.speakers(req.project_id) if s.label == req.label), None)
+    record = _owned(req.video_id, owner)
+    spk = next((s for s in repo.speakers(req.video_id) if s.label == req.label), None)
     if spk is None:
         raise HTTPException(status_code=404, detail="speaker not found")
     seconds = speech_seconds(record.transcript, spk.label)
@@ -830,7 +898,7 @@ def add_my_voice_from_speaker(req: FromSpeakerRequest, owner: str = Depends(curr
     sample = artifacts.put_file(_user_store(owner), reference.path, kind="audio", container="wav", duration=reference.duration)
     entry = {"voice_id": voice_id, "name": label, "seconds": round(seconds, 1), "at": _now(), "kind": "cloned",
              "sample_sha": sample.sha256, "description": None,
-             "source": {"project_id": req.project_id, "filename": record.source.filename, "label": spk.label}}
+             "source": {"video_id": req.video_id, "filename": record.source.filename, "label": spk.label}}
     _set_my_voices(owner, [*_my_voices(owner), entry])
     return _voice_entry(entry)
 
@@ -919,15 +987,27 @@ def delete_my_voice(voice_id: str, owner: str = Depends(current_owner)) -> Respo
     return Response(status_code=204)
 
 
-@app.get("/projects")
-def list_projects(owner: str = Depends(current_owner)) -> dict:
-    """The caller's projects, newest first — enough to show and reopen them:
-    a frame (the source media), where each stands, and its last change (UX-3)."""
-    return {"projects": [_summary(r) for r in repo.list(owner)]}
+@app.get("/videos")
+def list_projects(project: str | None = None, recent: int | None = None, owner: str = Depends(current_owner)) -> dict:
+    """The caller's videos, newest first — enough to show and reopen them:
+    a frame (the source media), where each stands, and its last change (UX-3).
+    Folders: `project=none` lists the standalone ones, `project=<id>` one
+    project's; `recent=N` caps the list."""
+    from app.store.repository import ANY_FOLDER
+    folder: str | None = ANY_FOLDER
+    if project == "none":
+        folder = None
+    elif project:
+        folder = _owned_project(project, owner).project_id
+    found = repo.list(owner, folder=folder)
+    if recent is not None:
+        found = found[:max(0, recent)]
+    return {"videos": [_summary(r) for r in found]}
 
 
 def _summary(r: ProjectRecord) -> dict:
     pid = r.source.project_id
+    folder = _folder_of(r)
     live = [e for e in repo.list_edits(pid) if not e.reverted]
     plan = repo.latest_plan(pid)
     settings_ = repo.settings(pid)
@@ -944,7 +1024,9 @@ def _summary(r: ProjectRecord) -> dict:
     else:
         last = "Nothing changed yet"
     return {
-        "project_id": pid,
+        "video_id": pid,
+        "project_id": folder.project_id if folder else None,
+        "project_name": folder.name if folder else None,
         "filename": r.source.filename,
         "duration": r.source.duration,
         "created_at": r.created_at,
@@ -956,9 +1038,9 @@ def _summary(r: ProjectRecord) -> dict:
     }
 
 
-@app.get("/projects/{project_id}")
+@app.get("/videos/{project_id}")
 def get_project(project_id: str, owner: str = Depends(current_owner)) -> dict:
-    """Everything needed to reopen a project: source, transcript, approved
+    """Everything needed to reopen a video: source, transcript, approved
     edits and the chat."""
     record = _owned(project_id, owner)
     speakers = _speakers_by_take(project_id)
@@ -1009,14 +1091,19 @@ def _edit_dict(e: ApprovedEdit, speakers: dict[str, str | None]) -> dict:
     }
 
 
-@app.get("/projects/{project_id}/usage")
+@app.get("/videos/{project_id}/usage")
+@app.get("/projects/{project_id}/usage", deprecated=True)
 def get_usage(project_id: str, owner: str = Depends(current_owner)) -> dict:
     """What the project has spent, per vendor, against its limits. USD is an
     estimate from list prices."""
-    _owned(project_id, owner)
+    record = _owned(project_id, owner)
+    folder = _folder_of(record)
     return {
         "spent_usd": round(ledger.spent_usd(project_id), 4),
         "ceiling_usd": ledger.ceiling_usd,
+        # Folders: the project's ceiling (when set) and what the project has spent.
+        "project_ceiling_usd": folder.ceiling_usd if folder else None,
+        "project_spent_usd": round(ledger.spent_usd_by_folder(folder.project_id), 4) if folder else None,
         "user_spent_usd": round(ledger.spent_usd_by_owner(owner), 4) if settings.auth_mode != "off" else None,
         "user_ceiling_usd": settings.user_budget_usd if settings.auth_mode != "off" else None,
         "voice_characters": budget.spent(project_id),
@@ -1055,10 +1142,11 @@ def get_my_usage(period: Literal["week", "month", "all"] = "month", owner: str =
     outside any project (the voices page) counts in the totals, not by project."""
     since = _period_start(period)
     by_vendor = {v: 0.0 for v in VENDOR_LABELS}
-    by_project: list[dict] = []
+    by_video: list[dict] = []
     turns = takes = 0
     voices_made = len(_my_voices(owner))
     projects = repo.list(owner)
+    turns_by_folder: dict[str, int] = {}
     for r in projects:
         pid = r.source.project_id
         lines = ledger.lines(pid, since)
@@ -1069,11 +1157,19 @@ def get_my_usage(period: Literal["week", "month", "all"] = "month", owner: str =
                 takes += u.calls
         turns += project_turns
         voices_made += len(repo.settings(pid).get("made_voices") or [])
-        by_project.append({
-            "project_id": pid, "filename": r.source.filename, "turns": project_turns,
+        if r.folder_id:
+            turns_by_folder[r.folder_id] = turns_by_folder.get(r.folder_id, 0) + project_turns
+        by_video.append({
+            "video_id": pid, "project_id": r.folder_id, "filename": r.source.filename, "turns": project_turns,
             "voice_characters": int(sum(u.units for u in lines if u.vendor == VoiceBudget.VENDOR and u.unit == VoiceBudget.UNIT)),
             "spent_usd": round(sum(u.usd for u in lines), 4), "cap_usd": ledger.ceiling_usd,
         })
+    # Folders: each project's share, from the rows charged while its videos were in it.
+    by_project = [{
+        "project_id": p.project_id, "name": p.name, "videos": sum(1 for r in projects if r.folder_id == p.project_id),
+        "turns": turns_by_folder.get(p.project_id, 0), "spent_usd": round(ledger.spent_usd_by_folder(p.project_id, since), 4),
+        "ceiling_usd": p.ceiling_usd,
+    } for p in repo.list_projects(owner)]
     for u in ledger.lines(_user_store(owner), since):
         by_vendor[u.vendor] = by_vendor.get(u.vendor, 0.0) + u.usd
     thinking = by_vendor.get("anthropic", 0.0)
@@ -1087,6 +1183,7 @@ def get_my_usage(period: Literal["week", "month", "all"] = "month", owner: str =
         "voices_made": voices_made,
         "avg_turn_usd": round(thinking / turns, 4) if turns else 0.0,
         "by_vendor": [{"vendor": v, "label": VENDOR_LABELS.get(v, v), "usd": round(usd, 4)} for v, usd in by_vendor.items()],
+        "by_video": by_video,
         "by_project": by_project,
     }
 
@@ -1100,13 +1197,15 @@ class SettingsUpdate(BaseModel):
     ask_before: dict[str, bool] | None = None
 
 
-@app.get("/projects/{project_id}/settings")
+@app.get("/videos/{project_id}/settings")
+@app.get("/projects/{project_id}/settings", deprecated=True)
 def get_settings(project_id: str, owner: str = Depends(current_owner)) -> dict:
     _owned(project_id, owner)
     return {"settings": _settings(project_id, owner)}
 
 
-@app.put("/projects/{project_id}/settings")
+@app.put("/videos/{project_id}/settings")
+@app.put("/projects/{project_id}/settings", deprecated=True)
 def update_settings(
     project_id: str, req: SettingsUpdate, owner: str = Depends(current_owner),
 ) -> dict:
@@ -1128,13 +1227,15 @@ class SpeakerUpdate(BaseModel):
     clear_voice: bool = False
 
 
-@app.get("/projects/{project_id}/speakers")
+@app.get("/videos/{project_id}/speakers")
+@app.get("/projects/{project_id}/speakers", deprecated=True)
 def get_speakers(project_id: str, owner: str = Depends(current_owner)) -> dict:
     _owned(project_id, owner)
     return {"speakers": _speakers(project_id)}
 
 
-@app.put("/projects/{project_id}/speakers/{label}")
+@app.put("/videos/{project_id}/speakers/{label}")
+@app.put("/projects/{project_id}/speakers/{label}", deprecated=True)
 def update_speaker(
     project_id: str, label: str, req: SpeakerUpdate, owner: str = Depends(current_owner),
 ) -> dict:
@@ -1147,7 +1248,8 @@ def update_speaker(
     return {"speakers": _speakers(project_id)}
 
 
-@app.post("/projects/{project_id}/speakers/detect")
+@app.post("/videos/{project_id}/speakers/detect")
+@app.post("/projects/{project_id}/speakers/detect", deprecated=True)
 def detect_speakers(project_id: str, owner: str = Depends(current_owner)) -> dict:
     """Find who speaks when, for a project transcribed before Phase 11."""
     record = _owned(project_id, owner)
@@ -1171,7 +1273,8 @@ class ReadRequest(BaseModel):
     again: bool = False
 
 
-@app.post("/projects/{project_id}/reading")
+@app.post("/videos/{project_id}/reading")
+@app.post("/projects/{project_id}/reading", deprecated=True)
 def read_project(project_id: str, req: ReadRequest, owner: str = Depends(current_owner)) -> dict:
     """Voltage's first look at the clip (UX-2): one specific opening line for
     the goal stage, and a role for each speaker ("the Customer") to confirm
@@ -1219,7 +1322,7 @@ def read_project(project_id: str, req: ReadRequest, owner: str = Depends(current
     return out
 
 
-@app.delete("/projects/{project_id}", status_code=204)
+@app.delete("/videos/{project_id}", status_code=204)
 def delete_project(project_id: str, owner: str = Depends(current_owner)) -> None:
     """Delete the project and all of its media. This is also how consent is
     withdrawn (design spec §2): nothing of the speaker is kept."""
@@ -1271,7 +1374,464 @@ def delete_account(owner: str = Depends(current_owner)) -> Response:
     return Response(status_code=204)
 
 
-@app.post("/projects/{project_id}/variants")
+# ── Folders: a project is a folder of videos ─────────────────────────────────
+# A project has a name, a brief, defaults for new videos, shared voices,
+# reference files and an optional spending ceiling. Its voices, files and
+# brief suggestions are meta lists keyed by its id; the files' bytes live
+# under the artifact store at projects/<id>/files/<sha256>.
+
+def _project_voices(project_id: str) -> list[dict]:
+    return repo.meta_list(f"project_voices:{project_id}")
+
+
+def _set_project_voices(project_id: str, voices: list[dict]) -> None:
+    repo.set_meta_list(f"project_voices:{project_id}", voices)
+
+
+def _project_files(project_id: str) -> list[dict]:
+    """The reference files, `text` included (what read_project_files searches)."""
+    return repo.meta_list(f"project_files:{project_id}")
+
+
+def _set_project_files(project_id: str, files: list[dict]) -> None:
+    repo.set_meta_list(f"project_files:{project_id}", files)
+
+
+def _suggestions(project_id: str) -> list[dict]:
+    return repo.meta_list(f"brief_suggestions:{project_id}")
+
+
+def _set_suggestions(project_id: str, items: list[dict]) -> None:
+    repo.set_meta_list(f"brief_suggestions:{project_id}", items)
+
+
+def _files_dir(project_id: str) -> Path:
+    return artifacts.root / "projects" / project_id / "files"
+
+
+def _file_dict(entry: dict) -> dict:
+    return {k: entry.get(k) for k in ("name", "sha256", "size", "kind", "at")}
+
+
+def _suggestion_dict(entry: dict) -> dict:
+    record = repo.get(entry.get("video_id") or "")
+    return {**entry, "filename": record.source.filename if record else None}
+
+
+def _folder_dict(project: Project) -> dict:
+    return {
+        "project_id": project.project_id,
+        "name": project.name,
+        "brief": project.brief,
+        "settings": {k: v for k, v in _defaults_for(project.owner, project).items() if k in SETTING_KEYS},
+        "ceiling_usd": project.ceiling_usd,
+        "spent_usd": round(ledger.spent_usd_by_folder(project.project_id), 4),
+        "created_at": project.created_at,
+    }
+
+
+def _last_at(videos: list[ProjectRecord], fallback: str) -> str:
+    """When something last happened in the project: the newest message or upload."""
+    at = fallback
+    for r in videos:
+        at = max(at, r.created_at)
+        messages = repo.messages(r.source.project_id)
+        if messages:
+            at = max(at, messages[-1].at)
+    return at
+
+
+def _project_summary(project: Project) -> dict:
+    videos = repo.list(project.owner, folder=project.project_id)
+    return {
+        **{k: v for k, v in _folder_dict(project).items() if k != "settings"},
+        "video_count": len(videos),
+        "voices": len(_project_voices(project.project_id)),
+        "files": len(_project_files(project.project_id)),
+        "last_at": _last_at(videos, project.created_at),
+    }
+
+
+def _voices_used_by(video_id: str) -> set[str]:
+    """The voices a video's kept edits and ready proposals speak in."""
+    used = {e.plan.voice_profile_id for e in repo.list_edits(video_id) if not e.reverted}
+    plan = repo.latest_plan(video_id)
+    for item in (plan.items if plan else ()):
+        if item.status == "ready" and item.candidate_id:
+            candidate = repo.get_candidate(video_id, item.candidate_id)
+            if candidate is not None:
+                used.add(candidate.plan.voice_profile_id)
+    return {v for v in used if v}
+
+
+def _project_page(project: Project) -> dict:
+    videos = repo.list(project.owner, folder=project.project_id)
+    in_use: dict[str, int] = {}
+    for r in videos:
+        for vid in _voices_used_by(r.source.project_id):
+            in_use[vid] = in_use.get(vid, 0) + 1
+    return {
+        "project": _folder_dict(project),
+        "videos": [_summary(r) for r in videos],
+        "voices": [_voice_entry(v, in_use.get(v["voice_id"], 0)) for v in _project_voices(project.project_id)],
+        "files": [_file_dict(f) for f in _project_files(project.project_id)],
+        "suggestions": [_suggestion_dict(s) for s in _suggestions(project.project_id)],
+    }
+
+
+def _project_view(video_id: str) -> dict | None:
+    """The project around a video, for the agent (Folders): name, brief,
+    the shared voices, the sister videos with what each shipped, the
+    reference files with their text. None for a standalone video."""
+    record = repo.get(video_id)
+    if record is None or not record.folder_id:
+        return None
+    project = repo.get_project(record.folder_id)
+    if project is None:
+        return None
+    sisters = []
+    for r in repo.list(project.owner, folder=project.project_id):
+        pid = r.source.project_id
+        if pid == video_id:
+            continue
+        shipped = [{"text": e.plan.new_text, "voice": _voice_words(pid, r.owner, e.plan.voice_profile_id)}
+                   for e in repo.list_edits(pid) if not e.reverted and e.plan.mix != "remove"]
+        sisters.append({**_summary(r), "shipped": shipped})
+    return {"project_id": project.project_id, "name": project.name, "brief": project.brief,
+            "voices": _project_voices(project.project_id), "videos": sisters, "files": _project_files(project.project_id)}
+
+
+def _suggest_brief(video_id: str, addition: str, why: str) -> str | None:
+    """Record what Voltage thinks the brief should add; the brief changes
+    only when the user accepts it on the project page."""
+    record = repo.get(video_id)
+    if record is None or not record.folder_id or repo.get_project(record.folder_id) is None:
+        return None
+    items = _suggestions(record.folder_id)
+    n = 1 + max((int(i["id"][1:]) for i in items if str(i.get("id", "")).startswith("s") and str(i["id"])[1:].isdigit()), default=0)
+    entry = {"id": f"s{n}", "text": addition.strip(), "why": why.strip(), "video_id": video_id, "at": _now()}
+    _set_suggestions(record.folder_id, [*items, entry])
+    return entry["id"]
+
+
+class ProjectCreate(BaseModel):
+    name: str
+    brief: str = ""
+
+
+class ProjectUpdate(BaseModel):
+    name: str | None = None
+    brief: str | None = None
+    # Defaults for new videos: any subset of autonomy, turn_usd, effort, ask_before.
+    settings: dict | None = None
+    # A null sent on purpose clears the ceiling.
+    ceiling_usd: float | None = None
+
+
+def _project_name_or_422(name: str) -> str:
+    label = " ".join(name.split())[:80]
+    if not label:
+        raise HTTPException(status_code=422, detail="Give the project a name.")
+    return label
+
+
+def _clean_defaults(saved: dict) -> dict:
+    """The defaults a project may hold, validated like a video's settings."""
+    out: dict = {}
+    if saved.get("autonomy") is not None:
+        if saved["autonomy"] not in ("ask", "draft"):
+            raise HTTPException(status_code=422, detail="autonomy is ask or draft.")
+        out["autonomy"] = saved["autonomy"]
+    if saved.get("turn_usd") is not None:
+        out["turn_usd"] = _clamp_turn_usd(float(saved["turn_usd"]))
+    if saved.get("effort") is not None:
+        if saved["effort"] not in EFFORTS:
+            raise HTTPException(status_code=422, detail=f"effort is one of {', '.join(EFFORTS)}.")
+        out["effort"] = saved["effort"]
+    if saved.get("ask_before") is not None:
+        if not isinstance(saved["ask_before"], dict):
+            raise HTTPException(status_code=422, detail="ask_before is an object of ship, clone, design.")
+        out["ask_before"] = {k: bool(v) for k, v in saved["ask_before"].items() if k in ASK_BEFORE}
+    return out
+
+
+@app.get("/projects")
+def list_folders(owner: str = Depends(current_owner)) -> dict:
+    """The caller's projects (folders), with how much each holds and has spent."""
+    return {"projects": [_project_summary(p) for p in repo.list_projects(owner)]}
+
+
+@app.post("/projects", status_code=201)
+def create_folder(req: ProjectCreate, owner: str = Depends(current_owner)) -> dict:
+    project = repo.create_project(owner, _project_name_or_422(req.name), req.brief.strip())
+    return _folder_dict(project)
+
+
+@app.get("/projects/{project_id}")
+def get_folder(project_id: str, owner: str = Depends(current_owner)) -> dict:
+    """The project page: the project, its videos, shared voices (with how
+    many videos use each), reference files and Voltage's brief suggestions."""
+    return _project_page(_owned_project(project_id, owner))
+
+
+@app.patch("/projects/{project_id}")
+def update_folder(project_id: str, req: ProjectUpdate, owner: str = Depends(current_owner)) -> dict:
+    _owned_project(project_id, owner)
+    name = _project_name_or_422(req.name) if req.name is not None else None
+    if req.ceiling_usd is not None and req.ceiling_usd <= 0:
+        raise HTTPException(status_code=422, detail="The ceiling is a positive amount, or null for none.")
+    project = repo.update_project(
+        project_id, name=name, brief=req.brief.strip() if req.brief is not None else None,
+        settings=_clean_defaults(req.settings) if req.settings is not None else None,
+        ceiling_usd=req.ceiling_usd, clear_ceiling="ceiling_usd" in req.model_fields_set and req.ceiling_usd is None,
+    )
+    return _folder_dict(project)
+
+
+@app.delete("/projects/{project_id}", status_code=204)
+def delete_folder(project_id: str, videos: Literal["delete", "keep"], owner: str = Depends(current_owner)) -> Response:
+    """Delete a project: its videos go with it (`delete`) or become
+    standalone (`keep`). A voice shared only here goes at the vendor
+    unless someone kept it as their own or a video still carries it."""
+    project = _owned_project(project_id, owner)
+    shared = _project_voices(project_id)
+    if videos == "delete":
+        for r in repo.list(owner, folder=project_id):
+            _delete_project(r.source.project_id)
+    repo.delete_project(project_id, keep_videos=videos == "keep")
+    kept = _kept_voice_ids()
+    for r in repo.list(owner):
+        kept.update(m["voice_id"] for m in repo.settings(r.source.project_id).get("made_voices") or [])
+        kept.update(repo.clones(r.source.project_id).values())
+    for v in shared:
+        if v["voice_id"] in kept:
+            continue
+        try:
+            getattr(voice, "delete_voice", lambda vid: None)(v["voice_id"])
+        except Exception as exc:  # noqa: BLE001
+            logging.getLogger("ave").warning("project %s deleted, but voice %s (%s) is still at ElevenLabs: %s",
+                                             project.project_id, v.get("name"), v["voice_id"], exc)
+    shutil.rmtree(artifacts.root / "projects" / project_id, ignore_errors=True)
+    return Response(status_code=204)
+
+
+@app.get("/projects/{project_id}/videos")
+def list_folder_videos(project_id: str, owner: str = Depends(current_owner)) -> dict:
+    project = _owned_project(project_id, owner)
+    return {"videos": [_summary(r) for r in repo.list(owner, folder=project.project_id)]}
+
+
+# ── reference files ──
+
+MAX_FILE_BYTES = 20 << 20
+MAX_FILE_TEXT = 20_000
+TEXT_KINDS = ("txt", "md", "json", "csv")
+
+
+def _extract_text(name: str, data: bytes) -> str:
+    """The file's words, where they can be read without a new dependency:
+    text files as they are; a .docx from its XML (stdlib); a .pdf through
+    pypdf when it is installed, else nothing."""
+    kind = Path(name).suffix.lstrip(".").lower()
+    text = ""
+    try:
+        if kind in TEXT_KINDS:
+            text = data.decode("utf-8", errors="replace")
+        elif kind == "docx":
+            import io
+            import re as _re
+            import zipfile
+            with zipfile.ZipFile(io.BytesIO(data)) as z:
+                xml = z.read("word/document.xml").decode("utf-8", errors="replace")
+            xml = _re.sub(r"</w:p>", "\n", xml)
+            text = _re.sub(r"<[^>]+>", "", xml)
+        elif kind == "pdf":
+            try:
+                import io
+                from pypdf import PdfReader  # type: ignore[import-not-found]
+                reader = PdfReader(io.BytesIO(data))
+                text = "\n".join((page.extract_text() or "") for page in reader.pages)
+            except ImportError:
+                text = ""
+    except Exception as exc:  # noqa: BLE001 — a file whose text cannot be read is still kept
+        logging.getLogger("ave").info("no text read from %s: %s", name, exc)
+        text = ""
+    return text[:MAX_FILE_TEXT]
+
+
+@app.post("/projects/{project_id}/files", status_code=201)
+async def add_folder_file(project_id: str, file: UploadFile = File(...), owner: str = Depends(current_owner)) -> dict:
+    """Add a reference file (a brief, a script, notes). Its text is kept so
+    Voltage can search it."""
+    _owned_project(project_id, owner)
+    name = Path(file.filename or "file").name
+    data = await file.read(MAX_FILE_BYTES + 1)
+    if len(data) > MAX_FILE_BYTES:
+        raise HTTPException(status_code=413, detail="That file is too large (20 MB at most).")
+    if not data:
+        raise HTTPException(status_code=422, detail="That file is empty.")
+    import hashlib
+    sha256 = hashlib.sha256(data).hexdigest()
+    folder = _files_dir(project_id)
+    folder.mkdir(parents=True, exist_ok=True)
+    dest = folder / sha256
+    if not dest.exists():
+        tmp = dest.with_name(f"{sha256}.tmp")
+        tmp.write_bytes(data)
+        tmp.replace(dest)
+    entry = {"name": name, "sha256": sha256, "size": len(data), "kind": Path(name).suffix.lstrip(".").lower() or "file",
+             "at": _now(), "text": _extract_text(name, data)}
+    _set_project_files(project_id, [*(f for f in _project_files(project_id) if f["sha256"] != sha256), entry])
+    return _file_dict(entry)
+
+
+@app.get("/projects/{project_id}/files/{sha256}")
+def get_folder_file(project_id: str, sha256: str, owner: str = Depends(current_owner)) -> FileResponse:
+    _owned_project(project_id, owner)
+    entry = next((f for f in _project_files(project_id) if f["sha256"] == sha256), None)
+    path = _files_dir(project_id) / sha256
+    if entry is None or not path.is_file():
+        raise HTTPException(status_code=404, detail="file not found")
+    import mimetypes
+    media_type = mimetypes.guess_type(entry["name"])[0] or "application/octet-stream"
+    return FileResponse(path, media_type=media_type, filename=entry["name"])
+
+
+@app.delete("/projects/{project_id}/files/{sha256}", status_code=204)
+def delete_folder_file(project_id: str, sha256: str, owner: str = Depends(current_owner)) -> Response:
+    _owned_project(project_id, owner)
+    files = _project_files(project_id)
+    if not any(f["sha256"] == sha256 for f in files):
+        raise HTTPException(status_code=404, detail="file not found")
+    _set_project_files(project_id, [f for f in files if f["sha256"] != sha256])
+    (_files_dir(project_id) / sha256).unlink(missing_ok=True)
+    return Response(status_code=204)
+
+
+# ── shared voices ──
+
+class ShareVoiceRequest(BaseModel):
+    voice_id: str
+
+
+@app.post("/projects/{project_id}/voices", status_code=201)
+def share_voice(project_id: str, req: ShareVoiceRequest, owner: str = Depends(current_owner)) -> dict:
+    """Share one of the caller's voices (their own, or one Voltage made in
+    a video) into the project, so every video in it can speak in it."""
+    _owned_project(project_id, owner)
+    shared = _project_voices(project_id)
+    if any(v["voice_id"] == req.voice_id for v in shared):
+        raise HTTPException(status_code=409, detail="That voice is already shared in this project.")
+    found = next((v for v in _my_voices(owner) if v["voice_id"] == req.voice_id), None)
+    if found is not None:
+        entry = {"voice_id": found["voice_id"], "name": found["name"], "kind": found.get("kind") or "recorded",
+                 "description": found.get("description"), "sample_sha": found.get("sample_sha"), "at": _now(),
+                 "consent": True}
+    else:
+        made = next((m for m in _made_voices_of(owner) if m["voice_id"] == req.voice_id), None)
+        if made is None:
+            raise HTTPException(status_code=404, detail="No such voice of yours.")
+        entry = {"voice_id": made["voice_id"], "name": made["name"], "kind": made["kind"], "description": made.get("description"),
+                 "sample_sha": None, "at": _now(), "consent": made["kind"] != "cloned"}
+    _set_project_voices(project_id, [*shared, entry])
+    getattr(voice, "register_clone", lambda vid: None)(entry["voice_id"])
+    return _voice_entry(entry)
+
+
+@app.delete("/projects/{project_id}/voices/{voice_id}", status_code=204)
+def unshare_voice(project_id: str, voice_id: str, owner: str = Depends(current_owner)) -> Response:
+    _owned_project(project_id, owner)
+    shared = _project_voices(project_id)
+    if not any(v["voice_id"] == voice_id for v in shared):
+        raise HTTPException(status_code=404, detail="That voice is not shared in this project.")
+    _set_project_voices(project_id, [v for v in shared if v["voice_id"] != voice_id])
+    return Response(status_code=204)
+
+
+# ── brief suggestions ──
+
+def _suggestion_or_404(project_id: str, sid: str) -> list[dict]:
+    items = _suggestions(project_id)
+    if not any(i["id"] == sid for i in items):
+        raise HTTPException(status_code=404, detail="suggestion not found")
+    return items
+
+
+@app.post("/projects/{project_id}/suggestions/{sid}/accept")
+def accept_suggestion(project_id: str, sid: str, owner: str = Depends(current_owner)) -> dict:
+    """Add the suggestion's words to the brief and drop the suggestion."""
+    project = _owned_project(project_id, owner)
+    items = _suggestion_or_404(project_id, sid)
+    text = next(i["text"] for i in items if i["id"] == sid)
+    brief = project.brief.rstrip()
+    repo.update_project(project_id, brief=(brief + "\n" + text) if brief else text)
+    _set_suggestions(project_id, [i for i in items if i["id"] != sid])
+    return _project_page(repo.get_project(project_id))
+
+
+@app.post("/projects/{project_id}/suggestions/{sid}/dismiss")
+def dismiss_suggestion(project_id: str, sid: str, owner: str = Depends(current_owner)) -> dict:
+    _owned_project(project_id, owner)
+    items = _suggestion_or_404(project_id, sid)
+    _set_suggestions(project_id, [i for i in items if i["id"] != sid])
+    return _project_page(repo.get_project(project_id))
+
+
+# ── moving a video ──
+
+class MoveVideoRequest(BaseModel):
+    project_id: str | None = None
+    # What to do with a project voice the video uses when it leaves: copy it
+    # into the video's own voices, or keep it in the owner's.
+    voice: Literal["copy", "keep"] | None = None
+
+
+@app.patch("/videos/{project_id}")
+def move_video(project_id: str, req: MoveVideoRequest, owner: str = Depends(current_owner)):
+    """Move a video into a project, or out (`project_id` null). Its turns,
+    takes and edits stay with it. Leaving a project whose voices its kept
+    edits or ready proposals use needs `voice`: copy or keep; without it the
+    answer is 409 naming the voices."""
+    record = _owned(project_id, owner)
+    target = _owned_project(req.project_id, owner) if req.project_id else None
+    target_id = target.project_id if target else None
+    leaving = record.folder_id if record.folder_id and record.folder_id != target_id else None
+    if leaving:
+        shared = {v["voice_id"]: v for v in _project_voices(leaving)}
+        # A voice the destination shares too, or the video carries itself, needs no question.
+        still = {v["voice_id"] for v in _project_voices(target_id)} if target_id else set()
+        still |= {m["voice_id"] for m in repo.settings(project_id).get("made_voices") or []}
+        going = [shared[v] for v in sorted(_voices_used_by(project_id)) if v in shared and v not in still]
+        if going and req.voice is None:
+            names = ", ".join(v["name"] for v in going)
+            return JSONResponse(status_code=409, content={
+                "detail": f"This video speaks in {names}, shared in the project it is leaving. Copy the voice into the video, or keep it in your voices.",
+                "voices": [{"voice_id": v["voice_id"], "name": v["name"]} for v in going]})
+        if going and req.voice == "copy":
+            made = repo.settings(project_id).get("made_voices") or []
+            have = {m["voice_id"] for m in made}
+            made.extend({"voice_id": v["voice_id"], "name": v["name"], "kind": v.get("kind") or "designed", "at": _now(),
+                         "description": v.get("description")} for v in going if v["voice_id"] not in have)
+            repo.set_settings(project_id, made_voices=made)
+        elif going and req.voice == "keep":
+            mine = _my_voices(owner)
+            have = {m["voice_id"] for m in mine}
+            taken = {m["name"].lower() for m in mine}
+            for v in going:
+                if v["voice_id"] in have:
+                    continue
+                name = v["name"] if v["name"].lower() not in taken else f"{v['name']} ({repo.get_project(leaving).name})"
+                mine.append({"voice_id": v["voice_id"], "name": name, "seconds": 0.0, "at": _now(), "kind": v.get("kind") or "designed",
+                             "sample_sha": v.get("sample_sha"), "description": v.get("description"),
+                             "source": {"project_id": leaving}})
+                taken.add(name.lower())
+            _set_my_voices(owner, mine)
+    repo.set_folder(project_id, target_id)
+    return _project_dict(repo.get(project_id))
+
+
+@app.post("/videos/{project_id}/variants")
+@app.post("/projects/{project_id}/variants", deprecated=True)
 def create_variant(project_id: str, owner: str = Depends(current_owner)) -> dict:
     """A variant (UX-3): the same clip as a new project, with the latest
     plan copied as a draft — every line planned again, nothing voiced — so
@@ -1284,12 +1844,12 @@ def create_variant(project_id: str, owner: str = Depends(current_owner)) -> dict
     media = artifacts.put_file(new_id, path, kind="video", container=record.source.media.container,
                                duration=record.source.media.duration)
     source = replace(record.source, project_id=new_id, media=media)
-    repo.create(source, record.transcript, record.consent, owner=owner)
+    repo.create(source, record.transcript, record.consent, owner=owner, folder_id=record.folder_id)
     for s in repo.speakers(project_id):
         repo.set_speaker(new_id, s.label, name=s.name, voice_id=s.voice_id)
     # The original's settings carry over (its render does not: the variant has
     # not been rendered); the owner's defaults fill whatever it never set.
-    saved = _starting_settings(owner) | {k: v for k, v in repo.settings(project_id).items() if k not in ("reading", "render")} | {"variant_of": project_id}
+    saved = _starting_settings(owner, _folder_of(record)) | {k: v for k, v in repo.settings(project_id).items() if k not in ("reading", "render")} | {"variant_of": project_id}
     if "reading" in repo.settings(project_id):
         saved["reading"] = repo.settings(project_id)["reading"]
     repo.set_settings(new_id, **saved)
@@ -1310,7 +1870,8 @@ def create_variant(project_id: str, owner: str = Depends(current_owner)) -> dict
     return _project_dict(repo.get(new_id))
 
 
-@app.post("/projects/{project_id}/consent")
+@app.post("/videos/{project_id}/consent")
+@app.post("/projects/{project_id}/consent", deprecated=True)
 def grant_consent(project_id: str, owner: str = Depends(current_owner)) -> dict:
     """Confirm rights for a project uploaded without them.
 
@@ -1318,10 +1879,11 @@ def grant_consent(project_id: str, owner: str = Depends(current_owner)) -> dict:
     """
     _owned(project_id, owner)
     recorded = repo.grant_consent(project_id, Consent(granted_at=_now()))
-    return {"project_id": project_id, "consent": _consent_dict(recorded)}
+    return {"video_id": project_id, "consent": _consent_dict(recorded)}
 
 
-@app.get("/projects/{project_id}/artifacts/{sha256}")
+@app.get("/videos/{project_id}/artifacts/{sha256}")
+@app.get("/projects/{project_id}/artifacts/{sha256}", deprecated=True)
 def get_artifact(project_id: str, sha256: str, owner: str = Depends(current_owner)) -> FileResponse:
     """Serve stored media by content address, with range requests.
 
@@ -1342,7 +1904,7 @@ def _job_dict(job: Job) -> dict:
     return {
         "job_id": job.job_id,
         "kind": job.kind,
-        "project_id": job.project_id,
+        "video_id": job.project_id,
         "status": job.status,
         "progress": round(job.progress, 3),
         "step": job.step,
@@ -1438,7 +2000,8 @@ def get_job(job_id: str) -> dict:
     return _job_dict(job)
 
 
-@app.post("/projects/{project_id}/edits")
+@app.post("/videos/{project_id}/edits")
+@app.post("/projects/{project_id}/edits", deprecated=True)
 def approve_edit(
     project_id: str, req: ApproveRequest, owner: str = Depends(current_owner),
 ) -> dict:
@@ -1482,7 +2045,8 @@ def _approve_candidate(project_id: str, candidate: EditCandidate, overridden: bo
     return edit_id
 
 
-@app.post("/projects/{project_id}/edits/{edit_id}/revert")
+@app.post("/videos/{project_id}/edits/{edit_id}/revert")
+@app.post("/projects/{project_id}/edits/{edit_id}/revert", deprecated=True)
 def revert_edit(project_id: str, edit_id: str, owner: str = Depends(current_owner)) -> dict:
     """Undo an approved edit (Phase 12). The edit is kept and marked, so
     nothing is lost; the render skips it and the transcript shows the line as
@@ -1523,7 +2087,8 @@ class ExportRequest(BaseModel):
     with_proposals: bool = False
 
 
-@app.post("/projects/{project_id}/export")
+@app.post("/videos/{project_id}/export")
+@app.post("/projects/{project_id}/export", deprecated=True)
 def export_project(project_id: str, req: ExportRequest | None = None, owner: str = Depends(current_owner)) -> dict:
     return _export(_owned(project_id, owner), proposals=bool(req and req.with_proposals))
 
@@ -1687,7 +2252,8 @@ def _change_dict(project_id: str, owner: str, e: ApprovedEdit) -> dict:
     return {"edit_id": e.edit_id, "start": e.plan.selection.start, "text": e.plan.new_text, "kind": kind, "note": note}
 
 
-@app.get("/projects/{project_id}/receipt")
+@app.get("/videos/{project_id}/receipt")
+@app.get("/projects/{project_id}/receipt", deprecated=True)
 def get_receipt(project_id: str, owner: str = Depends(current_owner)) -> dict:
     """What the project took: the turns, the takes voiced, the money, each
     change in the video in time order, what is still a draft, and the latest
@@ -1812,7 +2378,8 @@ def _catalogue() -> list[dict]:
         return []
 
 
-@app.get("/projects/{project_id}/plans/{plan_id}")
+@app.get("/videos/{project_id}/plans/{plan_id}")
+@app.get("/projects/{project_id}/plans/{plan_id}", deprecated=True)
 def get_plan(project_id: str, plan_id: str, owner: str = Depends(current_owner)) -> dict:
     _owned(project_id, owner)
     return _plan_dict(_plan_or_404(project_id, plan_id))
@@ -1825,7 +2392,8 @@ def _plan_or_404(project_id: str, plan_id: str) -> Plan:
     return plan
 
 
-@app.post("/projects/{project_id}/plans/{plan_id}/approve")
+@app.post("/videos/{project_id}/plans/{plan_id}/approve")
+@app.post("/projects/{project_id}/plans/{plan_id}/approve", deprecated=True)
 def approve_plan(
     project_id: str, plan_id: str, req: PlanApproveRequest, owner: str = Depends(current_owner),
 ) -> dict:
@@ -1899,7 +2467,8 @@ def _room_tone(record: ProjectRecord, seconds: float) -> "np.ndarray":
     return np.tile(room, reps)[:want].astype(np.float32)
 
 
-@app.post("/projects/{project_id}/lines/remove")
+@app.post("/videos/{project_id}/lines/remove")
+@app.post("/projects/{project_id}/lines/remove", deprecated=True)
 def remove_line(project_id: str, req: RemoveRequest, owner: str = Depends(current_owner)) -> dict:
     """Take a line out (UX-1): its words go, the room's own sound stays in
     their place, the picture is untouched. Approved at once — nothing is
@@ -1931,7 +2500,8 @@ def _remove_words(project_id: str, record: ProjectRecord, span: Selection) -> di
     }
 
 
-@app.post("/projects/{project_id}/plans/{plan_id}/items/{item_id}/dismiss")
+@app.post("/videos/{project_id}/plans/{plan_id}/items/{item_id}/dismiss")
+@app.post("/projects/{project_id}/plans/{plan_id}/items/{item_id}/dismiss", deprecated=True)
 def dismiss_item(project_id: str, plan_id: str, item_id: str, owner: str = Depends(current_owner)) -> dict:
     """Discard a proposal (20e): the line leaves the plan; a shipped one is
     taken out with Revert instead."""
@@ -1975,7 +2545,8 @@ def _room_tone_candidate(project_id: str, record: ProjectRecord, selection: Sele
     return candidate
 
 
-@app.post("/projects/{project_id}/lines/shift")
+@app.post("/videos/{project_id}/lines/shift")
+@app.post("/projects/{project_id}/lines/shift", deprecated=True)
 def shift_line(project_id: str, req: ShiftRequest, owner: str = Depends(current_owner)) -> dict:
     """Move a line of the original speech to another time, as it was
     spoken: its words leave their place (the room's sound stays there) and
@@ -2068,7 +2639,8 @@ def _releveled(project_id: str, source: EditCandidate, level_db: float) -> EditC
     return candidate
 
 
-@app.post("/projects/{project_id}/candidates/{candidate_id}/level")
+@app.post("/videos/{project_id}/candidates/{candidate_id}/level")
+@app.post("/projects/{project_id}/candidates/{candidate_id}/level", deprecated=True)
 def level_candidate(project_id: str, candidate_id: str, req: LevelRequest, owner: str = Depends(current_owner)) -> dict:
     """A proposed take mixed louder or softer (20g); the plan item follows it."""
     _owned(project_id, owner)
@@ -2086,7 +2658,8 @@ def level_candidate(project_id: str, candidate_id: str, req: LevelRequest, owner
     return _candidate_dict(out)
 
 
-@app.post("/projects/{project_id}/edits/{edit_id}/level")
+@app.post("/videos/{project_id}/edits/{edit_id}/level")
+@app.post("/projects/{project_id}/edits/{edit_id}/level", deprecated=True)
 def level_edit(project_id: str, edit_id: str, req: LevelRequest, owner: str = Depends(current_owner)) -> dict:
     """An added line in the video mixed louder or softer (20g): the old edit
     is reverted and the same take approved at the new level, in one step."""
@@ -2113,7 +2686,8 @@ def _relevel_edit(project_id: str, edit_id: str, level_db: float) -> dict | None
     return {"edit_id": new_id, "reverted": edit_id, "candidate": _candidate_dict(out)}
 
 
-@app.post("/projects/{project_id}/candidates/{candidate_id}/move")
+@app.post("/videos/{project_id}/candidates/{candidate_id}/move")
+@app.post("/projects/{project_id}/candidates/{candidate_id}/move", deprecated=True)
 def move_candidate(
     project_id: str, candidate_id: str, req: MoveRequest, owner: str = Depends(current_owner),
 ) -> dict:
@@ -2136,7 +2710,8 @@ def move_candidate(
     return _candidate_dict(moved)
 
 
-@app.post("/projects/{project_id}/edits/{edit_id}/move")
+@app.post("/videos/{project_id}/edits/{edit_id}/move")
+@app.post("/projects/{project_id}/edits/{edit_id}/move", deprecated=True)
 def move_edit(
     project_id: str, edit_id: str, req: MoveRequest, owner: str = Depends(current_owner),
 ) -> dict:
@@ -2236,6 +2811,7 @@ def _workbench() -> Workbench:
         delete_voice=getattr(voice, "delete_voice", None),
         slots=getattr(voice, "slots", lambda: None), put_audio=put_audio,
         speakers=repo.speakers, voice_for=_voice_for, remove_words=_remove_words, shift_words=_shift_words, move_take=_moved,
+        project=_project_view, suggest=_suggest_brief, help_search=lambda query: search_help_articles(query, limit=3),
     )
 
 
@@ -2262,18 +2838,22 @@ def _turn_plan(project_id: str, text: str) -> Plan:
     return plan
 
 
-@app.post("/projects/{project_id}/turns", status_code=202)
+@app.post("/videos/{project_id}/turns", status_code=202)
+@app.post("/projects/{project_id}/turns", status_code=202, deprecated=True)
 def take_turn(project_id: str, req: TurnRequest, owner: str = Depends(current_owner)) -> dict:
     """One turn of Voltage with tools (Phase 20): the user's words go in, the
     agent looks, listens, voices and asks through its tools, and the job's
     result is the plan and Voltage's closing line. Steps appear as messages
     while it runs (`GET /projects/{id}/messages?after=`)."""
     record = _owned(project_id, owner)
-    if not _agent_on():
-        raise HTTPException(status_code=503, detail="Voltage needs Claude for this (set AVE_AGENT=1 and an Anthropic key).")
     text = req.text.strip()
     if not text:
         raise HTTPException(status_code=422, detail="Say what you want.")
+    # The tutorial's sample video replays a recorded run: no vendor, no agent.
+    if is_tutorial is not None and is_tutorial(repo, project_id):
+        return replay_turn(repo, project_id, text, owner)
+    if not _agent_on():
+        raise HTTPException(status_code=503, detail="Voltage needs Claude for this (set AVE_AGENT=1 and an Anthropic key).")
     if any(j.kind == "turn" and j.project_id == project_id and not j.done for j in jobs.all()):
         raise HTTPException(status_code=409, detail="Voltage is still on the last thing you said.")
     prefs = _settings(project_id, owner)
@@ -2309,15 +2889,16 @@ def take_turn(project_id: str, req: TurnRequest, owner: str = Depends(current_ow
                        filename=record.source.filename, speakers=names, lines=len(lines), autonomy=autonomy,
                        spent_usd=ledger.spent_usd(project_id), ceiling_usd=ledger.ceiling_usd,
                        turn_usd=prefs["turn_usd"], sight=_sight_text(project_id) if not lines else "",
-                       edits=[e for e in repo.list_edits(project_id) if not e.reverted])
+                       edits=[e for e in repo.list_edits(project_id) if not e.reverted], project=_project_view(project_id))
         content = [{"type": "text", "text": head}, {"type": "text", "text": f"The user says: {text}"
                    + (" (They are answering yes to what you asked.)" if approve else "")}]
         history = repo.turns(project_id)
 
-        def on_step(step: str, cost: float, tool: str = "") -> None:
-            # The trace shows which tool a step was and when in the turn it landed.
+        def on_step(step: str, cost: float, tool: str = "", data: dict | None = None) -> None:
+            # The trace shows which tool a step was and when in the turn it landed;
+            # a search_help step also carries the articles it found (data.help).
             repo.add_message(project_id, "assistant", step, kind="step", cost=cost or None,
-                             data={"tool": tool, "t": round(budget_.elapsed(), 1)})
+                             data={"tool": tool, "t": round(budget_.elapsed(), 1), **(data or {})})
             repo.append_log(project_id, plan.plan_id, step, f"${cost:.2f}" if cost else "")
             report(min(0.95, 0.05 + 0.9 * turn.budget.calls_made / turn.budget.calls), step)
 
@@ -2376,8 +2957,27 @@ def _guarded(work, on_fail):
     return run
 
 
-@app.get("/projects/{project_id}/messages")
+@app.get("/videos/{project_id}/messages")
+@app.get("/projects/{project_id}/messages", deprecated=True)
 def list_messages(project_id: str, after: int = 0, owner: str = Depends(current_owner)) -> list[dict]:
     """The thread after a message (by `seq`): what Voltage said and did."""
     _owned(project_id, owner)
     return [_message_dict(m) for m in repo.messages(project_id, after)]
+
+
+# ── Help, the tutorial, onboarding: the coordinator's routers ────────────────
+
+def _mount_optional_routers() -> None:
+    import importlib
+    for name in ("app.onboarding", "app.help", "app.tutorial"):
+        try:
+            module = importlib.import_module(name)
+        except ImportError:
+            log.info("%s is not here yet; its routes are not mounted", name)
+            continue
+        router = getattr(module, "router", None)
+        if router is not None:
+            app.include_router(router)
+
+
+_mount_optional_routers()

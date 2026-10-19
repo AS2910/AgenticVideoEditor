@@ -100,7 +100,7 @@ def test_deleting_the_project_deletes_the_clone_at_the_vendor(client, sample_vid
     voice = cloning(min_seconds=1.0)
     assert upload(client, sample_video).status_code == 200
     warnings_of()
-    assert client.delete("/projects/p1").status_code == 204
+    assert client.delete("/videos/p1").status_code == 204
     assert voice.deleted == [CLONE]
 
 
@@ -126,12 +126,12 @@ def test_an_export_with_an_edit_separates_the_voice_from_the_bed(client, sample_
     monkeypatch.setattr(main, "compose", lambda *a, **k: seen.update(stems=k.get("stems", "missing")) or real(*a, **k))
 
     assert upload(client, sample_video).status_code == 200
-    assert client.post("/projects/p1/export").status_code == 200
+    assert client.post("/videos/p1/export").status_code == 200
     assert asked == [] and seen["stems"] is None          # nothing edited: no separation, no cost
 
     candidate = generate()
-    assert client.post("/projects/p1/edits", json={"candidate_id": candidate["candidate_id"]}).status_code == 200
-    assert client.post("/projects/p1/export").status_code == 200
+    assert client.post("/videos/p1/edits", json={"candidate_id": candidate["candidate_id"]}).status_code == 200
+    assert client.post("/videos/p1/export").status_code == 200
     assert len(asked) == 1 and asked[0].name == "stems"   # kept under the project, once per source
     assert seen["stems"] is None                          # the (faked) separation failed: today's render
 

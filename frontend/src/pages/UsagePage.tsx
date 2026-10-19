@@ -86,20 +86,46 @@ export function UsagePage({ me }: { me: Me | null }) {
       </section>
 
       <section className="rounded-xl border-[1.5px] border-foreground bg-card p-[22px]" aria-labelledby="project-h">
-        <div className="mb-4 flex items-baseline gap-2.5"><h2 id="project-h" className="disp m-0 text-[22px] font-bold">By project</h2>{r && <span className="tag text-faint">each capped at {usd(r.project_cap_usd)}</span>}</div>
+        <div className="mb-4 flex items-baseline gap-2.5"><h2 id="project-h" className="disp m-0 text-[22px] font-bold">By project</h2><span className="tag text-faint">a project's ceiling spans every video in it</span></div>
         <div className="overflow-x-auto">
           <table className="w-full border-collapse">
             <thead>
               <tr className="[&>th]:tag [&>th]:border-b-[1.5px] [&>th]:border-foreground [&>th]:pb-2.5 [&>th]:text-left [&>th]:font-medium [&>th]:text-faint">
-                <th scope="col">Project</th><th scope="col" className="text-right!">Turns</th><th scope="col" className="text-right!">Voice chars</th><th scope="col" className="text-right!">Spent</th><th scope="col" className="w-40 pl-6">Of its cap</th>
+                <th scope="col">Project</th><th scope="col" className="text-right!">Videos</th><th scope="col" className="text-right!">Turns</th><th scope="col" className="text-right!">Spent</th><th scope="col" className="w-40 pl-6">Of its ceiling</th>
               </tr>
             </thead>
             <tbody>
-              {!r || r.by_project.length === 0 ? (
-                <tr><td colSpan={5} className="py-3.5 text-[13px] text-muted-foreground">{loading ? 'Adding up…' : `No project spent anything ${word.toLowerCase()}.`}</td></tr>
+              {!r || !r.by_project || r.by_project.length === 0 ? (
+                <tr><td colSpan={5} className="py-3.5 text-[13px] text-muted-foreground">{loading ? 'Adding up…' : 'No project spent anything, or every video is standalone.'}</td></tr>
               ) : r.by_project.map((p) => (
                 <tr key={p.project_id} className="rise transition-colors hover:bg-sunk [&>td]:border-b [&>td]:border-line [&>td]:py-3.5">
-                  <td><a href={hrefFor({ page: 'editor', projectId: p.project_id })} className="font-semibold no-underline">{p.filename}</a></td>
+                  <td><a href={hrefFor({ page: 'folder', projectId: p.project_id })} className="font-semibold no-underline">{p.name}</a></td>
+                  <td className="tnum text-right">{p.videos}</td>
+                  <td className="tnum text-right">{p.turns}</td>
+                  <td className="tnum text-right">{usd(p.spent_usd)}</td>
+                  <td className="pl-6">{p.ceiling_usd ? <FillBar share={p.ceiling_usd > 0 ? p.spent_usd / p.ceiling_usd : 0} height={10} label={`${p.name}: ${usd(p.spent_usd)} of its ${usd(p.ceiling_usd)} ceiling`} /> : <span className="tag text-faint">no ceiling</span>}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section className="rounded-xl border-[1.5px] border-foreground bg-card p-[22px]" aria-labelledby="video-h">
+        <div className="mb-4 flex items-baseline gap-2.5"><h2 id="video-h" className="disp m-0 text-[22px] font-bold">By video</h2>{r && <span className="tag text-faint">each capped at {usd(r.project_cap_usd)}</span>}</div>
+        <div className="overflow-x-auto">
+          <table className="w-full border-collapse">
+            <thead>
+              <tr className="[&>th]:tag [&>th]:border-b-[1.5px] [&>th]:border-foreground [&>th]:pb-2.5 [&>th]:text-left [&>th]:font-medium [&>th]:text-faint">
+                <th scope="col">Video</th><th scope="col" className="text-right!">Turns</th><th scope="col" className="text-right!">Voice chars</th><th scope="col" className="text-right!">Spent</th><th scope="col" className="w-40 pl-6">Of its cap</th>
+              </tr>
+            </thead>
+            <tbody>
+              {!r || r.by_video.length === 0 ? (
+                <tr><td colSpan={5} className="py-3.5 text-[13px] text-muted-foreground">{loading ? 'Adding up…' : `No video spent anything ${word.toLowerCase()}.`}</td></tr>
+              ) : r.by_video.map((p) => (
+                <tr key={p.video_id} className="rise transition-colors hover:bg-sunk [&>td]:border-b [&>td]:border-line [&>td]:py-3.5">
+                  <td><a href={hrefFor({ page: 'editor', projectId: p.video_id })} className="font-semibold no-underline">{p.filename}</a></td>
                   <td className="tnum text-right">{p.turns}</td>
                   <td className="tnum text-right">{p.voice_characters.toLocaleString()}</td>
                   <td className="tnum text-right">{usd(p.spent_usd)}</td>

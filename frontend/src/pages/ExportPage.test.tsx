@@ -5,7 +5,7 @@ import { ExportPage } from './ExportPage'
 
 const ok = (body: unknown) => ({ ok: true, status: 200, json: async () => body, text: async () => '' }) as Response
 const MEDIA = { kind: 'video', sha256: 's'.repeat(64), duration: 48.9, container: 'mp4' }
-const PROJECT = { project_id: 'p2', filename: 'bhaji-cam-ad.mp4', duration: 48.9, media: MEDIA, consent: null, transcript: [], edits: [], messages: [] }
+const PROJECT = { video_id: 'p2', filename: 'bhaji-cam-ad.mp4', duration: 48.9, media: MEDIA, consent: null, transcript: [], edits: [], messages: [] }
 const RENDER = { sha256: 'r'.repeat(64), duration: 48.9, filename: 'bhaji-cam-ad-edited.mp4' }
 const RECEIPT = {
   turns: 4, takes: 6, spent_usd: 1.07, drafts: 0, render: RENDER,
@@ -23,10 +23,10 @@ function routeFetch(receipt: typeof RECEIPT | (Omit<typeof RECEIPT, 'render'> & 
   const f = vi.fn(async (url: string, init?: RequestInit) => {
     const method = init?.method ?? 'GET'
     if (method !== 'GET') calls.push(`${method} ${url}`)
-    if (url.endsWith('/projects/p2') && method === 'GET') return ok(PROJECT)
-    if (url.endsWith('/projects/p2/receipt')) return ok(current)
-    if (url.endsWith('/projects/p2/export') && method === 'POST') { current = { ...receipt, render: { ...RENDER, duration: 50.1 } }; return ok({ segments: [], render: MEDIA }) }
-    if (url.endsWith('/projects/p2/variants') && method === 'POST') return ok({ ...PROJECT, project_id: 'p3' })
+    if (url.endsWith('/videos/p2') && method === 'GET') return ok(PROJECT)
+    if (url.endsWith('/videos/p2/receipt')) return ok(current)
+    if (url.endsWith('/videos/p2/export') && method === 'POST') { current = { ...receipt, render: { ...RENDER, duration: 50.1 } }; return ok({ segments: [], render: MEDIA }) }
+    if (url.endsWith('/videos/p2/variants') && method === 'POST') return ok({ ...PROJECT, video_id: 'p3' })
     throw new Error(`unexpected ${method} ${url}`)
   })
   vi.stubGlobal('fetch', f)
@@ -44,9 +44,9 @@ describe('ExportPage', () => {
     expect(screen.getByRole('status')).toHaveTextContent(/^Rendered$/)   // no seconds unless measured
     expect(screen.getByText('bhaji-cam-ad-edited.mp4 · 0:48.9, the same length as the original · H.264 + AAC · plays everywhere.')).toBeInTheDocument()
     const dl = screen.getByRole('link', { name: 'Download MP4' })
-    expect(dl).toHaveAttribute('href', `/api/projects/p2/artifacts/${'r'.repeat(64)}`)
+    expect(dl).toHaveAttribute('href', `/api/videos/p2/artifacts/${'r'.repeat(64)}`)
     expect(dl).toHaveAttribute('download', 'bhaji-cam-ad-edited.mp4')
-    expect(screen.getByTestId('render')).toHaveAttribute('src', `/api/projects/p2/artifacts/${'r'.repeat(64)}`)
+    expect(screen.getByTestId('render')).toHaveAttribute('src', `/api/videos/p2/artifacts/${'r'.repeat(64)}`)
     expect(screen.getByText('2 changes')).toBeInTheDocument()
     expect(screen.getByText('0:04.9')).toBeInTheDocument()
     expect(screen.getByText('Start a Bhaji Cam session.')).toBeInTheDocument()
@@ -57,8 +57,8 @@ describe('ExportPage', () => {
     expect(screen.getByText('Takes').nextElementSibling).toHaveTextContent('6')
     expect(screen.getByText('Spent').nextElementSibling).toHaveTextContent('$1.07')
     expect(screen.getByRole('link', { name: 'Full receipt →' })).toHaveAttribute('href', '#usage')
-    expect(screen.getByRole('link', { name: '← Back to editing' })).toHaveAttribute('href', '#p2')
-    expect(screen.getByRole('link', { name: 'bhaji-cam-ad.mp4' })).toHaveAttribute('href', '#p2')
+    expect(screen.getByRole('link', { name: '← Back to editing' })).toHaveAttribute('href', '#v/p2')
+    expect(screen.getByRole('link', { name: 'bhaji-cam-ad.mp4' })).toHaveAttribute('href', '#v/p2')
   })
 
   it('copies the absolute link and says so for a moment', async () => {
@@ -67,7 +67,7 @@ describe('ExportPage', () => {
     Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true })
     render(<ExportPage projectId="p2" me={ME} onBack={() => {}} />)
     await userEvent.click(await screen.findByRole('button', { name: 'Copy link' }))
-    expect(writeText).toHaveBeenCalledWith(`${window.location.origin}/api/projects/p2/artifacts/${'r'.repeat(64)}`)
+    expect(writeText).toHaveBeenCalledWith(`${window.location.origin}/api/videos/p2/artifacts/${'r'.repeat(64)}`)
     expect(screen.getByRole('button', { name: '✓ Link copied' })).toBeInTheDocument()
     await waitFor(() => expect(screen.getByRole('button', { name: 'Copy link' })).toBeInTheDocument(), { timeout: 3000 })
   })
@@ -76,15 +76,15 @@ describe('ExportPage', () => {
     const calls = routeFetch()
     render(<ExportPage projectId="p2" me={ME} onBack={() => {}} />)
     await userEvent.click(await screen.findByRole('button', { name: 'Make a variant' }))
-    await waitFor(() => expect(window.location.hash).toBe('#p3'))
-    expect(calls).toContain('POST /api/projects/p2/variants')
+    await waitFor(() => expect(window.location.hash).toBe('#v/p3'))
+    expect(calls).toContain('POST /api/videos/p2/variants')
   })
 
   it('renders once when the project has no file yet, timing it', async () => {
     const calls = routeFetch({ ...RECEIPT, drafts: 2, render: null })
     render(<ExportPage projectId="p2" me={ME} onBack={() => {}} />)
     expect(await screen.findByRole('heading', { level: 1 })).toHaveTextContent("It's out.")
-    expect(calls.filter((c) => c === 'POST /api/projects/p2/export')).toHaveLength(1)
+    expect(calls.filter((c) => c === 'POST /api/videos/p2/export')).toHaveLength(1)
     expect(screen.getByRole('status')).toHaveTextContent(/^Rendered in \d+ s$/)
     // 50.1 s against a 48.9 s original: not the same length, so it does not say so.
     expect(screen.getByText('bhaji-cam-ad-edited.mp4 · 0:50.1 · H.264 + AAC · plays everywhere.')).toBeInTheDocument()

@@ -89,7 +89,7 @@ describe('SettingsPage', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Sign out' }))
     await waitFor(() => expect(onSignedOut).toHaveBeenCalledOnce())
     expect(calls).toContainEqual({ url: '/api/auth/logout', method: 'POST', body: undefined })
-    expect(window.location.hash).toBe('#projects')
+    expect(window.location.hash).toBe('#home')
 
     await userEvent.click(screen.getByRole('button', { name: 'Delete…' }))
     const go = screen.getByRole('button', { name: 'Delete everything' })

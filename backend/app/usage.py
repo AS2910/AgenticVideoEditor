@@ -1,8 +1,10 @@
-"""What each project has spent on paid vendors (Phase 9b).
+"""What each video has spent on paid vendors (Phase 9b).
 
 Every paid call is one row in the `usage` table: vendor, units, and an
-estimated USD cost. The ledger is the single source for both the per-project
+estimated USD cost. The ledger is the single source for both the per-video
 spend ceiling and the ElevenLabs character budget, so both survive restarts.
+Folders: a row also carries `folder_id`, the project the video was in at the
+time of the charge, so a project's spend is a sum over its own rows.
 
 USD is an estimate from list prices, not an invoice: ElevenLabs bills by plan
 (the free tier costs nothing but has a quota), so its rate is configurable.
@@ -32,26 +34,45 @@ def claude_usd(model: str, input_tokens: int, output_tokens: int, cache_read: in
 
 
 class SpendCeilingReached(NonRetryableError):
-    """The project has spent its allowance; no new paid work starts."""
+    """The video has spent its allowance; no new paid work starts."""
 
     def __init__(self, spent: float, ceiling: float) -> None:
         self.spent, self.ceiling = spent, ceiling
         super().__init__(
-            f"This project has used its ${ceiling:.2f} spending limit "
+            f"This video has used its ${ceiling:.2f} spending limit "
             f"(about ${spent:.2f} so far). Raise AVE_PROJECT_BUDGET_USD to continue."
         )
 
 
 class UserCeilingReached(SpendCeilingReached):
-    """The person has spent their allowance across every project."""
+    """The person has spent their allowance across every video."""
 
     def __init__(self, spent: float, ceiling: float) -> None:
         self.spent, self.ceiling = spent, ceiling
         NonRetryableError.__init__(
             self,
-            f"You have used your ${ceiling:.2f} spending limit across your projects "
+            f"You have used your ${ceiling:.2f} spending limit across your videos "
             f"(about ${spent:.2f} so far).",
         )
+
+
+class ProjectCeilingReached(SpendCeilingReached):
+    """The project (folder) has spent the ceiling set on it (Folders)."""
+
+    def __init__(self, spent: float, ceiling: float, name: str = "") -> None:
+        self.spent, self.ceiling = spent, ceiling
+        NonRetryableError.__init__(
+            self,
+            f"The project{f' {name}' if name else ''} has used its ${ceiling:.2f} spending ceiling "
+            f"(about ${spent:.2f} so far). Raise it on the project page to continue.",
+        )
+
+
+def folder_of(c, project_id: str) -> str | None:
+    """The project (folder) a video is in now, read inside the caller's
+    transaction, so a charge carries it."""
+    row = c.execute("SELECT project_id FROM videos WHERE id = ?", (project_id,)).fetchone()
+    return row["project_id"] if row else None
 
 
 @dataclass(frozen=True)
@@ -74,9 +95,10 @@ class Ledger:
     ) -> None:
         with self.db.tx() as c:
             c.execute(
-                "INSERT INTO usage (project_id, vendor, what, units, unit, usd, at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (project_id, vendor, what, units, unit, usd, datetime.now(timezone.utc).isoformat()),
+                "INSERT INTO usage (project_id, vendor, what, units, unit, usd, at, folder_id) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (project_id, vendor, what, units, unit, usd, datetime.now(timezone.utc).isoformat(),
+                 folder_of(c, project_id)),
             )
 
     def spent_usd(self, project_id: str) -> float:
@@ -131,21 +153,36 @@ class Ledger:
         return [UsageLine(r["vendor"], r["what"], r["unit"], r["units"], r["usd"], r["calls"]) for r in rows]
 
     def spent_usd_by_owner(self, owner: str) -> float:
-        """Everything one person's projects have spent (Phase 9c)."""
+        """Everything one person's videos have spent (Phase 9c)."""
         with self.db.tx() as c:
             row = c.execute(
                 "SELECT COALESCE(SUM(u.usd), 0) AS usd FROM usage u "
-                "JOIN projects p ON p.id = u.project_id WHERE p.owner = ?", (owner,),
+                "JOIN videos v ON v.id = u.project_id WHERE v.owner = ?", (owner,),
+            ).fetchone()
+        return float(row["usd"])
+
+    def spent_usd_by_folder(self, folder_id: str, since: str | None = None) -> float:
+        """What a project's videos spent while in it (Folders)."""
+        with self.db.tx() as c:
+            row = c.execute(
+                "SELECT COALESCE(SUM(usd), 0) AS usd FROM usage WHERE folder_id = ?" + (" AND at >= ?" if since else ""),
+                (folder_id,) + ((since,) if since else ()),
             ).fetchone()
         return float(row["usd"])
 
     def ensure_can_spend(self, project_id: str, owner: str | None = None,
-                         owner_ceiling_usd: float | None = None) -> None:
-        """Refuse new paid work once the project — or, with sign-in, the
-        person — has reached its ceiling."""
+                         owner_ceiling_usd: float | None = None, folder: tuple[str, float, str] | None = None) -> None:
+        """Refuse new paid work once the video — or its project (`folder` =
+        (id, ceiling, name)), or with sign-in the person — has reached its
+        ceiling. Every ceiling applies; the lowest wins."""
         spent = self.spent_usd(project_id)
         if spent >= self.ceiling_usd:
             raise SpendCeilingReached(spent, self.ceiling_usd)
+        if folder is not None:
+            folder_id, ceiling, name = folder
+            ours = self.spent_usd_by_folder(folder_id)
+            if ours >= ceiling:
+                raise ProjectCeilingReached(ours, ceiling, name)
         if owner is not None and owner_ceiling_usd is not None:
             mine = self.spent_usd_by_owner(owner)
             if mine >= owner_ceiling_usd:

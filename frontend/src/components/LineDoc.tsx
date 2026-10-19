@@ -542,10 +542,10 @@ export function LineDoc({
   /** The four verbs on a proposal (20e, Volt): Hear it, Add it, Edit it (opens the depth), Discard. */
   const verbs = (item: PlanItem, c: Candidate, order: number, mode: 'edit' | 'layer', inDepth = false) => (
     <span className="flex flex-wrap items-center gap-2" role="group" aria-label={`Proposal at ${clock(c.plan.selection.start)}`}>
-      <button type="button" className={cn('btn sm', playing === c.candidate_id && 'ink')} aria-pressed={playing === c.candidate_id} onClick={() => onHearTake(item, c)}>
+      <button type="button" className={cn('btn sm', playing === c.candidate_id && 'ink')} aria-pressed={playing === c.candidate_id} onClick={() => onHearTake(item, c)} data-tour-action={item.item_id === firstProposalId ? 'proposal-row' : undefined}>
         <PlayGlyph />{playing === c.candidate_id ? 'Stop' : 'Hear it'}<KBD k="␣" />
       </button>
-      <button type="button" className="btn volt sm" onClick={() => void run(`add-${item.item_id}`, () => onAdd(item))} disabled={disabled || pending !== null} aria-busy={pending === `add-${item.item_id}` || undefined}>
+      <button type="button" className="btn volt sm" data-tour={item.item_id === firstProposalId ? 'add-it' : undefined} onClick={() => void run(`add-${item.item_id}`, () => onAdd(item))} disabled={disabled || pending !== null} aria-busy={pending === `add-${item.item_id}` || undefined}>
         <BoltGlyph />{pending === `add-${item.item_id}` ? 'Adding…' : item.mix === 'remove' ? 'Remove it' : 'Add it'}<KBD k="K" />
       </button>
       {inDepth && item.mix !== 'remove' && onDelivery && (
@@ -780,9 +780,17 @@ export function LineDoc({
     for (const [start, n] of folds.after) if (order > start && order <= start + n) setUnfolded((u) => new Set(u).add(start))
   }
 
+  // The tour's anchors: the first spoken line, and the first proposal ready to hear (and its Add it).
+  const firstLineOrder = rows.findIndex((r) => r.kind === 'line')
+  const readyOf = (r: Row) => (r.kind === 'item' ? r.item : r.kind === 'line' ? ownItem(r.s) : null)
+  const firstProposalOrder = rows.findIndex((r) => { const it = readyOf(r); return !!it && it.status === 'ready' && !!it.candidate })
+  const firstProposalId = firstProposalOrder >= 0 ? readyOf(rows[firstProposalOrder])?.item_id ?? null : null
+  const tourOf = (order: number) => [order === firstLineOrder && 'transcript-row', order === firstProposalOrder && 'proposal-row'].filter(Boolean).join(' ') || undefined
+
   /** The keyboard and focus wiring every row shares. */
   const rowProps = (order: number, key: string, label: string, end: number) => ({
     id: `line-${order}`,
+    'data-tour': tourOf(order),
     'data-row-key': key,
     'data-row-end': end,
     'data-dragging': drag?.key === key || undefined,

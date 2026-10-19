@@ -18,7 +18,7 @@ const MADE = [
   { voice_id: 'm1', name: 'Diwali Narrator', kind: 'designed', project_id: 'p2', filename: 'bhaji-cam-ad.mp4', description: 'Warm, unhurried Indian woman near fifty' },
   { voice_id: 'm2', name: 'The Customer', kind: 'cloned', project_id: 'p2', filename: 'bhaji-cam-ad.mp4', kept: true },
 ]
-const SPEAKERS = [{ project_id: 'p2', filename: 'bhaji-cam-ad.mp4', label: 'speaker-2', name: 'The Customer', seconds: 14.2 }]
+const SPEAKERS = [{ video_id: 'p2', filename: 'bhaji-cam-ad.mp4', label: 'speaker-2', name: 'The Customer', seconds: 14.2 }]
 const PREVIEWS = [1, 2, 3].map((n) => ({ generated_voice_id: `g${n}`, sha256: String(n).repeat(64), duration: 4.2, text: 'A sample line.' }))
 
 type Call = { url: string; method: string; body: Record<string, unknown> | undefined }
@@ -149,7 +149,7 @@ describe('VoicesPage', () => {
     await userEvent.click(consent())
     await userEvent.click(screen.getByRole('button', { name: 'Clone and keep' }))
     await waitFor(() => expect(calls).toContainEqual({
-      url: '/api/voices/mine/from-speaker', method: 'POST', body: { project_id: 'p2', label: 'speaker-2', name: 'The Customer', consent: true },
+      url: '/api/voices/mine/from-speaker', method: 'POST', body: { video_id: 'p2', label: 'speaker-2', name: 'The Customer', consent: true },
     }))
     expect(await screen.findByText('Kept The Customer in your voices.')).toBeInTheDocument()
   })

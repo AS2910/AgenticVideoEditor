@@ -5,7 +5,7 @@ import { BillingPage } from './BillingPage'
 const ok = (body: unknown) => ({ ok: true, status: 200, json: async () => body, text: async () => '' }) as Response
 const REPORT = {
   period: 'month', spent_usd: 2.06, ceiling_usd: 10, project_cap_usd: 2, turns: 16, takes: 14, voices_made: 3, avg_turn_usd: 0.14, by_vendor: [],
-  by_project: [{ project_id: 'p2', filename: 'bhaji-cam-ad.mp4', turns: 5, voice_characters: 612, spent_usd: 1.07, cap_usd: 2 }, { project_id: 'p1', filename: 'goa-beach.mov', turns: 10, voice_characters: 488, spent_usd: 0.94, cap_usd: 2 }],
+  by_video: [{ video_id: 'p2', filename: 'bhaji-cam-ad.mp4', turns: 5, voice_characters: 612, spent_usd: 1.07, cap_usd: 2 }, { video_id: 'p1', filename: 'goa-beach.mov', turns: 10, voice_characters: 488, spent_usd: 0.94, cap_usd: 2 }],
 }
 const SETTINGS = { autonomy: 'ask', turn_usd: 0.5, effort: 'high', ask_before: { ship: false, clone: true, design: false } }
 
