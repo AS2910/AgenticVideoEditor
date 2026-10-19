@@ -33,6 +33,9 @@ interface PlayerProps {
   children?: ReactNode
   /** Volt: a large play button on the picture, for the first read. */
   bigPlay?: boolean
+  /** As shot (2026-10-19): where the next file should start, when its clock differs from this one's
+   *  (a retimed render). `id` makes a repeat ask count. Without it the new file starts where this one was. */
+  carry?: { time: number; id: number } | null
 }
 
 /** play() returns a promise in browsers and nothing in jsdom; neither may throw. */
@@ -55,7 +58,7 @@ export const timecode = (t: number) => {
  *  scrubber with its markers and playhead, and whatever the caller puts on
  *  the right (Tracks, the word timeline). */
 export function Player({
-  src, duration, currentTime, onSeek, onTimeUpdate, seekRequest, caption, children, muted, onPlayingChange, badge, scanning, markers = [], bigPlay,
+  src, duration, currentTime, onSeek, onTimeUpdate, seekRequest, caption, children, muted, onPlayingChange, badge, scanning, markers = [], bigPlay, carry,
 }: PlayerProps) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const [playing, setPlaying] = useState(false)
@@ -63,15 +66,25 @@ export function Player({
   // longer than the source `duration` describes.
   const [length, setLength] = useState(duration)
 
-  // Bug 1: a new file (a finished render, or another mode) resumes at the moment the old one was at,
-  // paused. The URL carries the artifact's sha, so a new render is always a new file.
+  // A new file (a finished render, or another mode) resumes at the moment the old one was at, and keeps
+  // playing if it was playing — so Edited ↔ As shot is an instant comparison. The URL carries the
+  // artifact's sha, so a new render is always a new file.
   const lastTime = useRef(0)
   const resumeAt = useRef<number | null>(null)
+  const playingNow = useRef(false)
+  const resumePlay = useRef(false)
+  const carried = useRef<number | null>(null)
+  useEffect(() => { playingNow.current = playing }, [playing])
   useEffect(() => {
+    resumePlay.current = playingNow.current
+    const fresh = carry && carry.id !== carried.current ? carry : null
+    if (fresh) carried.current = fresh.id
+    resumeAt.current = fresh ? fresh.time : lastTime.current
     setPlaying(false)
     setLength(duration)
-    resumeAt.current = lastTime.current
-    console.debug('[player] load', { src: src.split('/').pop()?.slice(0, 12), at: Number(lastTime.current.toFixed(2)) })
+    console.debug('[player] load', { src: src.split('/').pop()?.slice(0, 12), at: Number((resumeAt.current ?? 0).toFixed(2)), play: resumePlay.current })
+    // carry is read with the file it belongs to; a carry alone does not reload.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [src, duration])
 
   useEffect(() => { onPlayingChange?.(playing) }, [playing, onPlayingChange])
@@ -132,7 +145,13 @@ export function Player({
             if (at !== null && at > 0) {
               const t = Number.isFinite(d) && d > 0 ? Math.min(at, Math.max(0, d - 0.05)) : at
               e.currentTarget.currentTime = t
+              lastTime.current = t
               onTimeUpdate?.(t)
+            }
+            if (resumePlay.current) {
+              resumePlay.current = false
+              playSafely(e.currentTarget)
+              setPlaying(true)
             }
           }}
           onTimeUpdate={(e) => {

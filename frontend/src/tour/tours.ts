@@ -48,9 +48,9 @@ export const guidedRun: Tour = {
     },
     {
       targets: ['proposal-row', 'playback-switch'],
-      title: 'Hear it in the video, then flip to the original',
-      body: 'Play the new line in place, then switch to Original at the top to compare.',
-      hint: '→ Click Hear it, then Original',
+      title: 'Hear it in the video, then flip to As shot',
+      body: 'Play the new line in place, then switch to As shot at the top (or press O) to hear the clip without it.',
+      hint: '→ Click Hear it, then As shot',
       action: 'Hear it',
       advanceOn: { event: 'heard-and-original' },
     },

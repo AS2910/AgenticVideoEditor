@@ -34,6 +34,8 @@ export interface LanesProps {
   /** A take being moved: a draggable block in A2 (pointer drag, Arrow keys ±0.1 s, Shift ±1 s). */
   placing?: { start: number; duration: number } | null
   onPlace?: (start: number) => void
+  /** As shot (2026-10-19): the added lines are not in this version, so A2 greys out. */
+  asShot?: boolean
 }
 
 /** The ruler: a label every `step` seconds, chosen so there are about five,
@@ -150,11 +152,11 @@ function Pill({ at, tone, label, title, onClick, className, testid = 'pill', chi
 }
 
 /** A lane: its label in the left column, its body (the track) filling the rest. */
-function Lane({ id, label, bodyRef, children }: { id: string; label: string; bodyRef?: Ref<HTMLDivElement>; children: ReactNode }) {
+function Lane({ id, label, bodyRef, children, muted }: { id: string; label: string; bodyRef?: Ref<HTMLDivElement>; children: ReactNode; muted?: boolean }) {
   const labelId = useId()
   return (
-    <div className="flex items-stretch gap-2" role="group" aria-labelledby={labelId} data-testid={`lane-${id}`}>
-      <div id={labelId} className="lane-n flex w-20 shrink-0 items-center whitespace-nowrap">{label}</div>
+    <div className={cn('flex items-stretch gap-2 transition-opacity', muted && 'opacity-40 grayscale')} role="group" aria-labelledby={labelId} data-testid={`lane-${id}`} data-muted={muted || undefined}>
+      <div id={labelId} className="lane-n flex w-20 shrink-0 items-center whitespace-nowrap">{label}{muted && <span className="sr-only"> (not in this version)</span>}</div>
       <div ref={bodyRef} className="relative flex min-w-0 flex-1 flex-col overflow-hidden rounded-md bg-sunk/60">{children}</div>
     </div>
   )
@@ -181,7 +183,7 @@ const ADDED_NAME: Record<Added['state'], string> = {
 }
 
 export function Lanes({
-  duration, currentTime, statements, speakers, revisions, items, pieces = [], onSeek, placing, onPlace,
+  duration, currentTime, statements, speakers, revisions, items, pieces = [], onSeek, placing, onPlace, asShot,
 }: LanesProps) {
   const addedRef = useRef<HTMLDivElement>(null)
   const at = (start: number, end: number) => place(duration, start, end)
@@ -333,7 +335,7 @@ export function Lanes({
 
       {/* A2: the added lines. Overlapping ones take their own sub-rows, so
           coexisting audio is seen as such; the take being placed rides on top. */}
-      <Lane id="a2" label="A2 Added" bodyRef={addedRef}>
+      <Lane id="a2" label="A2 Added" bodyRef={addedRef} muted={asShot}>
         {placing && duration > 0 && (
           <div className={ROW} data-testid="placing-row">
             <div

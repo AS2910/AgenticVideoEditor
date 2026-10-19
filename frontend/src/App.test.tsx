@@ -319,16 +319,16 @@ describe('App playback after shipping', () => {
 
     await user.type(screen.getByRole('textbox', TEXTBOX), 'change "20% off" to "30% off"{Enter}')
     // 20e: with a proposal waiting, the player offers "With proposals" beside Original.
-    expect(within(await screen.findByRole('group', { name: 'Play' })).getAllByRole('button').map((b) => b.textContent)).toEqual(['With proposals', 'Original'])
+    expect(within(await screen.findByRole('group', { name: 'Play' })).getAllByRole('button').map((b) => b.textContent)).toEqual(['With proposals', 'As shot'])
     await user.click(within(screen.getByRole('group', { name: 'Proposal at 0:00' })).getByRole('button', { name: 'Add it' }))
 
     const video = () => container.querySelector('video') as HTMLVideoElement
     const renderUrl = `/api/videos/p1/artifacts/${'r'.repeat(64)}`
     await waitFor(() => expect(video().getAttribute('src')).toBe(renderUrl))
-    expect(screen.getByRole('button', { name: 'Final' })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByRole('button', { name: 'Edited' })).toHaveAttribute('aria-pressed', 'true')
     expect(screen.queryByRole('button', { name: 'With proposals' })).toBeNull()   // nothing is proposed any more
 
-    await user.click(screen.getByRole('button', { name: 'Original' }))
+    await user.click(screen.getByRole('button', { name: 'As shot' }))
     expect(video().getAttribute('src')).toBe(`/api/videos/p1/artifacts/${'s'.repeat(64)}`)
   })
 })
@@ -1432,7 +1432,7 @@ describe('App: renders land in the order they were asked for (bug 1)', () => {
     const withProposals = await screen.findByRole('button', { name: /with proposals/i })
     await user.click(withProposals)
     await waitFor(() => expect(held.filter((h) => h.proposals)).toHaveLength(1))
-    await user.click(screen.getByRole('button', { name: /original/i }))
+    await user.click(screen.getByRole('button', { name: /as shot/i }))
     await user.click(screen.getByRole('button', { name: /with proposals/i }))
     // Before the fix a second ask was ignored while the first ran, and the status could never clear.
     await waitFor(() => expect(held.filter((h) => h.proposals)).toHaveLength(2))
@@ -1443,5 +1443,98 @@ describe('App: renders land in the order they were asked for (bug 1)', () => {
     expect((container.querySelector('video') as HTMLVideoElement).getAttribute('src')).not.toBe(`/api/videos/p1/artifacts/${'c'.repeat(64)}`)
     newer.release('d')
     await waitFor(() => expect((container.querySelector('video') as HTMLVideoElement).getAttribute('src')).toBe(`/api/videos/p1/artifacts/${'d'.repeat(64)}`))
+  })
+})
+
+
+describe('App: Edited, As shot, With proposals (2026-10-19)', () => {
+  const EDITS = [
+    { edit_id: 'e1', candidate_id: 'c1', new_text: 'Get 30% off today only.', selection: { start: 0, end: 2.3 }, mix: 'replace', overridden: false, reverted: false },
+    { edit_id: 'e2', candidate_id: 'c2', new_text: 'Hurry!', selection: { start: 1.5, end: 2.0 }, mix: 'layer', overridden: false, reverted: false },
+  ]
+  const READY = { ...PLAN_DONE, items: [{ ...PLAN_ITEM, item_id: 'i5', selection: { start: 0.2, end: 0.6 }, mix: 'layer', new_text: 'Wow', status: 'ready', candidate: { ...BRIAN_TAKE, candidate_id: 'c5', plan: { ...BRIAN_TAKE.plan, mix: 'layer', selection: { start: 0.2, end: 0.6 } } } }] }
+  function opened(edits: unknown[], plan: unknown = null) {
+    const base = routeFetch()
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.endsWith('/videos/p1') && !init?.method) return ok({ ...PROJECT, created_at: '2026-10-19T08:00:00.000Z', settings: { autonomy: 'ask' }, edits, plan, messages: [{ role: 'user', text: 'x' }] })
+      return base(url, init)
+    }))
+    window.location.hash = 'v/p1'
+  }
+  const badge = () => screen.getByTestId('mode-badge')
+
+  it('names the modes Edited, With proposals and As shot, and the badge counts what each leaves out', async () => {
+    opened(EDITS, READY)
+    const user = userEvent.setup()
+    render(<App />)
+    const play = await screen.findByRole('group', { name: 'Play' })
+    await waitFor(() => expect(within(play).getAllByRole('button').map((b) => b.textContent)).toEqual(['Edited', 'With proposals', 'As shot']))
+    await waitFor(() => expect(badge()).toHaveTextContent('Edited · 1 proposal not included'))
+    await user.click(within(play).getByRole('button', { name: 'As shot' }))
+    expect(badge()).toHaveTextContent('As shot · 2 changes hidden')
+  })
+
+  it('makes the transcript and the A2 lane follow the mode, and O flips Edited ↔ As shot', async () => {
+    opened(EDITS)
+    const user = userEvent.setup()
+    render(<App />)
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Edited' })).toHaveAttribute('aria-pressed', 'true'))
+    // Edited: the replaced line shows its new words; the added line is in the video.
+    expect(screen.getByTestId('revision')).toHaveTextContent('30%')
+    const added = screen.getByRole('listitem', { name: 'Added line at 0:01' })
+    expect(within(added).queryByTestId('not-in-version')).toBeNull()
+    await user.click(screen.getByRole('button', { name: 'Tracks' }))
+    expect(screen.getByTestId('lane-a2')).not.toHaveAttribute('data-muted')
+
+    await user.click(document.body)
+    await user.keyboard('o')
+    expect(screen.getByRole('button', { name: 'As shot' })).toHaveAttribute('aria-pressed', 'true')
+    // As shot: the replaced line reads as shot; the added line dims with "not in this version"; A2 greys out.
+    expect(screen.queryByTestId('revision')).toBeNull()
+    expect(screen.getByRole('listitem', { name: /Line at 0:00/ })).toHaveTextContent('Get 20% off today only.')
+    expect(within(screen.getByRole('listitem', { name: /Line at 0:00/ })).getByTestId('not-in-version')).toBeInTheDocument()
+    const dimmed = screen.getByRole('listitem', { name: 'Added line at 0:01' })
+    expect(within(dimmed).getByTestId('not-in-version')).toHaveTextContent('not in this version')
+    expect(dimmed).toHaveClass('opacity-50')
+    expect(screen.getByTestId('lane-a2')).toHaveAttribute('data-muted', 'true')
+
+    await user.keyboard('O')
+    expect(screen.getByRole('button', { name: 'Edited' })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByTestId('revision')).toHaveTextContent('30%')
+  })
+
+  it('shows a removed line with its words again in As shot', async () => {
+    opened([{ edit_id: 'e3', candidate_id: 'c3', new_text: '', selection: { start: 0, end: 2.3 }, mix: 'remove', overridden: false, reverted: false }])
+    const user = userEvent.setup()
+    render(<App />)
+    const line = await screen.findByRole('listitem', { name: /Line at 0:00/ })
+    await waitFor(() => expect(line.querySelector('del')).not.toBeNull())
+    await user.click(screen.getByRole('button', { name: 'As shot' }))
+    const asShot = screen.getByRole('listitem', { name: /Line at 0:00/ })
+    expect(asShot.querySelector('del')).toBeNull()
+    expect(asShot).toHaveTextContent('Get 20% off today only.')
+    expect(badge()).toHaveTextContent('As shot · 1 change hidden')
+  })
+
+  it('with no live edits shows a plain As shot label instead of the switch', async () => {
+    opened([])
+    render(<App />)
+    expect(await screen.findByTestId('as-shot-label')).toHaveTextContent('As shot')
+    expect(screen.queryByRole('group', { name: 'Play' })).toBeNull()
+  })
+
+  it('keeps the moment when switching mid-playback', async () => {
+    opened(EDITS)
+    const user = userEvent.setup()
+    const { container } = render(<App />)
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Edited' })).toHaveAttribute('aria-pressed', 'true'))
+    const video = () => container.querySelector('video') as HTMLVideoElement
+    await user.click(screen.getAllByRole('button', { name: 'Play' }).find((b) => b.closest('section[aria-label="Monitor"]'))!)
+    video().currentTime = 1.4
+    fireEvent.timeUpdate(video())
+    await user.click(screen.getByRole('button', { name: 'As shot' }))
+    fireEvent.loadedMetadata(video())
+    expect(video().currentTime).toBeCloseTo(1.4, 2)
+    expect(screen.getByRole('button', { name: 'Pause' })).toBeInTheDocument()   // still playing
   })
 })

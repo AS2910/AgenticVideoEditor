@@ -139,6 +139,9 @@ function Studio() {
     const mine = (r.mine ?? []).map(asVoice)
     setVoices([...mine, ...r.voices.filter((v) => !mine.some((m) => m.voice_id === v.voice_id))])
   }
+  // As shot (2026-10-19): where the next file starts when a mode switch changes the clock, and the O key's flip.
+  const [carry, setCarry] = useState<{ time: number; id: number } | null>(null)
+  const flipRef = useRef<(() => void) | null>(null)
   const [seekRequest, setSeekRequest] = useState<{ time: number; id: number; play?: boolean; until?: number } | null>(null)
   const [detecting, setDetecting] = useState(false)
   const [approved, setApproved] = useState<Revision[]>([])
@@ -233,6 +236,12 @@ function Studio() {
         const t = e.target as HTMLElement | null
         if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return
         if (window.location.hash.startsWith('#v/') || /^#p\d/.test(window.location.hash)) { e.preventDefault(); setKeysOpen(true) }
+        return
+      }
+      if ((e.key === 'o' || e.key === 'O') && !e.metaKey && !e.ctrlKey && !e.altKey) {
+        const t = e.target as HTMLElement | null
+        if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return
+        if (flipRef.current) { e.preventDefault(); flipRef.current() }
         return
       }
       if (e.key !== '/' || e.metaKey || e.ctrlKey || e.altKey) return
@@ -1091,12 +1100,35 @@ function Studio() {
       ? spoken.map((w, k) => <Fragment key={k}>{k > 0 && ' '}<ins data-said={w.said || undefined}>{w.text}</ins></Fragment>)
       : captionRuns?.map((r, k) => <Fragment key={k}>{k > 0 && ' '}{r.kind === 'ins' ? <ins>{r.text}</ins> : r.text}</Fragment>)
   
+    // As shot (2026-10-19): Edited has the live edits, As shot is the source as shot, With proposals adds
+    // what is waiting. With no live edits Edited is As shot, so it is not offered.
+    const changes = approved.filter((r) => !(r.mix === 'remove' && r.partner)).length
     const views = [
-      ...(rendered ? [['final', 'Final'] as const] : []),
+      ...(changes > 0 ? [['final', 'Edited'] as const] : []),
       ...(readyItems.length > 0 ? [['proposals', 'With proposals'] as const] : []),
-      ['original', 'Original'] as const,
+      ['original', 'As shot'] as const,
     ]
-    const badge = views.length > 1 ? views.find(([v]) => v === view)?.[1] : undefined
+    const proposalsWord = `${readyItems.length} ${readyItems.length === 1 ? 'proposal' : 'proposals'}`
+    const badge = view === 'original'
+      ? (changes > 0 ? `As shot · ${changes} ${changes === 1 ? 'change' : 'changes'} hidden` : 'As shot')
+      : view === 'final'
+        ? (readyItems.length > 0 ? `Edited · ${proposalsWord} not included` : 'Edited')
+        : 'With proposals'
+    const version = view === 'original' ? 'as-shot' as const : view === 'proposals' ? 'proposals' as const : 'edited' as const
+    /** Switch modes at the same moment, playing or paused: the time is carried across, mapped through the pieces when the clocks differ. */
+    const switchView = (v: typeof view) => {
+      if (v === view) return
+      const piecesOf = (w: typeof view) => (w === 'final' && rendered ? pieces : w === 'proposals' && previewReady ? preview!.pieces : [])
+      const source = shown ? sourceTimeFrom(currentTime, shown.pieces) : currentTime
+      const next = piecesOf(v)
+      const time = next.length ? renderTimeFrom(source, next) : source
+      setCarry((c) => ({ time, id: (c?.id ?? 0) + 1 }))
+      setView(v)
+      if (v === 'proposals') void ensurePreview()
+      if (v === 'original') heardBoth('original')
+    }
+    // O flips Edited ↔ As shot (from With proposals, to As shot).
+    flipRef.current = route.page === 'editor' && changes > 0 ? () => switchView(view === 'original' ? 'final' : 'original') : null
     const scanning = turnBusy ? (turnStep ?? 'Voltage is working') : readingBusy ? 'Voltage is reading the clip' : null
     const spent = usage?.spent_usd ?? 0
     const ceiling = usage?.ceiling_usd ?? mayDo.ceiling_usd
@@ -1157,14 +1189,17 @@ function Studio() {
           <span className="text-faint max-sm:hidden" aria-hidden="true">/</span>
           <h1 className="disp m-0 min-w-0 max-w-[28ch] truncate text-[15px] font-semibold" title={project.filename}>{project.filename}</h1>
           <span className="tag text-faint">{timecode(project.duration)}{speakers.length > 0 ? ` · ${speakers.length} ${speakers.length === 1 ? 'voice' : 'voices'}` : ''}</span>
-          {views.length > 1 && (
+          {views.length > 1 ? (
             <div className="segs" role="group" aria-label="Play" data-tour="playback-switch">
               {views.map(([v, label]) => (
-                <button key={v} type="button" className="seg" aria-pressed={view === v} onClick={() => { setView(v); if (v === 'proposals') void ensurePreview(); if (v === 'original') heardBoth('original') }}>
+                <button key={v} type="button" className="seg" aria-pressed={view === v} onClick={() => switchView(v)}
+                  title={v === 'final' ? 'The video with the lines you added (O)' : v === 'original' ? 'The video as shot, without your changes (O)' : 'Edited, plus the proposals waiting for you'}>
                   {v === 'proposals' && !previewReady && previewing ? `${label}…` : label}
                 </button>
               ))}
             </div>
+          ) : (
+            <span className="tag rounded-md border-[1.5px] border-line2 px-2.5 py-1.5 text-muted-foreground" data-testid="as-shot-label" title="Nothing is changed yet: the video plays as shot.">As shot</span>
           )}
           <span className="flex-1" />
           <button type="button" className="act" onClick={() => { setMayDoOpen(true); tour.notify('autonomy-opened') }} data-tour="autonomy" data-tour-action="autonomy" aria-haspopup="dialog" aria-label={`${autonomy === 'ask' ? 'Check with me' : 'Just do it'}. What Voltage may do`}>
@@ -1197,6 +1232,7 @@ function Studio() {
                 caption={caption}
                 muted={playingTake !== null && playingMix === 'replace'}
                 badge={badge}
+                carry={carry}
                 scanning={scanning}
                 markers={markers}
                 bigPlay={firstRead}
@@ -1214,6 +1250,7 @@ function Studio() {
                     statements={statements}
                     speakers={speakers}
                     revisions={approved}
+                    asShot={version === 'as-shot'}
                     items={planItems}
                     pieces={shown?.pieces ?? pieces}
                     onSeek={(t) => { const time = shown ? renderTimeFrom(t, shown.pieces) : t; setSeekRequest((r) => ({ time, id: (r?.id ?? 0) + 1 })); setCurrentTime(time) }}
@@ -1277,6 +1314,7 @@ function Studio() {
                 onPlacing={setPlacing}
                 onEditingChange={setEditingLine}
                 duration={project.duration}
+                version={version}
               />
             </div>
           </main>

@@ -12,6 +12,7 @@ const MOVE: Row[] = [
   { keys: ['Enter'], what: "Open the line's editor" },
   { keys: ['Esc'], what: 'Close the editor or this sheet' },
   { keys: ['/'], what: 'Ask Voltage: cursor to its box' },
+  { keys: ['O'], what: 'Flip Edited and As shot, at the same moment' },
   { keys: ['?'], what: 'Open this sheet', hot: true },
 ]
 const CHANGE: Row[] = [

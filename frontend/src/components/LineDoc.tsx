@@ -92,7 +92,12 @@ interface LineDocProps {
   onEditingChange?: (statement: Statement | null) => void
   /** UX-5: the clip's length, so a voice-over can be placed on a clip with no speech. */
   duration?: number
+  /** As shot (2026-10-19): the version the player plays. In As shot the live edits are not in it:
+   *  added and moved lines dim with "not in this version", removed and replaced lines read as shot. */
+  version?: 'edited' | 'proposals' | 'as-shot'
 }
+
+const NOT_IN_VERSION = <span className="tag rounded-[4px] border border-dashed border-line2 px-1.5 py-px text-faint" data-testid="not-in-version">not in this version</span>
 
 const overlaps = (a: { start: number; end: number }, b: { start: number; end: number }) =>
   a.start < b.end && b.start < a.end
@@ -158,8 +163,9 @@ export function LineDoc({
   statements, words = [], speakers = [], voices = [], revisions = [], selection, currentTime,
   pendingLines = [], items = [], disabled, usdPerChar, playing,
   onSeek, onHear, onAdd, onDiscard, onAddAll, onUndo, onRemove, onHearTake, onLevel, backgroundDb = -12, onDelivery,
-  onEditingChange, onMove, onMoveKept, placing, onPlacing, onShift, duration,
+  onEditingChange, onMove, onMoveKept, placing, onPlacing, onShift, duration, version = 'edited',
 }: LineDocProps) {
+  const asShot = version === 'as-shot'
   const [at, setAt] = useState<string>('')          // the add editor's "starts at", as typed
   const [placeText, setPlaceText] = useState('')     // the placing control's time, as typed
   const [editing, setEditing] = useState<{ order: number; mode: 'edit' | 'add' | 'layer' } | null>(null)
@@ -844,13 +850,13 @@ export function LineDoc({
     return (
       <Fragment key={key}>
         {drag && dropIndexFor(drag.to) === order && dropMarker()}
-        <div className={rowClass} data-state="moved" {...rowProps(order, key, `Moved line at ${clock(rev.start)}${label ? `, ${label}` : ''}`, rev.end)}>
+        <div className={cn(rowClass, asShot && 'opacity-50')} data-state="moved" data-version={version} {...rowProps(order, key, `Moved line at ${clock(rev.start)}${label ? `, ${label}` : ''}`, rev.end)}>
           <span className="flex items-start">
             {rev.edit_id && onMoveKept && gripButton(key, `edit-${rev.edit_id}`, s.text, rev.start, Math.max(0.05, rev.end - rev.start), (t) => onMoveKept(rev.edit_id!, t))}
           </span>
           <button className={timeClass} onClick={() => onSeek({ ...s, start: rev.start, end: rev.end })} aria-label={`Go to ${clock(rev.start)}`}>{clock(rev.start)}</button>
           <div className="flex min-w-0 flex-col gap-1.5">
-            {whoLine(label, <StatusBadge status="kept">Moved</StatusBadge>)}
+            {whoLine(label, <>{<StatusBadge status="kept">Moved</StatusBadge>}{asShot && NOT_IN_VERSION}</>)}
             <span className="say">{s.text}</span>
             <div className={metaClass}>
               Moved from {clock(from.start)}, as spoken, over the sound here.
@@ -875,13 +881,13 @@ export function LineDoc({
     return (
       <Fragment key={key}>
         {drag && dropIndexFor(drag.to) === order && dropMarker()}
-        <div className={rowClass} data-state="kept" data-current={currentTime >= rev.start && currentTime < rev.end} {...rowProps(order, key, `Added line at ${clock(rev.start)}`, rev.end)}>
+        <div className={cn(rowClass, asShot && 'opacity-50')} data-state="kept" data-version={version} data-current={currentTime >= rev.start && currentTime < rev.end} {...rowProps(order, key, `Added line at ${clock(rev.start)}`, rev.end)}>
           <span className="flex items-start">
             {!isEditing && rev.edit_id && onMoveKept && gripButton(key, `edit-${rev.edit_id}`, rev.text, rev.start, Math.max(0.05, rev.end - rev.start), (t) => onMoveKept(rev.edit_id!, t))}
           </span>
           <button className={timeClass} onClick={() => onSeek(s)} aria-label={`Go to ${clock(rev.start)}`}>{clock(rev.start)}</button>
           <div className="flex min-w-0 flex-col gap-1.5">
-            {whoLine(<>+ New line{rev.speaker && name(rev.speaker) ? ` · ${name(rev.speaker)}` : ''}</>, <StatusBadge status="kept" role="status">{STATUS.kept}</StatusBadge>)}
+            {whoLine(<>+ New line{rev.speaker && name(rev.speaker) ? ` · ${name(rev.speaker)}` : ''}</>, <>{<StatusBadge status="kept" role="status">{STATUS.kept}</StatusBadge>}{asShot && NOT_IN_VERSION}</>)}
             {isEditing ? <div className={unfold}>{editor(s, 'layer')}</div> : (
               <>
                 <span className="say">{rev.text}</span>
@@ -953,7 +959,7 @@ export function LineDoc({
     const movedTo = removed && revision?.partner ? revisions.find((r) => r.edit_id === revision.partner) ?? null : null
     const shown: Revision | null = pending?.text
       ? { start: pending.selection.start, end: pending.selection.end, text: pending.text, mix: pending.mix ?? 'replace' }
-      : revision && !removed ? revision : null
+      : revision && !removed && !asShot ? revision : null
     const own = ownItem(s)
     // The row's state word comes from the plan's item itself when there is one (20e), so a proposal reads Proposed without the plan's pending list.
     const itemStatus = own && own.status !== 'approved' && own.status !== 'dismissed' && STATUS[own.status] ? own.status : null
@@ -975,7 +981,7 @@ export function LineDoc({
       : status === 'removed' ? <StatusBadge status="removed" role="status">{movedTo ? 'Moved away' : 'Removed'}</StatusBadge> : null
     const wordsButton = (
       <button className={cn(lineClass, proposed && 'text-lg')} onClick={() => open(order, 'edit')} title="Change the words" data-testid={shown ? 'revision' : undefined}>
-        {removed || (own?.mix === 'remove' && own.status === 'ready') ? <del>{s.text}</del>
+        {(removed && !asShot) || (own?.mix === 'remove' && own.status === 'ready') ? <del>{s.text}</del>
           : shown ? trackedChanges(s, shown, words).map((run, k) => (
             <Fragment key={k}>{k > 0 && ' '}
               {run.kind === 'same' ? <span>{run.text}</span> : run.kind === 'del' ? <del>{run.text}</del> : <ins>{run.text}</ins>}
@@ -990,7 +996,7 @@ export function LineDoc({
           className={rowClass}
           data-current={current}
           data-selected={selected}
-          data-state={status ?? undefined}
+          data-state={asShot && revision ? undefined : status ?? undefined} data-version={version}
           data-depth={inDepth || undefined}
           data-actions-open={actionsOpen === order || undefined}
           {...rowProps(order, key, `Line at ${clock(s.start)}${label ? `, ${label}` : ''}`, s.end)}
@@ -1000,11 +1006,11 @@ export function LineDoc({
           </span>
           <button className={timeClass} onClick={() => onSeek(s)} aria-label={`Go to ${clock(s.start)}`}>{clock(s.start)}</button>
           <div className={cn('flex min-w-0 flex-col', proposed ? 'gap-2.5' : 'gap-1.5')}>
-            {whoLine(label, stamp)}
+            {whoLine(label, <>{stamp}{asShot && revision && NOT_IN_VERSION}</>)}
             {isEditing ? <div className={unfold}>{editor(s, 'edit')}</div> : inDepth ? depth(own!, own!.candidate!, s, order, 'edit') : (
               <>
                 {wordsButton}
-                {(revision || removed) && (
+                {(revision || removed) && !asShot && (
                   <div className={metaClass}>
                     {movedTo ? `Moved to ${timecode(movedTo.start)}; the room's own sound stays here.`
                       : removed ? "Removed. The gap is closed with the room's own sound; the picture is untouched." : `${shown && MIX_NOTE[shown.mix] ? (MIX_NOTE[shown.mix] ?? '').replace(/^./, (ch) => ch.toUpperCase()) : 'In place of the words as shot'}.`}

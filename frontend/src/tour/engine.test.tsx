@@ -38,7 +38,7 @@ function Page({ tour, at }: { tour: Tour; at?: number }) {
       <div data-tour="trace">Trace</div>
       <div data-tour="gate"><button type="button" data-tour-action="gate" onClick={() => t.notify('take-ready')}>Go ahead</button></div>
       <div data-tour="proposal-row"><button type="button" data-tour-action="proposal-row" onClick={() => t.notify('heard-and-original')}>Hear it</button></div>
-      <div data-tour="playback-switch">Final · With proposals · Original</div>
+      <div data-tour="playback-switch">Edited · With proposals · As shot</div>
       <button type="button" data-tour="add-it" onClick={() => t.notify('added')}>Add it</button>
       <a href="#v/p1/export" data-tour="export" onClick={(e) => { e.preventDefault(); t.notify('export-opened') }}>Export</a>
       <button type="button" onClick={() => t.fail()}>Break it</button>
@@ -86,7 +86,7 @@ describe('the tour engine', () => {
 
     await userEvent.click(within(coach()).getByRole('button', { name: 'Go ahead' }))
     expect(coach()).toHaveTextContent('Step 5 of 7')
-    expect(coach()).toHaveTextContent('Hear it in the video, then flip to the original')
+    expect(coach()).toHaveTextContent('Hear it in the video, then flip to As shot')
     await userEvent.click(within(coach()).getByRole('button', { name: 'Hear it' }))
     expect(coach()).toHaveTextContent('Step 6 of 7')
     await userEvent.click(within(coach()).getByRole('button', { name: 'Add it' }))

@@ -10,7 +10,7 @@ describe('KeyboardSheet', () => {
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Keyboard' })).toHaveFocus())
     expect(sheet).toHaveTextContent('Move and listen')
     expect(sheet).toHaveTextContent('Change')
-    expect(within(sheet).getAllByRole('definition')).toHaveLength(11)
+    expect(within(sheet).getAllByRole('definition')).toHaveLength(12)
     for (const k of ['↑', '↓', 'Space', 'Enter', 'Esc', 'K', 'U', 'A', 'Delete', 'S', '/', '?']) expect(within(sheet).getAllByText(k).length).toBeGreaterThan(0)
     expect(sheet).toHaveTextContent('Add the proposal to the video')
     expect(sheet).toHaveTextContent('Shortcuts never spend money on their own')

@@ -98,3 +98,27 @@ describe('Player as the monitor (UX-7b)', () => {
     expect(rulerMarks(0)).toEqual([])
   })
 })
+
+describe('Player: switching versions (As shot, 2026-10-19)', () => {
+  it('keeps the moment and the play state when its file changes, or starts at a carried time', async () => {
+    const { rerender, container } = render(<Player src="/a.mp4" duration={8} currentTime={0} onSeek={() => {}} />)
+    const video = () => container.querySelector('video') as HTMLVideoElement
+    fireEvent.click(screen.getByRole('button', { name: 'Play' }))
+    video().currentTime = 3.2
+    fireEvent.timeUpdate(video())
+    rerender(<Player src="/b.mp4" duration={8} currentTime={3.2} onSeek={() => {}} />)
+    fireEvent.loadedMetadata(video())
+    expect(video().currentTime).toBeCloseTo(3.2, 2)
+    expect(screen.getByRole('button', { name: 'Pause' })).toBeInTheDocument()
+    // A retimed version: the caller carries the mapped time across.
+    rerender(<Player src="/c.mp4" duration={8} currentTime={3.2} onSeek={() => {}} carry={{ time: 4.5, id: 1 }} />)
+    fireEvent.loadedMetadata(video())
+    expect(video().currentTime).toBeCloseTo(4.5, 2)
+    // Paused stays paused.
+    fireEvent.click(screen.getByRole('button', { name: 'Pause' }))
+    rerender(<Player src="/d.mp4" duration={8} currentTime={4.5} onSeek={() => {}} carry={{ time: 4.5, id: 1 }} />)
+    fireEvent.loadedMetadata(video())
+    expect(screen.getByRole('button', { name: 'Play' })).toBeInTheDocument()
+    expect(video().currentTime).toBeCloseTo(4.5, 2)
+  })
+})
