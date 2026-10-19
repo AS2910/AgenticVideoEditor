@@ -230,6 +230,15 @@ class ProjectRepository:
             ).fetchone()
         return codec.candidate(json.loads(row["body"])) if row else None
 
+    def candidates(self, project_id: str) -> list[EditCandidate]:
+        """Every take ever made for the project, in the order they were made
+        (the receipt counts them)."""
+        with self.db.tx() as c:
+            rows = c.execute(
+                "SELECT body FROM candidates WHERE project_id = ? ORDER BY rowid", (project_id,),
+            ).fetchall()
+        return [codec.candidate(json.loads(r["body"])) for r in rows]
+
     # ── approved edits ──
 
     def append_edit(self, project_id: str, edit: ApprovedEdit) -> None:
@@ -294,6 +303,17 @@ class ProjectRepository:
         with self.db.tx() as c:
             c.execute("INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value", (key, value))
 
+    def delete_meta(self, key: str) -> None:
+        with self.db.tx() as c:
+            c.execute("DELETE FROM meta WHERE key = ?", (key,))
+
+    def meta_with_prefix(self, prefix: str) -> dict[str, str]:
+        """Every meta row under one prefix — e.g. everyone's own voices, so a
+        voice kept by anyone is never deleted with a project."""
+        with self.db.tx() as c:
+            rows = c.execute("SELECT key, value FROM meta WHERE key LIKE ?", (prefix + "%",)).fetchall()
+        return {str(r["key"]): str(r["value"]) for r in rows}
+
     # ── settings ──
 
     def settings(self, project_id: str) -> dict:
@@ -323,6 +343,17 @@ class ProjectRepository:
                 (project_id, project_id, role, text, _now(), kind, cost, json.dumps(data) if data is not None else None),
             )
             return int(c.execute("SELECT MAX(seq) FROM messages WHERE project_id = ?", (project_id,)).fetchone()[0])
+
+    def count_steps(self, project_id: str, text: str, since: str | None = None) -> int:
+        """How many step messages say exactly `text` — one "Thinking" per
+        turn, so this is how turns are counted — from `since` on when given."""
+        with self.db.tx() as c:
+            row = c.execute(
+                "SELECT COUNT(*) AS n FROM messages WHERE project_id = ? AND kind = 'step' AND text = ?"
+                + (" AND at >= ?" if since else ""),
+                (project_id, text) + ((since,) if since else ()),
+            ).fetchone()
+        return int(row["n"])
 
     def messages(self, project_id: str, after: int = 0) -> list[Message]:
         with self.db.tx() as c:
@@ -382,6 +413,12 @@ class ProjectRepository:
                 "SELECT body FROM plans WHERE project_id = ? AND plan_id = ?", (project_id, plan_id),
             ).fetchone()
         return plan_from_dict(json.loads(row["body"])) if row else None
+
+    def plans(self, project_id: str) -> list[Plan]:
+        """Every plan of the project, oldest first."""
+        with self.db.tx() as c:
+            rows = c.execute("SELECT body FROM plans WHERE project_id = ? ORDER BY seq", (project_id,)).fetchall()
+        return [plan_from_dict(json.loads(r["body"])) for r in rows]
 
     def latest_plan(self, project_id: str) -> Plan | None:
         with self.db.tx() as c:

@@ -46,7 +46,8 @@ def test_a_question_ends_the_turn_with_the_pending_calls_answered_as_not_run(wor
               use("list_voices", "b"), stop="tool_use"),
     ])
     out, persisted, steps = run(world, client, turn=world.turn(autonomy="ask"))
-    assert out.question == {"text": "Voice “Welcome.” in Varsha's voice, about $0.00?", "options": ["Go ahead", "Not yet"], "guess": "Go ahead", "gate": True}
+    assert out.question == {"text": "Voice “Welcome.” in Varsha's voice, about $0.00?", "options": ["Go ahead", "Not yet"], "guess": "Go ahead", "gate": True,
+                            "cost_usd": 0.0024}
     results = persisted[-1][1]
     assert results[0]["content"].startswith("Waiting for the user:")
     assert results[1]["content"] == "Not run: the turn ended before this step." and results[1]["is_error"] is True
@@ -171,3 +172,16 @@ def test_a_card_follows_its_step_and_the_turns_effort_goes_in_the_request(world)
     assert all(c["output_config"] == {"effort": "xhigh"} for c in client.calls)
     from app.agent.loop import BETAS, CONTEXT_MANAGEMENT
     assert "compact-2026-01-12" in BETAS and CONTEXT_MANAGEMENT["edits"][1] == {"type": "compact_20260112", "trigger": {"type": "input_tokens", "value": 100000}}
+
+
+def test_each_step_names_its_tool_and_a_two_argument_callback_still_works(world):
+    """Volt: the trace shows which tool a step was; `run` above narrates with (step, cost) only."""
+    client = ScriptedClient([
+        reply(use("read_transcript", "a"), use("list_voices", "b"), stop="tool_use"),
+        reply(use("synthesize_take", "c", text="Welcome.", voice_id="kL06KYMvPY56NluIQ72m", start=0.4, end=2.4,
+                  direction=None, mix=None, line=None, item_id=None), stop="tool_use"),
+        reply(text("Done.")),
+    ])
+    named = []
+    Agent(client).run(world.wb, world.turn(), [], "Say welcome", on_step=lambda step, cost, tool: named.append((tool, cost)))
+    assert named == [("read_transcript", 0.0), ("list_voices", 0.0), ("synthesize_take", 0.03)]

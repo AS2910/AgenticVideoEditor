@@ -118,12 +118,15 @@ class Ledger:
             ).fetchone()
         return float(row["n"])
 
-    def lines(self, project_id: str) -> list[UsageLine]:
+    def lines(self, project_id: str, since: str | None = None) -> list[UsageLine]:
+        """What the project spent, per vendor and purpose; with `since`, only
+        the rows from that moment on (the Usage page's week or month)."""
         with self.db.tx() as c:
             rows = c.execute(
                 "SELECT vendor, what, unit, SUM(units) AS units, SUM(usd) AS usd, SUM(CASE WHEN units > 0 THEN 1 WHEN units < 0 THEN -1 ELSE 0 END) AS calls "
-                "FROM usage WHERE project_id = ? GROUP BY vendor, what, unit ORDER BY vendor, what",
-                (project_id,),
+                "FROM usage WHERE project_id = ?" + (" AND at >= ?" if since else "")
+                + " GROUP BY vendor, what, unit ORDER BY vendor, what",
+                (project_id,) + ((since,) if since else ()),
             ).fetchall()
         return [UsageLine(r["vendor"], r["what"], r["unit"], r["units"], r["usd"], r["calls"]) for r in rows]
 

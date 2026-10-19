@@ -2,7 +2,7 @@ import json
 import logging
 import tempfile
 from dataclasses import asdict, replace
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import shutil
@@ -37,6 +37,7 @@ from app import chaos as chaos_module
 from app.budget import VoiceBudget, BudgetExceeded
 from app.orchestrator.planner import Line, Frame, Sight
 from app.media.ffmpeg import SpanMismatch
+from app.media.reference import extract_reference_audio, speech_seconds
 from app.orchestrator.clones import CloneService, VoiceChoice
 from app.orchestrator.pipeline import run_edit
 from app.store.db import Database
@@ -418,15 +419,90 @@ EFFORTS = ("medium", "high", "xhigh")
 DEFAULT_AUTONOMY = "ask"
 
 
-def _settings(project_id: str) -> dict:
+# The steps that can still wait for a yes under Just do it (Volt's Settings).
+ASK_BEFORE = ("ship", "clone", "design")
+
+
+def _ask_before(saved: dict | None) -> dict:
+    saved = saved or {}
+    return {k: bool(saved.get(k, False)) for k in ASK_BEFORE}
+
+
+def _clamp_turn_usd(usd: float) -> float:
+    """A turn's cap, between a cent and the project's ceiling."""
+    return round(min(ledger.ceiling_usd, max(0.01, usd)), 2)
+
+
+def _prefs(owner: str) -> dict:
+    """The owner's defaults (Volt): what a new project starts with, and which
+    steps still ask under Just do it. Kept in meta, apart from any project."""
+    saved = json.loads(repo.get_meta(f"prefs:{owner}") or "{}")
+    return {
+        "autonomy": saved.get("autonomy", DEFAULT_AUTONOMY),
+        "turn_usd": float(saved.get("turn_usd") or settings.agent_turn_usd),
+        "effort": saved.get("effort") or settings.agent_effort,
+        "ask_before": _ask_before(saved.get("ask_before")),
+    }
+
+
+def _starting_settings(owner: str) -> dict:
+    """What a new project starts with: the owner's defaults, copied in, so a
+    later change to the defaults leaves the project as it was set."""
+    prefs = _prefs(owner)
+    return {k: prefs[k] for k in ("autonomy", "turn_usd", "effort", "ask_before")}
+
+
+class PrefsUpdate(BaseModel):
+    autonomy: Literal["ask", "draft"] | None = None
+    turn_usd: float | None = None
+    effort: Literal["medium", "high", "xhigh"] | None = None
+    # Any subset of ship / clone / design; the rest stay as they were.
+    ask_before: dict[str, bool] | None = None
+
+
+@app.get("/me/settings")
+def get_my_settings(owner: str = Depends(current_owner)) -> dict:
+    """The caller's defaults: what a new project starts with, and which steps
+    still wait for a yes under Just do it."""
+    return _prefs(owner)
+
+
+@app.put("/me/settings")
+def update_my_settings(req: PrefsUpdate, owner: str = Depends(current_owner)) -> dict:
+    """Change any of the defaults; the whole set comes back. Projects already
+    made keep the settings they were made with."""
+    prefs = _prefs(owner)
+    if req.autonomy is not None:
+        prefs["autonomy"] = req.autonomy
+    if req.turn_usd is not None:
+        prefs["turn_usd"] = _clamp_turn_usd(req.turn_usd)
+    if req.effort is not None:
+        prefs["effort"] = req.effort
+    if req.ask_before is not None:
+        prefs["ask_before"] = _ask_before({**prefs["ask_before"], **req.ask_before})
+    repo.set_meta(f"prefs:{owner}", json.dumps(prefs))
+    return prefs
+
+
+def _settings(project_id: str, owner: str | None = None) -> dict:
     """What Voltage may do on this project (20d): the autonomy, what one
-    turn may spend, and how hard it thinks; the project's ceiling is read-only."""
+    turn may spend, how hard it thinks, and which steps still ask under Just
+    do it; the project's ceiling and the model are read-only. A project made
+    before it had its own `ask_before` reads its owner's."""
     saved = repo.settings(project_id)
+    ask = saved.get("ask_before")
+    if ask is None:
+        if owner is None:
+            record = repo.get(project_id)
+            owner = record.owner if record else LOCAL_OWNER
+        ask = _prefs(owner)["ask_before"]
     return {
         "autonomy": saved.get("autonomy", DEFAULT_AUTONOMY),
         "turn_usd": float(saved.get("turn_usd") or settings.agent_turn_usd),
         "effort": saved.get("effort") or settings.agent_effort,
         "ceiling_usd": ledger.ceiling_usd,
+        "ask_before": _ask_before(ask),
+        "model": settings.agent_model,
     }
 
 
@@ -484,6 +560,7 @@ async def create_project(
 
     granted = Consent(granted_at=_now()) if consent else None
     repo.create(source, transcript, granted, owner=owner)
+    repo.set_settings(project_id, **_starting_settings(owner))
     if transcriber_label.startswith("openai"):
         minutes = source.duration / 60
         ledger.record(project_id, "openai", "transcription", minutes, "minutes",
@@ -509,14 +586,94 @@ def _set_my_voices(owner: str, voices: list[dict]) -> None:
     repo.set_meta(f"my_voices:{owner}", json.dumps(voices))
 
 
+def _user_store(owner: str) -> str:
+    """Where an owner's own media lives (voice samples, designed previews): a
+    pseudo project id in the artifact store, since none of it belongs to a clip."""
+    return f"user-{owner}"
+
+
+def _designs(owner: str) -> dict:
+    """The owner's recent designed previews outside any project, by generated id."""
+    return json.loads(repo.get_meta(f"designs:{owner}") or "{}")
+
+
+def _set_designs(owner: str, designs: dict) -> None:
+    repo.set_meta(f"designs:{owner}", json.dumps(designs))
+
+
+def _kept_voice_ids() -> set[str]:
+    """Every voice anyone kept as their own. A project's deletion leaves
+    these at the vendor: they outlive the clip they were made from."""
+    out: set[str] = set()
+    for value in repo.meta_with_prefix("my_voices:").values():
+        out.update(v["voice_id"] for v in json.loads(value))
+    return out
+
+
+def _voice_entry(v: dict, used_in: int = 0) -> dict:
+    """One of the owner's voices as the voices page shows it. Voices kept
+    before Volt have no kind: they were all recordings."""
+    return {**v, "kind": v.get("kind") or "recorded", "sample_sha": v.get("sample_sha"),
+            "description": v.get("description"), "used_in": used_in}
+
+
+def _voices_in_use(owner: str) -> dict[str, int]:
+    """How many of the owner's projects speak in each voice: a live edit, or
+    a plan item with a take, in that voice."""
+    counts: dict[str, int] = {}
+    for r in repo.list(owner):
+        pid = r.source.project_id
+        used = {e.plan.voice_profile_id for e in repo.list_edits(pid) if not e.reverted}
+        plan = repo.latest_plan(pid)
+        for item in (plan.items if plan else ()):
+            if item.candidate_id and item.status != "dismissed":
+                candidate = repo.get_candidate(pid, item.candidate_id)
+                if candidate is not None:
+                    used.add(candidate.plan.voice_profile_id)
+        for vid in used:
+            counts[vid] = counts.get(vid, 0) + 1
+    return counts
+
+
+def _slots() -> list[int] | None:
+    """[used, limit] voice slots at the vendor, or None when it cannot say."""
+    found = getattr(voice, "slots", lambda: None)()
+    return [int(found[0]), int(found[1])] if found else None
+
+
+def _voice_name_or_422(name: str) -> str:
+    label = " ".join(name.split())[:40]
+    if not label:
+        raise HTTPException(status_code=422, detail="Give the voice a name.")
+    return label
+
+
+def _no_voice_called(owner: str, label: str) -> None:
+    if any(v["name"].lower() == label.lower() for v in _my_voices(owner)):
+        raise HTTPException(status_code=409, detail=f"You already have a voice called {label}.")
+
+
+def _voices_can_be_made(attr: str = "can_clone") -> None:
+    """Making a voice of the user's own needs a vendor that keeps it; under
+    dry-run a mock id would outlive the setup that made it."""
+    if settings.dry_run or not getattr(voice, attr, False):
+        raise HTTPException(status_code=503, detail="Voices cannot be made in this setup (no vendor that clones).")
+
+
 @app.get("/voices")
 def list_voices(owner: str = Depends(current_owner)) -> dict:
-    """The voices a new line can be spoken in, which one is the default, and
-    the caller's own uploaded voices (20i)."""
+    """The voices a new line can be spoken in, which one is the default, the
+    caller's own voices (20i) with where each is used, and the vendor's slots."""
     mine = _my_voices(owner)
     for v in mine:
         getattr(voice, "register_clone", lambda vid: None)(v["voice_id"])
-    return {"default": voice.default_voice, "voices": voice.voices(), "mine": mine}
+    used = _voices_in_use(owner) if mine else {}
+    return {
+        "default": voice.default_voice,
+        "voices": [{**v, "preview_url": v.get("preview_url")} for v in voice.voices()],
+        "mine": [_voice_entry(v, used.get(v["voice_id"], 0)) for v in mine],
+        "slots": _slots(),
+    }
 
 
 @app.post("/voices/mine", status_code=201)
@@ -530,13 +687,9 @@ async def add_my_voice(
     or one they may use."""
     if not consent:
         raise HTTPException(status_code=403, detail="Say it is your voice, or one you have the right to use.")
-    if settings.dry_run or not getattr(voice, "can_clone", False):
-        raise HTTPException(status_code=503, detail="Voices cannot be made in this setup (no vendor that clones).")
-    label = " ".join(name.split())[:40]
-    if not label:
-        raise HTTPException(status_code=422, detail="Give the voice a name.")
-    if any(v["name"].lower() == label.lower() for v in _my_voices(owner)):
-        raise HTTPException(status_code=409, detail=f"You already have a voice called {label}.")
+    _voices_can_be_made()
+    label = _voice_name_or_422(name)
+    _no_voice_called(owner, label)
     filename = Path(file.filename or "voice.wav").name
     with tempfile.TemporaryDirectory() as tmp:
         staged = Path(tmp) / filename
@@ -551,9 +704,205 @@ async def add_my_voice(
             voice_id = voice.create_clone(f"voltage-mine-{label}", wav)
         except Exception as exc:  # noqa: BLE001 — the vendor's refusal, in its own words
             raise HTTPException(status_code=502, detail=str(exc) or "The voice could not be made.") from None
-    entry = {"voice_id": voice_id, "name": label, "seconds": round(seconds, 1), "at": _now()}
+        # The recording stays with the owner, so the voices page can play it back.
+        sample = artifacts.put_file(_user_store(owner), wav, kind="audio", container="wav", duration=seconds)
+    entry = {"voice_id": voice_id, "name": label, "seconds": round(seconds, 1), "at": _now(),
+             "kind": "recorded", "sample_sha": sample.sha256, "description": None}
     _set_my_voices(owner, [*_my_voices(owner), entry])
-    return entry
+    return _voice_entry(entry)
+
+
+@app.get("/voices/sample/{sha256}")
+def get_voice_sample(sha256: str, owner: str = Depends(current_owner)) -> FileResponse:
+    """The recording behind one of the caller's voices, or one of their
+    designed previews, with range requests. Only their own are served."""
+    allowed = {v.get("sample_sha") for v in _my_voices(owner)} | {d.get("sha256") for d in _designs(owner).values()}
+    path = artifacts.find(_user_store(owner), sha256) if sha256 in allowed else None
+    if path is None:
+        raise HTTPException(status_code=404, detail="sample not found")
+    return FileResponse(path, media_type=_MEDIA_TYPES.get(path.suffix.lstrip("."), "application/octet-stream"))
+
+
+def _made_voices_of(owner: str) -> list[dict]:
+    """Every voice Voltage made inside the owner's projects: designed or added
+    from the library (the project's `made_voices`), and each speaker's own
+    clone. `kept` says it is already one of the owner's own."""
+    kept = {v["voice_id"] for v in _my_voices(owner)}
+    out: list[dict] = []
+    for r in repo.list(owner):
+        pid, filename = r.source.project_id, r.source.filename
+        for m in repo.settings(pid).get("made_voices") or []:
+            out.append({"voice_id": m["voice_id"], "name": m.get("name") or m["voice_id"], "kind": m.get("kind") or "designed",
+                        "project_id": pid, "filename": filename, "description": m.get("description"), "seconds": None,
+                        "kept": m["voice_id"] in kept})
+        names = {s.label: s.name for s in repo.speakers(pid)}
+        for key, voice_id in repo.clones(pid).items():
+            whole = key == ProjectRepository.WHOLE_CLIP
+            out.append({"voice_id": voice_id, "name": "The speaker" if whole else names.get(key, f"Speaker {key}"), "kind": "cloned",
+                        "project_id": pid, "filename": filename, "description": None,
+                        "seconds": round(speech_seconds(r.transcript, None if whole else key), 1), "kept": voice_id in kept})
+    return out
+
+
+@app.get("/voices/made")
+def list_made_voices(owner: str = Depends(current_owner)) -> dict:
+    """The voices Voltage made across the caller's projects, and whether each
+    is kept as their own yet. One that is not goes when its project does."""
+    return {"voices": _made_voices_of(owner)}
+
+
+class KeepRequest(BaseModel):
+    voice_id: str
+    # Defaults to the name it was made under.
+    name: str | None = None
+
+
+@app.post("/voices/mine/keep", status_code=201)
+def keep_made_voice(req: KeepRequest, owner: str = Depends(current_owner)) -> dict:
+    """Keep a voice Voltage made for a clip as one of your own: it leaves the
+    project's list, so deleting the project no longer deletes it."""
+    mine = _my_voices(owner)
+    if any(v["voice_id"] == req.voice_id for v in mine):
+        raise HTTPException(status_code=409, detail="That voice is already yours.")
+    found = next((m for m in _made_voices_of(owner) if m["voice_id"] == req.voice_id), None)
+    if found is None:
+        raise HTTPException(status_code=404, detail="No such voice was made in your projects.")
+    label = _voice_name_or_422(req.name or found["name"])
+    _no_voice_called(owner, label)
+    pid = found["project_id"]
+    made = repo.settings(pid).get("made_voices") or []
+    if any(m["voice_id"] == req.voice_id for m in made):
+        repo.set_settings(pid, made_voices=[m for m in made if m["voice_id"] != req.voice_id])
+    entry = {"voice_id": req.voice_id, "name": label, "seconds": float(found.get("seconds") or 0.0), "at": _now(),
+             "kind": found["kind"], "sample_sha": None, "description": found.get("description"),
+             "source": {"project_id": pid, "filename": found["filename"]}}
+    _set_my_voices(owner, [*mine, entry])
+    getattr(voice, "register_clone", lambda vid: None)(req.voice_id)
+    return _voice_entry(entry)
+
+
+@app.get("/voices/speakers")
+def list_speakers_with_a_voice(owner: str = Depends(current_owner)) -> dict:
+    """Every speaker across the caller's projects with enough speech to clone."""
+    out = []
+    for r in repo.list(owner):
+        pid = r.source.project_id
+        for spk in repo.speakers(pid):
+            seconds = speech_seconds(r.transcript, spk.label)
+            if seconds >= MIN_MY_VOICE_SECONDS:
+                out.append({"project_id": pid, "filename": r.source.filename, "label": spk.label, "name": spk.name,
+                            "seconds": round(seconds, 1)})
+    return {"speakers": out}
+
+
+class FromSpeakerRequest(BaseModel):
+    project_id: str
+    label: str
+    name: str
+    consent: bool = False
+
+
+@app.post("/voices/mine/from-speaker", status_code=201)
+def add_my_voice_from_speaker(req: FromSpeakerRequest, owner: str = Depends(current_owner)) -> dict:
+    """One of your own voices from a speaker in one of your clips: their
+    speech, joined, cloned once under your name. Consent is your word that
+    the voice is yours or one you may use."""
+    if not req.consent:
+        raise HTTPException(status_code=403, detail="Say it is your voice, or one you have the right to use.")
+    _voices_can_be_made()
+    label = _voice_name_or_422(req.name)
+    _no_voice_called(owner, label)
+    record = _owned(req.project_id, owner)
+    spk = next((s for s in repo.speakers(req.project_id) if s.label == req.label), None)
+    if spk is None:
+        raise HTTPException(status_code=404, detail="speaker not found")
+    seconds = speech_seconds(record.transcript, spk.label)
+    if seconds < MIN_MY_VOICE_SECONDS:
+        raise HTTPException(status_code=422, detail=f"{spk.name} speaks for {seconds:.0f} s; at least {MIN_MY_VOICE_SECONDS:.0f} s is needed to clone a voice.")
+    reference = extract_reference_audio(record.source, record.transcript, artifacts, speaker=spk.label, min_seconds=MIN_MY_VOICE_SECONDS)
+    if reference is None:
+        raise HTTPException(status_code=422, detail=f"Could not cut a clean sample of {spk.name}'s voice.")
+    try:
+        voice_id = voice.create_clone(f"voltage-mine-{label}", Path(reference.path))
+    except Exception as exc:  # noqa: BLE001 — the vendor's refusal, in its own words
+        raise HTTPException(status_code=502, detail=str(exc) or "The voice could not be made.") from None
+    # The sample is kept with the owner, so it outlives the project it came from.
+    sample = artifacts.put_file(_user_store(owner), reference.path, kind="audio", container="wav", duration=reference.duration)
+    entry = {"voice_id": voice_id, "name": label, "seconds": round(seconds, 1), "at": _now(), "kind": "cloned",
+             "sample_sha": sample.sha256, "description": None,
+             "source": {"project_id": req.project_id, "filename": record.source.filename, "label": spk.label}}
+    _set_my_voices(owner, [*_my_voices(owner), entry])
+    return _voice_entry(entry)
+
+
+class DesignRequest(BaseModel):
+    description: str
+
+
+# How many designed previews an owner keeps outside projects; older ones are forgotten.
+RECENT_DESIGNS = 30
+
+
+@app.post("/voices/design")
+def design_my_voice(req: DesignRequest, owner: str = Depends(current_owner)) -> dict:
+    """Three previews of a voice described in words, outside any project. The
+    spend is kept under the owner's own id and the ceiling applies."""
+    description = " ".join(req.description.split())
+    if not description:
+        raise HTTPException(status_code=422, detail="Describe the voice in words first.")
+    if settings.dry_run or not hasattr(voice, "design_voice"):
+        raise HTTPException(status_code=503, detail="Voices cannot be designed in this setup (no vendor that designs).")
+    key = _user_store(owner)
+    try:
+        ledger.ensure_can_spend(key, owner=owner if settings.auth_mode != "off" else None,
+                                owner_ceiling_usd=settings.user_budget_usd if settings.auth_mode != "off" else None)
+        previews = list(voice.design_voice(key, description))
+    except (SpendCeilingReached, BudgetExceeded) as exc:
+        raise HTTPException(status_code=402, detail=str(exc)) from exc
+    except NonRetryableError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    except VendorError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    designs = _designs(owner)
+    out = []
+    for pv in previews:
+        container = "wav" if "wav" in (pv.get("media_type") or "") else "mp3"
+        duration = float(pv.get("duration") or 0.0)
+        art = artifacts.put_bytes(key, pv["audio"], kind="audio", container=container, duration=duration)
+        designs[pv["generated_voice_id"]] = {"description": description, "sha256": art.sha256, "duration": duration, "at": _now()}
+        out.append({"generated_voice_id": pv["generated_voice_id"], "sha256": art.sha256, "duration": round(duration, 1),
+                    "text": pv.get("text") or ""})
+    _set_designs(owner, dict(sorted(designs.items(), key=lambda kv: kv[1].get("at", ""))[-RECENT_DESIGNS:]))
+    return {"previews": out}
+
+
+class FromPreviewRequest(BaseModel):
+    generated_voice_id: str
+    name: str
+    sha256: str | None = None
+    description: str = ""
+    consent: bool = False
+
+
+@app.post("/voices/mine/from-preview", status_code=201)
+def add_my_voice_from_preview(req: FromPreviewRequest, owner: str = Depends(current_owner)) -> dict:
+    """Keep one designed preview as one of your own voices (a slot, no credits)."""
+    if not req.consent:
+        raise HTTPException(status_code=403, detail="Say you have the right to use this voice.")
+    if settings.dry_run or not hasattr(voice, "save_voice"):
+        raise HTTPException(status_code=503, detail="Voices cannot be designed in this setup (no vendor that designs).")
+    label = _voice_name_or_422(req.name)
+    _no_voice_called(owner, label)
+    designed = _designs(owner).get(req.generated_voice_id) or {}
+    description = " ".join(req.description.split()) or designed.get("description") or ""
+    try:
+        voice_id = voice.save_voice(req.generated_voice_id, f"voltage-mine-{label}", description)
+    except Exception as exc:  # noqa: BLE001 — the vendor's refusal, in its own words
+        raise HTTPException(status_code=502, detail=str(exc) or "The voice could not be kept.") from None
+    entry = {"voice_id": voice_id, "name": label, "seconds": 0.0, "at": _now(), "kind": "designed",
+             "sample_sha": req.sha256 or designed.get("sha256"), "description": description or None}
+    _set_my_voices(owner, [*_my_voices(owner), entry])
+    return _voice_entry(entry)
 
 
 @app.delete("/voices/mine/{voice_id}", status_code=204)
@@ -612,27 +961,51 @@ def get_project(project_id: str, owner: str = Depends(current_owner)) -> dict:
     """Everything needed to reopen a project: source, transcript, approved
     edits and the chat."""
     record = _owned(project_id, owner)
+    speakers = _speakers_by_take(project_id)
     return {
         **_project_dict(record),
-        "edits": [
-            {
-                "edit_id": e.edit_id,
-                "candidate_id": e.candidate_id,
-                "new_text": e.plan.new_text,
-                "selection": {"start": e.plan.selection.start, "end": e.plan.selection.end},
-                "mix": e.plan.mix,
-                "delivery": e.plan.delivery,
-                "flex": e.plan.flex,
-                "level_db": e.plan.level_db,
-                "overridden": e.overridden,
-                "reverted": e.reverted,
-                "partner": e.partner,
-            }
-            for e in repo.list_edits(project_id)
-        ],
+        "edits": [_edit_dict(e, speakers) for e in repo.list_edits(project_id)],
         "messages": [_message_dict(m) for m in repo.messages(project_id)],
         # Phase 20: the composer talks to Voltage with tools when this is on.
         "agent": _agent_on(),
+    }
+
+
+def _speakers_by_take(project_id: str) -> dict[str, str | None]:
+    """Who each take was given to, by candidate id and by edit id, from the
+    plans' items — the edit itself does not know (Volt's rows name them). An
+    edit may belong to an earlier plan than the latest, so every plan is read."""
+    out: dict[str, str | None] = {}
+    for plan in repo.plans(project_id):
+        for item in plan.items:
+            if item.candidate_id:
+                out[item.candidate_id] = item.speaker
+            if item.edit_id:
+                out[item.edit_id] = item.speaker
+    return out
+
+
+def _voice_of(plan: EditPlan) -> str | None:
+    # A removal is room tone, not a voice.
+    return None if plan.voice_profile_id in ("none", "") else plan.voice_profile_id
+
+
+def _edit_dict(e: ApprovedEdit, speakers: dict[str, str | None]) -> dict:
+    return {
+        "edit_id": e.edit_id,
+        "candidate_id": e.candidate_id,
+        "new_text": e.plan.new_text,
+        "selection": {"start": e.plan.selection.start, "end": e.plan.selection.end},
+        "mix": e.plan.mix,
+        "delivery": e.plan.delivery,
+        "flex": e.plan.flex,
+        "level_db": e.plan.level_db,
+        "overridden": e.overridden,
+        "reverted": e.reverted,
+        "partner": e.partner,
+        # Volt: the row says who the line is for and whose voice says it.
+        "speaker": speakers.get(e.edit_id, speakers.get(e.candidate_id)),
+        "voice_profile_id": _voice_of(e.plan),
     }
 
 
@@ -656,11 +1029,81 @@ def get_usage(project_id: str, owner: str = Depends(current_owner)) -> dict:
     }
 
 
+# How the Usage page names each vendor's share.
+VENDOR_LABELS = {"anthropic": "Voltage thinking", "elevenlabs": "Voices and takes", "openai": "Transcription"}
+# The ElevenLabs rows that are a take: the budget charges takes as "speech";
+# the agent tests' fake ledger says "take".
+TAKE_WHATS = ("speech", "take")
+
+
+def _period_start(period: str) -> str | None:
+    """When the period began, in the ledger's own time (UTC ISO); None for all time."""
+    now = datetime.now(timezone.utc)
+    if period == "week":
+        return (now - timedelta(days=7)).isoformat()
+    if period == "month":
+        return now.replace(day=1, hour=0, minute=0, second=0, microsecond=0).isoformat()
+    return None
+
+
+@app.get("/usage")
+def get_my_usage(period: Literal["week", "month", "all"] = "month", owner: str = Depends(current_owner)) -> dict:
+    """What the caller has spent across their projects in the period: the
+    week is the last seven days, the month the calendar month so far (UTC).
+    A turn is one "Thinking" step; a take is one ElevenLabs speech call; the
+    voices made are the caller's own plus every project's. A voice designed
+    outside any project (the voices page) counts in the totals, not by project."""
+    since = _period_start(period)
+    by_vendor = {v: 0.0 for v in VENDOR_LABELS}
+    by_project: list[dict] = []
+    turns = takes = 0
+    voices_made = len(_my_voices(owner))
+    projects = repo.list(owner)
+    for r in projects:
+        pid = r.source.project_id
+        lines = ledger.lines(pid, since)
+        project_turns = repo.count_steps(pid, "Thinking", since)
+        for u in lines:
+            by_vendor[u.vendor] = by_vendor.get(u.vendor, 0.0) + u.usd
+            if u.vendor == VoiceBudget.VENDOR and u.what in TAKE_WHATS:
+                takes += u.calls
+        turns += project_turns
+        voices_made += len(repo.settings(pid).get("made_voices") or [])
+        by_project.append({
+            "project_id": pid, "filename": r.source.filename, "turns": project_turns,
+            "voice_characters": int(sum(u.units for u in lines if u.vendor == VoiceBudget.VENDOR and u.unit == VoiceBudget.UNIT)),
+            "spent_usd": round(sum(u.usd for u in lines), 4), "cap_usd": ledger.ceiling_usd,
+        })
+    for u in ledger.lines(_user_store(owner), since):
+        by_vendor[u.vendor] = by_vendor.get(u.vendor, 0.0) + u.usd
+    thinking = by_vendor.get("anthropic", 0.0)
+    return {
+        "period": period,
+        "spent_usd": round(sum(by_vendor.values()), 4),
+        "ceiling_usd": settings.user_budget_usd,
+        "project_cap_usd": ledger.ceiling_usd,
+        "turns": turns,
+        "takes": takes,
+        "voices_made": voices_made,
+        "avg_turn_usd": round(thinking / turns, 4) if turns else 0.0,
+        "by_vendor": [{"vendor": v, "label": VENDOR_LABELS.get(v, v), "usd": round(usd, 4)} for v, usd in by_vendor.items()],
+        "by_project": by_project,
+    }
+
+
 class SettingsUpdate(BaseModel):
     autonomy: Literal["ask", "draft"] | None = None
     # 20d: what one turn may spend, and how hard Voltage thinks.
     turn_usd: float | None = None
     effort: Literal["medium", "high", "xhigh"] | None = None
+    # Volt: the steps that still ask under Just do it, any subset.
+    ask_before: dict[str, bool] | None = None
+
+
+@app.get("/projects/{project_id}/settings")
+def get_settings(project_id: str, owner: str = Depends(current_owner)) -> dict:
+    _owned(project_id, owner)
+    return {"settings": _settings(project_id, owner)}
 
 
 @app.put("/projects/{project_id}/settings")
@@ -668,11 +1111,13 @@ def update_settings(
     project_id: str, req: SettingsUpdate, owner: str = Depends(current_owner),
 ) -> dict:
     """What Voltage may do on this project: the autonomy, a turn's spend
-    cap (between a cent and the project's ceiling) and the effort."""
+    cap (between a cent and the project's ceiling), the effort, and which
+    steps still wait for a yes under Just do it."""
     _owned(project_id, owner)
-    turn_usd = None if req.turn_usd is None else round(min(ledger.ceiling_usd, max(0.01, req.turn_usd)), 2)
-    repo.set_settings(project_id, autonomy=req.autonomy, turn_usd=turn_usd, effort=req.effort)
-    return {"settings": _settings(project_id)}
+    turn_usd = None if req.turn_usd is None else _clamp_turn_usd(req.turn_usd)
+    ask_before = None if req.ask_before is None else _ask_before({**_settings(project_id, owner)["ask_before"], **req.ask_before})
+    repo.set_settings(project_id, autonomy=req.autonomy, turn_usd=turn_usd, effort=req.effort, ask_before=ask_before)
+    return {"settings": _settings(project_id, owner)}
 
 
 class SpeakerUpdate(BaseModel):
@@ -779,16 +1224,24 @@ def delete_project(project_id: str, owner: str = Depends(current_owner)) -> None
     """Delete the project and all of its media. This is also how consent is
     withdrawn (design spec §2): nothing of the speaker is kept."""
     _owned(project_id, owner)
+    _delete_project(project_id)
+
+
+def _delete_project(project_id: str) -> None:
     # A clone of the speaker's voice goes with the project (Phase 15a). If the
     # vendor cannot be reached the project is still deleted here; the failure
-    # is logged by name so the clone can be removed by hand.
-    left = clones.purge(project_id)
+    # is logged by name so the clone can be removed by hand. A voice someone
+    # kept as their own stays (Volt): it is theirs now, not the project's.
+    kept = _kept_voice_ids()
+    left = clones.purge(project_id, keep=kept)
     if left:
         logging.getLogger("ave").warning(
             "project %s deleted, but these voice clone(s) are still at ElevenLabs: %s", project_id, ", ".join(left))
     # Voices Voltage made for the clip (designed, or added from the library;
     # 20b) go with it too, so slots come back.
     for made in repo.settings(project_id).get("made_voices") or []:
+        if made["voice_id"] in kept:
+            continue
         try:
             getattr(voice, "delete_voice", lambda v: None)(made["voice_id"])
         except Exception as exc:  # noqa: BLE001
@@ -796,6 +1249,26 @@ def delete_project(project_id: str, owner: str = Depends(current_owner)) -> None
                                              project_id, made.get("name"), made["voice_id"], exc)
     repo.delete(project_id)
     shutil.rmtree(artifacts.root / project_id, ignore_errors=True)
+
+
+@app.delete("/account", status_code=204)
+def delete_account(owner: str = Depends(current_owner)) -> Response:
+    """Everything of the caller's goes: every project with its media and the
+    voices made for it, every voice of their own (deleted at the vendor; a
+    failure is logged by name), their samples and their defaults."""
+    for r in repo.list(owner):
+        _delete_project(r.source.project_id)
+    for v in _my_voices(owner):
+        try:
+            getattr(voice, "delete_voice", lambda vid: None)(v["voice_id"])
+        except Exception as exc:  # noqa: BLE001
+            logging.getLogger("ave").warning("account %s deleted, but voice %s (%s) is still at ElevenLabs: %s",
+                                             owner, v.get("name"), v["voice_id"], exc)
+    for key in ("my_voices", "prefs", "designs"):
+        repo.delete_meta(f"{key}:{owner}")
+    repo.delete(_user_store(owner))   # the designs' spend, kept under the owner's own id
+    shutil.rmtree(artifacts.root / _user_store(owner), ignore_errors=True)
+    return Response(status_code=204)
 
 
 @app.post("/projects/{project_id}/variants")
@@ -814,7 +1287,9 @@ def create_variant(project_id: str, owner: str = Depends(current_owner)) -> dict
     repo.create(source, record.transcript, record.consent, owner=owner)
     for s in repo.speakers(project_id):
         repo.set_speaker(new_id, s.label, name=s.name, voice_id=s.voice_id)
-    saved = {k: v for k, v in repo.settings(project_id).items() if k != "reading"} | {"variant_of": project_id}
+    # The original's settings carry over (its render does not: the variant has
+    # not been rendered); the owner's defaults fill whatever it never set.
+    saved = _starting_settings(owner) | {k: v for k, v in repo.settings(project_id).items() if k not in ("reading", "render")} | {"variant_of": project_id}
     if "reading" in repo.settings(project_id):
         saved["reading"] = repo.settings(project_id)["reading"]
     repo.set_settings(new_id, **saved)
@@ -980,6 +1455,8 @@ def approve_edit(
         "candidate_id": candidate.candidate_id,
         "overridden": overridden,
         "continuity": _continuity_dict(candidate.continuity),
+        "speaker": _speakers_by_take(project_id).get(candidate.candidate_id),
+        "voice_profile_id": _voice_of(candidate.plan),
     }
 
 
@@ -1149,6 +1626,13 @@ def _export(record: ProjectRecord, proposals: bool = False) -> dict:
             project_id, path, kind="video", container="mp4",
             duration=ffmpeg.duration_of(path),
         )
+    if not proposals:
+        # The latest finished render, for the Export page's receipt; a preview
+        # with proposals in it is not the video the user takes away.
+        repo.set_settings(project_id, render={
+            "sha256": rendered.sha256, "duration": rendered.duration,
+            "filename": f"{Path(record.source.filename).stem}-voltage.mp4", "at": _now(),
+        })
     held_at = {p.start: p.out for p in pieces if p.kind == "hold"}
     return {
         "render": _artifact_dict(rendered),
@@ -1167,6 +1651,60 @@ def _export(record: ProjectRecord, proposals: bool = False) -> dict:
              "held": round(held_at.get(round(min(max(i.at, 0.0), record.source.duration) * ffmpeg.frame_rate(record.source.media.path)) / ffmpeg.frame_rate(record.source.media.path), 0.0), 3)}
             for i in manifest.inserts
         ],
+    }
+
+
+# ── Volt: the Export page's receipt ──────────────────────────────────────────
+
+def _voice_words(project_id: str, owner: str, voice_id: str | None) -> str | None:
+    """Whose voice a take is in, as the user knows it: "Sarah's voice",
+    "Priya's own voice". None for a voice no one can name (a moved line
+    keeps the original speech)."""
+    if not voice_id or voice_id in ("original", "none"):
+        return None
+    for v in [*_catalogue(), *_my_voices(owner), *(repo.settings(project_id).get("made_voices") or [])]:
+        if v["voice_id"] == voice_id:
+            return f"{v['name']}'s voice"
+    names = {s.label: s.name for s in repo.speakers(project_id)}
+    for key, clone in repo.clones(project_id).items():
+        if clone == voice_id:
+            return "the speaker's own voice" if key == ProjectRepository.WHOLE_CLIP else f"{names.get(key, 'Speaker ' + key)}'s own voice"
+    return None
+
+
+def _change_dict(project_id: str, owner: str, e: ApprovedEdit) -> dict:
+    mix = e.plan.mix
+    kind = "changed" if mix == "replace" else "removed" if mix == "remove" else "added"
+    whose = _voice_words(project_id, owner, e.plan.voice_profile_id) if mix != "remove" else None
+    if mix == "remove":
+        note = "room tone in its place"
+    elif mix == "replace":
+        note = f"in {whose}" if whose else "said again"
+    elif mix == "concatenate":
+        note = f"{whose}, the picture makes room" if whose else "the picture makes room"
+    else:
+        note = f"{whose}, over the picture" if whose else "over the picture"
+    return {"edit_id": e.edit_id, "start": e.plan.selection.start, "text": e.plan.new_text, "kind": kind, "note": note}
+
+
+@app.get("/projects/{project_id}/receipt")
+def get_receipt(project_id: str, owner: str = Depends(current_owner)) -> dict:
+    """What the project took: the turns, the takes voiced, the money, each
+    change in the video in time order, what is still a draft, and the latest
+    render if there is one."""
+    _owned(project_id, owner)
+    live = sorted((e for e in repo.list_edits(project_id) if not e.reverted), key=lambda e: (e.plan.selection.start, e.edit_id))
+    plan = repo.latest_plan(project_id)
+    # A take is audio Voltage voiced: a removal is room tone, a shifted line is
+    # the original speech, and a moved or releveled take is the same audio again.
+    takes = {c.audio.sha256 for c in repo.candidates(project_id) if c.plan.mix != "remove" and c.plan.voice_profile_id != "original"}
+    return {
+        "turns": repo.count_steps(project_id, "Thinking"),
+        "takes": len(takes),
+        "spent_usd": round(ledger.spent_usd(project_id), 4),
+        "changes": [_change_dict(project_id, owner, e) for e in live],
+        "drafts": sum(1 for i in (plan.items if plan else ()) if i.kind == "planned" and i.status == "ready"),
+        "render": repo.settings(project_id).get("render"),
     }
 
 
@@ -1315,7 +1853,8 @@ def _ship(project_id: str, record: ProjectRecord, plan_id: str, item_ids: list[s
             skipped.append({"item_id": item.item_id, "reason": "continuity check failed"})
             continue
         edit_id = _approve_candidate(project_id, candidate, overridden)
-        approved.append({"item_id": item.item_id, "edit_id": edit_id, "overridden": overridden})
+        approved.append({"item_id": item.item_id, "edit_id": edit_id, "overridden": overridden,
+                         "speaker": item.speaker, "voice_profile_id": _voice_of(candidate.plan)})
     if approved:
         repo.append_log(project_id, plan_id,
                         f"Approved {len(approved)} {'change' if len(approved) == 1 else 'changes'}")
@@ -1737,7 +2276,7 @@ def take_turn(project_id: str, req: TurnRequest, owner: str = Depends(current_ow
         raise HTTPException(status_code=422, detail="Say what you want.")
     if any(j.kind == "turn" and j.project_id == project_id and not j.done for j in jobs.all()):
         raise HTTPException(status_code=409, detail="Voltage is still on the last thing you said.")
-    prefs = _settings(project_id)
+    prefs = _settings(project_id, owner)
     autonomy = prefs["autonomy"]
     plan = _turn_plan(project_id, text)
     # A yes to a gate question (a paid or committing step that waited): a go word, or its first option.
@@ -1762,7 +2301,7 @@ def take_turn(project_id: str, req: TurnRequest, owner: str = Depends(current_ow
         budget_ = TurnBudget(usd=prefs["turn_usd"])
         turn = AgentTurn(project_id=project_id, record=record, plan_id=plan.plan_id, autonomy=autonomy,
                          spend_approved=approve or autonomy == "draft", budget=budget_, started_at=started_at,
-                         report=report, commit_approved=approve)
+                         report=report, commit_approved=approve, ask_before=prefs["ask_before"])
         lines = _lines(record)
         names = [s.name for s in repo.speakers(project_id)]
         from app.agent.context import opening
@@ -1775,8 +2314,10 @@ def take_turn(project_id: str, req: TurnRequest, owner: str = Depends(current_ow
                    + (" (They are answering yes to what you asked.)" if approve else "")}]
         history = repo.turns(project_id)
 
-        def on_step(step: str, cost: float) -> None:
-            repo.add_message(project_id, "assistant", step, kind="step", cost=cost or None)
+        def on_step(step: str, cost: float, tool: str = "") -> None:
+            # The trace shows which tool a step was and when in the turn it landed.
+            repo.add_message(project_id, "assistant", step, kind="step", cost=cost or None,
+                             data={"tool": tool, "t": round(budget_.elapsed(), 1)})
             repo.append_log(project_id, plan.plan_id, step, f"${cost:.2f}" if cost else "")
             report(min(0.95, 0.05 + 0.9 * turn.budget.calls_made / turn.budget.calls), step)
 
@@ -1803,8 +2344,12 @@ def take_turn(project_id: str, req: TurnRequest, owner: str = Depends(current_ow
         # the tools say what they spent; this is the rest of the turn's money.
         thought = ledger.spent_usd_since(project_id, started_at, vendor="anthropic")
         if thought > 0:
-            repo.add_message(project_id, "assistant", "Thinking", kind="step", cost=round(thought, 4))
+            repo.add_message(project_id, "assistant", "Thinking", kind="step", cost=round(thought, 4),
+                             data={"tool": "thinking", "t": round(budget_.elapsed(), 1)})
         if question:
+            # The gate card shows the step's price beside what the turn has left.
+            left = prefs["turn_usd"] - ledger.spent_usd_since(project_id, started_at)
+            question = {**question, "left_usd": round(max(0.0, left), 2)}
             repo.add_message(project_id, "assistant", question["text"])
             repo.append_log(project_id, plan.plan_id, f"Asked: {question['text']}")
         updated = repo.get_plan(project_id, plan.plan_id)

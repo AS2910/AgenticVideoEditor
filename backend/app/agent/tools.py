@@ -83,6 +83,15 @@ class Turn:
     progress: float = 0.0
     commit_approved: bool = False
     takes: list[str] = field(default_factory=list)
+    # The steps the user chose to be asked about even under Just do it
+    # (Settings): shipping, cloning a speaker, designing a voice.
+    ask_before: dict = field(default_factory=lambda: {"ship": False, "clone": False, "design": False})
+
+    def asks_before(self, what: str) -> bool:
+        """Whether this committing step waits for the user: always under
+        Check with me, and under Just do it when they asked for it in
+        Settings; never once they have said yes this turn."""
+        return not self.commit_approved and (self.autonomy == "ask" or bool(self.ask_before.get(what)))
 
 
 @dataclass(frozen=True)
@@ -350,9 +359,9 @@ def _made_voices(wb: Workbench, turn: Turn) -> list[dict]:
     return list(wb.repo.settings(turn.project_id).get("made_voices") or [])
 
 
-def _remember_voice(wb: Workbench, turn: Turn, voice_id: str, name: str, kind: str) -> None:
+def _remember_voice(wb: Workbench, turn: Turn, voice_id: str, name: str, kind: str, description: str | None = None) -> None:
     made = [m for m in _made_voices(wb, turn) if m["voice_id"] != voice_id]
-    made.append({"voice_id": voice_id, "name": name, "kind": kind, "at": wb.now()})
+    made.append({"voice_id": voice_id, "name": name, "kind": kind, "at": wb.now(), "description": description})
     wb.repo.set_settings(turn.project_id, made_voices=made)
 
 
@@ -429,7 +438,7 @@ def _synthesize_take(wb: Workbench, turn: Turn, args: dict) -> ToolResult:
     else:
         whose = f"{_voice_name(wb, voice_id, turn)}'s voice"
     if turn.autonomy == "ask" and not turn.spend_approved:
-        raise WaitingForUser(f"Voice “{text}” in {whose}, about ${usd:.2f}?")
+        raise WaitingForUser(f"Voice “{text}” in {whose}, about ${usd:.2f}?", cost_usd=usd)
     wb.ensure_spend(turn.project_id)
     voice_notes: tuple[str, ...] = ()
     if own:
@@ -547,8 +556,10 @@ def _design_voice(wb: Workbench, turn: Turn, args: dict) -> ToolResult:
     refusal = turn.budget.refuses(spent, usd)
     if refusal:
         return ToolResult(refusal)
-    if turn.autonomy == "ask" and not turn.spend_approved:
-        raise WaitingForUser(f"Design a voice from “{description}” — three previews to hear, about ${usd:.2f}?")
+    # A paid step: waits under Check with me like a take, and under Just do it
+    # when the user asked to be asked before a voice is designed.
+    if (turn.autonomy == "ask" and not turn.spend_approved) or (turn.ask_before.get("design") and not turn.commit_approved):
+        raise WaitingForUser(f"Design a voice from “{description}” — three previews to hear, about ${usd:.2f}?", cost_usd=usd)
     wb.ensure_spend(turn.project_id)
     turn.report(turn.progress, "Designing a voice")
     before = wb.ledger.spent_usd(turn.project_id)
@@ -563,7 +574,8 @@ def _design_voice(wb: Workbench, turn: Turn, args: dict) -> ToolResult:
     designs = dict(wb.repo.settings(turn.project_id).get("designs") or {})
     rows = []
     for n, pv in enumerate(previews, 1):
-        art = wb.put_audio(turn.project_id, pv["audio"], "mp3", float(pv.get("duration") or 0.0))
+        container = "wav" if "wav" in (pv.get("media_type") or "") else "mp3"
+        art = wb.put_audio(turn.project_id, pv["audio"], container, float(pv.get("duration") or 0.0))
         designs[pv["generated_voice_id"]] = {"description": description, "sha256": art.sha256,
                                              "duration": float(pv.get("duration") or 0.0), "n": n, "at": wb.now()}
         rows.append({"n": n, "generated_voice_id": pv["generated_voice_id"], "sha256": art.sha256,
@@ -596,7 +608,7 @@ def _save_voice(wb: Workbench, turn: Turn, args: dict) -> ToolResult:
     except Exception as exc:  # noqa: BLE001
         reason = str(exc) or type(exc).__name__
         return ToolResult(f"The voice could not be saved: {reason}", step=f"Could not keep the voice — {reason[:80]}")
-    _remember_voice(wb, turn, voice_id, name, "designed")
+    _remember_voice(wb, turn, voice_id, name, "designed", description=designs[gid]["description"])
     n = designs[gid].get("n")
     return ToolResult(f"Saved preview {n} as “{name}” ({voice_id}); it is in the catalogue now and can speak a line.{_slots_line(wb)}",
                       step=f"Kept preview {n} as “{name}”")
@@ -666,7 +678,7 @@ def _clone_speaker(wb: Workbench, turn: Turn, args: dict) -> ToolResult:
     if spk.clone_voice_id and not spk.voice_id:
         return ToolResult(f"{spk.name}'s own voice is already made ({spk.clone_voice_id}); a replacement in their line uses it when voice_id is empty.")
     picked = f" {_voice_name(wb, spk.voice_id)} was picked for them by hand; their own voice replaces it." if spk.voice_id else ""
-    if turn.autonomy == "ask" and not turn.commit_approved:
+    if turn.asks_before("clone"):
         raise WaitingForUser(f"Clone {spk.name}'s voice from their own speech in this clip? It stays with this project and goes when the project does.{picked}",
                              ("Clone it", "Not yet"), "Clone it")
     turn.report(turn.progress, f"Cloning {spk.name}'s voice")
@@ -798,7 +810,7 @@ def _ship(wb: Workbench, turn: Turn, args: dict) -> ToolResult:
         return ToolResult("Nothing is ready to ship: no voiced line that is not already shipped.")
     n = len(ready)
     anyway = bool(args.get("anyway"))
-    if turn.autonomy == "ask" and not turn.commit_approved:
+    if turn.asks_before("ship"):
         raise WaitingForUser(f"Ship {n} {'change' if n == 1 else 'changes'} and render the video?"
                              + (" One did not pass its check." if anyway else ""), ("Ship it", "Not yet"), "Ship it")
     result = wb.ship(turn.project_id, turn.record, turn.plan_id, [i.item_id for i in ready], override=anyway)

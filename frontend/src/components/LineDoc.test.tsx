@@ -45,17 +45,18 @@ const doc = (props: Partial<Parameters<typeof LineDoc>[0]> = {}) => {
 const KEY = keyOf({ start: 7.54, end: 9.02 })
 
 describe('LineDoc: the line is the unit', () => {
-  it('lists lines with their times and shows the speaker once per change', () => {
+  it('lists lines with their times and who says each (Volt)', () => {
     doc({ currentTime: 8 })
     expect(screen.getByText('0:07')).toBeInTheDocument()
     expect(screen.getByText('Start a live Bajicam session.').closest('[data-current]')).toHaveAttribute('data-current', 'true')
-    expect(screen.getAllByRole('img', { name: 'the Customer' })).toHaveLength(1)
+    expect(screen.getAllByText('the Customer').length).toBeGreaterThan(0)
+    expect(screen.queryByRole('img')).not.toBeInTheDocument()
   })
 
   it('offers the same verbs on a line as shot: Hear it, Edit it, Discard (20e)', async () => {
     const h = doc()
     const actions = screen.getByRole('group', { name: 'Actions for 0:07' })
-    expect(within(actions).getAllByRole('button').map((b) => b.textContent)).toEqual(
+    expect(within(actions).getAllByRole('button').map((b) => b.getAttribute('aria-label') ?? b.textContent?.replace(/[␣K]$/, ''))).toEqual(
       ['Hear it', 'Edit it', 'Discard', 'Add a line after'])
     await userEvent.click(within(actions).getByRole('button', { name: 'Discard' }))
     expect(h.onRemove).toHaveBeenCalledWith(STATEMENTS[1])   // a removal is proposed, not done
@@ -69,7 +70,7 @@ describe('LineDoc: the line is the unit', () => {
     const onAddAll = vi.fn()
     const h = doc({ items: [item(), second], onAddAll })
     const verbs = screen.getByRole('group', { name: 'Proposal at 0:07' })
-    expect(within(verbs).getAllByRole('button').map((b) => b.textContent)).toEqual(['Hear it', 'Add it', 'Edit it', 'Discard'])
+    expect(within(verbs).getAllByRole('button').map((b) => b.getAttribute('aria-label') ?? b.textContent?.replace(/[␣K]$/, ''))).toEqual(['Hear it', 'Add it', 'Edit it', 'Discard'])
     expect(screen.getAllByText('Proposed')).toHaveLength(2)
     expect(screen.getByText(/one transcript|2 lines are proposed/i)).toHaveTextContent('2 lines are proposed')
     await userEvent.click(within(verbs).getByRole('button', { name: 'Hear it' }))
@@ -79,6 +80,8 @@ describe('LineDoc: the line is the unit', () => {
     await userEvent.click(within(verbs).getByRole('button', { name: 'Discard' }))
     expect(h.onDiscard).toHaveBeenCalledWith(expect.objectContaining({ item_id: 'i1' }))
     await userEvent.click(within(verbs).getByRole('button', { name: 'Edit it' }))
+    expect(screen.getByTestId('depth')).toBeInTheDocument()   // Volt: the proposal opens in place
+    await userEvent.click(screen.getByRole('button', { name: 'Change the words' }))
     expect(screen.getByRole('textbox', { name: /new wording/i })).toHaveValue('Start a live Bhaji Cam session.')
     await userEvent.keyboard('{Escape}')
     await userEvent.click(screen.getByRole('button', { name: 'Add all 2' }))
@@ -99,7 +102,7 @@ describe('LineDoc: the line is the unit', () => {
     expect(screen.getByText('Start a live Bajicam session.').tagName).toBe('DEL')
     expect(screen.getByText(/Proposed: these words go/)).toBeInTheDocument()
     const verbs = screen.getByRole('group', { name: 'Proposal at 0:07' })
-    expect(within(verbs).getAllByRole('button').map((b) => b.textContent)).toEqual(['Hear it', 'Remove it', 'Discard'])
+    expect(within(verbs).getAllByRole('button').map((b) => b.getAttribute('aria-label') ?? b.textContent?.replace(/[␣K]$/, ''))).toEqual(['Hear it', 'Remove it', 'Discard'])
     await userEvent.click(within(verbs).getByRole('button', { name: 'Remove it' }))
     expect(h.onAdd).toHaveBeenCalledWith(expect.objectContaining({ item_id: 'r' }))
   })
@@ -175,7 +178,7 @@ describe('LineDoc: the line is the unit', () => {
 
   it('can hold the picture instead', async () => {
     const h = doc()
-    await userEvent.click(screen.getByRole('button', { name: /add a line here/i }))
+    await userEvent.click(screen.getByRole('button', { name: /^\+ add a line$/i }))
     await userEvent.click(screen.getByRole('button', { name: 'Hold the picture' }))
     await userEvent.type(screen.getByRole('textbox', { name: /words for the new line/i }), 'Bye!{Enter}')
     expect(h.onHear).toHaveBeenCalledWith(addKeyOf(STATEMENTS[2]), expect.objectContaining({ mix: 'concatenate' }))
@@ -204,7 +207,7 @@ describe('LineDoc: the line is the unit', () => {
     })
     expect(screen.getByTestId('line-working')).toHaveTextContent('Trying again')
     expect(screen.getByText('Voicing…')).toBeInTheDocument()
-    expect(screen.getByText('Needs you')).toBeInTheDocument()
+    expect(screen.getByText('Waiting on you')).toBeInTheDocument()
     expect(screen.getByText("Couldn't voice it")).toBeInTheDocument()
     // What a line needs is said to Voltage in the box; the row has no answers or retries of its own.
     expect(screen.queryByTestId('line-needs-you')).toBeNull()
@@ -218,11 +221,11 @@ describe('LineDoc: the line is the unit', () => {
     ] })
     const kept = screen.getByTestId('revision')
     expect(within(kept).getByText('Bhaji Cam').tagName).toBe('INS')
-    expect(screen.getByText('Added')).toBeInTheDocument()
+    expect(screen.getByText('✓ In the video')).toBeInTheDocument()
     expect(screen.getByText('Removed')).toBeInTheDocument()
     expect(screen.getByText('Sure, sir.').tagName).toBe('DEL')
     const added = screen.getByRole('group', { name: 'Added line at 0:07' })
-    expect(within(added).getAllByRole('button').map((b) => b.textContent)).toEqual(['Hear it', 'Take it out', 'Edit it'])
+    expect(within(added).getAllByRole('button').map((b) => b.getAttribute('aria-label') ?? b.textContent?.replace(/[␣K]$/, ''))).toEqual(['Hear it', 'Take it out', 'Edit it'])
     await userEvent.click(within(added).getByRole('button', { name: 'Take it out' }))
     expect(h.onUndo).toHaveBeenCalledWith('e1')
     await userEvent.click(screen.getByRole('button', { name: 'Put it back' }))
@@ -256,6 +259,7 @@ describe('LineDoc: editing starts from where the line stands', () => {
     const tried = item({ new_text: 'Start a Bhaji Cam session now.', delivery: 'warmer', candidate: take({ plan: { ...take().plan, voice_profile_id: 'EXAVITQu4vr4xnSDxMaL' } }) })
     doc({ items: [tried] })
     await userEvent.click(within(screen.getByRole('group', { name: 'Proposal at 0:07' })).getByRole('button', { name: 'Edit it' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Change the words' }))
     expect(screen.getByRole('textbox', { name: /new wording/i })).toHaveValue('Start a Bhaji Cam session now.')
     expect(screen.getByRole('combobox', { name: 'Voice' })).toHaveValue('EXAVITQu4vr4xnSDxMaL')
     expect(screen.getByRole('button', { name: 'Warmer' })).toHaveAttribute('aria-pressed', 'true')
@@ -300,7 +304,7 @@ describe('LineDoc: editing starts from where the line stands', () => {
     expect(rows[0]).toHaveTextContent('with 3 other lines at this moment')   // the other layer, the proposal, and the spoken line it runs under
     expect(rows[1]).toHaveTextContent('Woohoo!')
     expect(rows[2]).toHaveTextContent('Yeahhh!')
-    expect(screen.getAllByText('Added')).toHaveLength(2)
+    expect(screen.getAllByText('✓ In the video')).toHaveLength(2)
     expect(screen.getByText('Proposed')).toBeInTheDocument()
     // The spoken lines keep their own words: a layer over them is not a change to them.
     expect(screen.getByText('Hi, I want to buy groceries.')).toBeInTheDocument()
@@ -316,6 +320,7 @@ describe('LineDoc: editing starts from where the line stands', () => {
     expect(h.onHear).toHaveBeenCalledWith(keyOf({ start: 0.4, end: 6.9 }), expect.objectContaining({ text: 'Golden sands.', mix: 'layer', editId: 'e1', before: 'Golden sands, endless sunsets.' }))
     // Edit it on the proposal voices that item again.
     await userEvent.click(within(screen.getByRole('group', { name: 'Proposal at 0:00' })).getByRole('button', { name: 'Edit it' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Change the words' }))
     await userEvent.type(screen.getByRole('textbox', { name: /new wording/i }), ' Woo!{Enter}')
     expect(h.onHear).toHaveBeenLastCalledWith(keyOf({ start: 0.4, end: 1.9 }), expect.objectContaining({ text: 'Yeahhh! Woo!', mix: 'layer', itemId: 'i3' }))   // the row spans the take's own length
   })
@@ -359,7 +364,7 @@ describe('LineDoc: a take can go anywhere on the timeline', () => {
 
   it('lets an added line start at a chosen time', async () => {
     const h = doc()
-    await userEvent.click(screen.getByRole('button', { name: /add a line here/i }))
+    await userEvent.click(screen.getByRole('button', { name: /^\+ add a line$/i }))
     await userEvent.type(screen.getByRole('textbox', { name: 'Starts at' }), '0:03.50')
     await userEvent.type(screen.getByRole('textbox', { name: /words for the new line/i }), 'Welcome to Goa.{Enter}')
     expect(h.onHear).toHaveBeenCalledWith(addKeyOf(STATEMENTS[2]), expect.objectContaining({ text: 'Welcome to Goa.', mix: 'over', at: 3.5 }))
@@ -458,7 +463,7 @@ describe('LineDoc: shifting a line of the original speech (UX-1c)', () => {
     expect(screen.getAllByRole('button', { name: 'Undo' })).toHaveLength(1)
     expect(screen.getByRole('button', { name: /move the line at 0:12/i })).toBeInTheDocument()
     // The line it landed on is left alone.
-    expect(screen.queryByText('Added')).not.toBeInTheDocument()
+    expect(screen.queryByText('✓ In the video')).not.toBeInTheDocument()
   })
 
   it('drags a row down the transcript: the drop shows the time, and the line lands where the row above ends', async () => {

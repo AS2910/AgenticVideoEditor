@@ -28,13 +28,16 @@ class WaitingForUser(Exception):
     the user's answer is the next turn, and the agent carries on from there."""
 
     def __init__(self, question: str, options: tuple[str, ...] = ("Go ahead", "Not yet"),
-                 guess: str | None = "Go ahead", *, gate: bool = True) -> None:
+                 guess: str | None = "Go ahead", *, gate: bool = True, cost_usd: float | None = None) -> None:
         super().__init__(question)
         self.question = question
         self.options = options
         self.guess = guess if guess in options else options[0]
         # A gate question (a paid or committing step waits); its first option is the yes.
         self.gate = gate
+        # What the waiting step would spend, so the card can show it beside
+        # what the turn has left; None when the step is free.
+        self.cost_usd = cost_usd
 
 
 class TurnStopped(Exception):

@@ -861,6 +861,8 @@ def test_settings_say_what_voltage_may_do_and_round_trip(client, project):
     assert project["settings"] == {
         "autonomy": "ask", "turn_usd": main.settings.agent_turn_usd, "effort": main.settings.agent_effort,
         "ceiling_usd": main.ledger.ceiling_usd,
+        # Volt: which steps still ask under Just do it, and the model (read-only).
+        "ask_before": {"ship": False, "clone": False, "design": False}, "model": main.settings.agent_model,
     }
 
     resp = client.put("/projects/p1/settings", json={"turn_usd": 0.2, "effort": "xhigh"})
@@ -958,7 +960,8 @@ def test_a_turn_voices_the_line_then_approve_all_exports(client, project, monkey
     resp = client.post(f"/projects/p1/plans/{plan_id}/approve", json={})
     body = resp.json()
     assert resp.status_code == 200
-    assert body["approved"] == [{"item_id": "i1", "edit_id": "e1", "overridden": False}] and body["skipped"] == []
+    assert body["approved"] == [{"item_id": "i1", "edit_id": "e1", "overridden": False, "speaker": None, "voice_profile_id": "mock"}]
+    assert body["skipped"] == []
     assert [s["kind"] for s in body["export"]["segments"]] == ["edited"]
     assert body["plan"]["items"][0]["status"] == "approved" and body["plan"]["items"][0]["edit_id"] == "e1"
     assert body["plan"]["log"][-1]["text"] == "Rendered the edited video"
@@ -977,7 +980,7 @@ def test_a_failing_take_is_skipped_by_approve_all_unless_overridden(client, proj
     assert body["export"] is None
 
     body = client.post(f"/projects/p1/plans/{plan_id}/approve", json={"override": True}).json()
-    assert body["approved"] == [{"item_id": "i1", "edit_id": "e1", "overridden": True}]
+    assert body["approved"] == [{"item_id": "i1", "edit_id": "e1", "overridden": True, "speaker": "A", "voice_profile_id": "unknown"}]
 
 
 def test_approving_a_plan_items_take_through_the_edit_route_marks_the_item(client, project, monkeypatch):
@@ -1846,3 +1849,326 @@ def test_a_turn_ends_with_what_voltages_own_thinking_cost_as_a_step(client, proj
     usage = client.get("/projects/p1/usage").json()
     claude = sum(u["usd"] for u in usage["lines"] if u["vendor"] == "anthropic")
     assert last["cost"] == pytest.approx(claude, abs=1e-4)
+
+
+# ── Volt: the user's defaults, and still asking under Just do it ──────────────
+
+def test_my_defaults_round_trip_and_a_new_project_starts_from_them(client, sample_video):
+    import app.api.main as main
+    assert client.get("/me/settings").json() == {
+        "autonomy": "ask", "turn_usd": main.settings.agent_turn_usd, "effort": main.settings.agent_effort,
+        "ask_before": {"ship": False, "clone": False, "design": False}}
+    resp = client.put("/me/settings", json={"autonomy": "draft", "ask_before": {"ship": True}})
+    assert resp.status_code == 200
+    assert resp.json()["autonomy"] == "draft" and resp.json()["ask_before"] == {"ship": True, "clone": False, "design": False}
+    assert client.put("/me/settings", json={"turn_usd": 1e9}).json()["turn_usd"] == round(main.ledger.ceiling_usd, 2)
+    assert client.put("/me/settings", json={"effort": "low"}).status_code == 422
+    # A project made now starts from them; a later change to the defaults leaves it alone.
+    made = upload(client, sample_video).json()
+    assert made["settings"]["autonomy"] == "draft" and made["settings"]["ask_before"]["ship"] is True
+    assert made["settings"]["model"] == main.settings.agent_model
+    client.put("/me/settings", json={"autonomy": "ask"})
+    assert client.get("/projects/p1/settings").json()["settings"]["autonomy"] == "draft"
+    # A variant keeps the original's settings; the defaults fill only what it never set.
+    client.put("/projects/p1/settings", json={"effort": "xhigh"})
+    variant = client.post("/projects/p1/variants").json()
+    assert (variant["settings"]["effort"], variant["settings"]["autonomy"], variant["settings"]["ask_before"]["ship"]) == ("xhigh", "draft", True)
+
+
+def test_project_settings_carry_ask_before_and_the_model(client, project):
+    import app.api.main as main
+    assert project["settings"]["ask_before"] == {"ship": False, "clone": False, "design": False}
+    assert project["settings"]["model"] == main.settings.agent_model
+    resp = client.put("/projects/p1/settings", json={"ask_before": {"design": True, "other": True}})
+    assert resp.json()["settings"]["ask_before"] == {"ship": False, "clone": False, "design": True}
+    assert client.get("/projects/p1/settings").json()["settings"]["ask_before"]["design"] is True
+    assert client.put("/projects/p1/settings", json={"ask_before": {"ship": "maybe"}}).status_code == 422
+    assert client.get("/projects/p9/settings").status_code == 404
+
+
+def test_under_just_do_it_a_step_the_user_chose_to_be_asked_about_waits_for_their_yes(client, project, monkeypatch):
+    """Volt: Settings can keep a yes on shipping even under Just do it; the
+    gate question says what the step costs and what the turn has left."""
+    import app.api.main as main
+    from tests.agent.conftest import reply, text as said, use
+    client.put("/projects/p1/settings", json={"autonomy": "draft", "ask_before": {"ship": True}})
+    _agent_on(monkeypatch, main, [
+        reply(take("c"), stop="tool_use"),
+        reply(use("ship", "d", item_ids=[], anyway=False), stop="tool_use"),
+        reply(use("ship", "e", item_ids=[], anyway=False), stop="tool_use"),
+        reply(said("Shipped.")),
+    ])
+    result = send(client, "make it 30% off and ship it")
+    question = result["question"]
+    assert question["text"] == "Ship 1 change and render the video?" and question["gate"] is True
+    assert question["cost_usd"] is None
+    spent = client.get("/projects/p1/usage").json()["spent_usd"]
+    assert question["left_usd"] == round(main.settings.agent_turn_usd - spent, 2)
+    assert result["plan"]["status"] == "clarifying" and result["plan"]["question"]["left_usd"] == question["left_usd"]
+    assert client.get("/projects/p1").json()["edits"] == []
+    result = send(client, "go")
+    assert result["reply"] == "Shipped." and [e["edit_id"] for e in client.get("/projects/p1").json()["edits"]] == ["e1"]
+
+
+def test_a_paid_gate_question_carries_the_steps_price(client, project, monkeypatch):
+    import app.api.main as main
+    _agent_on(monkeypatch, main, [reply_take_under_ask()])
+    client.put("/projects/p1/settings", json={"autonomy": "ask"})
+    result = send(client, "make it 30% off")
+    assert result["question"]["cost_usd"] == 0.0 and 0 < result["question"]["left_usd"] <= main.settings.agent_turn_usd
+
+
+def reply_take_under_ask():
+    from tests.agent.conftest import reply
+    return reply(take("c"), stop="tool_use")
+
+
+def test_steps_carry_their_tool_and_time_in_the_turn(client, project, monkeypatch):
+    """Volt: the trace shows which tool each step was and when it landed."""
+    voiced(client, monkeypatch)
+    steps = [m for m in client.get("/projects/p1/messages").json() if m["kind"] == "step"]
+    assert [s["data"]["tool"] for s in steps] == ["synthesize_take", "thinking"]
+    assert all(isinstance(s["data"]["t"], float) and s["data"]["t"] >= 0 for s in steps)
+    assert steps[0]["data"]["t"] <= steps[1]["data"]["t"]
+
+
+def test_an_edit_says_who_it_is_for_and_whose_voice_says_it(client, project, monkeypatch):
+    """Volt: the rows show "+ New line · Riya" and the stand-in voice from the edit itself."""
+    client.post("/projects/p1/speakers/detect")
+    done = voiced(client, monkeypatch, voice_id="")        # line 1 is A's; the mock cannot clone, so the default speaks
+    plan_id = done["plan"]["plan_id"]
+    shipped = client.post(f"/projects/p1/plans/{plan_id}/approve", json={}).json()
+    assert [(a["speaker"], a["voice_profile_id"]) for a in shipped["approved"]] == [("A", "mock")]
+    [edit] = client.get("/projects/p1").json()["edits"]
+    assert (edit["speaker"], edit["voice_profile_id"]) == ("A", "mock")
+    # A removal has no voice; approving a take by hand says the same.
+    removed = client.post("/projects/p1/lines/remove", json={"start": 1.3, "end": 1.8}).json()
+    by_hand = client.post("/projects/p1/edits", json={"candidate_id": removed["candidate_id"]}).json()
+    assert (by_hand["speaker"], by_hand["voice_profile_id"]) == (None, None)
+    assert [(e["speaker"], e["voice_profile_id"]) for e in client.get("/projects/p1").json()["edits"]] == [("A", "mock"), (None, None)]
+
+
+# ── Volt: usage across projects ──────────────────────────────────────────────
+
+def test_usage_across_projects_counts_turns_takes_and_money_in_the_period(client, project, monkeypatch):
+    import app.api.main as main
+    voiced(client, monkeypatch)
+    main.ledger.record("p1", "elevenlabs", "speech", 40, "characters", 0.012)
+    # A row from long ago is outside the week and the month, inside all time.
+    with main.database.tx() as c:
+        c.execute("INSERT INTO usage (project_id, vendor, what, units, unit, usd, at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                  ("p1", "openai", "transcription", 1.0, "minutes", 0.006, "2000-01-01T00:00:00+00:00"))
+    month = client.get("/usage").json()
+    claude = sum(u["usd"] for u in client.get("/projects/p1/usage").json()["lines"] if u["vendor"] == "anthropic")
+    assert (month["period"], month["turns"], month["takes"], month["voices_made"]) == ("month", 1, 1, 0)
+    assert month["spent_usd"] == pytest.approx(claude + 0.012, abs=1e-4) and month["avg_turn_usd"] == pytest.approx(claude, abs=1e-4)
+    assert (month["ceiling_usd"], month["project_cap_usd"]) == (main.settings.user_budget_usd, main.ledger.ceiling_usd)
+    assert [(v["vendor"], v["label"]) for v in month["by_vendor"]] == [
+        ("anthropic", "Voltage thinking"), ("elevenlabs", "Voices and takes"), ("openai", "Transcription")]
+    assert next(v["usd"] for v in month["by_vendor"] if v["vendor"] == "openai") == 0.0
+    [p1] = month["by_project"]
+    assert (p1["project_id"], p1["filename"], p1["turns"], p1["voice_characters"], p1["cap_usd"]) == ("p1", "ad.mp4", 1, 40, main.ledger.ceiling_usd)
+    assert p1["spent_usd"] == pytest.approx(month["spent_usd"], abs=1e-4)
+    everything = client.get("/usage", params={"period": "all"}).json()
+    assert everything["spent_usd"] == pytest.approx(month["spent_usd"] + 0.006, abs=1e-4)
+    assert client.get("/usage", params={"period": "week"}).json()["turns"] == 1
+    assert client.get("/usage", params={"period": "year"}).status_code == 422
+    # Someone else sees nothing of it.
+    main.app.dependency_overrides[main.current_owner] = lambda: "someone-else"
+    try:
+        assert client.get("/usage").json()["by_project"] == [] and client.get("/usage").json()["spent_usd"] == 0.0
+    finally:
+        main.app.dependency_overrides.clear()
+
+
+# ── Volt: voices ─────────────────────────────────────────────────────────────
+
+def my_voice(client, tmp_path, name="Me"):
+    me = tmp_path / f"{name}.wav"
+    ffmpeg.generate_tone(me, 12.0, 220)
+    with me.open("rb") as f:
+        made = client.post("/voices/mine", data={"name": name, "consent": "true"}, files={"file": (me.name, f, "audio/wav")})
+    assert made.status_code == 201, made.text
+    return made.json()
+
+
+def test_voices_carry_a_preview_a_kind_a_sample_and_the_slots(client, project, tmp_path, monkeypatch):
+    import app.api.main as main
+    body = client.get("/voices").json()
+    assert body["voices"][0]["preview_url"] is None and body["slots"] is None and body["mine"] == []
+    made = my_voice(client, tmp_path)
+    assert (made["kind"], made["description"], made["used_in"]) == ("recorded", None, 0) and len(made["sample_sha"]) == 64
+    [mine] = client.get("/voices").json()["mine"]
+    assert (mine["kind"], mine["sample_sha"], mine["used_in"]) == ("recorded", made["sample_sha"], 0)
+    sample = client.get(f"/voices/sample/{made['sample_sha']}")
+    assert sample.status_code == 200 and sample.headers["content-type"] == "audio/wav"
+    assert client.get(f"/voices/sample/{made['sample_sha']}", headers={"Range": "bytes=0-99"}).status_code == 206
+    assert client.get("/voices/sample/" + "0" * 64).status_code == 404
+    main.app.dependency_overrides[main.current_owner] = lambda: "someone-else"
+    try:
+        assert client.get(f"/voices/sample/{made['sample_sha']}").status_code == 404
+    finally:
+        main.app.dependency_overrides.clear()
+    # A take in the voice counts the project as using it.
+    voiced(client, monkeypatch, voice_id=made["voice_id"])
+    assert client.get("/voices").json()["mine"][0]["used_in"] == 1
+    # The vendor's slots, when it can say.
+    monkeypatch.setattr(main.voice, "slots", lambda: (3, 30), raising=False)
+    assert client.get("/voices").json()["slots"] == [3, 30]
+
+
+def test_a_speaker_with_enough_speech_can_become_one_of_my_voices(client, tmp_path):
+    import app.api.main as main
+    from app.domain.models import Transcript, Word
+    from tests.conftest import _mux
+    video, _ = ffmpeg.generate_solid_video(tmp_path / "v.mp4", 12.0)
+    audio, _ = ffmpeg.generate_silence(tmp_path / "a.wav", 12.0)
+    assert upload(client, _mux(video, audio, tmp_path / "talk.mp4"), name="talk.mp4").status_code == 200
+    words = tuple(Word(f"w{i}", float(i), i + 0.9, speaker="A") for i in range(11)) + (Word("hm", 11.0, 11.9, speaker="B"),)
+    main.repo.update_transcript("p1", Transcript(words=words))
+    client.put("/projects/p1/speakers/A", json={"name": "Presenter"})
+    assert client.get("/voices/speakers").json() == {"speakers": [
+        {"project_id": "p1", "filename": "talk.mp4", "label": "A", "name": "Presenter", "seconds": 10.9}]}
+    ask = {"project_id": "p1", "label": "A", "name": "Presenter", "consent": True}
+    assert client.post("/voices/mine/from-speaker", json={**ask, "consent": False}).status_code == 403
+    assert client.post("/voices/mine/from-speaker", json={**ask, "label": "B"}).status_code == 422
+    assert client.post("/voices/mine/from-speaker", json={**ask, "label": "Z"}).status_code == 404
+    assert client.post("/voices/mine/from-speaker", json={**ask, "project_id": "p9"}).status_code == 404
+    made = client.post("/voices/mine/from-speaker", json=ask)
+    assert made.status_code == 201, made.text
+    body = made.json()
+    assert (body["kind"], body["name"], body["seconds"]) == ("cloned", "Presenter", 10.9) and body["voice_id"].startswith("mock-clone-")
+    assert client.get(f"/voices/sample/{body['sample_sha']}").status_code == 200
+    assert client.post("/voices/mine/from-speaker", json=ask).status_code == 409
+    # The sample is the owner's now: the project can go.
+    client.delete("/projects/p1")
+    assert client.get(f"/voices/sample/{body['sample_sha']}").status_code == 200
+
+
+class Remembering(MockVoiceAdapter):
+    """The mock voice, remembering what it is asked to delete."""
+
+    def __init__(self, store):
+        super().__init__(store)
+        self.deleted: list[str] = []
+
+    def delete_voice(self, voice_id):
+        self.deleted.append(voice_id)
+
+    delete_clone = delete_voice
+
+
+def test_a_voice_made_for_a_clip_can_be_kept_as_mine_and_then_outlives_the_project(client, project, monkeypatch):
+    import app.api.main as main
+    from app.orchestrator.clones import CloneService
+    voice = Remembering(main.artifacts)
+    monkeypatch.setattr(main, "voice", voice)
+    monkeypatch.setattr(main, "clones", CloneService(main.repo, main.artifacts, voice))
+    client.post("/projects/p1/speakers/detect")
+    client.put("/projects/p1/speakers/A", json={"name": "Presenter"})
+    main.repo.set_settings("p1", made_voices=[
+        {"voice_id": "DESIGNED1", "name": "Dusk", "kind": "designed", "description": "an older woman", "at": main._now()},
+        {"voice_id": "LIB1", "name": "Riya", "kind": "library", "at": main._now()}])
+    main.repo.set_clone("p1", "A", "CLONEA")
+    made = client.get("/voices/made").json()["voices"]
+    assert [(v["voice_id"], v["name"], v["kind"], v["kept"]) for v in made] == [
+        ("DESIGNED1", "Dusk", "designed", False), ("LIB1", "Riya", "library", False), ("CLONEA", "Presenter", "cloned", False)]
+    assert made[0]["description"] == "an older woman" and made[0]["seconds"] is None and made[2]["seconds"] == 2.3
+    assert all(v["project_id"] == "p1" and v["filename"] == "ad.mp4" for v in made)
+
+    kept = client.post("/voices/mine/keep", json={"voice_id": "DESIGNED1"})
+    assert kept.status_code == 201, kept.text
+    assert (kept.json()["name"], kept.json()["kind"], kept.json()["description"]) == ("Dusk", "designed", "an older woman")
+    assert client.post("/voices/mine/keep", json={"voice_id": "DESIGNED1"}).status_code == 409
+    assert client.post("/voices/mine/keep", json={"voice_id": "NOPE"}).status_code == 404
+    assert client.post("/voices/mine/keep", json={"voice_id": "CLONEA", "name": "dusk"}).status_code == 409   # a name in use
+    kept = client.post("/voices/mine/keep", json={"voice_id": "CLONEA", "name": "My presenter"}).json()
+    assert (kept["kind"], kept["seconds"]) == ("cloned", 2.3)
+    assert [m["voice_id"] for m in main.repo.settings("p1")["made_voices"]] == ["LIB1"]
+    assert [(v["voice_id"], v["kept"]) for v in client.get("/voices/made").json()["voices"]] == [("LIB1", False), ("CLONEA", True)]
+    assert [v["name"] for v in client.get("/voices").json()["mine"]] == ["Dusk", "My presenter"]
+    # Deleting the project takes the voice it still owns with it; the kept ones stay at the vendor.
+    assert client.delete("/projects/p1").status_code == 204
+    assert voice.deleted == ["LIB1"]
+    assert [v["name"] for v in client.get("/voices").json()["mine"]] == ["Dusk", "My presenter"]
+
+
+def test_a_voice_is_designed_outside_any_project_and_a_preview_kept_as_mine(client, monkeypatch):
+    import app.api.main as main
+    resp = client.post("/voices/design", json={"description": "  an older woman,  unhurried "})
+    assert resp.status_code == 200, resp.text
+    previews = resp.json()["previews"]
+    assert len(previews) == 3 and all(len(p["sha256"]) == 64 and p["duration"] == 1.0 and p["text"] for p in previews)
+    assert previews[0]["generated_voice_id"].startswith("mock-preview-")
+    assert client.get(f"/voices/sample/{previews[1]['sha256']}").status_code == 200
+    keep = {"generated_voice_id": previews[1]["generated_voice_id"], "name": "Dusk", "sha256": previews[1]["sha256"],
+            "description": "", "consent": True}
+    assert client.post("/voices/mine/from-preview", json={**keep, "consent": False}).status_code == 403
+    kept = client.post("/voices/mine/from-preview", json=keep)
+    assert kept.status_code == 201, kept.text
+    body = kept.json()
+    assert (body["kind"], body["name"], body["sample_sha"], body["description"]) == ("designed", "Dusk", previews[1]["sha256"], "an older woman, unhurried")
+    assert body["voice_id"].startswith("mock-designed-")
+    assert [v["name"] for v in client.get("/voices").json()["mine"]] == ["Dusk"]
+    assert client.post("/voices/design", json={"description": "   "}).status_code == 422
+    # The ceiling applies to the owner's own spend too.
+    main.ledger.record("user-local", "elevenlabs", "speech", 1, "characters", main.ledger.ceiling_usd)
+    assert client.post("/voices/design", json={"description": "a man"}).status_code == 402
+    # Without a vendor that designs, the page is told so.
+    monkeypatch.delattr(MockVoiceAdapter, "design_voice")
+    assert client.post("/voices/design", json={"description": "a man"}).status_code == 503
+
+
+def test_deleting_the_account_removes_every_project_voice_and_default(client, project, tmp_path, monkeypatch):
+    import app.api.main as main
+    mine = my_voice(client, tmp_path)
+    client.put("/me/settings", json={"autonomy": "draft"})
+    deleted = []
+    monkeypatch.setattr(main.voice, "delete_voice", deleted.append)
+    assert client.delete("/account").status_code == 204
+    assert client.get("/projects").json()["projects"] == [] and client.get("/projects/p1").status_code == 404
+    assert client.get("/voices").json()["mine"] == [] and deleted == [mine["voice_id"]]
+    assert client.get(f"/voices/sample/{mine['sample_sha']}").status_code == 404
+    assert client.get("/me/settings").json()["autonomy"] == "ask"
+    assert not (main.artifacts.root / "user-local").exists() and not (main.artifacts.root / "p1").exists()
+
+
+# ── Volt: the Export page's receipt ──────────────────────────────────────────
+
+def test_the_receipt_sums_up_the_project_for_the_export_page(client, project, monkeypatch):
+    assert client.get("/projects/p1/receipt").json() == {"turns": 0, "takes": 0, "spent_usd": 0.0, "changes": [], "drafts": 0, "render": None}
+    done = voiced(client, monkeypatch)
+    before = client.get("/projects/p1/receipt").json()
+    assert (before["turns"], before["takes"], before["drafts"], before["render"]) == (1, 1, 1, None)
+    assert before["spent_usd"] == pytest.approx(client.get("/projects/p1/usage").json()["spent_usd"])
+    client.post(f"/projects/p1/plans/{done['plan']['plan_id']}/approve", json={})
+    receipt = client.get("/projects/p1/receipt").json()
+    assert (receipt["turns"], receipt["takes"], receipt["drafts"]) == (1, 1, 0)
+    assert receipt["changes"] == [{"edit_id": "e1", "start": 0.0, "text": "Get 30% off today only.", "kind": "changed", "note": "in Test tone's voice"}]
+    render = receipt["render"]
+    assert render["filename"] == "ad-voltage.mp4" and len(render["sha256"]) == 64 and render["duration"] > 0 and render["at"]
+    assert client.get(f"/projects/p1/artifacts/{render['sha256']}").status_code == 200
+    # A removal is a draft until it ships, and never a take; a preview render is not the render.
+    removed = client.post("/projects/p1/lines/remove", json={"start": 1.3, "end": 1.8}).json()
+    client.post("/projects/p1/export", json={"with_proposals": True})
+    again = client.get("/projects/p1/receipt").json()
+    assert (again["takes"], again["drafts"], again["render"]["sha256"]) == (1, 1, render["sha256"])
+    client.post("/projects/p1/edits/e1/revert")
+    client.post(f"/projects/p1/plans/{removed['plan']['plan_id']}/approve", json={})
+    assert client.get("/projects/p1/receipt").json()["changes"] == [
+        {"edit_id": "e2", "start": 1.3, "text": "", "kind": "removed", "note": "room tone in its place"}]
+    assert client.get("/projects/p9/receipt").status_code == 404
+
+
+def test_a_change_note_says_whose_voice_and_how_it_meets_the_picture(client, project, monkeypatch):
+    import app.api.main as main
+    from dataclasses import replace
+    from app.domain.models import ApprovedEdit
+    done = voiced(client, monkeypatch)
+    c = main.repo.get_candidate("p1", done["plan"]["items"][0]["candidate"]["candidate_id"])
+    edit = lambda **plan: ApprovedEdit(edit_id="x", candidate_id=c.candidate_id, plan=replace(c.plan, **plan), audio=c.audio, frames=c.frames)   # noqa: E731
+    notes = {mix: main._change_dict("p1", "local", edit(mix=mix))["note"] for mix in ("replace", "layer", "concatenate", "remove")}
+    assert notes == {"replace": "in Test tone's voice", "layer": "Test tone's voice, over the picture",
+                     "concatenate": "Test tone's voice, the picture makes room", "remove": "room tone in its place"}
+    assert main._change_dict("p1", "local", edit(mix="layer", voice_profile_id="original"))["note"] == "over the picture"
+    assert main._change_dict("p1", "local", edit(mix="layer"))["kind"] == "added"

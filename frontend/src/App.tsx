@@ -1,39 +1,32 @@
 import { Fragment, useCallback, useEffect, useRef, useState } from 'react'
 import { ConsentSheet } from './components/ConsentSheet'
-import { SignIn } from './components/SignIn'
-import { ShipSheet } from './components/ShipSheet'
-import type { Shipped } from './components/ShipSheet'
-import { LoadScreen } from './components/LoadScreen'
-import { Player } from './components/Player'
-import type { Block } from './components/Player'
+import { Player, timecode } from './components/Player'
+import type { Marker } from './components/Player'
 import { captionAt, takeCaption } from './transcript/caption'
 import type { CaptionPending } from './transcript/caption'
 import { Timeline } from './components/Timeline'
-import { ChatPanel } from './components/ChatPanel'
-import { ExportBar } from './components/ExportBar'
-import { ProjectList } from './components/ProjectList'
-import { SpendMeter } from './components/SpendMeter'
+import { VoltagePane } from './components/VoltagePane'
 import { LineDoc } from './components/LineDoc'
 import type { LineRequest, PendingLine } from './components/LineDoc'
 import type { LineKey } from './transcript/keys'
-import { PlanCard } from './components/PlanCard'
-import { ActivityLog } from './components/ActivityLog'
-import { ReadingCard } from './components/ReadingCard'
-import { AutonomySwitch } from './components/AutonomySwitch'
 import { WhatVoltageMayDo } from './components/WhatVoltageMayDo'
 import type { MayDo } from './components/WhatVoltageMayDo'
-import { Presence } from './components/Presence'
-import { ThemeToggle } from './components/ThemeToggle'
-import { Button } from '@/components/ui/button'
-import { cn } from '@/lib/utils'
-import { ArrowUp, AudioLines, ChevronLeft, ChevronRight, Film, FolderOpen, Loader2, Mic, ShieldCheck, SlidersHorizontal, Users, Zap } from 'lucide-react'
+import { WhoSpeaks, EXAMPLES, SILENT_EXAMPLES } from './components/WhoSpeaks'
+import { Wordmark, Wave } from './components/Wordmark'
 import { Lanes } from './components/Lanes'
-import { VoicesSheet } from './components/VoicesSheet'
-import { SpeakersBar } from './components/SpeakersBar'
+import { AccountDot } from './pages/Shell'
+import { ProjectsPage } from './pages/ProjectsPage'
+import { VoicesPage } from './pages/VoicesPage'
+import { UsagePage } from './pages/UsagePage'
+import { SettingsPage } from './pages/SettingsPage'
+import { BillingPage } from './pages/BillingPage'
+import { LoginPage } from './pages/LoginPage'
+import { ExportPage } from './pages/ExportPage'
+import { go, hrefFor, useRoute } from './lib/route'
+import { cn } from '@/lib/utils'
 import { clock } from './transcript/format'
-import { speakerSlot } from './transcript/speakers'
 import {
-  createProject, confirmPlace, exportProject, artifactUrl, pollJob, PollCancelled, ApiError, listProjects, getProject, deleteProject, getUsage, listVoices, updateSpeaker, detectSpeakers, revertEdit, updateSettings, removeLine, dismissItem, setEditLevel, setCandidateLevel, BACKGROUND_DB, uploadMyVoice, deleteMyVoice, moveCandidate, moveEdit, shiftLine, getPlan, approvePlan, readProject, grantConsent, createVariant, getMe, logout, postTurn, getMessages,
+  createProject, confirmPlace, exportProject, artifactUrl, pollJob, PollCancelled, ApiError, listProjects, getProject, deleteProject, getUsage, listVoices, updateSpeaker, detectSpeakers, revertEdit, updateSettings, removeLine, dismissItem, setEditLevel, setCandidateLevel, BACKGROUND_DB, moveCandidate, moveEdit, shiftLine, getPlan, approvePlan, readProject, grantConsent, getMe, postTurn, getMessages,
 } from './api'
 import type { Me, PlanApproval } from './api'
 import type {
@@ -46,100 +39,80 @@ import { piecesFromInserts, renderTimeFrom, sourceTimeFrom } from './timeline/se
 /** Bundled demo clip, uploaded through the same path as any other file. */
 const SAMPLE_URL = '/sample-ad.mp4'
 
-type Stage = 'load' | 'editor'
-
 // What Voltage may do until the project says otherwise (the server's defaults).
 const MAY_DO: MayDo = { autonomy: 'ask', turn_usd: 0.5, effort: 'high', ceiling_usd: 2 }
 
+// The model's short name on the pane's header; an unknown id shows as it is.
+const MODEL_NAMES: Record<string, string> = {
+  'claude-opus-5-5': 'Opus 5.5', 'claude-sonnet-5-5': 'Sonnet 5.5', 'claude-haiku-5-5': 'Haiku 5.5', 'claude-fable-5-1': 'Fable 5.1',
+}
+
+/** What a turn that shipped on its own left behind, for the note in the pane (replaces the ship sheet). */
+interface ShippedNote { count: number; held: number; spendUsd: number }
+
 export default function App() {
-  const [stage, setStage] = useState<Stage>('load')
-  // Phase 9c: whether sign-in is on, and who is here. Null until asked.
+  const route = useRoute()
+  // Who is here (Phase 9c): null until the server says.
   const [me, setMe] = useState<Me | null>(null)
   const [signedOut, setSignedOut] = useState(false)
-  // Consent is asked once per project, the first time a voice is about to be
-  // made (UX-3): the sheet, and what to do once it is given.
+
+  // UX-3: consent is asked for in a sentence the first time a voice is about to be made.
   const [consentAsk, setConsentAsk] = useState<{ who: string | null; go: () => void } | null>(null)
   const [consenting, setConsenting] = useState(false)
-  // Read by closures made before consent was given, so the action they
-  // resume does not ask a second time.
   const consentGiven = useRef(false)
-  // What just shipped, for the sheet that says what is in the file.
-  const [shipped, setShipped] = useState<Shipped | null>(null)
-  const [varianting, setVarianting] = useState(false)
+
+  const [shippedNote, setShippedNote] = useState<ShippedNote | null>(null)
   const [loading, setLoading] = useState(false)
   const [project, setProject] = useState<Project | null>(null)
   const [transcript, setTranscript] = useState<Word[]>([])
   const [selection, setSelection] = useState<Selection | null>(null)
   const [currentTime, setCurrentTime] = useState(0)
   const [messages, setMessages] = useState<ChatMessage[]>([])
-  const [segments, setSegments] = useState<Segment[]>([])
-  const [inserts, setInserts] = useState<Insert[]>([])
-  // Phase 16: the render as pieces — copies, flexed lines, living holds, held frames — for the clocks.
+  const [, setSegments] = useState<Segment[]>([])
+  const [, setInserts] = useState<Insert[]>([])
   const [pieces, setPieces] = useState<Piece[]>([])
   const [download, setDownload] = useState<{ url: string; filename: string } | null>(null)
   const [exporting, setExporting] = useState(false)
-  // UX-6: how much of the upload has gone, 0..1; null when not uploading.
   const [uploadShare, setUploadShare] = useState<number | null>(null)
-  // The latest render of the approved edits, and which version the player shows.
   const [rendered, setRendered] = useState<{ url: string; duration: number } | null>(null)
-  // 20e: what plays — the original, the final (the added lines), or with the proposals mixed in.
+  // 20e: which render plays — the final, the original, or the preview with the proposals mixed in.
   const [view, setView] = useState<'original' | 'final' | 'proposals'>('original')
-  // The preview render with the proposals, keyed by the takes it carries (stale when they change).
   const [preview, setPreview] = useState<{ url: string; duration: number; pieces: Piece[]; key: string } | null>(null)
   const [previewing, setPreviewing] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [projects, setProjects] = useState<ProjectSummary[]>([])
   const [usage, setUsage] = useState<Usage | null>(null)
   const [voices, setVoices] = useState<Voice[]>([])
-  // 20i: your own voices, uploaded under a name; offered first wherever a voice is picked.
-  const [myVoices, setMyVoices] = useState<MyVoice[]>([])
-  const [voicesOpen, setVoicesOpen] = useState(false)
   const asVoice = (v: MyVoice): Voice => ({ voice_id: v.voice_id, name: v.name, description: 'your voice', gender: null, accent: null, age: null, category: 'mine' })
   const takeInVoices = (r: { voices: Voice[]; mine?: MyVoice[] }) => {
-    setMyVoices(r.mine ?? [])
-    setVoices([...(r.mine ?? []).map(asVoice), ...r.voices])
+    const mine = (r.mine ?? []).map(asVoice)
+    setVoices([...mine, ...r.voices.filter((v) => !mine.some((m) => m.voice_id === v.voice_id))])
   }
   const [seekRequest, setSeekRequest] = useState<{ time: number; id: number; play?: boolean; until?: number } | null>(null)
   const [detecting, setDetecting] = useState(false)
-  // Approved edits still in force, shown as tracked changes in the transcript.
   const [approved, setApproved] = useState<Revision[]>([])
-  // The agent (Phase 13): how much it does on its own, and its latest plan.
   const [autonomy, setAutonomy] = useState<Autonomy>('ask')
   const [mayDo, setMayDo] = useState<MayDo>(MAY_DO)
   const [mayDoOpen, setMayDoOpen] = useState(false)
   const [plan, setPlan] = useState<Plan | null>(null)
-  // Voltage's first look at the clip (UX-2), for the goal stage.
   const [reading, setReading] = useState<Reading | null>(null)
   const [readingBusy, setReadingBusy] = useState(false)
+  const wantReading = useRef(true)
   const readFor = useRef<string | null>(null)
-  // A fresh project gets read once it opens; one with a plan or edits does not.
-  const wantReading = useRef(false)
-  // UX-7c: Voltage's panel can be tucked away to a rail; `\` toggles it.
-  const [panelHidden, setPanelHidden] = useState(() => typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia('(max-width: 960px)').matches)
-  const panelRef = useRef<HTMLElement>(null)
-  const showPanel = () => { setPanelHidden(false); window.setTimeout(() => panelRef.current?.scrollIntoView?.({ block: 'start', behavior: 'smooth' }), 0) }
-  // An example picked from Voltage's first message, put into the composer.
-  const [seed, setSeed] = useState<{ text: string; id: number } | null>(null)
-  // Phase 20: a turn of Voltage with tools is running; its latest step.
   const [turnBusy, setTurnBusy] = useState(false)
   const [turnStep, setTurnStep] = useState<string | null>(null)
   const seenSeq = useRef(0)
-  // While Voltage reads, the transcript line it is "on" is lit in turn.
-  // The line open in the hands-on editor, so the panel can stand by.
   const [editingLine, setEditingLine] = useState<Statement | null>(null)
-  const [showPlanWhileEditing, setShowPlanWhileEditing] = useState(false)
-  // The take playing in place of the line, with its own audio under the video.
   const [playingTake, setPlayingTake] = useState<string | null>(null)
   const takeAudio = useRef<HTMLAudioElement | null>(null)
-  // The take playing in place, whole: its words light up as they are said (the polish pass).
   const playingCandidate = useRef<Candidate | null>(null)
-  // What the phone's strip composer holds while Voltage is tucked away.
-  const [railText, setRailText] = useState('')
-  // The word timeline is for exact spans; hidden until asked for.
+  const composerRef = useRef<HTMLTextAreaElement>(null)
+  // Volt: the tracks panel under the scrubber, and the word-precise timeline inside it.
+  const [tracksOpen, setTracksOpen] = useState(false)
   const [precise, setPrecise] = useState(false)
-  // A take or kept line being dragged to a new start on the bar.
   const [placing, setPlacing] = useState<{ id: string; start: number; duration: number } | null>(null)
-  const composerRef = useRef<HTMLInputElement>(null)
+  const [placeDraft, setPlaceDraft] = useState<string | null>(null)
+  const opening = useRef<string | null>(null)
 
   const refreshProjects = useCallback(async () => {
     try {
@@ -150,35 +123,15 @@ export default function App() {
   }, [])
 
   useEffect(() => {
-    if (stage === 'load') void refreshProjects()
-  }, [stage, refreshProjects])
-
-  // Who is here (Phase 9c), then — a reload keeps you in the project you
-  // had open: its id is the URL hash.
-  useEffect(() => {
     getMe()
-      .then((m) => {
-        setMe(m)
-        const id = window.location.hash.slice(1)
-        if ((m.mode === 'off' || m.user) && /^p\d+$/.test(id)) void openProject(id)
-      })
+      .then(setMe)
       .catch(() => setMe({ mode: 'off', user: null }))   // an older server: open as before
-    // Only on first load.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   // A 401 anywhere means the session ended: back to the door.
   useEffect(() => {
     if (me?.mode === 'google' && error === 'Sign in to continue.') setSignedOut(true)
   }, [error, me])
-
-  const signOut = async () => {
-    try { await logout() } catch { /* the cookie is gone either way */ }
-    clearEditor()
-    window.location.hash = ''
-    setMe((m) => (m ? { ...m, user: null } : m))
-    setStage('load')
-  }
 
   /** Back to a blank editor state, e.g. before opening another project. */
   const clearEditor = () => {
@@ -203,12 +156,13 @@ export default function App() {
     setPlan(null)
     setReading(null)
     setReadingBusy(false)
-    setShipped(null)
+    setShippedNote(null)
     setConsentAsk(null)
     consentGiven.current = false
     setEditingLine(null)
     setPlayingTake(null)
     setPlacing(null)
+    setTracksOpen(false)
     takeAudio.current?.pause()
   }
 
@@ -225,20 +179,8 @@ export default function App() {
     return () => window.removeEventListener('keydown', onKey)
   }, [])
 
-  // "\" hides Voltage to a rail and brings it back (UX-7c), from anywhere that is not typing.
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key !== '\\' || e.metaKey || e.ctrlKey || e.altKey) return
-      const t = e.target as HTMLElement | null
-      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return
-      e.preventDefault()
-      setPanelHidden((h) => !h)
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [])
-
   const projectId = project?.project_id ?? null
+  const signedIn = me !== null && (me.mode === 'off' || (me.user !== null && !signedOut))
 
   /** Re-reads what the project has spent; after anything that may have paid. */
   const refreshUsage = useCallback(async (id: string | null) => {
@@ -252,25 +194,25 @@ export default function App() {
 
   useEffect(() => { void refreshUsage(projectId) }, [projectId, refreshUsage])
 
-  // The voices, once: they don't change while the app is open.
+  // The voices, once a project is open: they don't change while the app is open.
   useEffect(() => {
-    if (stage !== 'editor' || voices.length > 0) return
+    if (!projectId || voices.length > 0) return
     listVoices()
       .then(takeInVoices)
       .catch(() => {}) // without the list, the editor offers no voice to pick
-  }, [stage, voices.length])
+  }, [projectId, voices.length])
 
   // When a fresh project opens, Voltage takes the clip in once: an opening
   // line and a role for each speaker (UX-2), as its first message (UX-7c).
   useEffect(() => {
-    if (stage !== 'editor' || !projectId || !wantReading.current || reading || readFor.current === projectId) return
+    if (!projectId || !wantReading.current || reading || readFor.current === projectId) return
     readFor.current = projectId
     setReadingBusy(true)
     readProject(projectId)
       .then((r) => setReading(r))
       .catch(() => {})   // the stage still works with the plain count
       .finally(() => { setReadingBusy(false); void refreshUsage(projectId) })
-  }, [stage, projectId, reading, project?.statements?.length, refreshUsage])
+  }, [projectId, reading, project?.statements?.length, refreshUsage])
 
   /** Into the project: fresh ones start by asking what the video should
    *  say; ones with a plan or edits open straight in the editor. */
@@ -289,8 +231,8 @@ export default function App() {
     // UX-7c: one workspace. A fresh project is read on arrival (a clip with
     // no speech is looked at); one with a plan or edits opens as it was.
     wantReading.current = !loaded.plan && !edited
-    setStage('editor')
-    window.location.hash = loaded.project_id
+    opening.current = loaded.project_id
+    go({ page: 'editor', projectId: loaded.project_id })
   }
 
   const load = async (file: File) => {
@@ -388,7 +330,7 @@ export default function App() {
       const r = await moveEdit(projectId, editId, { start })
       const { selection: at, new_text: text, mix = 'replace' } = r.candidate.plan
       setApproved((a) => a.map((rev) => (
-        rev.edit_id === editId ? { edit_id: r.edit_id, start: at.start, end: at.end, text, mix, partner: rev.partner ?? null }
+        rev.edit_id === editId ? { ...rev, edit_id: r.edit_id, start: at.start, end: at.end, text, mix, partner: rev.partner ?? null }
         : rev.partner === editId ? { ...rev, partner: r.edit_id } : rev
       )))
       setDownload(null)
@@ -444,8 +386,8 @@ export default function App() {
     try {
       const r = await shiftLine(projectId, { start: s.start, end: s.end, to })
       setApproved((a) => [...a,
-        { edit_id: r.removed_edit_id, start: r.from.start, end: r.from.end, text: '', mix: 'remove', partner: r.edit_id },
-        { edit_id: r.edit_id, start: r.selection.start, end: r.selection.end, text: s.text, mix: 'layer', partner: r.removed_edit_id },
+        { edit_id: r.removed_edit_id, start: r.from.start, end: r.from.end, text: '', mix: 'remove', partner: r.edit_id, speaker: s.speaker },
+        { edit_id: r.edit_id, start: r.selection.start, end: r.selection.end, text: s.text, mix: 'layer', partner: r.removed_edit_id, speaker: s.speaker },
       ])
       setDownload(null)
       if (await runExport()) setView('final')
@@ -509,6 +451,7 @@ export default function App() {
     try {
       const sight = await confirmPlace(projectId, place)
       setReading((r) => (r ? { ...r, sight } : r))
+      setPlaceDraft(null)
     } catch (e) {
       tell(e instanceof ApiError ? e.message : "I couldn't keep that place. Try again.")
     }
@@ -523,7 +466,7 @@ export default function App() {
 
   /** The box is for the whole video: a goal, a change to the plan, an answer.
    *  With words selected on the Precise timeline, the sentence names the time. */
-  const submitComposer = (text: string) => void takeTurn(selection ? `At ${clock(selection.start)}: ${text}` : text)
+  const submitComposer = (text: string) => void takeTurn(selection && precise ? `At ${clock(selection.start)}: ${text}` : text)
 
   /** Phase 20: one turn of Voltage with tools. The steps arrive as messages
    *  while it works; the result is the plan and Voltage's closing line. A
@@ -535,6 +478,7 @@ export default function App() {
     if (autonomy === 'draft' && !consentGiven.current) return withConsent(null, () => void takeTurn(text, again))
     if (!again) say({ role: 'user', text })
     setError(null)
+    setShippedNote(null)
     setTurnBusy(true)
     setTurnStep('Thinking…')
     try {
@@ -602,23 +546,16 @@ export default function App() {
     }
   }
 
-  /** 15e/20c: the voice picked by hand on the plan card is asked of Voltage in words. */
-  const pickPlanVoice = (voiceIdPicked: string) => {
-    const name = voices.find((v) => v.voice_id === voiceIdPicked)?.name ?? voiceIdPicked
-    return takeTurn(`Use ${name}'s voice for the lines`)
-  }
-
-  /** Another take of a line, or a failed one again: asked of Voltage in words (20c). */
-  const redoTheItem = (item: PlanItem) => takeTurn(`Another take of “${item.new_text}” (${item.item_id})`)
-
-  /** An approved edit as the transcript shows it (20g: with its level). */
+  /** An approved edit as the transcript shows it (20g: with its level; Volt: with its speaker and voice). */
   const asRevision = (e: ApprovedEditSummary): Revision => ({
     edit_id: e.edit_id, start: e.selection.start, end: e.selection.end, text: e.new_text, mix: e.mix, partner: e.partner ?? null, level_db: e.level_db ?? null,
+    speaker: e.speaker ?? null, voice_profile_id: e.voice_profile_id ?? null,
   })
   /** The plan item just approved, as a revision. */
   const itemRevision = (i: PlanItem): Revision => ({
     edit_id: i.edit_id!, start: i.candidate?.plan.selection.start ?? i.selection.start,
     end: i.candidate?.plan.selection.end ?? i.selection.end, text: i.new_text, mix: i.mix, level_db: i.candidate?.plan.level_db ?? null,
+    speaker: i.speaker ?? null, voice_profile_id: i.candidate?.plan.voice_profile_id ?? null,
   })
 
   /** 20g: after a turn, the edits as the server has them — Voltage may have undone or releveled a line — so the transcript never shows a stale row. */
@@ -684,24 +621,15 @@ export default function App() {
   /** Under Just do it, Voltage ships inside its turn. The lines it shipped
    *  come back as approved items the panel has not seen: they become
    *  revisions, the edited video is rendered (no paid step), the player
-   *  switches to it and the sheet says what is in the file — the same as a
-   *  hand-shipped approval. */
+   *  switches to it and a note in the pane says what went in (Volt: the
+   *  export page has the receipt). */
   const takeInShipped = async (fresh: Plan) => {
     if (!projectId) return
     const went = fresh.items.filter((i) => i.status === 'approved' && i.edit_id
       && !approved.some((r) => r.edit_id === i.edit_id))
     const { changed, render } = await syncEdits()
     if (went.length === 0 || !changed || !render) return
-    setShipped({
-      items: went,
-      held: fresh.items.filter((i) => i.status === 'ready').length,
-      removed: approved.filter((r) => r.mix === 'remove').length,
-      before: project?.duration ?? 0,
-      after: render.duration,
-      download: render.download,
-      spendUsd: fresh.spend_usd,
-      takesVoiced: fresh.takes_voiced ?? 0,
-    })
+    setShippedNote({ count: went.length, held: fresh.items.filter((i) => i.status === 'ready').length, spendUsd: fresh.spend_usd })
   }
 
   /** Add them all (20e): every proposal goes into the video in one render,
@@ -722,22 +650,6 @@ export default function App() {
       setError(e instanceof ApiError ? e.message : 'Could not add those lines.')
     } finally {
       void refreshUsage(projectId)
-    }
-  }
-
-  /** A variant: this clip again, as a new project, with the plan as a draft. */
-  const makeVariant = async () => {
-    if (!projectId) return
-    setVarianting(true)
-    setError(null)
-    try {
-      const made = await createVariant(projectId)
-      window.location.hash = made.project_id
-      await openProject(made.project_id)
-    } catch (e) {
-      setError(e instanceof ApiError ? e.message : 'Could not make a variant.')
-    } finally {
-      setVarianting(false)
     }
   }
 
@@ -884,40 +796,76 @@ export default function App() {
     await refreshProjects()
   }
 
+  // Volt: the route decides what is open. The editor and export routes open
+  // the project they name (once, by id); the start lists the projects and
+  // lets the last one go.
+  useEffect(() => {
+    if (!signedIn) return
+    if (route.page === 'editor' || route.page === 'export') {
+      if (opening.current !== route.projectId) { opening.current = route.projectId; void openProject(route.projectId) }
+    } else if (route.page === 'projects') {
+      if (project) { clearEditor(); opening.current = null }
+      void refreshProjects()
+    }
+    // openProject and clearEditor are stable enough for the route's purposes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [route, signedIn])
+
+  const signedOutNow = () => {
+    clearEditor()
+    opening.current = null
+    setMe((m) => (m ? { ...m, user: null } : m))
+    go({ page: 'projects' })
+  }
+
   if (me === null) {
     return (
       <div className="flex min-h-dvh items-center justify-center gap-3 bg-background text-muted-foreground" role="status" aria-busy="true">
-        <Presence size={20} working />
-        <span>Opening…</span>
+        <Wave busy /><span>Opening…</span>
       </div>
     )
   }
   if (me.mode === 'google' && (!me.user || signedOut)) {
-    return <SignIn error={signedOut ? 'Your session ended. Sign in again to continue.' : null} />
+    return <LoginPage error={signedOut ? 'Your session ended. Sign in again to continue.' : null} />
   }
-  if (stage === 'load' || !project) {
+  if (route.page === 'projects') {
     return (
-      <LoadScreen
-        onLoad={load}
-        onLoadSample={loadSample}
-        loading={loading}
+      <ProjectsPage
+        me={me}
+        projects={projects}
+        onOpen={(id) => go({ page: 'editor', projectId: id })}
+        onUpload={(file) => void load(file)}
+        onSample={() => void loadSample()}
+        onDelete={(id) => void removeProject(id)}
+        uploading={loading}
         progress={uploadShare}
         error={error}
-        who={me.user ? { name: me.user.name ?? me.user.email ?? 'You', picture: me.user.picture } : null}
-        onSignOut={me.user ? () => void signOut() : undefined}
-      >
-        <ProjectList projects={projects} onOpen={(id) => void openProject(id)} onDelete={(id) => void removeProject(id)} />
-      </LoadScreen>
+      />
     )
   }
+  if (route.page === 'voices') return <VoicesPage me={me} />
+  if (route.page === 'usage') return <UsagePage me={me} />
+  if (route.page === 'settings') return <SettingsPage me={me} onSignedOut={signedOutNow} />
+  if (route.page === 'billing') return <BillingPage me={me} />
+  if (route.page === 'export') {
+    return <ExportPage projectId={route.projectId} me={me} onBack={() => go({ page: 'editor', projectId: route.projectId })} />
+  }
+  if (!project) {
+    return (
+      <div className="flex min-h-dvh flex-col items-center justify-center gap-4 bg-background px-4 text-center" role={error ? undefined : 'status'} aria-busy={!error || undefined}>
+        {error ? (
+          <>
+            <p className="disp m-0 text-xl font-bold" role="alert">{error}</p>
+            <a className="btn sm" href={hrefFor({ page: 'projects' })}>← Projects</a>
+          </>
+        ) : <><Wave busy /><span className="text-muted-foreground">Opening {route.projectId}…</span></>}
+      </div>
+    )
+  }
+
   const speakers = project.speakers ?? []
   // 20f: the spoken lines only; added lines and proposals are rows of their own in LineDoc.
   const statements: Statement[] = project.statements ?? []
-  const leave = () => {
-    clearEditor()
-    window.location.hash = ''
-    setStage('load')
-  }
 
   // Where things stand line by line: the plan's items, and nothing else.
   const planItems = plan?.items.filter((i) => i.kind === 'planned' && i.enabled) ?? []
@@ -931,19 +879,22 @@ export default function App() {
   const shown = view === 'final' && rendered ? { url: rendered.url, duration: rendered.duration, pieces }
     : view === 'proposals' && previewReady ? { url: preview!.url, duration: preview!.duration, pieces: preview!.pieces }
     : null
-  const busy = turnBusy
   const clarifying = plan?.status === 'clarifying'
-  const stateWord = clarifying ? 'has a question'
+  const needsYou = planItems.filter((i) => i.status === 'needs-you')
+  const stateWord = clarifying ? 'needs your go'
     : turnBusy ? 'working'
+    : readingBusy ? 'reading'
     : editingLine ? 'standing by'
-    : plan?.status === 'proposed' ? 'has a plan'
-    : readyItems.length > 0 ? 'has proposals'
+    : readyItems.length > 0 ? `${readyItems.length} proposed`
     : 'ready'
   const sendLabel = clarifying ? 'Answer' : 'Send'
   const placeholder = clarifying ? 'Answer, or tell Voltage anything else'
-    : selection ? 'Ask for a change, e.g. say "30% off" instead'
-    : plan ? 'Say what to change, or ask for another take; "ship it" when it sounds right'
+    : selection && precise ? 'Ask for a change, e.g. say "30% off" instead'
+    : plan ? 'Say what to change, or ask for another take'
     : 'What should this video say?'
+  // The first read (Volt): nothing said yet — the opening line, who speaks, the examples.
+  const firstRead = !plan && messages.length === 0
+  const engine = [project.settings?.model ? (MODEL_NAMES[project.settings.model] ?? project.settings.model) : null, mayDo.effort].filter(Boolean).join(' · ')
 
   const sourceClock = shown ? sourceTimeFrom(currentTime, shown.pieces) : currentTime
   const voiceLine = usage?.lines.find((l) => l.vendor === 'elevenlabs' && l.units > 0)
@@ -952,15 +903,14 @@ export default function App() {
     ? (playingCandidate.current?.candidate_id === playingTake ? playingCandidate.current.plan.mix : null)
       ?? plan?.items.find((i) => i.candidate?.candidate_id === playingTake)?.candidate?.plan.mix ?? 'replace'
     : null
-  // What is waiting on you, line by line, for the rail's badge.
-  const needsYou = planItems.filter((i) => i.status === 'needs-you')
-  // UX-7b: the monitor's timeline and caption. Times follow the version that
-  // plays: an insert in the edited render pushes everything after it later.
+  // UX-7b: the monitor's clock follows the version that plays: an insert in
+  // the edited render pushes everything after it later.
   const toRender = (t: number) => (shown ? renderTimeFrom(t, shown.pieces) : t)
-  const blocks: Block[] = [
-    ...statements.map((s) => ({ start: toRender(s.start), end: toRender(s.end), tone: speakerSlot(speakers, s.speaker) as Block['tone'] })),
-    ...approved.filter((r) => r.mix !== 'remove').map((r) => ({ start: toRender(r.start), end: toRender(r.end), tone: 'changed' as const })),
-    ...pendingLines.filter((l) => l.text).map((l) => ({ start: toRender(l.selection.start), end: toRender(l.selection.end), tone: 'changed' as const })),
+  // Volt: the scrubber's marks — a proposal (volt), a line in the video (ink), a step waiting on you (amber).
+  const markers: Marker[] = [
+    ...approved.filter((r) => r.mix !== 'remove').map((r) => ({ at: toRender(r.start), tone: 'ink' as const, label: `In the video: ${r.text}` })),
+    ...readyItems.filter((i) => i.candidate).map((i) => ({ at: toRender(i.candidate!.plan.selection.start), tone: 'volt' as const, label: `Proposed: ${i.new_text}` })),
+    ...needsYou.map((i) => ({ at: toRender(i.selection.start), tone: 'warn' as const, label: `Waiting on you: ${i.new_text}` })),
   ]
   // A take in hand, not yet kept, is captioned with its words too: the picture
   // shows what you are about to hear.
@@ -976,327 +926,221 @@ export default function App() {
     ? spoken.map((w, k) => <Fragment key={k}>{k > 0 && ' '}<ins data-said={w.said || undefined}>{w.text}</ins></Fragment>)
     : captionRuns?.map((r, k) => <Fragment key={k}>{k > 0 && ' '}{r.kind === 'ins' ? <ins>{r.text}</ins> : r.text}</Fragment>)
 
+  const views = [
+    ...(rendered ? [['final', 'Final'] as const] : []),
+    ...(readyItems.length > 0 ? [['proposals', 'With proposals'] as const] : []),
+    ['original', 'Original'] as const,
+  ]
+  const badge = views.length > 1 ? views.find(([v]) => v === view)?.[1] : undefined
+  const scanning = turnBusy ? (turnStep ?? 'Voltage is working') : readingBusy ? 'Voltage is reading the clip' : null
+  const spent = usage?.spent_usd ?? 0
+  const ceiling = usage?.ceiling_usd ?? mayDo.ceiling_usd
+  const sight = reading?.sight ?? null
+  const place = sight ? (sight.place_confirmed ?? sight.place_guess) : null
+
   return (
-    <div
-      className="flex h-dvh flex-col bg-background max-[960px]:h-auto max-[960px]:min-h-dvh"
-      data-panel={panelHidden ? 'hidden' : undefined}
-    >
-      <a className="skip" href="#main">Skip to the transcript</a>
-      {/* UX-9: the studio's header — brand, the file, the play switch, the autonomy, the money, the exports. */}
-      <header className="relative z-10 flex min-h-13 items-center gap-2.5 border-b bg-card px-3 max-[960px]:flex-wrap max-[960px]:gap-y-2 max-[960px]:py-2">
-        <h1 className="m-0 flex items-center gap-2 text-sm font-semibold tracking-tight"><Presence size={16} />Voltage</h1>
-        <span className="flex min-w-0 max-w-[34ch] shrink items-center gap-2 rounded-md border bg-muted px-2 py-1 font-mono text-xs text-muted-foreground max-[960px]:max-w-[50vw]">
-          <Film className="size-3.5 shrink-0" aria-hidden="true" />
-          <span className="min-w-0 truncate font-medium text-foreground" title={project.filename}>{project.filename}</span>
-          <span className="tnum whitespace-nowrap">{project.duration.toFixed(1)} s{speakers.length > 0 ? ` · ${speakers.length} ${speakers.length === 1 ? 'speaker' : 'speakers'}` : ''}</span>
-        </span>
-        <span className="flex-1" />
-        {(rendered || readyItems.length > 0) && (
-          <div className="inline-flex gap-0.5 rounded-md border bg-muted p-0.5" role="group" aria-label="Play">
-            {([
-              ...(rendered ? [['final', 'Final'] as const] : []),
-              ...(readyItems.length > 0 ? [['proposals', 'With proposals'] as const] : []),
-              ['original', 'Original'] as const,
-            ]).map(([v, label]) => (
-              <Button
-                key={v}
-                variant="ghost"
-                size="sm"
-                className={cn('h-7 whitespace-nowrap px-2.5 text-xs', view === v ? 'bg-background text-foreground shadow-xs hover:bg-background' : 'text-muted-foreground')}
-                aria-pressed={view === v}
-                onClick={() => { setView(v); setCurrentTime(0); if (v === 'proposals') void ensurePreview() }}
-              >
-                {v === 'proposals' && <span className={cn('size-1.5 rounded-full bg-primary', !previewReady && previewing && 'animate-pulse')} aria-hidden="true" />}
-                {label}
-              </Button>
+    <div className="flex h-dvh flex-col bg-background text-foreground max-[960px]:h-auto max-[960px]:min-h-dvh">
+      <a className="skip" href="#main" onClick={(e) => { e.preventDefault(); document.getElementById('main')?.focus() }}>Skip to the transcript</a>
+      {/* Volt: the editor's header — the wordmark, the file, the play switch, the autonomy, the spend, Export, the account. */}
+      <header className="flex min-h-[62px] flex-wrap items-center gap-x-4 gap-y-2 border-b-[1.5px] border-foreground bg-card px-4 py-2 sm:px-6">
+        <Wordmark />
+        <span className="text-faint max-sm:hidden" aria-hidden="true">/</span>
+        <h1 className="disp m-0 min-w-0 max-w-[28ch] truncate text-[15px] font-semibold" title={project.filename}>{project.filename}</h1>
+        <span className="tag text-faint">{timecode(project.duration)}{speakers.length > 0 ? ` · ${speakers.length} ${speakers.length === 1 ? 'voice' : 'voices'}` : ''}</span>
+        {views.length > 1 && (
+          <div className="segs" role="group" aria-label="Play">
+            {views.map(([v, label]) => (
+              <button key={v} type="button" className="seg" aria-pressed={view === v} onClick={() => { setView(v); setCurrentTime(0); if (v === 'proposals') void ensurePreview() }}>
+                {v === 'proposals' && !previewReady && previewing ? `${label}…` : label}
+              </button>
             ))}
           </div>
         )}
-        <AutonomySwitch value={autonomy} onChange={(v) => void rememberAutonomy(v)} />
         <span className="flex-1" />
-        <SpendMeter usage={usage} />
-        <ExportBar segments={segments} inserts={inserts} pieces={pieces} onExport={() => void runExport()} download={download} busy={exporting} onVariant={() => void makeVariant()} varianting={varianting} />
-        <Button variant="ghost" size="icon" onClick={() => setMayDoOpen(true)} aria-label="What Voltage may do: the autonomy, the turn's spend cap and the effort" title="What Voltage may do">
-          <SlidersHorizontal aria-hidden="true" />
-        </Button>
+        <button type="button" className="act" onClick={() => setMayDoOpen(true)} aria-haspopup="dialog" aria-label={`${autonomy === 'ask' ? 'Check with me' : 'Just do it'}. What Voltage may do`}>
+          <span className="tag">{autonomy === 'ask' ? 'Check with me' : 'Just do it'}</span>
+          <svg width="12" height="12" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>
+        </button>
+        <a className="tnum flex items-center gap-2 rounded-md px-2 py-1.5 text-[13px] text-foreground no-underline hover:bg-sunk" href={hrefFor({ page: 'usage' })} aria-label={`Spent $${spent.toFixed(2)} of $${ceiling} on this project. Usage`} data-testid="spend">
+          ${spent.toFixed(2)}
+          <span className="h-2 w-12 overflow-hidden rounded-sm bg-line" aria-hidden="true"><span className="block h-full bg-foreground" style={{ width: `${Math.min(100, ceiling > 0 ? (spent / ceiling) * 100 : 0)}%` }} /></span>
+          <span className="text-faint">${Number.isInteger(ceiling) ? ceiling : ceiling.toFixed(2)}</span>
+        </a>
+        <a className={cn('btn ink sm', exporting && 'opacity-70')} href={hrefFor({ page: 'export', projectId: project.project_id })} aria-busy={exporting || undefined}>
+          {exporting ? 'Rendering…' : 'Export'}
+        </a>
+        <AccountDot me={me} />
         <WhatVoltageMayDo open={mayDoOpen} value={mayDo} onChange={(c) => void changeMayDo(c)} onClose={() => setMayDoOpen(false)} />
-        <ThemeToggle />
-        {me.user && (
-          <span className="flex items-center gap-2 border-l pl-2 text-sm">
-            {me.user.picture ? <img className="size-6 rounded-full" src={me.user.picture} alt="" referrerPolicy="no-referrer" /> : null}
-            <span className="max-w-36 truncate max-[960px]:hidden">{me.user.name ?? me.user.email ?? 'You'}</span>
-            <Button variant="ghost" size="sm" onClick={() => void signOut()}>Sign out</Button>
-          </span>
-        )}
       </header>
 
-      <div className="flex min-h-0 flex-1 gap-2 p-2 max-[960px]:flex-col">
-        {/* The dock: real destinations only. */}
-        <nav className="flex w-10 shrink-0 flex-col items-center gap-1 rounded-lg border bg-card py-2 max-[960px]:w-auto max-[960px]:flex-row max-[960px]:px-2" aria-label="Dock">
-          <Button variant="ghost" size="icon" onClick={leave} aria-label="Projects" title="Projects"><FolderOpen aria-hidden="true" /></Button>
-          <Button variant="ghost" size="icon" className="bg-accent text-primary" aria-label="Workspace" aria-current="page" title="Workspace"><AudioLines aria-hidden="true" /></Button>
-          <Button variant="ghost" size="icon" onClick={() => document.getElementById('speakers')?.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' })} aria-label="Speakers" title="Speakers"><Users aria-hidden="true" /></Button>
-          <Button variant="ghost" size="icon" onClick={() => setVoicesOpen(true)} aria-label="Your voices" title="Your voices"><Mic aria-hidden="true" /></Button>
-          <span className="flex-1" />
-          <Button variant="ghost" size="icon" onClick={() => setPanelHidden((h) => !h)} aria-label={panelHidden ? 'Bring Voltage back' : 'Tuck Voltage away'} title={panelHidden ? 'Bring Voltage back' : 'Tuck Voltage away'}><Zap aria-hidden="true" className={cn(panelHidden ? 'text-muted-foreground' : 'text-primary')} /></Button>
-        </nav>
-
-        {/* The player and its lanes. */}
-        <main id="main" className="flex min-h-0 flex-[41_1_0%] flex-col gap-2 overflow-y-auto rounded-lg border bg-card p-2.5 max-[960px]:flex-none max-[960px]:overflow-visible" aria-busy={turnBusy || undefined}>
-          <Player
-            src={shown ? shown.url : artifactUrl(project.project_id, project.media.sha256)}
-            duration={shown ? shown.duration : project.duration}
-            currentTime={currentTime}
-            onSeek={setCurrentTime}
-            onTimeUpdate={setCurrentTime}
-            seekRequest={seekRequest}
-            blocks={blocks}
-            words={transcript}
-            caption={caption}
-            muted={playingTake !== null && playingMix === 'replace'}
-          >
-            <Button variant={precise ? 'secondary' : 'ghost'} size="sm" aria-pressed={precise} onClick={() => setPrecise((p) => !p)}>Precise</Button>
-            <span className="flex-1" />
-            <span className="flex items-center gap-2 font-mono text-xs text-muted-foreground" role="status" aria-busy={previewing || undefined} data-testid="retime">
-              {view === 'proposals' && !previewReady ? (
-                <><Loader2 className="size-3.5 shrink-0 animate-spin" aria-hidden="true" />{previewing ? 'Rendering with the proposals…' : 'The proposals changed; rendering again…'}</>
-              ) : view === 'proposals' ? `Preview mix with ${readyItems.length} proposed ${readyItems.length === 1 ? 'take' : 'takes'}`
-              : view === 'final' && rendered ? 'The final'
-              : 'The original'}
-              {shown && shown.pieces.some((p) => p.kind === 'flex' && p.factor != null && Math.abs(p.factor - 1) > 0.005) && (
-                <span className="text-ok">· picture flexed</span>
-              )}
-            </span>
-          </Player>
-          <Lanes
-            duration={project.duration}
-            currentTime={sourceClock}
-            statements={statements}
-            speakers={speakers}
-            revisions={approved}
-            items={planItems}
-            pieces={shown?.pieces ?? pieces}
-            onSeek={(t) => { const time = shown ? renderTimeFrom(t, shown.pieces) : t; setSeekRequest((r) => ({ time, id: (r?.id ?? 0) + 1 })); setCurrentTime(time) }}
-            placing={placing}
-            onPlace={(start) => setPlacing((p) => (p ? { ...p, start } : p))}
-          />
-          {error && <div className="rounded-md border border-needs/40 bg-needs-soft px-3 py-2 text-sm text-needs" role="alert">{error}</div>}
-          {precise && (
-            <Timeline
-              key={project.project_id}
+      <div className="flex min-h-0 flex-1 max-[960px]:flex-col">
+        {/* The picture, the transport, the transcript. */}
+        <main id="main" tabIndex={-1} className="min-w-0 flex-1 overflow-y-auto outline-none max-[960px]:overflow-visible" aria-busy={turnBusy || undefined}>
+          <div className="mx-auto flex w-full max-w-[820px] flex-col gap-4 px-4 py-5 sm:px-6">
+            <Player
+              src={shown ? shown.url : artifactUrl(project.project_id, project.media.sha256)}
+              duration={shown ? shown.duration : project.duration}
+              currentTime={currentTime}
+              onSeek={setCurrentTime}
+              onTimeUpdate={setCurrentTime}
+              seekRequest={seekRequest}
+              caption={caption}
+              muted={playingTake !== null && playingMix === 'replace'}
+              badge={badge}
+              scanning={scanning}
+              markers={markers}
+              bigPlay={firstRead}
+            >
+              <button type="button" className="act" aria-expanded={tracksOpen} aria-controls="tracks" onClick={() => setTracksOpen((t) => !t)}>
+                <span className="tag">Tracks</span>
+                <svg width="12" height="12" viewBox="0 0 16 16" aria-hidden="true" className={cn('transition-transform', tracksOpen && 'rotate-180')}><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>
+              </button>
+            </Player>
+            {tracksOpen && (
+              <section id="tracks" className="flex flex-col gap-3 rounded-xl border-[1.5px] border-line2 bg-card p-4" aria-label="Tracks">
+                <Lanes
+                  duration={project.duration}
+                  currentTime={sourceClock}
+                  statements={statements}
+                  speakers={speakers}
+                  revisions={approved}
+                  items={planItems}
+                  pieces={shown?.pieces ?? pieces}
+                  onSeek={(t) => { const time = shown ? renderTimeFrom(t, shown.pieces) : t; setSeekRequest((r) => ({ time, id: (r?.id ?? 0) + 1 })); setCurrentTime(time) }}
+                  placing={placing}
+                  onPlace={(start) => setPlacing((p) => (p ? { ...p, start } : p))}
+                />
+                <div className="flex flex-wrap items-center gap-2">
+                  <button type="button" className="pill" aria-pressed={precise} onClick={() => setPrecise((p) => !p)}>Precise</button>
+                  <span className="meta">{precise ? 'Pick words on the timeline; the box then talks about that moment.' : 'Word by word, when you need it.'}</span>
+                  <span className="flex-1" />
+                  <span className="tag text-faint" role="status" aria-busy={previewing || undefined} data-testid="retime">
+                    {view === 'proposals' && !previewReady ? (previewing ? 'Rendering with the proposals…' : 'The proposals changed; rendering again…')
+                      : view === 'proposals' ? `Preview mix · ${readyItems.length} proposed ${readyItems.length === 1 ? 'take' : 'takes'}`
+                      : view === 'final' && rendered ? 'The final' : 'The original'}
+                    {shown && shown.pieces.some((p) => p.kind === 'flex' && p.factor != null && Math.abs(p.factor - 1) > 0.005) && ' · picture flexed'}
+                  </span>
+                </div>
+                {precise && (
+                  <Timeline key={project.project_id} words={transcript} duration={project.duration} selection={selection} currentTime={sourceClock} onSelect={setSelection} />
+                )}
+              </section>
+            )}
+            {error && <div className="rounded-lg border-[1.5px] border-warn bg-card px-3.5 py-2.5 text-sm" role="alert">{error}</div>}
+            {firstRead && speakers.length > 0 && (
+              <WhoSpeaks speakers={speakers} statements={statements} reading={readingBusy ? null : reading} onName={(label, name) => void changeSpeaker(label, { name })} />
+            )}
+            {firstRead && speakers.length === 0 && statements.length > 0 && (
+              <div className="flex items-center gap-3 rounded-xl border-[1.5px] border-line2 bg-card p-4">
+                <span className="meta flex-1">Voltage hasn't told the speakers apart yet.</span>
+                <button type="button" className="btn sm" onClick={() => void findSpeakers()} disabled={detecting} aria-busy={detecting || undefined}>{detecting ? 'Listening…' : 'Find who speaks'}</button>
+              </div>
+            )}
+            <LineDoc
+              statements={statements}
               words={transcript}
-              duration={project.duration}
-              selection={selection}
-              currentTime={sourceClock}
-              onSelect={setSelection}
-            />
-          )}
-          <div id="speakers">
-            <SpeakersBar
               speakers={speakers}
               voices={voices}
-              hasSpeech={transcript.length > 0}
-              detecting={detecting}
-              onDetect={() => void findSpeakers()}
-              onRename={(label, name) => void changeSpeaker(label, { name })}
-              onVoice={(label, id) => void changeSpeaker(label, id ? { voice_id: id } : { clear_voice: true })}
+              revisions={approved}
+              selection={selection}
+              currentTime={sourceClock}
+              pendingLines={pendingLines}
+              items={planItems}
+              disabled={turnBusy}
+              usdPerChar={usdPerChar}
+              playing={playingTake}
+              onSeek={seekToStatement}
+              onHear={hearLine}
+              onAdd={(item) => addItem(item)}
+              onDiscard={(item) => discardItem(item)}
+              onAddAll={(items) => approveAll(items)}
+              onHearTake={(_item, c) => playTake(c)}
+              onLevel={(target, levelDb) => void changeLevel(target, levelDb)}
+              backgroundDb={BACKGROUND_DB}
+              onDelivery={(item, delivery) => void takeTurn(`Voice ${item.item_id} again, said ${delivery}`)}
+              onUndo={(id) => void revert(id)}
+              onRemove={(s) => void removeStatement(s)}
+              onShift={(s, to) => void shiftStatement(s, to)}
+              onMove={(item, c, start) => void moveTake(item, c, start)}
+              onMoveKept={(id, start) => void moveKept(id, start)}
+              placing={placing}
+              onPlacing={setPlacing}
+              onEditingChange={setEditingLine}
+              duration={project.duration}
             />
           </div>
         </main>
 
-        {/* The transcript and takes. */}
-        <section className="flex min-h-0 flex-[35_1_0%] flex-col overflow-y-auto rounded-lg border bg-card max-[960px]:flex-none max-[960px]:overflow-visible" aria-label="Transcript and takes">
-          <LineDoc
-            statements={statements}
-            words={transcript}
-            speakers={speakers}
-            voices={voices}
-            revisions={approved}
-            selection={selection}
-            currentTime={sourceClock}
-            pendingLines={pendingLines}
-            items={planItems}
-            disabled={turnBusy}
-            usdPerChar={usdPerChar}
-            playing={playingTake}
-            onSeek={seekToStatement}
-            onHear={hearLine}
-            onAdd={(item) => addItem(item)}
-            onDiscard={(item) => discardItem(item)}
-            onAddAll={(items) => approveAll(items)}
-            onHearTake={(_item, c) => playTake(c)}
-            onLevel={(target, levelDb) => void changeLevel(target, levelDb)}
-            backgroundDb={BACKGROUND_DB}
-            onDelivery={(item, delivery) => void takeTurn(`Voice ${item.item_id} again, said ${delivery}`)}
-            onUndo={(id) => void revert(id)}
-            onRemove={(s) => void removeStatement(s)}
-            onShift={(s, to) => void shiftStatement(s, to)}
-            onMove={(item, c, start) => void moveTake(item, c, start)}
-            onMoveKept={(id, start) => void moveKept(id, start)}
-            placing={placing}
-            onPlacing={setPlacing}
-            onEditingChange={setEditingLine}
-            duration={project.duration}
-          />
-        </section>
-
-        {/* Voltage. */}
-        {panelHidden ? (
-          <aside className="flex min-h-0 w-14 shrink-0 flex-col items-center gap-3.5 rounded-lg border bg-card py-3.5 max-[960px]:sticky max-[960px]:bottom-0 max-[960px]:z-10 max-[960px]:w-auto max-[960px]:flex-row max-[960px]:gap-2.5 max-[960px]:px-4 max-[960px]:py-2" aria-label="Voltage, tucked away" data-testid="rail">
-            <Button variant="ghost" size="icon" onClick={showPanel} aria-label={`Show Voltage. ${stateWord[0].toUpperCase()}${stateWord.slice(1)}`}>
-              <Presence size={18} working={busy} />
-            </Button>
-            {(needsYou.length > 0 || readyItems.length > 0) && (
-              <span
-                className={cn('flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 font-mono text-xs font-semibold text-background', needsYou.length > 0 ? 'bg-needs' : 'bg-changed')}
-                aria-hidden="true"
-              >{needsYou.length > 0 ? needsYou.length : readyItems.length}</span>
-            )}
-            <span className="rotate-180 whitespace-nowrap text-sm leading-none text-muted-foreground [writing-mode:vertical-rl] max-[960px]:hidden" aria-hidden="true">{stateWord}</span>
-            <span className="flex-1 max-[960px]:hidden" />
-            {/* On a phone the strip carries the composer too (the polish pass): sending brings Voltage back so the reply is seen. */}
-            <form
-              className="hidden min-w-0 flex-1 items-center gap-1.5 rounded-lg border bg-background py-1 pr-1 pl-3 focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/50 max-[960px]:flex"
-              onSubmit={(e) => {
-                e.preventDefault()
-                const text = railText.trim()
-                if (!text) return
-                setRailText('')
-                showPanel()
-                submitComposer(text)
-              }}
-            >
-              <input
-                className="min-h-9 min-w-0 flex-1 bg-transparent text-base outline-none placeholder:text-muted-foreground pointer-coarse:min-h-11"
-                type="text"
-                aria-label="Ask Voltage"
-                placeholder={placeholder}
-                value={railText}
-                onChange={(e) => setRailText(e.target.value)}
-              />
-              <Button type="submit" size="icon" className="rounded-full" aria-label={sendLabel} title={sendLabel} disabled={railText.trim() === ''}>
-                <ArrowUp aria-hidden="true" />
-              </Button>
-            </form>
-            <Button variant="outline" size="sm" className="hidden max-[960px]:inline-flex" onClick={showPanel}>Open</Button>
-            <Button variant="ghost" size="icon" className="max-[960px]:hidden" onClick={showPanel} aria-label="Show Voltage">
-              <ChevronLeft aria-hidden="true" />
-            </Button>
-          </aside>
-        ) : (
-        <aside ref={panelRef} className="flex min-h-0 flex-[24_1_0%] flex-col rounded-lg border bg-card max-[960px]:min-h-[60dvh] max-[960px]:flex-none" aria-label="Voltage" aria-busy={busy || undefined}>
-          <ChatPanel
+        {/* Voltage: black in both themes. */}
+        <aside className="pane flex min-h-0 w-[400px] shrink-0 flex-col max-[960px]:min-h-[60dvh] max-[960px]:w-auto" aria-label="Voltage" aria-busy={turnBusy || undefined}>
+          <VoltagePane
             messages={messages}
-            projectId={projectId ?? undefined}
-            canSubmit
+            projectId={project.project_id}
+            state={stateWord}
+            busy={turnBusy || readingBusy}
+            need={clarifying}
+            engine={engine}
+            cap={`Turn cap $${mayDo.turn_usd.toFixed(2)}`}
+            question={clarifying ? plan?.question ?? null : null}
+            onAnswer={(o) => void clarify(o)}
             onSubmit={submitComposer}
             inputRef={composerRef}
-            seed={seed}
             placeholder={placeholder}
             sendLabel={sendLabel}
-            cap={`Turn cap $${mayDo.turn_usd.toFixed(2)}`}
-            hint={clarifying ? 'Pick an answer above, or just say "go" and Voltage will use its guess.'
-              : selection && precise ? `Talking about the words at ${clock(selection.start)}.`
-              : (project.statements?.length ?? 0) === 0 ? 'For the whole video: what it should say, a brief, or ask me to look at it and help.'
-              : 'For the whole video: a goal, or a change to the plan. To change one line, click it.'}
-            header={
-              <div className="flex flex-none items-center gap-2.5 border-b px-3.5 py-2.5">
-                <Presence size={16} working={busy} />
-                <div className="flex min-w-0 flex-col">
-                  <h2 className="m-0 text-sm font-semibold tracking-tight">Voltage</h2>
-                  <span className="font-mono text-xs text-muted-foreground" role="status">{stateWord} · {autonomy === 'ask' ? 'Check with me' : 'Just do it'}</span>
-                </div>
-                <span className="flex-1" />
-                <Button variant="ghost" size="sm" onClick={() => setPanelHidden(true)} aria-label="Hide Voltage. Press backslash to show it again">
-                  Hide <kbd className="pointer-events-none inline-flex h-5 min-w-5 items-center justify-center rounded border bg-muted px-1 font-mono text-xs text-muted-foreground" aria-hidden="true">\</kbd>
-                  <ChevronRight aria-hidden="true" />
-                </Button>
+            working={turnBusy ? (turnStep ?? 'Working…') : null}
+            suggestions={firstRead && !readingBusy ? (statements.length > 0 ? EXAMPLES : SILENT_EXAMPLES) : undefined}
+            before={firstRead ? (
+              <div className="flex flex-col gap-3.5" data-testid="first-read">
+                {readingBusy && !reading ? (
+                  <p className="pm m-0 text-[15px]" role="status">Taking the clip in…</p>
+                ) : reading ? (
+                  <p className="m-0 text-[15px] leading-relaxed">{reading.opening}</p>
+                ) : (
+                  <p className="m-0 text-[15px] leading-relaxed">
+                    {statements.length > 0 ? `${statements.length} ${statements.length === 1 ? 'line' : 'lines'} of speech, ${timecode(project.duration)} long. Tell me what the video should say.` : `${timecode(project.duration)} with no speech. Tell me what it should say, or ask me to look at it.`}
+                  </p>
+                )}
+                {sight && (
+                  <div className="flex flex-col gap-2 rounded-lg border border-pline bg-psunk p-3.5" data-testid="sight">
+                    <span className="tag text-pmuted">What I saw</span>
+                    <p className="m-0 text-sm leading-relaxed">{sight.setting} · {sight.mood}{sight.text_on_screen ? ` · on screen: “${sight.text_on_screen}”` : ''}</p>
+                    {placeDraft === null ? (
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="text-sm">The place: <strong>{place}</strong>{sight.place_confirmed ? '' : ` (${sight.confidence})`}</span>
+                        {!sight.place_confirmed && <button type="button" className="btn volt sm" onClick={() => void confirmThePlace(sight.place_guess)}>Looks right</button>}
+                        <button type="button" className="act" onClick={() => setPlaceDraft(place ?? '')}>{sight.place_confirmed ? 'Change it' : 'Correct it'}</button>
+                      </div>
+                    ) : (
+                      <form className="flex flex-wrap items-center gap-2" onSubmit={(e) => { e.preventDefault(); if (placeDraft.trim()) void confirmThePlace(placeDraft.trim()) }}>
+                        <input className="h-8 min-w-0 flex-1 rounded-md border border-pline bg-pane px-2 text-sm text-ptext outline-none focus-visible:border-volt" aria-label="The place" value={placeDraft} autoFocus onChange={(e) => setPlaceDraft(e.target.value)} />
+                        <button type="submit" className="btn volt sm">Keep</button>
+                        <button type="button" className="act" onClick={() => setPlaceDraft(null)}>Cancel</button>
+                      </form>
+                    )}
+                  </div>
+                )}
               </div>
-            }
+            ) : undefined}
+            empty={!firstRead ? <span className="pm">Nothing said yet.</span> : undefined}
           >
-            {!plan && messages.length === 0 && (
-              <ReadingCard
-                project={project}
-                reading={readingBusy ? null : (reading ?? undefined)}
-                speakers={speakers}
-                onName={(label, name) => void changeSpeaker(label, { name })}
-                onPlace={(place) => void confirmThePlace(place)}
-                onExample={(text) => setSeed({ text, id: Date.now() })}
-              />
-            )}
-            {clarifying && plan?.question && (
-              <div className="flex flex-col gap-2.5 rounded-lg border border-primary/50 bg-card p-3.5 shadow-sm" data-testid="clarify">
-                <div className="flex items-center gap-1.5 font-mono text-xs uppercase tracking-wide text-muted-foreground">
-                  <ShieldCheck className="size-3.5 text-ok" aria-hidden="true" />{plan.question.gate ? 'Your go is needed' : 'One question'}
-                </div>
-                <div className="text-chat"><strong>{plan.question.text}</strong></div>
-                <div className="flex flex-wrap gap-1.5">
-                  {plan.question.options.map((o) => (
-                    <Button key={o} variant={o === plan.question?.guess ? 'default' : 'outline'} size="sm" onClick={() => void clarify(o)}>{o}</Button>
-                  ))}
-                </div>
-                <div className="text-sm leading-normal text-muted-foreground" role="status">
-                  {plan.question.gate ? 'Say go, or pick one.' : `${plan.question.guess ? `My guess is ${plan.question.guess}. ` : ''}Pick one, or answer in your own words.`}
+            {shippedNote && (
+              <div className="flex flex-col gap-2 rounded-lg border border-pline bg-psunk p-3.5" role="status" data-testid="shipped">
+                <span className="tag text-pmuted">In the video</span>
+                <span className="text-sm">{shippedNote.count} {shippedNote.count === 1 ? 'line' : 'lines'} went in on this turn{shippedNote.held > 0 ? `; ${shippedNote.held} ${shippedNote.held === 1 ? 'is' : 'are'} proposed and waiting` : ''}. Hear it in the player, or take a line out from its row.</span>
+                <div className="flex flex-wrap items-center gap-2">
+                  <a className="btn volt sm" href={hrefFor({ page: 'export', projectId: project.project_id })}>Export →</a>
+                  {download && <a className="act" href={download.url} download={download.filename}>Download the file</a>}
                 </div>
               </div>
             )}
             {editingLine && !turnBusy && (
-              <div className="text-base leading-relaxed text-muted-foreground">
-                You're on {clock(editingLine.start)}. I'll stay out of the way while you write; Voice it brings the line to me.
-              </div>
+              <p className="pm m-0 text-sm" role="status">You're on {clock(editingLine.start)}. Voltage stays out of the way while you write; Enter brings the line to it.</p>
             )}
-            {plan && editingLine && plan.status === 'done' && !showPlanWhileEditing && (
-              <Button variant="outline" className="h-auto justify-start py-2.5 text-left font-normal text-muted-foreground" onClick={() => setShowPlanWhileEditing(true)}>
-                Earlier: {plan.items.filter((i) => i.status === 'approved').length} changes shipped · Show
-              </Button>
-            )}
-            {plan && plan.status === 'done' && !(editingLine && plan.status === 'done' && !showPlanWhileEditing) && (
-              <ActivityLog plan={plan} />
-            )}
-            {plan && !clarifying && !(editingLine && plan.status === 'done' && !showPlanWhileEditing) && (
-              <PlanCard
-                plan={plan}
-                speakers={speakers}
-                voices={voices}
-                projectId={project.project_id}
-                busy={turnBusy}
-                onAdjust={() => composerRef.current?.focus()}
-                onRedo={(item) => redoTheItem(item)}
-                onVoice={(id) => pickPlanVoice(id)}
-              />
-            )}
-            {turnBusy && (
-              <div className="flex items-center gap-2.5 text-sm text-muted-foreground" role="status" data-testid="turn-working">
-                <Loader2 className="size-4 shrink-0 animate-spin" aria-hidden="true" />
-                <span>{turnStep ?? 'Working…'}</span>
-              </div>
-            )}
-          </ChatPanel>
+          </VoltagePane>
         </aside>
-        )}
       </div>
-      <VoicesSheet
-        open={voicesOpen}
-        voices={myVoices}
-        onUpload={async (name, file) => { await uploadMyVoice(name, file); takeInVoices(await listVoices()) }}
-        onDelete={async (id) => { await deleteMyVoice(id); takeInVoices(await listVoices()) }}
-        onClose={() => setVoicesOpen(false)}
-      />
       {consentAsk && (
         <ConsentSheet who={consentAsk.who} busy={consenting} onConfirm={() => void confirmConsent()} onCancel={() => setConsentAsk(null)} />
-      )}
-      {shipped && (
-        <ShipSheet
-          shipped={shipped}
-          busy={varianting}
-          onVariant={() => void makeVariant()}
-          onUndo={(item) => {
-            if (!item.edit_id) return
-            void revert(item.edit_id)
-            setShipped((sh) => (sh ? { ...sh, items: sh.items.filter((i) => i.item_id !== item.item_id), held: sh.held + 1 } : sh))
-          }}
-          onClose={() => setShipped(null)}
-        />
       )}
     </div>
   )

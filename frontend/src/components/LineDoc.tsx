@@ -6,14 +6,11 @@ import type {
 } from '../types'
 import { diffWords, lineAfter, trackedChanges } from '../transcript/changes'
 import { clock } from '../transcript/format'
-import { speakerSlot } from '../transcript/speakers'
 import { verdict } from '../transcript/verdict'
 import { takeFacts } from '../transcript/facts'
 import { parseTime, timecode } from '../transcript/time'
-import { Avatar } from './Avatar'
 import { PlaceEditor } from './PlaceEditor'
-import { GripVertical, Loader2, Play } from 'lucide-react'
-import { Badge } from '@/components/ui/badge'
+import { GripVertical, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
@@ -101,52 +98,52 @@ const overlaps = (a: { start: number; end: number }, b: { start: number; end: nu
   a.start < b.end && b.start < a.end
 
 const STATUS: Record<string, string> = {
-  reading: 'Reading', planned: 'Planned', working: 'Voicing…', ready: 'Proposed', 'needs-you': 'Needs you', failed: "Couldn't voice it",
-  kept: 'Added', removed: 'Removed',
+  reading: 'Reading', planned: 'Planned', working: 'Voicing…', ready: 'Proposed', 'needs-you': 'Waiting on you', failed: "Couldn't voice it",
+  kept: '✓ In the video', removed: 'Removed',
 }
-/** A row's state is a quiet badge, tinted only where it means something: changed, needs you, kept. */
+/** A row's state is a stamp (Volt): volt for a proposal, amber for a step waiting on you, an outline for what is in the video. */
 const TONE: Record<string, string> = {
-  reading: 'bg-changed-soft text-changed', planned: 'bg-secondary text-muted-foreground', working: 'bg-secondary text-muted-foreground',
-  ready: 'bg-changed-soft text-changed', 'needs-you': 'bg-needs-soft text-needs', failed: 'bg-needs-soft text-needs',
-  kept: 'bg-ok-soft text-ok', removed: 'bg-secondary text-muted-foreground',
+  reading: '', planned: 'in', working: 'in', ready: '', 'needs-you': 'need', failed: 'need', kept: 'in', removed: 'in',
 }
-const INS = 'rounded-sm bg-changed-soft px-1 text-changed no-underline'
-const DEL = 'text-muted-foreground line-through decoration-needs decoration-[1.5px]'
-const hint = 'text-sm text-muted-foreground'
+const INS = ''
+const DEL = ''
+const hint = 'meta'
 const faint = 'text-sm text-muted-foreground'
-const actionBtn = 'whitespace-nowrap'
 // UX-9: every audio line is a card. A proposal wears the accent border; an
 // added line a quiet one; a removed line fades until hovered.
+// Volt: the transcript row from the mocks — a grip, the time, the body. A
+// proposal is `.prop` (ink border, offset shadow); a line waiting on you is
+// dashed; a line as shot shows its actions on hover.
 const rowClass = [
-  // The words own the width: the state and the verbs run under them (UX-9's 35% pane left them a few characters wide beside the buttons).
-  'group/row relative grid min-h-11 grid-cols-[24px_44px_24px_minmax(0,1fr)] items-start gap-x-3 gap-y-2 rounded-lg border bg-card px-2.5 py-3 shadow-xs outline-none transition-colors',
+  'group/row relative grid min-h-11 grid-cols-[24px_76px_minmax(0,1fr)] items-start gap-x-3 gap-y-2 rounded-[10px] px-3.5 py-3 outline-none transition-colors',
   'focus-visible:ring-[3px] focus-visible:ring-ring/50',
-  'data-[selected=true]:border-primary/60',
-  'data-[state=reading]:bg-changed-soft data-[state=ready]:border-primary data-[state=ready]:shadow-sm data-[state=needs-you]:border-needs data-[state=failed]:border-needs',
-  'data-[state=kept]:border-ok/50 data-[state=moved]:border-ok/50 data-[state=removed]:opacity-75 data-[state=removed]:hover:opacity-100 data-[state=adding]:border-dashed',
+  'data-[selected=true]:bg-sunk data-[state=reading]:bg-sunk hover:bg-sunk',
+  'data-[state=ready]:prop data-[state=ready]:my-1.5 data-[state=ready]:hover:bg-card data-[state=needs-you]:waiting data-[state=failed]:waiting',
+  'data-[state=removed]:opacity-75 data-[state=removed]:hover:opacity-100 data-[state=adding]:border-[1.5px] data-[state=adding]:border-dashed data-[state=adding]:border-foreground',
   'data-[dragging]:opacity-50',
 ].join(' ')
-const timeClass = 'tnum -my-2.5 flex min-h-11 items-center rounded-md text-left text-xs text-muted-foreground outline-none hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50 group-data-[current=true]/row:font-semibold group-data-[current=true]/row:text-primary'
+const timeClass = 'tnum flex min-h-6 items-start pt-[3px] rounded-md text-left text-xs text-faint outline-none hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50 group-data-[current=true]/row:font-semibold group-data-[current=true]/row:text-foreground'
 const gripClass = [
   'relative -my-2.5 inline-flex h-11 w-6 cursor-grab touch-none select-none items-center justify-center rounded-md border border-transparent p-0 text-muted-foreground opacity-60 outline-none transition-opacity',
   'before:absolute before:inset-y-0 before:-inset-x-2.5 hover:bg-accent hover:text-foreground focus-visible:opacity-100 focus-visible:ring-[3px] focus-visible:ring-ring/50 active:cursor-grabbing',
   'group-hover/row:opacity-100 group-focus-within/row:opacity-100 max-[960px]:opacity-100',
 ].join(' ')
-const lineClass = 'block min-h-0 w-full cursor-pointer rounded-sm p-0 text-left text-base leading-normal text-foreground outline-none hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50'
-const sideClass = 'col-start-4 flex min-h-[22px] flex-row flex-wrap items-center justify-start gap-1.5 empty:hidden'
-const metaClass = 'text-sm text-muted-foreground'
+const lineClass = 'say block min-h-0 w-full cursor-pointer rounded-sm p-0 text-left text-foreground outline-none hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50'
+const metaClass = 'meta'
 const unfold = 'grid grid-rows-[1fr] empty:hidden *:min-h-0 ' + riseClass
-const kbd = 'tnum mx-px inline-block min-w-[18px] rounded-sm border border-b-2 bg-muted px-1 text-center text-xs text-muted-foreground'
-const factLabel = 'block font-mono text-xs uppercase tracking-wide text-muted-foreground'
+const kbd = 'kbd mx-px'
+// A line as shot shows its actions on hover or focus (quiet `.act`s); on touch the "…" button opens them.
 const actionsClass = [
-  'absolute right-2.5 top-1.5 z-10 flex flex-wrap justify-end gap-1 rounded-lg border bg-popover p-1 shadow-md transition-opacity',
-  '[clip-path:inset(0_0_0_100%)] opacity-0 group-hover/row:opacity-100 group-hover/row:[clip-path:inset(0)] group-focus-within/row:opacity-100 group-focus-within/row:[clip-path:inset(0)] group-data-[actions-open]/row:opacity-100 group-data-[actions-open]/row:[clip-path:inset(0)]',
-  // No hover: the actions live under the line, opened by the "…" button.
-  '[@media(hover:none)]:static [@media(hover:none)]:hidden [@media(hover:none)]:justify-start [@media(hover:none)]:border-0 [@media(hover:none)]:bg-transparent [@media(hover:none)]:p-0 [@media(hover:none)]:shadow-none [@media(hover:none)]:opacity-100 [@media(hover:none)]:[clip-path:none] group-data-[actions-open]/row:[@media(hover:none)]:flex',
+  'flex flex-wrap items-center gap-0.5 -ml-2 transition-opacity',
+  'opacity-0 group-hover/row:opacity-100 group-focus-within/row:opacity-100 group-data-[actions-open]/row:opacity-100',
+  '[@media(hover:none)]:hidden group-data-[actions-open]/row:[@media(hover:none)]:flex [@media(hover:none)]:opacity-100',
 ].join(' ')
 const StatusBadge = ({ status, children, role }: { status: string; children: ReactNode; role?: 'status' }) => (
-  <Badge variant="secondary" className={cn('px-2.5', TONE[status])} role={role}>{children}</Badge>
+  <span className={cn('stamp', TONE[status])} role={role} data-status={status}>{children}</span>
 )
+const KBD = ({ k }: { k: string }) => <span className="kbd ml-0.5" aria-hidden="true">{k}</span>
+const PlayGlyph = () => <svg width="12" height="12" viewBox="0 0 16 16" aria-hidden="true"><path d="M4.5 2.5v11l9-5.5z" fill="currentColor" /></svg>
+const BoltGlyph = () => <svg width="13" height="13" viewBox="0 0 16 16" aria-hidden="true"><path d="M9 1.5 3.5 9H8l-1 5.5L12.5 7H8z" fill="currentColor" /></svg>
 const DELIVERIES = ['warmer', 'more excited', 'calmer', 'slower', 'firmer']
 const MIX_NOTE: Record<string, string | null> = {
   replace: null, layer: 'plays over the picture', over: 'plays over the picture', concatenate: 'the picture makes room while it plays', remove: null,
@@ -154,7 +151,6 @@ const MIX_NOTE: Record<string, string | null> = {
 const voiceLabel = (v: Voice) => (v.category === 'mine' ? `${v.name} (yours)` : v.gender ? `${v.name} (${v.gender})` : v.name)
 
 const Spinner = () => <Loader2 size={16} aria-hidden="true" className="shrink-0 animate-spin text-changed" />
-const PlayIcon = () => <Play size={14} aria-hidden="true" fill="currentColor" />
 
 /** The transcript as the working surface: every line carries its own state,
  *  actions, editor and takes. Nothing about a line happens anywhere else. */
@@ -183,8 +179,9 @@ export function LineDoc({
   const [placingAnother, setPlacingAnother] = useState(false)
   // The control whose request is on its way: it waits, and says so (UX-6).
   const [pending, setPending] = useState<string | null>(null)
-  // UX-9: the transcript filtered to one speaker's lines (null = everyone).
-  const [speakerFilter, setSpeakerFilter] = useState<string | null>(null)
+  // Volt: depth on demand — the proposal opened in place (its item id), and which runs of untouched lines are unfolded.
+  const [expanded, setExpanded] = useState<string | null>(null)
+  const [unfolded, setUnfolded] = useState<Set<number>>(() => new Set())
   const run = async (id: string, fn: () => void | Promise<unknown>) => {
     setPending(id)
     try { await fn() } finally { setPending((p) => (p === id ? null : p)) }
@@ -542,53 +539,43 @@ export function LineDoc({
     )
   }
 
-  /** A proposal's facts (20e, opened up in UX-9): whose voice and the verdict
-   *  in words; the delivery chips (a chip asks Voltage for the take again,
-   *  said that way); the direction Voltage wrote; the facts grid — voice and
-   *  model, dials, fit, picture — and the measured line, each score against
-   *  what it wants; where it starts; its level. */
+  /** The four verbs on a proposal (20e, Volt): Hear it, Add it, Edit it (opens the depth), Discard. */
+  const verbs = (item: PlanItem, c: Candidate, order: number, mode: 'edit' | 'layer', inDepth = false) => (
+    <span className="flex flex-wrap items-center gap-2" role="group" aria-label={`Proposal at ${clock(c.plan.selection.start)}`}>
+      <button type="button" className={cn('btn sm', playing === c.candidate_id && 'ink')} aria-pressed={playing === c.candidate_id} onClick={() => onHearTake(item, c)}>
+        <PlayGlyph />{playing === c.candidate_id ? 'Stop' : 'Hear it'}<KBD k="␣" />
+      </button>
+      <button type="button" className="btn volt sm" onClick={() => void run(`add-${item.item_id}`, () => onAdd(item))} disabled={disabled || pending !== null} aria-busy={pending === `add-${item.item_id}` || undefined}>
+        <BoltGlyph />{pending === `add-${item.item_id}` ? 'Adding…' : item.mix === 'remove' ? 'Remove it' : 'Add it'}<KBD k="K" />
+      </button>
+      {inDepth && item.mix !== 'remove' && onDelivery && (
+        <button type="button" className="btn sm" onClick={() => void run(`again-${item.item_id}`, () => onDelivery(item, (item.delivery ?? c.plan.delivery ?? 'the same way')))} disabled={disabled || pending !== null}>
+          {pending === `again-${item.item_id}` ? 'Asking…' : 'Voice it again'}
+        </button>
+      )}
+      {!inDepth && item.mix !== 'remove' && <button type="button" className="act" onClick={() => setExpanded(item.item_id)}>Edit it</button>}
+      {inDepth && item.mix !== 'remove' && <button type="button" className="act" onClick={() => open(order, mode)}>Change the words</button>}
+      <button type="button" className="act" onClick={() => void run(`discard-${item.item_id}`, () => onDiscard(item))} disabled={disabled || pending !== null} aria-busy={pending === `discard-${item.item_id}` || undefined}>
+        {pending === `discard-${item.item_id}` ? 'Discarding…' : 'Discard'}
+      </button>
+      {inDepth && <><span className="flex-1" /><button type="button" className="act" onClick={() => setExpanded(null)}><span className="tag">Less ↑</span></button></>}
+    </span>
+  )
+
+  /** A proposal's one line of facts (Volt): whose voice · the verdict · what the picture does. */
   const takeMeta = (item: PlanItem, c: Candidate, speaker: string | null | undefined) => {
     const v = verdict(c, name(speaker))
     const voice = voices.find((x) => x.voice_id === c.plan.voice_profile_id)?.name
-    const held = item.mix === 'over' && c.plan.mix === 'concatenate'
     const facts = takeFacts(c, voice)
-    const current = (item.delivery ?? c.plan.delivery ?? '').toLowerCase()
+    const picture = facts.grid.find((f) => f.label === 'Picture')?.value
+    const held = item.mix === 'over' && c.plan.mix === 'concatenate'
     return (
-      <div className="flex flex-col gap-2" data-testid="take">
+      <div className="flex flex-col gap-1.5" data-testid="take">
         <div className={cn(metaClass, !v.passed && 'text-needs')}>
-          {voice ? `${voice}'s voice · ` : ''}{v.text}{held ? ' Held the picture: no room to play over it.' : ''}
+          {voice ? `${voice}'s voice` : 'The default voice'} · {v.text}
+          {picture && picture !== 'as shot' ? ` The picture ${picture}.` : ''}{held ? ' Held the picture: no room to play over it.' : ''}
           {!v.passed && ' Add it anyway if it sounds right to you.'}
         </div>
-        {onDelivery && item.mix !== 'remove' && (
-          <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="Said again">
-            {DELIVERIES.map((d) => (
-              <Chip key={d} on={current === d} className="h-7 px-2.5 text-xs" disabled={disabled || pending !== null}
-                onClick={() => { if (current !== d) void run(`delivery-${item.item_id}`, () => onDelivery(item, d)) }}>
-                {d.charAt(0).toUpperCase() + d.slice(1)}
-              </Chip>
-            ))}
-            {pending === `delivery-${item.item_id}` && <span className={cn(metaClass, 'text-xs')} role="status">Asking Voltage…</span>}
-          </div>
-        )}
-        {item.reason && <div className={cn(metaClass, 'text-xs')}><span className={factLabel}>Direction</span>{item.reason}</div>}
-        <dl className="m-0 grid grid-cols-2 gap-x-4 gap-y-1.5 rounded-md bg-muted/60 p-2.5 sm:grid-cols-4" data-testid="facts">
-          {facts.grid.map((f) => (
-            <div key={f.label} className="min-w-0">
-              <dt className={factLabel}>{f.label}</dt>
-              <dd className="m-0 truncate text-sm" title={f.value}>{f.value}</dd>
-            </div>
-          ))}
-        </dl>
-        {(facts.measured.length > 0 || facts.flagged) && (
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 font-mono text-xs" data-testid="measured">
-            {facts.measured.map((f) => (
-              <span key={f.label} className={cn('flex items-center gap-1.5', f.tone === 'needs' ? 'text-needs' : 'text-ok')}>
-                <span className={cn('size-1.5 rounded-full', f.tone === 'needs' ? 'bg-needs' : 'bg-ok')} aria-hidden="true" />{f.value}
-              </span>
-            ))}
-            {facts.flagged && <span className="text-needs">Flagged: {facts.flagged}</span>}
-          </div>
-        )}
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
           {onMove && placeControl(c.candidate_id, c.plan.selection.start, c.audio.duration, (t) => onMove(item, c, t))}
           {isAdd(item) && levelControl(c.plan.level_db, { candidate: c, item })}
@@ -597,23 +584,74 @@ export function LineDoc({
     )
   }
 
-  /** The four verbs on a proposal (20e): Hear it, Add it, Edit it, Discard. */
-  const verbs = (item: PlanItem, c: Candidate, order: number, mode: 'edit' | 'layer') => (
-    <span className="flex flex-wrap items-center justify-end gap-1.5" role="group" aria-label={`Proposal at ${clock(c.plan.selection.start)}`}>
-      <Button
-        variant={playing === c.candidate_id ? 'default' : 'outline'} size="sm" className={actionBtn}
-        aria-pressed={playing === c.candidate_id}
-        onClick={() => onHearTake(item, c)}
-      ><PlayIcon />{playing === c.candidate_id ? 'Stop' : 'Hear it'}</Button>
-      <Button size="sm" className={actionBtn} onClick={() => void run(`add-${item.item_id}`, () => onAdd(item))} disabled={disabled || pending !== null} aria-busy={pending === `add-${item.item_id}` || undefined}>
-        {pending === `add-${item.item_id}` ? 'Adding…' : item.mix === 'remove' ? 'Remove it' : 'Add it'}
-      </Button>
-      {item.mix !== 'remove' && <Button variant="outline" size="sm" className={actionBtn} onClick={() => open(order, mode)}>Edit it</Button>}
-      <Button variant="ghost" size="sm" className={cn(actionBtn, 'text-muted-foreground')} onClick={() => void run(`discard-${item.item_id}`, () => onDiscard(item))} disabled={disabled || pending !== null} aria-busy={pending === `discard-${item.item_id}` || undefined}>
-        {pending === `discard-${item.item_id}` ? 'Discarding…' : 'Discard'}
-      </Button>
-    </span>
-  )
+  /** Depth on demand (Volt): the proposal opened in place — Before/After, the
+   *  delivery pills, Voltage's direction, the facts, the measured meters. */
+  const depth = (item: PlanItem, c: Candidate, s: Statement, order: number, mode: 'edit' | 'layer') => {
+    const voice = voices.find((x) => x.voice_id === c.plan.voice_profile_id)?.name
+    const facts = takeFacts(c, voice)
+    const current = (item.delivery ?? c.plan.delivery ?? '').toLowerCase()
+    const fact = (label: string) => facts.grid.find((f) => f.label === label)?.value ?? '—'
+    const before = item.mix === 'replace' ? standing(s) : null
+    return (
+      <div className="flex flex-col gap-4.5" data-testid="depth">
+        {before !== null ? (
+          <div className="grid grid-cols-[64px_minmax(0,1fr)] items-baseline gap-x-3 gap-y-2">
+            <span className="who">Before</span><span className="say text-muted-foreground"><del>{before}</del></span>
+            <span className="who">After</span><span className="say disp text-[22px] font-semibold"><ins>{item.new_text}</ins></span>
+          </div>
+        ) : (
+          <div className="say disp text-[22px] font-semibold"><ins>{item.new_text}</ins></div>
+        )}
+        <div className="flex flex-col gap-2">
+          <span className="tag text-faint">Delivery</span>
+          <div className="flex flex-wrap gap-1.5" role="group" aria-label="Said again">
+            {['as spoken', ...DELIVERIES].map((d) => (
+              <button key={d} type="button" className="pill" aria-pressed={d === 'as spoken' ? current === '' || current === 'as spoken' : current === d} disabled={disabled || pending !== null || !onDelivery}
+                onClick={() => { if (onDelivery && (d === 'as spoken' ? current !== '' && current !== 'as spoken' : current !== d)) void run(`delivery-${item.item_id}`, () => onDelivery(item, d)) }}>
+                {d.charAt(0).toUpperCase() + d.slice(1)}
+              </button>
+            ))}
+            <button type="button" className="pill" onClick={() => open(order, mode, true)}>Your words…</button>
+            {pending === `delivery-${item.item_id}` && <span className={cn(metaClass, 'text-xs')} role="status">Asking Voltage…</span>}
+          </div>
+          {item.reason && <p className="m-0 text-sm text-muted-foreground"><span className="tag text-foreground">Voltage's direction ›</span> “{item.reason}”</p>}
+        </div>
+        <dl className="m-0 grid grid-cols-2 gap-3.5 border-y-[1.5px] border-line py-3.5 sm:grid-cols-4" data-testid="facts">
+          {([['Voice', voice ?? 'the default'], ['Model', fact('Voice').split(' · ')[1] ?? 'default'], ['Dials', fact('Dials')], ['Fit', `${fact('Fit')} · picture ${fact('Picture')}`]] as const).map(([k, v]) => (
+            <div key={k} className="flex min-w-0 flex-col gap-0.5"><dt className="tag text-faint">{k}</dt><dd className={cn('m-0 truncate text-sm', k !== 'Voice' && 'tnum')} title={v}>{v}</dd></div>
+          ))}
+        </dl>
+        <div className="flex flex-col gap-2.5">
+          <span className="tag text-faint">Measured</span>
+          {facts.measured.length > 0 ? (
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4" data-testid="measured">
+              {facts.measured.map((f) => {
+                const [, num] = /([\d.]+) · wants ([\d.]+)/.exec(f.value) ?? []
+                const [, , wants] = /([\d.]+) · wants ([\d.]+)/.exec(f.value) ?? []
+                const n = Number(num), w = Number(wants)
+                const pct = f.label === 'UTMOS' ? Math.min(100, (n / 5) * 100) : Math.min(100, n * 100)
+                return (
+                  <div key={f.label} className="flex flex-col gap-1 rounded-lg border-[1.5px] border-line2 bg-card p-3">
+                    <span className="tag text-faint">{f.label === 'SIM-o' ? 'Voice match' : f.label === 'UTMOS' ? 'Natural' : f.label}</span>
+                    <span className="disp text-2xl font-bold">{num}</span>
+                    <div className="meter"><span style={{ width: `${pct}%`, background: f.tone === 'needs' ? 'var(--warn)' : undefined }} /></div>
+                    <span className="tnum text-xs text-muted-foreground">bar {wants} · {n >= w ? 'pass' : 'below'}</span>
+                  </div>
+                )
+              })}
+            </div>
+          ) : <span className="tag text-faint">Not measured yet</span>}
+          <span className="tag text-faint">Lip-sync · not measured yet</span>
+          {facts.flagged && <span className="meta text-needs">Flagged: {facts.flagged}</span>}
+        </div>
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+          {onMove && placeControl(c.candidate_id, c.plan.selection.start, c.audio.duration, (t) => onMove(item, c, t))}
+          {isAdd(item) && levelControl(c.plan.level_db, { candidate: c, item })}
+        </div>
+        {verbs(item, c, order, mode, true)}
+      </div>
+    )
+  }
 
   /** What stands under a line while Voltage is on it. */
   const lineBlock = (item: PlanItem | null, speaker: string | null | undefined) => {
@@ -714,6 +752,34 @@ export function LineDoc({
     return next ? Math.round(next.end * 100) / 100 : null
   }
 
+  // Volt: long runs of untouched lines fold to "+ N more lines" once the
+  // transcript has anything proposed or in the video, so what changed stands
+  // out. The current, selected, focused or edited line never folds; a drag
+  // keeps every row in place.
+  const isPlain = (r: Row, order: number) => r.kind === 'line'
+    && !ownItem(r.s) && ownRevisions(r.s).length === 0
+    && !pendingLines.some((p) => overlaps(p.selection, r.s))
+    && !(currentTime >= r.s.start && currentTime < r.s.end)
+    && !(selection && overlaps(selection, r.s))
+    && focusedRow !== order && editing?.order !== order && actionsOpen !== order
+  const folds = (() => {
+    const hidden = new Set<number>()
+    const after = new Map<number, number>()   // the order a "+ N more lines" button follows → N
+    if (drag || rows.length <= 8 || !rows.some((r, o) => !isPlain(r, o))) return { hidden, after }
+    let start = -1
+    const close = (end: number) => {
+      const n = end - start
+      if (start >= 0 && n > 3 && !unfolded.has(start)) { for (let o = start + 1; o < end; o++) hidden.add(o); after.set(start, n - 1) }
+      start = -1
+    }
+    rows.forEach((r, o) => { if (isPlain(r, o)) { if (start < 0) start = o } else close(o) })
+    close(rows.length)
+    return { hidden, after }
+  })()
+  const reveal = (order: number) => {
+    for (const [start, n] of folds.after) if (order > start && order <= start + n) setUnfolded((u) => new Set(u).add(start))
+  }
+
   /** The keyboard and focus wiring every row shares. */
   const rowProps = (order: number, key: string, label: string, end: number) => ({
     id: `line-${order}`,
@@ -723,10 +789,43 @@ export function LineDoc({
     tabIndex: 0,
     role: 'listitem' as const,
     'aria-label': label,
-    onKeyDown: (e: React.KeyboardEvent<HTMLDivElement>) => onRowKey(e, order),
+    onKeyDown: (e: React.KeyboardEvent<HTMLDivElement>) => {
+      if (e.target === e.currentTarget && (e.key === 'ArrowDown' || e.key === 'ArrowUp' || e.key === 'j')) {
+        const to = e.key === 'ArrowUp' ? order - 1 : order + 1
+        if (folds.hidden.has(to)) {
+          e.preventDefault()
+          reveal(to)
+          window.setTimeout(() => document.getElementById(`line-${to}`)?.focus(), 0)
+          return
+        }
+      }
+      onRowKey(e, order)
+    },
     onFocus: (e: React.FocusEvent<HTMLDivElement>) => { if (e.target === e.currentTarget) setFocusedRow(order) },
     onBlur: (e: React.FocusEvent<HTMLDivElement>) => { if (e.target === e.currentTarget) setFocusedRow((f) => (f === order ? null : f)) },
   })
+
+  /** The row's first line: who says it, and where it stands. */
+  const whoLine = (who: ReactNode, stamp: ReactNode) => (who || stamp) ? (
+    <div className="flex flex-wrap items-center gap-2.5">{who && <span className="who">{who}</span>}{stamp}</div>
+  ) : null
+
+  /** The quiet verbs under a line that is in the video: Hear it, Take it out, Edit it. */
+  const keptActs = (s: Statement, editId: string, order: number, mode: 'edit' | 'layer', at: number) => (
+    <span className="-ml-2 flex flex-wrap items-center gap-0.5" role="group" aria-label={`Added line at ${clock(at)}`}>
+      <button type="button" className="act" onClick={() => onSeek(s)}><PlayGlyph />Hear it</button>
+      <button type="button" className="act" onClick={() => onUndo(editId)}>Take it out</button>
+      <button type="button" className="act" onClick={() => open(order, mode)}>Edit it</button>
+    </span>
+  )
+
+  const foldButton = (order: number) => folds.after.has(order) && (
+    <div className="pl-[112px]" role="listitem" key={`fold-${order}`}>
+      <button type="button" className="act -ml-2" onClick={() => setUnfolded((u) => new Set(u).add(order))}>
+        <span className="tag">+ {folds.after.get(order)} more lines</span>
+      </button>
+    </div>
+  )
 
   /** A line's words where they now play, after a shift: its own row, with
    *  where it came from, Undo, Move, and a grip to drag it again. */
@@ -742,20 +841,15 @@ export function LineDoc({
             {rev.edit_id && onMoveKept && gripButton(key, `edit-${rev.edit_id}`, s.text, rev.start, Math.max(0.05, rev.end - rev.start), (t) => onMoveKept(rev.edit_id!, t))}
           </span>
           <button className={timeClass} onClick={() => onSeek({ ...s, start: rev.start, end: rev.end })} aria-label={`Go to ${clock(rev.start)}`}>{clock(rev.start)}</button>
-          <span className="flex justify-center pt-px">{label && <Avatar name={label} slot={speakerSlot(speakers, s.speaker)} />}</span>
-          <div className="min-w-0">
-            <div className="flex flex-col gap-1.5">
-              <span className="block text-base leading-normal">{s.text}</span>
-              <div className={metaClass}>
-                Moved from {clock(from.start)}, as spoken, over the sound here.
-                {rev.edit_id && <> <LinkButton onClick={() => onUndo(rev.edit_id!)}>Undo</LinkButton></>}
-              </div>
-              {rev.edit_id && onMoveKept && placeControl(`edit-${rev.edit_id}`, rev.start, Math.max(0.05, rev.end - rev.start), (t) => onMoveKept(rev.edit_id!, t))}
+          <div className="flex min-w-0 flex-col gap-1.5">
+            {whoLine(label, <StatusBadge status="kept">Moved</StatusBadge>)}
+            <span className="say">{s.text}</span>
+            <div className={metaClass}>
+              Moved from {clock(from.start)}, as spoken, over the sound here.
+              {rev.edit_id && <> <LinkButton onClick={() => onUndo(rev.edit_id!)}>Undo</LinkButton></>}
             </div>
+            {rev.edit_id && onMoveKept && placeControl(`edit-${rev.edit_id}`, rev.start, Math.max(0.05, rev.end - rev.start), (t) => onMoveKept(rev.edit_id!, t))}
           </div>
-          <span className={sideClass}>
-            <StatusBadge status="kept">Moved</StatusBadge>
-          </span>
         </div>
       </Fragment>
     )
@@ -769,6 +863,7 @@ export function LineDoc({
     const s = rowStatement(entry)
     const isEditing = editing?.order === order && editing.mode === 'layer'
     const others = rows.filter((r) => r !== entry && r.kind !== 'moved' && overlaps(r, entry)).length
+    const voice = voices.find((v) => v.voice_id === rev.voice_profile_id)?.name
     return (
       <Fragment key={key}>
         {drag && dropIndexFor(drag.to) === order && dropMarker()}
@@ -777,29 +872,20 @@ export function LineDoc({
             {!isEditing && rev.edit_id && onMoveKept && gripButton(key, `edit-${rev.edit_id}`, rev.text, rev.start, Math.max(0.05, rev.end - rev.start), (t) => onMoveKept(rev.edit_id!, t))}
           </span>
           <button className={timeClass} onClick={() => onSeek(s)} aria-label={`Go to ${clock(rev.start)}`}>{clock(rev.start)}</button>
-          <span />
-          <div className="min-w-0">
+          <div className="flex min-w-0 flex-col gap-1.5">
+            {whoLine(<>+ New line{rev.speaker && name(rev.speaker) ? ` · ${name(rev.speaker)}` : ''}</>, <StatusBadge status="kept" role="status">{STATUS.kept}</StatusBadge>)}
             {isEditing ? <div className={unfold}>{editor(s, 'layer')}</div> : (
-              <div className="flex flex-col gap-1.5">
-                <span className="block text-base leading-normal"><ins className={INS}>{rev.text}</ins></span>
-                <div className={metaClass}>In the video · {MIX_NOTE[rev.mix] ?? 'plays over the picture'}{others > 0 ? ` · with ${others} other ${others === 1 ? 'line' : 'lines'} at this moment` : ''}.</div>
-                <div className={cn(metaClass, 'flex flex-wrap items-center gap-x-3 gap-y-1')}>
+              <>
+                <span className="say">{rev.text}</span>
+                <div className={metaClass}>{(MIX_NOTE[rev.mix] ?? 'Over the picture').replace(/^./, (ch) => ch.toUpperCase())}{voice ? ` · ${voice}'s voice` : ''}{others > 0 ? ` · with ${others} other ${others === 1 ? 'line' : 'lines'} at this moment` : ''}</div>
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1 empty:hidden">
                   {rev.edit_id && onMoveKept && placeControl(`edit-${rev.edit_id}`, rev.start, Math.max(0.05, rev.end - rev.start), (t) => onMoveKept(rev.edit_id!, t))}
                   {rev.edit_id && levelControl(rev.level_db, { editId: rev.edit_id })}
                 </div>
-              </div>
+                {rev.edit_id && keptActs(s, rev.edit_id, order, 'layer', rev.start)}
+              </>
             )}
           </div>
-          <span className={sideClass}>
-            <StatusBadge status="kept" role="status">Added</StatusBadge>
-            {!isEditing && rev.edit_id && (
-              <span className="flex flex-wrap items-center justify-end gap-1.5" role="group" aria-label={`Added line at ${clock(rev.start)}`}>
-                <Button variant="outline" size="sm" className={actionBtn} onClick={() => onSeek(s)}><PlayIcon />Hear it</Button>
-                <Button variant="outline" size="sm" className={actionBtn} onClick={() => onUndo(rev.edit_id!)}>Take it out</Button>
-                <Button variant="outline" size="sm" className={actionBtn} onClick={() => open(order, 'layer')}>Edit it</Button>
-              </span>
-            )}
-          </span>
         </div>
       </Fragment>
     )
@@ -815,34 +901,32 @@ export function LineDoc({
     const c = item.candidate
     const status = STATUS[item.status] ? item.status : null
     const after = statements.filter((st) => st.end <= entry.start + 0.001).at(-1)
+    const inDepth = expanded === item.item_id && item.status === 'ready' && !!c
     return (
       <Fragment key={key}>
         {drag && dropIndexFor(drag.to) === order && dropMarker()}
-        <div className={rowClass} data-state={status ?? undefined} data-current={currentTime >= entry.start && currentTime < entry.end} {...rowProps(order, key, `Proposed line at ${clock(entry.start)}`, entry.end)}>
+        <div className={rowClass} data-state={status ?? undefined} data-current={currentTime >= entry.start && currentTime < entry.end} data-depth={inDepth || undefined} {...rowProps(order, key, `Proposed line at ${clock(entry.start)}`, entry.end)}>
           <span className="flex items-start">
             {!isEditing && c && onMove && gripButton(key, c.candidate_id, item.new_text, c.plan.selection.start, c.audio.duration, (t) => onMove(item, c, t))}
           </span>
           <button className={timeClass} onClick={() => onSeek(s)} aria-label={`Go to ${clock(entry.start)}`}>{clock(entry.start)}</button>
-          <span />
-          <div className="min-w-0">
-            {isEditing ? <div className={unfold}>{editor(s, 'layer')}</div> : (
-              <div className="flex flex-col gap-1.5">
-                <span className="block text-base leading-normal"><ins className={INS}>{item.new_text}</ins></span>
+          <div className={cn('flex min-w-0 flex-col', item.status === 'ready' ? 'gap-2.5' : 'gap-1.5')}>
+            {whoLine(<>+ New line{item.speaker && name(item.speaker) ? ` · ${name(item.speaker)}` : ''}</>, status && <StatusBadge status={status} role="status">{STATUS[status]}</StatusBadge>)}
+            {isEditing ? <div className={unfold}>{editor(s, 'layer')}</div> : inDepth ? depth(item, c!, s, order, 'layer') : (
+              <>
+                <span className={cn('say', item.status === 'ready' && 'text-lg')}><ins>{item.new_text}</ins></span>
                 <div className={metaClass}>
-                  {after && statements.length > 0 ? `New line after ${clock(after.start)}` : 'New line'} · {item.mix === 'concatenate' ? 'the picture makes room' : 'plays over the picture'}
+                  {after && statements.length > 0 ? `New line after ${clock(after.start)}` : 'New line'} · {item.mix === 'concatenate' ? 'the picture makes room' : 'over the picture'}
                 </div>
                 {item.note && <div className={cn(metaClass, 'text-needs')}>{item.note}</div>}
                 <div className={unfold}>{lineBlock(item, item.speaker)}</div>
-              </div>
+                {item.status === 'ready' && c && verbs(item, c, order, 'layer')}
+                {(item.status === 'needs-you' || item.status === 'failed' || item.status === 'planned') && (
+                  <span className="-ml-2 flex"><button type="button" className="act" onClick={() => void run(`discard-${item.item_id}`, () => onDiscard(item))} disabled={disabled || pending !== null}>Discard</button></span>
+                )}
+              </>
             )}
           </div>
-          <span className={sideClass}>
-            {status && <StatusBadge status={status} role="status">{STATUS[status]}</StatusBadge>}
-            {!isEditing && item.status === 'ready' && c && verbs(item, c, order, 'layer')}
-            {!isEditing && (item.status === 'needs-you' || item.status === 'failed' || item.status === 'planned') && (
-              <Button variant="ghost" size="sm" className={cn(actionBtn, 'text-muted-foreground')} onClick={() => void run(`discard-${item.item_id}`, () => onDiscard(item))} disabled={disabled || pending !== null}>Discard</Button>
-            )}
-          </span>
         </div>
       </Fragment>
     )
@@ -867,10 +951,10 @@ export function LineDoc({
     const itemStatus = own && own.status !== 'approved' && own.status !== 'dismissed' && STATUS[own.status] ? own.status : null
     const status: string | null = pending?.status ?? itemStatus ?? (removed ? 'removed' : revision ? 'kept' : null)
     const label = name(s.speaker)
-    const newSpeaker = !!label && s.speaker !== statements[i - 1]?.speaker
     const isEditing = editing?.order === order && editing.mode === 'edit'
     const isAdding = editing?.order === order && editing.mode === 'add'
     const proposed = own?.status === 'ready' && !!own.candidate
+    const inDepth = proposed && expanded === own!.item_id
     // UX-7e: an untouched line shifts; a kept line moves with its take; the rest stay put.
     const mover: { id: string; start: number; duration: number; apply: (to: number) => void } | null =
       !revision && onShift ? { id: `shift-${key}`, start: s.start, duration: Math.max(0.05, s.end - s.start), apply: (t) => onShift(s, t) }
@@ -879,6 +963,18 @@ export function LineDoc({
     const up = mover ? stepTo(key, -1) : null
     const down = mover ? stepTo(key, 1) : null
     const plain = !isEditing && !isAdding && !proposed && !(revision && !removed)
+    const stamp = status && STATUS[status] && status !== 'removed' ? <StatusBadge status={status} role="status">{STATUS[status]}</StatusBadge>
+      : status === 'removed' ? <StatusBadge status="removed" role="status">{movedTo ? 'Moved away' : 'Removed'}</StatusBadge> : null
+    const wordsButton = (
+      <button className={cn(lineClass, proposed && 'text-lg')} onClick={() => open(order, 'edit')} title="Change the words" data-testid={shown ? 'revision' : undefined}>
+        {removed || (own?.mix === 'remove' && own.status === 'ready') ? <del>{s.text}</del>
+          : shown ? trackedChanges(s, shown, words).map((run, k) => (
+            <Fragment key={k}>{k > 0 && ' '}
+              {run.kind === 'same' ? <span>{run.text}</span> : run.kind === 'del' ? <del>{run.text}</del> : <ins>{run.text}</ins>}
+            </Fragment>
+          )) : s.text}
+      </button>
+    )
     return (
       <Fragment key={`${s.start}-${i}`}>
         {drag && dropIndexFor(drag.to) === order && dropMarker()}
@@ -887,6 +983,7 @@ export function LineDoc({
           data-current={current}
           data-selected={selected}
           data-state={status ?? undefined}
+          data-depth={inDepth || undefined}
           data-actions-open={actionsOpen === order || undefined}
           {...rowProps(order, key, `Line at ${clock(s.start)}${label ? `, ${label}` : ''}`, s.end)}
         >
@@ -894,22 +991,15 @@ export function LineDoc({
             {mover && !isEditing && !isAdding && gripButton(key, mover.id, s.text, mover.start, mover.duration, mover.apply)}
           </span>
           <button className={timeClass} onClick={() => onSeek(s)} aria-label={`Go to ${clock(s.start)}`}>{clock(s.start)}</button>
-          <span className="flex justify-center pt-px">{newSpeaker && label && <Avatar name={label} slot={speakerSlot(speakers, s.speaker)} />}</span>
-          <div className="min-w-0">
-            {isEditing ? <div className={unfold}>{editor(s, 'edit')}</div> : (
-              <div className="flex flex-col gap-1.5">
-                <button className={lineClass} onClick={() => open(order, 'edit')} title="Change the words" data-testid={shown ? 'revision' : undefined}>
-                  {removed || (own?.mix === 'remove' && own.status === 'ready') ? <del className={DEL}>{s.text}</del>
-                    : shown ? trackedChanges(s, shown, words).map((run, k) => (
-                      <Fragment key={k}>{k > 0 && ' '}
-                        {run.kind === 'same' ? <span>{run.text}</span> : run.kind === 'del' ? <del className={DEL}>{run.text}</del> : <ins className={INS}>{run.text}</ins>}
-                      </Fragment>
-                    )) : s.text}
-                </button>
+          <div className={cn('flex min-w-0 flex-col', proposed ? 'gap-2.5' : 'gap-1.5')}>
+            {whoLine(label, stamp)}
+            {isEditing ? <div className={unfold}>{editor(s, 'edit')}</div> : inDepth ? depth(own!, own!.candidate!, s, order, 'edit') : (
+              <>
+                {wordsButton}
                 {(revision || removed) && (
                   <div className={metaClass}>
                     {movedTo ? `Moved to ${timecode(movedTo.start)}; the room's own sound stays here.`
-                      : removed ? "Removed. The gap is closed with the room's own sound; the picture is untouched." : `In the video${shown && MIX_NOTE[shown.mix] ? ` · ${MIX_NOTE[shown.mix]}` : ''}.`}
+                      : removed ? "Removed. The gap is closed with the room's own sound; the picture is untouched." : `${shown && MIX_NOTE[shown.mix] ? (MIX_NOTE[shown.mix] ?? '').replace(/^./, (ch) => ch.toUpperCase()) : 'In place of the words as shot'}.`}
                   </div>
                 )}
                 {revision && !removed && revision.edit_id && onMoveKept && (
@@ -921,53 +1011,40 @@ export function LineDoc({
                 {own?.mix === 'remove' && own.status === 'ready' && (
                   <div className={cn(metaClass, 'text-needs')}>Proposed: these words go, and the room's own sound stays in their place.</div>
                 )}
-                {!isEditing && <div className={unfold}>{lineBlock(own, s.speaker)}</div>}
-              </div>
+                <div className={unfold}>{lineBlock(own, s.speaker)}</div>
+                {proposed && !isAdding && verbs(own!, own!.candidate!, order, 'edit')}
+                {revision && !removed && revision.edit_id && !isAdding && keptActs(s, revision.edit_id, order, 'edit', s.start)}
+                {removed && revision?.edit_id && !isAdding && (
+                  <span className="-ml-2 flex"><button type="button" className="act" onClick={() => onUndo(revision.edit_id!)}>Put it back</button></span>
+                )}
+                {plain && (
+                  <div className="flex items-start gap-1">
+                    <span className={actionsClass} role="group" aria-label={`Actions for ${clock(s.start)}`}>
+                      <button type="button" className="act" onClick={() => { setActionsOpen(null); onSeek(s) }}><PlayGlyph />Hear it</button>
+                      {!removed && <button type="button" className="act" onClick={() => { setActionsOpen(null); open(order, 'edit') }}>Edit it</button>}
+                      {!removed && !own && <button type="button" className="act" onClick={() => { setActionsOpen(null); onRemove(s) }}>Discard</button>}
+                      <button type="button" className="act" onClick={() => { setActionsOpen(null); open(order, 'add') }}>Add a line after</button>
+                      {mover && up !== null && <button type="button" className="act" onClick={() => { setActionsOpen(null); mover.apply(up) }}>Move up</button>}
+                      {mover && down !== null && <button type="button" className="act" onClick={() => { setActionsOpen(null); mover.apply(down) }}>Move down</button>}
+                      {mover && onPlacing && (
+                        <button type="button" className="act" onClick={() => { onPlacing({ id: mover.id, start: mover.start, duration: mover.duration }); setPlaceText(timecode(mover.start)) }}>Shift to a time…</button>
+                      )}
+                    </span>
+                    <button
+                      type="button"
+                      className="act hidden h-8 w-8 justify-center px-0 text-lg tracking-wide aria-expanded:bg-sunk aria-expanded:text-foreground [@media(hover:none)]:inline-flex"
+                      aria-label={`Actions for ${clock(s.start)}`}
+                      aria-expanded={actionsOpen === order}
+                      onClick={() => setActionsOpen((o) => (o === order ? null : order))}
+                    >…</button>
+                  </div>
+                )}
+              </>
             )}
           </div>
-          <span className={sideClass}>
-            {status && STATUS[status] && status !== 'removed' && <StatusBadge status={status} role="status">{STATUS[status]}</StatusBadge>}
-            {status === 'removed' && <StatusBadge status="removed" role="status">{movedTo ? 'Moved away' : 'Removed'}</StatusBadge>}
-            {proposed && !isEditing && !isAdding && verbs(own!, own!.candidate!, order, 'edit')}
-            {revision && !removed && revision.edit_id && !isEditing && !isAdding && (
-              <span className="flex flex-wrap items-center justify-end gap-1.5" role="group" aria-label={`Added line at ${clock(s.start)}`}>
-                <Button variant="outline" size="sm" className={actionBtn} onClick={() => onSeek(s)}><PlayIcon />Hear it</Button>
-                <Button variant="outline" size="sm" className={actionBtn} onClick={() => onUndo(revision.edit_id!)}>Take it out</Button>
-                <Button variant="outline" size="sm" className={actionBtn} onClick={() => open(order, 'edit')}>Edit it</Button>
-              </span>
-            )}
-            {removed && revision?.edit_id && !isEditing && !isAdding && (
-              <Button variant="outline" size="sm" className={actionBtn} onClick={() => onUndo(revision.edit_id!)}>Put it back</Button>
-            )}
-            {plain && (
-              <Button
-                type="button"
-                variant="outline"
-                size="icon"
-                className="hidden text-lg tracking-wide text-muted-foreground aria-expanded:bg-accent aria-expanded:text-foreground [@media(hover:none)]:inline-flex"
-                aria-label={`Actions for ${clock(s.start)}`}
-                aria-expanded={actionsOpen === order}
-                onClick={() => setActionsOpen((o) => (o === order ? null : order))}
-              >…</Button>
-            )}
-            {plain && (
-              <span className={actionsClass} role="group" aria-label={`Actions for ${clock(s.start)}`}>
-                <Button variant="outline" size="sm" className={actionBtn} onClick={() => { setActionsOpen(null); onSeek(s) }}><PlayIcon />Hear it</Button>
-                {!removed && <Button variant="outline" size="sm" className={actionBtn} onClick={() => { setActionsOpen(null); open(order, 'edit') }}>Edit it</Button>}
-                {!removed && !own && <Button variant="outline" size="sm" className={actionBtn} onClick={() => { setActionsOpen(null); onRemove(s) }}>Discard</Button>}
-                <Button variant="outline" size="sm" className={actionBtn} onClick={() => { setActionsOpen(null); open(order, 'add') }}>Add a line after</Button>
-                {mover && up !== null && <Button variant="outline" size="sm" className={actionBtn} onClick={() => { setActionsOpen(null); mover.apply(up) }}>Move up</Button>}
-                {mover && down !== null && <Button variant="outline" size="sm" className={actionBtn} onClick={() => { setActionsOpen(null); mover.apply(down) }}>Move down</Button>}
-                {mover && onPlacing && (
-                  <Button variant="outline" size="sm" className={actionBtn} onClick={() => { onPlacing({ id: mover.id, start: mover.start, duration: mover.duration }); setPlaceText(timecode(mover.start)) }}>Shift to a time…</Button>
-                )}
-              </span>
-            )}
-          </span>
         </div>
         {isAdding && (
           <div className={rowClass} data-state="adding" role="listitem" aria-label={`New line after ${clock(s.start)}`}>
-            <span />
             <span />
             <span />
             <div className="min-w-0"><div className={unfold}>{editor(s, 'add')}</div></div>
@@ -980,79 +1057,61 @@ export function LineDoc({
   const lastLine = rows.map((r, order) => ({ r, order })).filter(({ r }) => r.kind === 'line').at(-1)?.order ?? null
   const editingAt = editing ? rowStatement(rows[editing.order] ?? rows[0]) : null
 
-  // UX-9: the pane's header — how many lines, who speaks them, where things stand.
-  const addedCount = layerRevisions.length + revisions.filter((r) => !isAdd(r) && r.mix !== 'remove').length
-  const removedCount = revisions.filter((r) => r.mix === 'remove' && !r.partner).length
-  const bySpeaker = [...new Set(statements.map((st) => st.speaker).filter(Boolean))] as string[]
-  const speakerCount = (label: string) => statements.filter((st) => st.speaker === label).length
-  const shownRows = rows.map((r, order) => ({ r, order })).filter(({ r }) => (
-    speakerFilter === null || (r.kind === 'line' || r.kind === 'moved' ? r.s.speaker === speakerFilter : false)
-  ))
+  // Volt: the heading — how many lines, how many proposed, how many in the video.
+  const inVideo = layerRevisions.length + revisions.filter((r) => !isAdd(r) && !r.partner).length
+  const shownRows = rows.map((r, order) => ({ r, order })).filter(({ order }) => !folds.hidden.has(order))
 
   return (
-    <section className="flex min-h-0 flex-col" aria-label="Transcript">
-      <div className="flex flex-col gap-2 border-b px-3 pb-2.5 pt-1">
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-          <h2 className="m-0 text-sm font-semibold tracking-tight">Transcript &amp; takes</h2>
-          <span className="tnum rounded-md border bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">{rows.length} {rows.length === 1 ? 'line' : 'lines'}</span>
+    <section className="flex min-h-0 flex-col gap-2.5" aria-label="Transcript">
+      <div className="flex flex-col gap-1.5 px-1 pt-1">
+        <div className="flex flex-wrap items-end gap-3.5">
+          <h2 className="disp m-0 text-[26px] leading-none font-bold">Transcript</h2>
+          <span className="tag pb-0.5 text-faint">{rows.length} {rows.length === 1 ? 'line' : 'lines'}</span>
           <span className="flex-1" />
+          {(proposals.length > 0 || inVideo > 0) && (
+            <span className="tag pb-1" role="status" aria-label="Where things stand" data-testid="counts">
+              <span className={cn('rounded-[3px] px-1.5 py-px', proposals.length > 0 ? 'bg-volt text-ink' : 'bg-sunk')}>{proposals.length}</span> proposed · {inVideo} in the video
+            </span>
+          )}
           {proposals.length > 1 && onAddAll && (
-            <Button size="sm" className="whitespace-nowrap" onClick={() => void run('add-all', () => onAddAll(proposals))} disabled={disabled || pending !== null} aria-busy={pending === 'add-all' || undefined}>
-              {pending === 'add-all' ? 'Adding…' : `Add all ${proposals.length}`}
-            </Button>
+            <button type="button" className="btn volt sm shine" onClick={() => void run('add-all', () => onAddAll(proposals))} disabled={disabled || pending !== null} aria-busy={pending === 'add-all' || undefined}>
+              <BoltGlyph />{pending === 'add-all' ? 'Adding…' : `Add all ${proposals.length}`}
+            </button>
           )}
         </div>
-        {(bySpeaker.length > 1 || proposals.length + addedCount + removedCount > 0) && (
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-            {bySpeaker.length > 1 && (
-              <div className="inline-flex gap-0.5 rounded-md border bg-muted p-0.5" role="group" aria-label="Whose lines">
-                <Button variant="ghost" size="sm" className={cn('h-7 px-2 text-xs', speakerFilter === null && 'bg-background shadow-xs hover:bg-background')} aria-pressed={speakerFilter === null} onClick={() => setSpeakerFilter(null)}>All</Button>
-                {bySpeaker.map((label) => (
-                  <Button key={label} variant="ghost" size="sm" className={cn('h-7 px-2 text-xs', speakerFilter === label && 'bg-background shadow-xs hover:bg-background')} aria-pressed={speakerFilter === label} onClick={() => setSpeakerFilter(label)}>
-                    {name(label)} <span className="tnum text-muted-foreground">({speakerCount(label)})</span>
-                  </Button>
-                ))}
-              </div>
-            )}
-            <span className="flex-1" />
-            <span className="flex flex-wrap items-center gap-x-3 font-mono text-xs" role="status" aria-label="Where things stand" data-testid="counts">
-              {proposals.length > 0 && <span className="flex items-center gap-1.5 text-changed"><span className="size-1.5 rounded-full bg-changed" aria-hidden="true" />{proposals.length} Proposed</span>}
-              {addedCount > 0 && <span className="flex items-center gap-1.5 text-ok"><span className="size-1.5 rounded-full bg-ok" aria-hidden="true" />{addedCount} Added</span>}
-              {removedCount > 0 && <span className="flex items-center gap-1.5 text-needs"><span className="size-1.5 rounded-full bg-needs" aria-hidden="true" />{removedCount} Removed</span>}
-            </span>
-          </div>
-        )}
         <span className={hint}>
           {editing && editingAt ? (editing.mode === 'add' ? `Adding a line after ${clock(editingAt.start)}. Esc to cancel.` : `Editing ${clock(editingAt.start)}. Enter to voice it, Esc to cancel.`)
             : pendingLines.some((p) => p.status === 'reading') ? "Voltage is reading. The line it's on is lit."
-            : focusedRow !== null ? <span className="whitespace-nowrap max-[960px]:hidden" data-testid="keys"><kbd className={kbd}>↑</kbd><kbd className={kbd}>↓</kbd> move · <kbd className={kbd}>Enter</kbd> edit it · <kbd className={kbd}>Space</kbd> hear it · <kbd className={kbd}>K</kbd> add it · <kbd className={kbd}>Delete</kbd> discard · <kbd className={kbd}>A</kbd> add after · <kbd className={kbd}>S</kbd> shift (or drag ⋮⋮) · <kbd className={kbd}>U</kbd> take it out · <kbd className={kbd}>/</kbd> ask Voltage</span>
+            : focusedRow !== null ? <span className="whitespace-nowrap max-[960px]:hidden" data-testid="keys"><kbd className={kbd}>↑</kbd><kbd className={kbd}>↓</kbd> move · <kbd className={kbd}>Enter</kbd> edit it · <kbd className={kbd}>␣</kbd> hear it · <kbd className={kbd}>K</kbd> add it · <kbd className={kbd}>⌫</kbd> discard · <kbd className={kbd}>A</kbd> add after · <kbd className={kbd}>S</kbd> shift (or drag ⋮⋮) · <kbd className={kbd}>U</kbd> take it out · <kbd className={kbd}>/</kbd> ask Voltage</span>
             : armedRow !== null && rows[armedRow] ? <span role="status">Press Backspace again to propose removing the line at {clock(rows[armedRow].start)}.</span>
             : proposals.length > 0 ? `${proposals.length === 1 ? 'One line is proposed' : `${proposals.length} lines are proposed`}: hear it, then Add it, Edit it or Discard. Nothing is in the video until you add it.`
-            : 'One transcript: what is in the video, and what is proposed. Lines at the same moment play together. Tap or hover a line for Hear it, Edit it, Discard.'}
+            : 'One transcript: what is in the video, and what is proposed. Lines at the same moment play together. Hover a line for Hear it, Edit it, Discard.'}
         </span>
       </div>
 
-      <div role="list" className="flex flex-col gap-2 p-2.5" ref={list} onFocusCapture={() => setFocusTick((t) => t + 1)} onBlurCapture={() => setFocusTick((t) => t + 1)} data-focus-tick={focusTick}>
+      <div role="list" className="flex flex-col gap-1.5" ref={list} onFocusCapture={() => setFocusTick((t) => t + 1)} onBlurCapture={() => setFocusTick((t) => t + 1)} data-focus-tick={focusTick}>
         {shownRows.map(({ r: entry, order }) => (
-          entry.kind === 'moved' ? movedRow(entry, order)
-          : entry.kind === 'layer' ? layerRow(entry, order)
-          : entry.kind === 'item' ? itemRow(entry, order)
-          : lineRow(entry.s, entry.i, order)
+          <Fragment key={`r-${order}`}>
+            {entry.kind === 'moved' ? movedRow(entry, order)
+              : entry.kind === 'layer' ? layerRow(entry, order)
+              : entry.kind === 'item' ? itemRow(entry, order)
+              : lineRow(entry.s, entry.i, order)}
+            {foldButton(order)}
+          </Fragment>
         ))}
         {drag && dropIndexFor(drag.to) === rows.length && dropMarker()}
         {statements.length > 0 && lastLine !== null && !(editing?.order === lastLine && editing.mode === 'add') && (
-          <div className="py-1" role="listitem">
-            <Button variant="outline" className="w-full border-dashed text-muted-foreground shadow-none" onClick={() => open(lastLine, 'add')}><span aria-hidden="true">+</span> Add a line here</Button>
+          <div className="mt-2 pl-[94px]" role="listitem">
+            <button type="button" className="act -ml-2" onClick={() => open(lastLine, 'add')}><span className="tag">+ Add a line</span></button>
           </div>
         )}
         {statements.length === 0 && duration && !placingAnother && (
           <div className="py-1" role="listitem">
-            <Button variant="outline" className="w-full border-dashed text-muted-foreground shadow-none" onClick={() => setPlacingAnother(true)}><span aria-hidden="true">+</span> Add another voice-over</Button>
+            <button type="button" className="btn w-full border-dashed" onClick={() => setPlacingAnother(true)}><span aria-hidden="true">+</span> Add another voice-over</button>
           </div>
         )}
         {statements.length === 0 && duration && placingAnother && (
           <div className={rowClass} data-state="adding" role="listitem" aria-label="New voice-over">
-            <span />
             <span />
             <span />
             <div className="min-w-0">

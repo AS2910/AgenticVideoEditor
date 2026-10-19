@@ -8,6 +8,7 @@ SDK recommends gating inside the tool function; `WaitingForUser` is that.
 """
 from __future__ import annotations
 
+import inspect
 import json
 import logging
 from dataclasses import dataclass, field
@@ -39,7 +40,23 @@ CONTEXT_MANAGEMENT = {"edits": [{"type": "clear_tool_uses_20250919", "trigger": 
 
 # (model, input, output, cache_read, cache_write) tokens of one request.
 Meter = Callable[[str, int, int, int, int], None]
-OnStep = Callable[[str, float], None]
+# (step, cost_usd, tool name); a callback that takes only the first two still works.
+OnStep = Callable[..., None]
+
+
+def _narrator(on_step: OnStep | None) -> Callable[[str, float, str], None] | None:
+    """`on_step` as a three-argument call. The trace wants the tool behind
+    each step; callers written for (step, cost) keep working."""
+    if on_step is None:
+        return None
+    try:
+        params = list(inspect.signature(on_step).parameters.values())
+    except (TypeError, ValueError):
+        return on_step
+    positional = [p for p in params if p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD)]
+    if len(positional) >= 3 or any(p.kind == p.VAR_POSITIONAL for p in params):
+        return on_step
+    return lambda step, cost, tool: on_step(step, cost)
 
 
 @dataclass
@@ -174,6 +191,7 @@ class Agent:
         """One turn. `history` is the thread as the model saw it (dicts);
         `persist(role, content)` is called for every message appended."""
         out = Outcome()
+        narrate = _narrator(on_step)
         system = [{"type": "text", "text": SYSTEM, "cache_control": {"type": "ephemeral"}}]
         messages = repaired(history)
 
@@ -248,13 +266,14 @@ class Agent:
                 results.append(_result_block(use["id"], result))
                 if result.step:
                     out.steps.append(result.step)
-                    if on_step:
-                        on_step(result.step, result.cost_usd)
+                    if narrate:
+                        narrate(result.step, result.cost_usd, use["name"])
                 if result.card and on_card:
                     on_card(result.card["text"], result.card["data"])
             append("user", results)
             if isinstance(ended, WaitingForUser):
-                out.question = {"text": ended.question, "options": list(ended.options), "guess": ended.guess, "gate": ended.gate}
+                out.question = {"text": ended.question, "options": list(ended.options), "guess": ended.guess, "gate": ended.gate,
+                                "cost_usd": ended.cost_usd}
                 out.reply = _text_of(content)
                 break
             if isinstance(ended, TurnStopped):

@@ -82,10 +82,38 @@ class MockVoiceAdapter:
         self._clones.add(voice_id)
 
     def identity_for(self, plan: EditPlan) -> str:
-        return "clone" if plan.voice_profile_id in getattr(self, "_clones", set()) else "stock"
+        # A clone's take is a clone; any other take is the mock's own tone
+        # (never labelled stock, never regenerated: it is deterministic).
+        return "clone" if plan.voice_profile_id in getattr(self, "_clones", set()) else self.identity
 
     def delete_voice(self, voice_id: str) -> None:
         getattr(self, "_clones", set()).discard(voice_id)
+
+    # A voice from words (20b), offline: three short tones pitched by the
+    # description, so the design routes and the agent's tool run without a
+    # vendor. Nothing is charged; `slots` stays unknown (None).
+    DESIGN_SAMPLE = ("The quick brown fox jumps over the lazy dog while the river runs on under the old stone bridge, "
+                     "unhurried, as it always has.")
+
+    def design_cost(self) -> int:
+        return 0
+
+    def design_voice(self, project_id: str, description: str, text: str | None = None) -> list[dict]:
+        sample = text or self.DESIGN_SAMPLE
+        previews = []
+        with tempfile.TemporaryDirectory() as tmp:
+            for n in (1, 2, 3):
+                seed = _digest("design", description, str(n))
+                path, duration = ffmpeg.generate_tone(Path(tmp) / f"preview{n}.wav", 1.0, 200 + int(seed[:4], 16) % 600)
+                previews.append({"generated_voice_id": f"mock-preview-{seed[:8]}", "audio": path.read_bytes(),
+                                 "media_type": "audio/wav", "duration": duration, "text": sample})
+        return previews
+
+    def save_voice(self, generated_voice_id: str, name: str, description: str) -> str:
+        voice_id = f"mock-designed-{_digest(generated_voice_id, name)[:8]}"
+        self._designed = getattr(self, "_designed", set())
+        self._designed.add(voice_id)
+        return voice_id
 
     def synthesize(
         self, source: Source, plan: EditPlan, transcript: Transcript | None = None,

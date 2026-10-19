@@ -391,3 +391,58 @@ def test_move_item_places_the_same_take_elsewhere(world):
     assert world.moved == [("c1", 3.0)] and out.step == "Moved i1 to 3.00 s"
     [item] = world.repo.get_plan("p1", "plan1").items
     assert (item.candidate_id, item.selection.start, item.selection.end) == ("c1m", 3.0, 5.0)
+
+
+# ── Volt: still ask under Just do it ──────────────────────────────────────────
+
+def _asking(world, **ask):
+    """A Just-do-it turn where the user chose to be asked before these steps."""
+    from dataclasses import replace
+    return replace(world.turn("draft"), ask_before={"ship": False, "clone": False, "design": False, **ask})
+
+
+def test_under_just_do_it_the_steps_the_user_chose_still_wait_until_their_yes(world):
+    _spoken(world)
+    t = world.turn()
+    BY_NAME["synthesize_take"].run(world.wb, t, {"text": "Welcome.", "voice_id": "kL06KYMvPY56NluIQ72m", "start": 0, "end": 2, "direction": None, "mix": None, "line": None, "item_id": None})
+    with pytest.raises(WaitingForUser) as w:
+        BY_NAME["ship"].run(world.wb, _asking(world, ship=True), {"item_ids": None})
+    assert w.value.question == "Ship 1 change and render the video?" and w.value.cost_usd is None
+    assert world.shipped == []
+    with pytest.raises(WaitingForUser):
+        BY_NAME["clone_speaker"].run(world.wb, _asking(world, clone=True), {"speaker": "Priya"})
+    assert world.cloned == []
+    with pytest.raises(WaitingForUser) as w:
+        BY_NAME["design_voice"].run(world.wb, _asking(world, design=True), {"description": "an older woman", "sample_text": None})
+    assert w.value.cost_usd == pytest.approx(0.105) and world.designed == []
+    # A step the user did not name goes ahead as Just do it always did.
+    BY_NAME["design_voice"].run(world.wb, _asking(world, ship=True), {"description": "an older woman", "sample_text": None})
+    assert len(world.designed) == 1
+    # Their yes (the next turn) lets each one through.
+    from dataclasses import replace
+    yes = replace(_asking(world, ship=True, clone=True, design=True), commit_approved=True)
+    assert BY_NAME["ship"].run(world.wb, yes, {"item_ids": None}).text.startswith("Shipped 1 change.")
+    assert BY_NAME["clone_speaker"].run(world.wb, yes, {"speaker": "Priya"}).step == "Cloned Priya's voice from their own speech"
+    BY_NAME["design_voice"].run(world.wb, yes, {"description": "a man", "sample_text": None})
+    assert len(world.designed) == 2
+
+
+def test_a_gate_question_carries_what_the_step_would_cost(world):
+    with pytest.raises(WaitingForUser) as w:
+        BY_NAME["synthesize_take"].run(world.wb, world.turn("ask"), {"text": "Welcome to Goa.", "voice_id": "kL06KYMvPY56NluIQ72m", "start": 0, "end": 2,
+                                                                     "direction": None, "mix": None, "line": None, "item_id": None})
+    assert w.value.cost_usd == pytest.approx(0.0045)
+    with pytest.raises(WaitingForUser) as w:
+        BY_NAME["design_voice"].run(world.wb, world.turn("ask"), {"description": "a man", "sample_text": None})
+    assert w.value.cost_usd == pytest.approx(0.105)
+    with pytest.raises(WaitingForUser) as w:
+        BY_NAME["ask"].run(world.wb, world.turn(), {"question": "Which one?", "options": ["One", "Two"], "guess": ""})
+    assert w.value.cost_usd is None
+
+
+def test_a_kept_designed_voice_remembers_its_description(world):
+    t = world.turn()
+    BY_NAME["design_voice"].run(world.wb, t, {"description": "an older woman", "sample_text": None})
+    BY_NAME["save_voice"].run(world.wb, t, {"generated_voice_id": "g1", "name": "Dusk"})
+    [made] = world.repo.settings("p1")["made_voices"]
+    assert (made["name"], made["kind"], made["description"]) == ("Dusk", "designed", "an older woman")

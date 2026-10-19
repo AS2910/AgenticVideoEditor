@@ -1,86 +1,95 @@
-# Design System Master File — Voltage
+# Design System Master File — Voltage ("Volt")
 
 > **LOGIC:** When building a specific page, first check `design-system/voltage/pages/[page-name].md`.
 > If that file exists, its rules **override** this Master file. If not, follow the rules below.
 
-**Project:** Voltage (AgenticVideoEditor) · **Rewritten:** 2026-10-18 (UX-9, "the studio"), replacing the zinc room of UX-8. Source of truth in code: `frontend/src/styles/globals.css`, `frontend/components.json`, `frontend/src/components/ui/`. The user's two mocks (dark, then light) are the reference; what was changed from them and why is in `docs/superpowers/plans/2026-10-18-ux9-the-studio.md`.
+**Project:** Voltage (AgenticVideoEditor) · **Rewritten:** 2026-10-19 for **Volt**, the user's design hand-off in `voltage-design/` (`HANDOFF.md` + eleven screens), replacing the UX-9 studio. Source of truth in code: `frontend/src/styles/globals.css` (tokens and the class layer), `frontend/src/components/ui/`. What was adapted from the hand-off and why is in `docs/superpowers/plans/2026-10-18-volt.md`.
 
-## The room
+## The idea
 
-A **studio**: three panes side by side — the player with its lanes, the transcript and takes, Voltage — and a slim dock on the left. Stock **shadcn/ui** (new-york style) on Tailwind v4, **light and dark as siblings**: slate and cyan in the light (#f1f5f9 behind white cards, cyan 600 as the accent), obsidian and cyan in the dark (#051424 behind #0b0f17 cards, electric cyan as the accent). Flat surfaces, 1 px borders, an 8 px radius, `shadow-xs`/`shadow-sm` at most. **No gradients, glows, frosted panels or blurs**, however the mocks drew them; the accent does the work. Voltage's presence is the bolt (`Presence`), a spinner while it works. The picture never stops; the line is the unit; the user's next action sits on the thing it acts on.
+**Paper and ink, one volt.** A warm off-white page (`#F3F3EF`) with white surfaces, near-black ink (`#0B0B0C`) for type, borders and the primary button, and one accent — **volt** (`#D7FF3A`) — used only as a fill with ink text, or as text on the black pane. Amber (`#FFB020`) is the one other colour, for a step that waits on you. Flat surfaces, **1.5 px ink borders** where something is actionable, and a **hard offset shadow** (`4px 4px 0 ink`, `7px 7px` on hover) on exactly three things: a proposal card, a gate card, a primary button. No gradients, glows, blurs or drop shadows anywhere (`theme.test.ts` fails on them). Dark mode is the same room at night: `#0E0E10` page, `#17171B` surfaces, the same volt and amber. **Voltage's pane is black in both themes** (`--pane`), so the agent is always the dark half of the screen.
 
-Theme: follows the system, with a Light / Dark / System menu in the header (`ThemeToggle`, `lib/theme.ts`); saved in `localStorage` (`voltage-theme`, in try/catch); an inline script in `index.html` sets `.dark` before first paint.
+Theme follows the system; Light / Dark / System is chosen on the Settings page (`lib/theme.ts`, `localStorage` `voltage-theme` in try/catch, `.dark` set before first paint by `index.html`).
 
-## Tokens (use the Tailwind utilities they generate, never a raw colour)
+## Tokens (use the utilities; never a raw colour)
 
-All colours are OKLCH variables in `globals.css`, defined for `:root` and `.dark`, exposed to Tailwind with `@theme inline`. `theme.test.ts` fails on a raw colour, a gradient, a blur, a glow, text under 12 px, a missing token or a missing dark value.
+OKLCH/hex variables in `globals.css` for `:root` and `.dark`, exposed through `@theme inline`. shadcn roles are mapped onto them so stock components fit.
 
 | Role | Utilities | Light → Dark |
 |---|---|---|
-| Page, text | `bg-background` `text-foreground` | slate 100 / slate 900 → obsidian / #d4e4fa |
-| Cards, panels, popovers | `bg-card` `bg-popover` (+ `-foreground`) | white → #0b0f17 |
-| **Primary action, the accent** | `bg-primary` `text-primary-foreground` `text-primary` `border-primary` | cyan 600 on white → electric cyan on #002027 |
-| Quiet fills, hover, selected | `bg-secondary` `bg-muted` `bg-accent` | slate 100–200 → #0f1420–#1c2438 |
-| Secondary text | `text-muted-foreground` (≥ 4.5:1 on background and card in both modes) | slate 500 → slate 400 |
-| Borders, inputs, focus | `border-border` `border-input` `ring-ring` | slate 300 / 200 → #233143 / #162332; the ring is cyan |
-| Errors | `text-destructive` | rose 600 → rose 400 |
-| **Proposed**: a take to hear, words Voltage wrote, a pill in A2 | `text-changed` `bg-changed-soft` `border-changed` | cyan 700 on cyan 50 → cyan 300 on cyan 950 |
-| **Added / in the video / kept** | `text-ok` `bg-ok-soft` `border-ok` | emerald 700 on emerald 50 → emerald 300 on emerald 950 |
-| **Needs you / flagged / removed** | `text-needs` `bg-needs-soft` `border-needs` | rose 600 on rose 50 → rose 300 on rose 950 |
-| Speakers A–D | `text-spk-a..d` `border-spk-a..d` (and `bg-spk-a..d/25`) | blue, violet, amber, pink |
-| The picture's surround | `bg-monitor` | near-black in both |
-| Radii | `rounded-sm/md/lg/xl` = 4 / 6 / 8 / 12 px off `--radius: 0.5rem`; nothing larger than `rounded-xl` |
+| Page, text | `bg-background` `text-foreground` | #F3F3EF / #0B0B0C → #0E0E10 / #F3F3EF |
+| Surface (cards, header) | `bg-card` | #FFFFFF → #17171B |
+| Sunk (rows on hover, wells, inputs) | `bg-sunk` | #EAEAE4 → #202025 |
+| Hairlines / stronger lines | `border-line` `border-line2` | #DEDED6 / #C8C8BE → #26262C / #35353D |
+| **Ink**: borders, the primary button, stamps' text | `border-ink` `bg-ink` `text-ink` | #0B0B0C in both |
+| **Volt**: the one accent, as a fill with ink text | `bg-volt text-ink`, `text-volt` only on the pane | #D7FF3A in both |
+| Amber: waiting on you | `bg-warn text-ink` `border-warn` | #FFB020 in both |
+| Secondary / faint text | `text-muted-foreground` `text-faint` | #5C5C58 / #8A8A84 → #A3A39C / #6E6E68 |
+| The picture's stage | `bg-pic` | near-black in both |
+| Lanes (tracks panel) | `bg-lane` `bg-lane2` | warm greys |
+| **The pane** (Voltage) | `.pane` → `bg-pane text-ptext`, `text-pmuted`, `border-pline`, `bg-psunk` | #0B0B0C → #050506; text #F3F3EF; muted #9A9A94; line #26262C; sunk #141418 |
+| shadcn roles | `primary`=volt/ink, `changed`=ink, `changed-soft`=volt, `ok`, `needs`=warn, `border`=line2, `ring`=text | |
+| Radii | 4 / 6 / 8 / 10 / 12 px (`rounded-sm` … `rounded-xl`, `rounded-[10px]` for rows); nothing larger than `rounded-xl` except circles | |
 
-Colour never carries meaning alone: every state has a word beside its colour (Proposed, Added, Removed, Voicing…, Needs you), and a dot before a count.
+Colour never carries meaning alone: every state has a word (Proposed, ✓ In the video, Waiting on you, Removed, Voicing…) in a `.stamp`, and a marker on the scrubber has a title.
 
 ## Typography
 
-**Geist** (variable, self-hosted via `@fontsource-variable/geist`) for words; **JetBrains Mono** (`@fontsource-variable/jetbrains-mono`) for times, money, counts, timecodes, lane labels and mono facts — through `font-mono` or the `.tnum` class, which now sets the mono face as well as tabular figures. No external font request.
+Three faces, self-hosted (`@fontsource-variable/*`, no network request):
+- **Space Grotesk** (`.disp`, `--font-display`, letter-spacing −0.02em) for display: the wordmark, page titles (26–40 px), card titles, big numbers, and every `.btn`.
+- **Geist** (`--font-sans`, body 14 px) for UI and sentences; the transcript's words are `.say` 16 px / 1.55.
+- **JetBrains Mono** (`--font-mono`, `.tnum`) for times, money, counts, tags and the trace. `.tag` and `.who` are 12 px mono, uppercase, tracked (.05–.06em).
 
-Scale: `text-xs` 12 px is the floor (labels, `kbd`, lane names, mono facts; never a sentence); `text-sm` 14 for compact UI, chips and card meta; `text-base` 16 for the transcript's words and inputs; `text-chat` (15 px / 1.6) for what Voltage and the user say. Headings `font-semibold tracking-tight`, one `h1` per screen. Uppercase labels are `text-xs font-mono uppercase tracking-wide text-muted-foreground`. Verdicts and states are sentences first, numbers behind them. **No number appears that was not measured or recorded**: no FPS, codec, LUFS, latency or engine status lines.
+**12 px is the floor**; nothing smaller, nothing in 8–10 px however the hand-off drew it. One `h1` per screen. Verdicts are sentences first; **no number appears that was not measured or recorded.**
 
-## Layout: the studio
+## The class layer (`globals.css` `@layer components`)
 
-Desktop (≥ 960 px): a 13-row header, then a row of panes with an 8 px gutter — the dock (40 px), **the player and lanes** (≈ 41%), **the transcript and takes** (≈ 35%), **Voltage** (≈ 24%). Each pane is a `bg-card` panel with a 1 px border and `rounded-lg`, its own header (`text-sm font-semibold`), its own scroll. Under 960 px the panes stack in that order with a 16 px gutter, no horizontal scroll; Voltage can tuck away to a strip with its composer. Full-height screens use `dvh`, never `vh`. 4 px grid via Tailwind.
+The hand-off's vocabulary is a small set of classes, used by name so a screen reads like the mock:
 
-- **Header:** brand (bolt, VOLTAGE), the file badge (name and length, mono), the play switch (Original · With proposals · Final), the autonomy switch (Check with me · Just do it) — autonomy lives here only — then the spend pill (spent / ceiling, a bar, voice characters), Make a variant, Export again, **Export MP4 / Download MP4** (the one filled primary button), What Voltage may do (sliders icon), theme, user.
-- **Dock:** Projects, Workspace, Speakers, What Voltage may do. Real destinations only.
-- **Player pane:** the picture on `bg-monitor` with the caption strip; the transport dock (play, timecode in mono, Precise); the retime strip (what the preview carries, what flexed); then the **lanes** (`Lanes`): a ruler with the playhead, V1 Picture (copies, "Flexed +8%", "Held 0.6 s"), A1 Spoken (pills by speaker; removed struck; replaced marked changed), A2 Added (every added or proposed line as a pill; **overlapping pills pack into sub-rows so coexisting audio is visible**; a "−12 dB" tag for a background layer; the placing block when a take is being moved), A3 Tone (room-tone patches). Every pill is a button that seeks; the Precise word timeline opens under the lanes.
-- **Transcript pane:** header with "Transcript & takes · N lines", **Add all (N)**, a speaker filter (All · each speaker with its count) and the state counts (● N Proposed · ● N Added · ● N Removed). The list is cards, one per audio line (see the transcript rules below).
-- **Voltage pane:** header (bolt, "Voltage", the autonomy word), the thread (the user's bubble right in `bg-accent`, Voltage's words left, steps as a list with money on the right, the Thinking line, a question as a **gate card** with its options), the plan's record, and the composer under "Instruction · Turn cap $x.xx".
+- **Buttons:** `.btn` (38 px, ink border, display face) with `.volt` (volt fill, offset shadow on hover), `.ink` (ink fill, volt text; inverted in dark), `.ghost` (pane outline), `.sm` 32 px, `.lg` 46 px, `.shine` (one sweep on a primary CTA). `.act` is the quiet text verb (Edit it, Discard, Take it out). `.pill` is a choice (delivery), pressed = volt. `.sugg` is a suggestion chip on the pane. `.kbd` is the key hint beside a verb (␣, K, /).
+- **State:** `.stamp` (volt, mono uppercase), `.stamp.need` (amber), `.stamp.in` (outline: ✓ In the video), `.stamp.inkd`.
+- **Transcript:** `.row` (76 px time column + body; the app adds a 24 px grip column), `.row.prop` (a proposal: card, ink border, offset shadow, `pop` in), `.waiting` (dashed ink: a step waiting on you), `.who`, `.say`, `.meta`.
+- **Playback:** `.segs` / `.seg` (Final · With proposals · Original; the chosen one is ink with volt text), `.meter` (a measured score), `.lane-n`, `.blk`.
+- **The pane:** `.pane`, `.pm` (muted on black), `.bubble` (your words, right), `.trace` with `.ln .ts .g .c .tool` (one step per line: time ├ sentence tool cost), `.gate` (Your go is needed), `.wave` (Voltage's presence: volt bars, `.busy` fast, `.need` amber).
+- **Motion:** `wv rise pop fill shine nudge scan grow blink stampin ringpulse` keyframes; `.rise(.d1-3)`, `.fillin`, `.scan` (the 2 px line that sweeps the picture while Voltage looks), `.grow`, `.blinkdot`, `.stampin`, `.rec`. `prefers-reduced-motion` zeroes them all.
 
-**Targets:** shadcn controls are 36 px with a mouse and **44 px on coarse pointers** (`pointer-coarse:`); custom clickable elements add `pointer-coarse:min-h-11`; 8 px between adjacent targets.
+## Layout
 
-## Motion
+**Account pages** (Projects, Voices, Usage, Settings, Billing; `pages/Shell.tsx`): a 62 px header with a 1.5 px ink rule — wordmark, `.nav` (mono uppercase; the current page is ink with volt text), a right slot, the account circle (initial in a 34 px ring) — then `<main>` with the page's own grid (Projects: hero drop zone + cards; Voices: three columns + the black "make a voice" pane; Usage: tiles + bars + a table; Settings: a side nav + sections).
 
-`tw-animate-css` enter/exit (150–250 ms); `prefers-reduced-motion` zeroes every transition and animation. At most one or two moving things per view: the playhead, and a small pulsing dot on a line being voiced. Nothing else pulses, waves or glows.
+**The editor** (`App.tsx`): the same header carrying the file name, the length and voices tag, the play `.segs`, the autonomy word (Check with me ▾ → the What Voltage may do sheet), the spend (`$spent ▮ $ceiling`, a link to Usage), **Export** (`.btn.ink.sm`, to `#pN/export`), the account circle. Below, two panes: **the work** (left; `max-width: 820px` centred; the picture ≤ 720 px with its mode tag, clock, caption and scan line; the transport row — ink play, mono clock, the scrubber with markers (volt = proposed, ink = in the video, amber = waiting) and the playhead, **Tracks ▾**; then the transcript) and **Voltage** (right, 400 px, `.pane`). Under 960 px they stack. `dvh`, never `vh`.
+
+**Targets:** 32 px `.sm` buttons with a mouse and 44 px on coarse pointers (`pointer-coarse:`); 8 px between adjacent targets; every icon-only control has an `aria-label`.
 
 ## The transcript (one transcript, four verbs)
 
-- A **card per audio line**, in time order: a spoken line; a shifted line where it now plays; an added line in the video; a proposed or working added line. Lines at the same moment are separate cards and play together; a layer never changes a spoken line's words.
-- **State words** beside their colour: nothing (as shot), **Proposed**, **Added**, **Removed**, **Voicing…**, **Needs you**, **Couldn't voice it**, **Moved**.
-- **The hero proposal card** (`border-primary`, `shadow-sm`): who and when (mono), the state chip; Before/After as a diff in a `bg-muted` box; the **delivery chips** (Warmer · Firmer · Calmer · More excited · Slower — the take's own delivery filled; a click asks Voltage for that take again, said that way); the direction line Voltage wrote; the **facts grid** (voice and model · stability / style · fit · picture) and the **measured line** (SIM-o, UTMOS, prosody against their thresholds, with "flagged" and why when a check failed); then **Add it (K) · Hear it · Edit it · Discard (Del)**, Add it the filled one. A removal proposal reads "Remove it".
-- An **added** card: who/when, the words, "In the video · plays over the picture · with N other lines at this moment", Starts at · Move, the level ("background (−12 dB) · Make it foreground" / "Make it background"), and **Hear it · Take it out · Edit it**. A **removed** card: struck words, "Room tone in its place", **Put it back**. A **voicing** card: the words in italics, a thin progress bar, the step in words. A line taken out of the video says "Taken out of the video. Add it puts it back; Discard drops it for good."
-- Keys: ↑↓ move, Enter edit it, Space hear it, K add it, Delete discard, U take it out, A add after, S shift, `/` the composer, `\` hides Voltage. Roving focus: only the focused card exposes its controls to Tab.
-- The in-place editor opens on the line's current words and choices (never the original once moved past); its submit is **Voice it**, and the take comes back proposed.
+- `Transcript` in display 26 px · `N lines` · `<volt>P</volt> proposed · A in the video` · **Add all N** (`.btn.volt.sm.shine`, when more than one).
+- A **row per audio line**, in time order: a spoken line; a shifted line where it now plays; an added line in the video; a proposed or working added line. The first line is `.who` + stamp; then `.say`; then `.meta`; then the verbs.
+- **A proposal** is `.row.prop`: words at 18 px with `<ins>` (volt highlighter) and `<del>`, one line of facts (whose voice · the verdict · what the picture does), then **Hear it ␣** (`.btn.sm`) · **Add it K** (`.btn.volt.sm`) · Edit it · Discard (`.act`). **Edit it opens the depth in place**: Before/After, the delivery pills (+ "Your words…"), Voltage's direction, a facts grid (Voice · Model · Dials · Fit), the Measured tiles with meters (Voice match, Natural, Prosody, Room against their bars), "Lip-sync · not measured yet", then Hear it · Add it · Voice it again · Change the words · Discard · Less ↑.
+- **A line in the video** shows `✓ In the video` and, on hover or focus, Hear it · Take it out · Edit it as `.act`s.
+- **A line as shot** shows `.who` and `.say`; its verbs (Hear it · Edit it · Discard · Add a line after · Move up/down · Shift to a time…) appear on hover/focus, or behind "…" on touch.
+- **Long runs of untouched lines fold** to "+ N more lines" once anything is proposed or in the video; the current, selected, focused or edited line never folds; arrow keys unfold as they pass.
+- Keyboard on a focused row: ↑↓ move · Enter edit · ␣ hear · K add · ⌫ discard · A add after · S shift · U take it out · / ask Voltage.
+
+## The pane (Voltage)
+
+Header: the wave, **Voltage** (display 18), the state word (`ready` · `working` · `reading` · `N proposed` · `needs your go`), the engine tag on the right (`Opus 5.5 · high`, only when the model is known). The thread is **turns**: your `.bubble`, the **trace card** (Trace · N steps · T s, one `.ln` per step with time, tool and cost), Voltage's words (Markdown), a question as a **gate card** (⚡ Your go is needed, cost tiles THIS STEP / LEFT IN TURN, the first option `.btn.volt.sm.shine`, the rest `.btn.sm`, Not yet quiet). Earlier turns collapse to chips. Under the thread: suggestion chips (the first read's examples), then the composer ("Describe a change", `/` focuses it) with "Turn cap $x.xx" and the send button named for what it does (Send · Answer).
+
+**The first read** (nothing said yet): the picture with a big volt play, **Who's speaking** (Voltage's guess per speaker, lines and seconds, Rename, ✓ Looks right), the transcript; the pane carries the opening line, what Voltage saw on a silent clip (the place, Looks right / Correct it) and the example chips. **While Voltage works**: the scan line sweeps the picture with the step beside it, the row it is on reads `Waiting on you` (dashed) when it stops for you.
 
 ## Interaction rules
 
-- Everything is reachable from the keyboard with a visible focus ring (`focus-visible:ring-[3px] focus-visible:ring-ring/50`); `outline-none` only beside a ring. Dragging is never the only way (Move up / Move down, typed times, nudge keys).
-- Every wait is spoken: one `role="status"` region per pane, `role="log"` on the thread, `role="alert"` for failures, `aria-busy` on the region doing the work. Disabled controls read as inert.
-- Sheets are real modals (shadcn `Dialog`). Every screen has an `h1`, a `<main>` and a skip link.
-- Icons are `lucide-react` SVG, never emoji; a meaningful icon has a text alternative; beside visible text it is `aria-hidden`.
-- Loading reserves the space of what is coming and says in a sentence what is happening. Errors appear where they belong, in one sentence with one action.
-- Compact labels do not wrap; nothing lives only in a tooltip.
-- Nothing in the workspace voices a line or changes the plan except a turn; the row's Add it / Discard / Take it out and the moves are the user's own hands. Every composer path is a turn. "What Voltage may do" (autonomy, the turn's spend cap, the effort) is a sheet off the header.
-- Playback: Final (the added lines), With proposals (a preview render with the proposed takes mixed in, a status line while it renders), Original.
+- Every change is a proposal first; nothing is in the video until **Add it**. The user's next action is the last element of whatever it acts on.
+- A paid or committing step waits as a gate card under Check with me (and for whatever `ask_before` keeps under Just do it); the answer is the next turn.
+- Playback: Final · With proposals · Original; "With proposals" is a preview render keyed to the takes it carries. Hear it on a proposal plays the take in place; a replacement mutes the original under it.
+- Nothing is voiced outside a turn: Edit it → Voice it, delivery pills, "Voice it again", a chip — all are sentences said to Voltage.
+- Focus is visible everywhere (3 px ring at 50 %); `outline-none` only with a ring; sheets are real dialogs (focus in, Escape, focus back).
+- No invented speech: Whisper's hallucinated lines are screened before anything is built on them; no placeholder reply stands for Voltage.
 
 ## Components in use
 
-shadcn: `Button` `Input` `Textarea` `Badge` `Card` `Dialog` `Popover` `DropdownMenu` `Progress` `Skeleton` `Switch` `Select` `Tooltip` `Separator` `Label` `ScrollArea` `Toggle` `ToggleGroup`.
-
-Voltage's own: `Lanes` (the multitrack), `LineDoc` (the transcript cards and the in-place editor; `EditorControls`, `editorStyles`), `PlanCard`, `ReadingCard`, `PlaceEditor`, `Player` (picture, caption, transport), `Timeline` (the Precise word track), `ChatPanel`, `ActivityLog`, `SpeakersBar`, `AutonomySwitch`, `SpendMeter`, `ExportBar`, `ConsentSheet`, `ShipSheet` (only when Voltage ships on its own), `WhatVoltageMayDo`, `LoadScreen`, `ProjectList`, `SignIn`, `Avatar`, `Presence`, `ThemeToggle`.
+shadcn `button`, `input`, `textarea`, `dialog`, `badge`, `toggle` under the class layer; `Player`, `Lanes` (+ `Timeline` for Precise), `LineDoc`, `PlaceEditor`, `VoltagePane`, `WhoSpeaks`, `WhatVoltageMayDo`, `ConsentSheet`, `Wordmark`/`Wave`; pages under `src/pages/` with `Shell`, `bits` (`Tile`, `FillBar`) and `fmt`.
 
 ## Adding a component
 
-`cd frontend && npx shadcn@latest add <name>`, then check the generated file's `cn` import (`@/lib/utils`) and add `pointer-coarse:` sizes if it is a control. Never spell a colour; add a token to `globals.css` (both `:root` and `.dark`, plus `@theme inline`) if a new meaning is needed.
+Use the class layer first (`.btn`, `.act`, `.pill`, `.stamp`, `.row`, `.tag`); add a token to `globals.css` for both modes and to `theme.test.ts`'s list before using it; never a raw colour, gradient, blur or `shadow-[`; keep 12 px as the floor; name every control; test light and dark.

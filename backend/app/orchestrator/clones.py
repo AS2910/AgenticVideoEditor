@@ -13,7 +13,7 @@ from __future__ import annotations
 import threading
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Collection
 
 from app.adapters.base import VendorError
 from app.domain.models import MediaArtifact, Source, Transcript
@@ -106,11 +106,16 @@ class CloneService:
             self._repo.set_clone(project_id, key, voice_id)
             return VoiceChoice(voice_id, cloned=True)
 
-    def purge(self, project_id: str) -> list[str]:
+    def purge(self, project_id: str, keep: Collection[str] = ()) -> list[str]:
         """Delete this project's clones at the vendor (consent withdrawn).
-        Returns the voice ids that could not be deleted, for the caller to name."""
+        Returns the voice ids that could not be deleted, for the caller to name.
+        A clone in `keep` is one the user kept as their own; it outlives the
+        project and is only forgotten here."""
         failed: list[str] = []
         for key, voice_id in self._repo.clones(project_id).items():
+            if voice_id in keep:
+                self._repo.set_clone(project_id, key, None)
+                continue
             try:
                 self._voice.delete_clone(voice_id)
             except (VendorError, NonRetryableError):

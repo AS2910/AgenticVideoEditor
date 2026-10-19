@@ -71,7 +71,7 @@ describe('Lanes: coexisting audio is seen as such', () => {
   it('lights a spoken line a replacement changed, with the new words', () => {
     render(<Lanes {...base} revisions={[{ edit_id: 'r2', start: 31, end: 34, text: 'Start a live Bhaji Cam session.', mix: 'replace' }]} onSeek={() => {}} />)
     const changed = screen.getByRole('button', { name: 'Changed line at 0:31, Marcus: Start a live Bhaji Cam session.' })
-    expect(changed).toHaveClass('border-changed', 'bg-changed-soft')
+    expect(changed).toHaveClass('border-ink', 'bg-volt')   // Volt: a change is volt with ink
     expect(changed).toHaveAttribute('title', 'Start a live Bhaji Cam session.')
   })
 })
@@ -160,13 +160,13 @@ describe('Lanes: levels, proposals, names', () => {
     render(<Lanes {...base} items={items} onSeek={() => {}} />)
     const a2 = within(screen.getByTestId('lane-a2'))
     const proposed = a2.getByRole('button', { name: 'Proposed line at 0:20: And here it is.' })
-    expect(proposed).toHaveClass('border-changed', 'bg-changed-soft', 'text-changed')
+    expect(proposed).toHaveClass('border-ink', 'bg-volt', 'text-ink')
     // The span is the take's own length from where it starts.
     expect(proposed.style.width).toBe(`${(2 / 48.9) * 100}%`)
     const voicing = a2.getByRole('button', { name: 'Voicing line at 0:25: Still voicing' })
     expect(within(voicing).getByTestId('pulse')).toHaveClass('animate-pulse')
     const needs = a2.getByRole('button', { name: 'Line needing you at 0:30: Help me' })
-    expect(needs).toHaveClass('border-needs', 'bg-needs-soft', 'text-needs')
+    expect(needs).toHaveClass('border-ink', 'bg-warn', 'text-ink')
     expect(within(needs).getByTestId('level')).toHaveTextContent('−12 dB')
     expect(a2.queryByRole('button', { name: /Gone/ })).toBeNull()
     // A replace item marks its spoken line, not A2.

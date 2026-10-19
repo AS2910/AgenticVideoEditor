@@ -109,8 +109,10 @@ def test_health_says_whether_cloning_is_on(client, cloning):
     assert client.get("/health").json()["cloning"] == "on"
 
 
-def test_health_says_off_for_a_voice_that_cannot_clone(client):
-    assert client.get("/health").json()["cloning"] == "off"        # the suite is on the mock voice
+def test_health_says_off_for_a_voice_that_cannot_clone(client, monkeypatch):
+    assert client.get("/health").json()["cloning"] == "on"         # the mock clones (20i: your own voice, offline)
+    monkeypatch.setattr(main.voice, "can_clone", False)
+    assert client.get("/health").json()["cloning"] == "off"
 
 
 # ── the room (Phase 15c): stems reach the export only when something is edited ──

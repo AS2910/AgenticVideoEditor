@@ -6,7 +6,7 @@
 import { describe, it, expect, vi } from 'vitest'
 import { render, screen, within, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { ChatPanel } from './ChatPanel'
+import { VoltagePane } from './VoltagePane'
 import { LineDoc } from './LineDoc'
 import { clock } from '../transcript/format'
 import type { Candidate, PlanItem, Statement } from '../types'
@@ -69,9 +69,9 @@ describe('an unreadable time cannot be voiced', () => {
 
 describe('the send button says what it will do', () => {
   it('is labelled by the caller, and Send by default', () => {
-    const { rerender } = render(<ChatPanel messages={[]} canSubmit onSubmit={() => {}} />)
+    const { rerender } = render(<VoltagePane messages={[]} state="ready" onSubmit={() => {}} />)
     expect(screen.getByRole('button', { name: 'Send' })).toBeInTheDocument()
-    rerender(<ChatPanel messages={[]} canSubmit onSubmit={() => {}} sendLabel="Change the plan" />)
+    rerender(<VoltagePane messages={[]} state="ready" onSubmit={() => {}} sendLabel="Change the plan" />)
     expect(screen.getByRole('button', { name: 'Change the plan' })).toBeInTheDocument()
   })
 })

@@ -138,7 +138,7 @@ Google OIDC with PKCE (`/auth/login`, `/auth/callback`, `/auth/me`, `/auth/logou
 - **Tests are offline and deterministic**: 648 backend (pytest; ffmpeg-dependent tests skip without it; vendor responses replayed from recorded fixtures) and 260 front end (vitest). A bench (`python -m app.bench gate`) runs a labelled corpus against a baseline. The agent eval is the one paid test and is run by hand.
 - **Latency**: a turn is typically 20–45 s and $0.10–0.20; a take about 10 s; a render seconds for a short clip (longer when the picture flexes or holds).
 - **Persistence**: everything but jobs survives a restart; an interrupted job is lost and said so.
-- **Accessibility and design** (`design-system/voltage/MASTER.md`): shadcn/ui on Tailwind v4, light and dark, Inter; every state has a word beside its colour; everything reachable from the keyboard with a visible focus ring; waits spoken through `role="status"`; sheets are real modals; 44 px targets on coarse pointers; no raw colours (guarded by a test).
+- **Accessibility and design** (`design-system/voltage/MASTER.md`, "Volt", 2026-10-19): the user's hand-off in `voltage-design/` built as drawn — paper and ink with one volt accent, Space Grotesk / Geist / JetBrains Mono, hard offset shadows on proposals, gates and primary buttons only, Voltage's pane black in both themes; shadcn/ui on Tailwind v4 under a small class layer; every state has a word beside its colour; everything reachable from the keyboard with a visible focus ring; waits spoken through `role="status"`; sheets are real modals; 44 px targets on coarse pointers; 12 px type floor; no raw colours, gradients, blurs or glows (guarded by a test); no number on screen that was not measured or recorded.
 - **Development**: `uvicorn --reload` restarts on any save under `backend/`, which kills a running turn — work in a git worktree while a live turn or eval runs.
 
 ## 6. The agent's tools
@@ -172,6 +172,10 @@ Google OIDC with PKCE (`/auth/login`, `/auth/callback`, `/auth/me`, `/auth/logou
 
 Limits the API taught us: at most 8 union-typed parameters across strict tools (7 in use), strict schemas only on the seven complex tools (the compiled grammar overflowed at 19).
 
+## 6b. The screens (Volt, 2026-10-19)
+
+Hash routes, one page each: `#projects` (upload, the sample, recent projects with Open / Delete-with-undo), `#pN` (the editor), `#pN/export` (the final render, Download, Copy link, the receipt), `#voices` (your voices: record or drop a file, clone a speaker from a project, design one from a description, keep what Voltage made; Hear it on any), `#usage` (this week / month / all time: total, by vendor, by project, turns and takes), `#settings` (defaults for new projects, what still asks under Just do it, appearance, sign out, delete everything), `#billing` (placeholder). The editor: header (file, length and voices, Final · With proposals · Original, the autonomy word → What Voltage may do, the spend → Usage, Export, account), the picture with its scrubber markers (volt proposed · ink in the video · amber waiting) and Tracks (the lanes and the word-precise timeline), the one transcript, and Voltage's pane (turns: your words, the trace of steps with tools and costs, the reply, a gate card with the step's cost and what the turn has left, suggestion chips, the composer). The first read shows Who's speaking with Voltage's guesses and one Looks right.
+
 ## 7. The API
 
 | Route | What it does |
@@ -180,7 +184,11 @@ Limits the API taught us: at most 8 union-typed parameters across strict tools (
 | `GET/POST /auth/*` | Sign-in (§4.8). |
 | `POST /projects` · `GET /projects` · `GET /projects/{id}` · `DELETE /projects/{id}` | Upload and transcribe; list; detail (edits, messages, plan, settings); delete with media. |
 | `POST /projects/{id}/consent` | Record consent. |
-| `GET /projects/{id}/usage` · `PUT /projects/{id}/settings` | Spend against ceilings; autonomy, turn cap, effort. |
+| `GET /projects/{id}/usage` · `GET/PUT /projects/{id}/settings` | Spend against ceilings; autonomy, turn cap, effort, `ask_before` (which commits still wait under Just do it), the model (read-only). |
+| `GET/PUT /me/settings` | Your defaults for new projects (autonomy, turn cap, effort, `ask_before`). |
+| `GET /usage?period=week\|month\|all` | What you spent across projects: total, by vendor, by project, turns and takes in the period, the ceilings. |
+| `GET /projects/{id}/receipt` | The export page's receipt: turns, takes, spend, each change with a note, drafts left, the last final render. |
+| `DELETE /account` | Everything of yours: projects, media, voices, settings, spend records. |
 | `GET/PUT /projects/{id}/speakers[/{label}]` · `POST …/speakers/detect` | Speakers, names, hand-picked voices. |
 | `POST /projects/{id}/reading` · `PUT /projects/{id}/sight` · `GET /projects/{id}/frames[/{index}]` | Voltage's first look; the place; frames. |
 | `POST /projects/{id}/turns` (202) · `GET /jobs/{job_id}` · `GET /projects/{id}/messages?after=` | A turn of the agent; its job; the thread as it grows. |
@@ -192,7 +200,11 @@ Limits the API taught us: at most 8 union-typed parameters across strict tools (
 | `POST /projects/{id}/export` | Render: the final, or with `{"with_proposals": true}` the preview. |
 | `POST /projects/{id}/variants` | A variant project. |
 | `GET /projects/{id}/artifacts/{sha256}` · `GET /voices` | Media; the catalogue and your own voices (`mine`). |
-| `POST /voices/mine` · `DELETE /voices/mine/{voice_id}` | Upload a voice of yours under a name (consent required, ≥ 10 s); remove it. |
+| `POST /voices/mine` · `DELETE /voices/mine/{voice_id}` | Upload or record a voice of yours under a name (consent required, ≥ 10 s); remove it. |
+| `GET /voices/made` · `POST /voices/mine/keep` | Voices Voltage made inside projects (designed, cloned); keep one as yours under a name. |
+| `GET /voices/speakers` · `POST /voices/mine/from-speaker` | Speakers with enough clean speech to clone; clone one into your voices (consent required). |
+| `POST /voices/design` · `POST /voices/mine/from-preview` | Three designed previews from a description (paid, against your own budget); keep one as yours. |
+| `GET /voices/sample/{sha}` | A voice's sample, for Hear it on the Voices page. |
 
 ## 8. Configuration
 
@@ -213,7 +225,8 @@ Limits the API taught us: at most 8 union-typed parameters across strict tools (
 - **Inpainting-grade editing** (Phase 18): needs a GPU.
 - **The eval bar**: 7 of 10 against 9; the fix is to give the closing words their facts (a final project state before the last line, and the source of each claim).
 - **Shift** is still an immediate, undoable action rather than a proposal.
-- **The plan card** stays in the panel as Voltage's record; it repeats lines the transcript shows.
-- **Perform it myself** (E3) has no recording path.
+- **A variant** (`POST /variants`) has no button in the Volt screens yet; the route stands.
+- **Billing** is a placeholder page: the ceilings are fixed in this build and nothing is charged; the copy says so.
+- **Lip-sync is "not measured yet"** on every proposal's depth view until Phase 17 lands.
 - **Ingest is synchronous**; jobs live in memory; a failed transcription orphans its upload.
 - **The README's "journey" and "seams"** predate the agent and the single transcript; this document is the current description.

@@ -67,11 +67,12 @@ const SPEAKER_TONES: Record<string, string> = {
   d: 'border-spk-d bg-spk-d/25',
   x: 'border-muted-foreground bg-muted-foreground/25',
 }
+// Volt: a line in the video is ink on the lane, a proposal volt with an ink edge, a stuck one amber.
 const TONES = {
-  ok: 'border-ok bg-ok-soft text-ok',
-  changed: 'border-changed bg-changed-soft text-changed',
-  needs: 'border-needs bg-needs-soft text-needs',
-  plain: 'border-border bg-card text-muted-foreground',
+  ok: 'border-foreground bg-foreground text-background',
+  changed: 'border-ink bg-volt text-ink',
+  needs: 'border-ink bg-warn text-ink',
+  plain: 'border-transparent bg-lane text-foreground',
 } as const
 type Tone = keyof typeof TONES
 
@@ -134,7 +135,7 @@ function Pill({ at, tone, label, title, onClick, className, testid = 'pill', chi
       {...data}
       type="button"
       className={cn(
-        'absolute inset-y-0.5 flex min-h-6 min-w-0 items-center gap-1 overflow-hidden rounded-sm border px-1.5 text-left text-xs whitespace-nowrap outline-none hover:z-10 focus-visible:z-10 focus-visible:ring-[3px] focus-visible:ring-ring/50 pointer-coarse:min-h-11',
+        'grow absolute inset-y-0.5 flex min-h-6 min-w-0 items-center gap-1 overflow-hidden rounded-sm border px-1.5 text-left font-mono text-xs whitespace-nowrap outline-none hover:z-10 focus-visible:z-10 focus-visible:ring-[3px] focus-visible:ring-ring/50 pointer-coarse:min-h-11',
         tone, className,
       )}
       style={{ left: `${at.left}%`, width: `${at.width}%` }}
@@ -153,8 +154,8 @@ function Lane({ id, label, bodyRef, children }: { id: string; label: string; bod
   const labelId = useId()
   return (
     <div className="flex items-stretch gap-2" role="group" aria-labelledby={labelId} data-testid={`lane-${id}`}>
-      <div id={labelId} className="flex w-20 shrink-0 items-center font-mono text-xs tracking-wide whitespace-nowrap text-muted-foreground uppercase">{label}</div>
-      <div ref={bodyRef} className="relative flex min-w-0 flex-1 flex-col overflow-hidden rounded-md bg-muted">{children}</div>
+      <div id={labelId} className="lane-n flex w-20 shrink-0 items-center whitespace-nowrap">{label}</div>
+      <div ref={bodyRef} className="relative flex min-w-0 flex-1 flex-col overflow-hidden rounded-md bg-sunk/60">{children}</div>
     </div>
   )
 }
@@ -251,7 +252,7 @@ export function Lanes({
   const time = (t: number) => <span className="tnum font-mono">{clock(t)}</span>
 
   return (
-    <section className="flex flex-col gap-1.5 rounded-lg border bg-card p-2.5 text-xs shadow-xs" aria-label="Lanes" data-testid="lanes">
+    <section className="flex flex-col gap-1.5 text-xs" aria-label="Lanes" data-testid="lanes">
       {/* The ruler: the marks, the playhead, and the real range input laid
           invisibly over it so a click there is a seek and a keyboard user has a slider. */}
       <div className="flex items-stretch gap-2">
@@ -283,7 +284,7 @@ export function Lanes({
       </div>
 
       {/* V1: the picture, piece by piece — as shot, slowed or sped a touch, or a frame held. */}
-      <Lane id="v1" label="V1 Picture">
+      <Lane id="v1" label="V1 Pic">
         <div className={ROW}>
           {pieces.length === 0 ? (
             <Pill at={at(0, duration)} tone={TONES.plain} label={`Picture as shot at ${clock(0)}`} title="As shot" onClick={() => onSeek(0)} testid="piece">
@@ -304,7 +305,7 @@ export function Lanes({
 
       {/* A1: the spoken lines, by speaker; a removed one struck through, a changed one lit with its new words. */}
       {statements.length > 0 && (
-        <Lane id="a1" label="A1 Spoken">
+        <Lane id="a1" label="A1 Said">
           <div className={ROW}>
             {statements.map((s, i) => {
               const who = name(s.speaker)

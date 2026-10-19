@@ -4,7 +4,7 @@ export interface Statement { text: string; start: number; end: number; speaker?:
 
 /** An approved edit as the transcript shows it: the new words over a span,
  *  as inline tracked changes. `edit_id` is what Revert names. */
-export interface Revision { edit_id?: string; start: number; end: number; text: string; mix: Mix; /** The other half of a shifted line. */ partner?: string | null; /** 20g: the level it is mixed at, dB; null or 0 is the foreground. */ level_db?: number | null }
+export interface Revision { edit_id?: string; start: number; end: number; text: string; mix: Mix; /** The other half of a shifted line. */ partner?: string | null; /** 20g: the level it is mixed at, dB; null or 0 is the foreground. */ level_db?: number | null; /** Volt: who says it and whose voice, when known. */ speaker?: string | null; voice_profile_id?: string | null }
 
 /** How much Voltage does on its own: show the plan and wait for your go (the
  *  controlled default), or voice it straight away. */
@@ -250,6 +250,9 @@ export interface ApprovedEditSummary {
   partner?: string | null
   /** 20g: the level it is mixed at. */
   level_db?: number | null
+  /** Volt: the line's speaker and the voice that said it, when known. */
+  speaker?: string | null
+  voice_profile_id?: string | null
 }
 
 /** A reopened project: the upload plus what has been done to it. */
@@ -290,7 +293,7 @@ export interface ChatMessage {
   kind?: 'say' | 'step' | 'previews'
   cost?: number
   seq?: number
-  data?: { description: string; previews: VoicePreview[] }
+  data?: { description?: string; previews?: VoicePreview[]; /** Volt: a step message's tool and clock. */ tool?: string; t?: number }
 }
 
 export interface QuestionOption {

@@ -131,6 +131,8 @@ def to_voice(raw: dict) -> dict:
         # "premade" (ElevenLabs' own), "professional"/"high_quality" (from the
         # library), "cloned" (a speaker's own, made by Voltage; never listed).
         "category": raw.get("category"),
+        # The vendor's own sample of the voice, so the voices page can play it.
+        "preview_url": raw.get("preview_url") or None,
     }
 
 

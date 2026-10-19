@@ -49,7 +49,7 @@ describe('Player playback (Phase 8 fix)', () => {
 describe('Player transport (redesign)', () => {
   it('shows a timecode of position and length', () => {
     render(<Player src="/a.mp4" duration={48.9} currentTime={7.54} onSeek={() => {}} />)
-    expect(screen.getByTestId('timecode')).toHaveTextContent('0:07.54 / 0:48.90')
+    expect(screen.getByTestId('timecode')).toHaveTextContent('0:07.5 / 0:48.9')
   })
 
   it('carries extra controls in the transport row', () => {
@@ -62,22 +62,6 @@ describe('Player transport (redesign)', () => {
   })
 })
 
-describe('Player placing (UX-1b)', () => {
-  it('shows the take being placed as a block on the bar, nudged with the arrow keys', async () => {
-    const onPlace = vi.fn()
-    render(<Player src="/a.mp4" duration={10} currentTime={0} onSeek={() => {}} placing={{ start: 2, duration: 1 }} onPlace={onPlace} />)
-    const block = screen.getByRole('slider', { name: 'Where the take starts' })
-    expect(block).toHaveAttribute('aria-valuenow', '2')
-    expect(block.style.left).toBe('20%')
-    expect(block.style.width).toBe('10%')
-    block.focus()
-    fireEvent.keyDown(block, { key: 'ArrowRight' })
-    expect(onPlace).toHaveBeenCalledWith(2.1)
-    fireEvent.keyDown(block, { key: 'ArrowLeft', shiftKey: true })
-    expect(onPlace).toHaveBeenCalledWith(1)
-  })
-})
-
 describe('Player as the monitor (UX-7b)', () => {
   it('captions the picture with the line at the playhead', () => {
     render(<Player src="/a.mp4" duration={8} currentTime={1} onSeek={() => {}} caption={<>Get <ins>30%</ins> off</>} />)
@@ -85,21 +69,25 @@ describe('Player as the monitor (UX-7b)', () => {
     expect(screen.getByTestId('caption').querySelector('ins')).toHaveTextContent('30%')
   })
 
-  it('draws the lines as blocks by speaker, the changed span lit, and the words as ticks', () => {
+  it('marks the scrubber with proposals, lines in the video and steps waiting on you (Volt)', () => {
     render(
       <Player
         src="/a.mp4" duration={10} currentTime={2.5} onSeek={() => {}}
-        blocks={[{ start: 0, end: 4, tone: 'a' }, { start: 5, end: 8, tone: 'b' }, { start: 1, end: 2, tone: 'changed' }]}
-        words={[{ text: 'Get', start: 0, end: 0.4 }, { text: 'off', start: 0.9, end: 1.3 }]}
+        markers={[{ at: 1, tone: 'ink', label: 'In the video: Thirty off.' }, { at: 4, tone: 'volt', label: 'Proposed: Bhaji Cam' }, { at: 8, tone: 'warn', label: 'Waiting on you' }]}
       />,
     )
-    const blocks = screen.getAllByTestId('block')
-    expect(blocks.map((b) => b.getAttribute('data-tone'))).toEqual(['a', 'b', 'changed'])
-    expect(blocks[0].style.left).toBe('0%')
-    expect(blocks[0].style.width).toBe('40%')
-    expect(blocks[1].style.left).toBe('50%')
-    expect(screen.getAllByTestId('tick')).toHaveLength(2)
+    const marks = screen.getAllByTestId('marker')
+    expect(marks.map((m) => m.getAttribute('data-tone'))).toEqual(['ink', 'volt', 'warn'])
+    expect(marks[1].style.left).toBe('40%')
+    expect(marks[1]).toHaveAttribute('title', 'Proposed: Bhaji Cam')
     expect(screen.getByTestId('head').style.left).toBe('25%')
+  })
+
+  it('tags the picture with what plays, and sweeps it while Voltage looks (Volt)', () => {
+    render(<Player src="/a.mp4" duration={10} currentTime={0} onSeek={() => {}} badge="With proposals" scanning="Voltage is looking at 0:04" />)
+    expect(screen.getByTestId('mode-badge')).toHaveTextContent('With proposals')
+    expect(screen.getByRole('status')).toHaveTextContent('Voltage is looking at 0:04')
+    expect(screen.getByTestId('scan')).toBeInTheDocument()
   })
 
   it('rules the timeline with a label every few seconds and the end', () => {
