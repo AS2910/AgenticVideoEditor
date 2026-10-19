@@ -35,11 +35,13 @@ def test_claude_price():
 def test_calls_since_counts_one_vendors_rows_from_a_moment():
     ledger = Ledger()
     ledger.record("p1", "elevenlabs", "speech", 7, "characters", 0.001)
-    from datetime import datetime, timezone
-    mark = datetime.now(timezone.utc).isoformat()
+    import time
+    from app.timefmt import now_iso
+    time.sleep(0.002)   # moments are kept to the millisecond: the mark is after the first row
+    mark = now_iso()
     ledger.record("p1", "elevenlabs", "speech", 7, "characters", 0.001)
     ledger.record("p1", "elevenlabs", "speech", 7, "characters", 0.001)
     ledger.record("p1", "anthropic", "plan", 10, "tokens", 0.001)
     ledger.record("p2", "elevenlabs", "speech", 7, "characters", 0.001)
     assert ledger.calls_since("p1", "elevenlabs", mark) == 2
-    assert ledger.calls_since("p1", "elevenlabs", "1970-01-01T00:00:00+00:00") == 3
+    assert ledger.calls_since("p1", "elevenlabs", "2000-01-01T00:00:00.000Z") == 3

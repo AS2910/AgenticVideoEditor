@@ -5,7 +5,7 @@ import { ExportPage } from './ExportPage'
 
 const ok = (body: unknown) => ({ ok: true, status: 200, json: async () => body, text: async () => '' }) as Response
 const MEDIA = { kind: 'video', sha256: 's'.repeat(64), duration: 48.9, container: 'mp4' }
-const PROJECT = { video_id: 'p2', filename: 'bhaji-cam-ad.mp4', duration: 48.9, media: MEDIA, consent: null, transcript: [], edits: [], messages: [] }
+const PROJECT = { video_id: 'p2', filename: 'bhaji-cam-ad.mp4', duration: 48.9, media: MEDIA, consent_granted_at: null, transcript: [], edits: [], messages: [] }
 const RENDER = { sha256: 'r'.repeat(64), duration: 48.9, filename: 'bhaji-cam-ad-edited.mp4' }
 const RECEIPT = {
   turns: 4, takes: 6, spent_usd: 1.07, drafts: 0, render: RENDER,

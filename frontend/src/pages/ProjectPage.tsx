@@ -7,7 +7,8 @@ import { go, hrefFor } from '../lib/route'
 import { clock } from '../transcript/format'
 import { cn } from '@/lib/utils'
 import { Shell } from './Shell'
-import { usd, usdShort, whenLabel } from './fmt'
+import { formatDate } from '../lib/dates'
+import { usd, usdShort } from './fmt'
 
 interface ProjectPageProps {
   me: Me | null
@@ -272,11 +273,18 @@ export function ProjectPage({ me, projectId, onUpload, uploading, error, onDelet
             <div className="flex items-center gap-2"><span className="disp text-xl font-bold">Shared voices</span><span className="flex-1" /><button type="button" className="btn sm" onClick={() => void openAdd()} aria-expanded={adding}>+ Add</button></div>
             {detail.voices.length === 0 && !adding && <span className="text-[13px] text-muted-foreground">Share one of your voices and every video here can ask for it by name.</span>}
             {detail.voices.map((v) => (
-              <div key={v.voice_id} className="flex items-center gap-2.5 border-t border-line py-2">
-                <span className={cn('stamp', v.kind === 'designed' ? 'inkd' : v.kind === 'cloned' ? '' : 'in')}>{voiceKind[v.kind ?? 'recorded'] ?? v.kind}</span>
-                <span className="flex-1 truncate font-semibold">{v.name}</span>
-                <span className="tag text-faint">{v.used_in_project ? `${v.used_in_project} ${v.used_in_project === 1 ? 'video' : 'videos'}` : v.consent ? `consent ${whenLabel(v.consent)}` : ''}</span>
-                <button type="button" className="act" onClick={() => void unshare(v.voice_id)} disabled={busy === v.voice_id} aria-label={`Remove ${v.name} from the project`}>Remove</button>
+              <div key={v.voice_id} className="flex items-start gap-2.5 border-t border-line py-2" data-testid="shared-voice">
+                {/* Bug 2: the name keeps its own line; kind and consent sit under it, so neither can squeeze it to nothing. */}
+                <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+                  <span className="truncate font-semibold" title={v.name}>{v.name}</span>
+                  <span className="text-[13px] text-muted-foreground">
+                    {voiceKind[v.kind ?? 'recorded'] ?? v.kind}
+                    {' · '}
+                    {v.consent_needed === false ? 'No consent needed' : v.consent_granted_at ? `Consent ${formatDate(v.consent_granted_at)}${v.consent_approximate ? ' (approx.)' : ''}` : 'Consent not recorded'}
+                    {v.used_in ? ` · ${v.used_in} ${v.used_in === 1 ? 'video' : 'videos'}` : ''}
+                  </span>
+                </div>
+                <button type="button" className="act flex-none" onClick={() => void unshare(v.voice_id)} disabled={busy === v.voice_id} aria-label={`Remove ${v.name} from the project`}>Remove</button>
               </div>
             ))}
             {adding && (

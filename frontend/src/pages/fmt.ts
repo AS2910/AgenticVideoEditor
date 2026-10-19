@@ -13,22 +13,8 @@ export function clockTenths(t: number): string {
   return `${m}:${String(Math.floor(rest / 10)).padStart(2, '0')}.${rest % 10}`
 }
 
-const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
-const LONG_MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
-export const monthShort = (d = new Date()) => MONTHS[d.getMonth()]
-export const monthLong = (d = new Date()) => LONG_MONTHS[d.getMonth()]
-
-/** "Today · 11:40", "Yesterday", "12 Oct" (with the year once it is another year). */
-export function whenLabel(iso: string, now = new Date()): string {
-  const d = new Date(iso)
-  if (Number.isNaN(d.getTime())) return ''
-  const day = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime()
-  const diff = Math.round((day(now) - day(d)) / 86_400_000)
-  if (diff === 0) return `Today · ${d.getHours()}:${String(d.getMinutes()).padStart(2, '0')}`
-  if (diff === 1) return 'Yesterday'
-  const base = `${d.getDate()} ${MONTHS[d.getMonth()]}`
-  return d.getFullYear() === now.getFullYear() ? base : `${base} ${d.getFullYear()}`
-}
+/** Dates live in one module (bug 2): these names stay for the pages that import them from here. */
+export { formatRelative as whenLabel, monthShort, monthLong } from '../lib/dates'
 
 export const greeting = (hour: number) => (hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening')
 

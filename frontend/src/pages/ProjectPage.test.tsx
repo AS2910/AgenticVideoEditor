@@ -11,7 +11,11 @@ const DETAIL = {
     { video_id: 'p2', project_id: 'f1', project_name: 'Diwali 2026', filename: 'bhaji-cam-ad.mp4', duration: 48.9, created_at: '2026-10-18T09:00:00Z', edits: 0, state: 'draft', last_change: '2 proposed' },
     { video_id: 'p3', project_id: 'f1', project_name: 'Diwali 2026', filename: 'shop-tour.mp4', duration: 31, created_at: '2026-10-15T09:00:00Z', edits: 2, state: 'shipped', last_change: 'Brand said as Bhaji Cam throughout' },
   ],
-  voices: [{ voice_id: 'v1', name: 'Diwali Narrator', kind: 'designed', seconds: 0, at: '2026-10-18T08:00:00Z', used_in_project: 2 }],
+  voices: [
+    { voice_id: 'v1', name: 'Diwali Narrator', kind: 'designed', seconds: 0, at: '2026-10-18T08:00:00.000Z', used_in: 2, consent_granted_at: null, consent_needed: false },
+    { voice_id: 'v2', name: 'Deewar song', kind: 'recorded', seconds: 15, at: '2026-10-19T16:10:24.983Z', used_in: 1, consent_granted_at: '2026-10-19T16:09:46.615Z' },
+    { voice_id: 'v3', name: 'Old share', kind: 'recorded', seconds: 15, at: '2026-10-19T16:10:24.983Z', consent_granted_at: null },
+  ],
   files: [{ name: 'brand-guide.pdf', sha256: 'a'.repeat(64), size: 1200, kind: 'pdf', at: '2026-10-18T08:00:00Z' }],
   suggestions: [{ id: 's1', text: 'The offer ends 2 November.', why: null, video_id: 'p2', filename: 'bhaji-cam-ad.mp4', at: '2026-10-19T08:00:00Z' }],
 }
@@ -39,7 +43,7 @@ describe('ProjectPage (a folder of videos)', () => {
     vi.stubGlobal('fetch', routeFetch())
     render(<ProjectPage me={ME} projectId="f1" onUpload={() => {}} />)
     expect(await screen.findByRole('heading', { level: 1 })).toHaveTextContent('Diwali 2026')
-    expect(screen.getByText('2 videos · 1 shared voice · 1 file · $1.94 of the $10 project ceiling')).toBeInTheDocument()
+    expect(screen.getByText('2 videos · 3 shared voices · 1 file · $1.94 of the $10 project ceiling')).toBeInTheDocument()
     const cards = screen.getAllByRole('link', { name: /\.mp4/ })
     expect(cards.map((c) => c.getAttribute('href'))).toEqual(['#v/p2', '#v/p3'])
     expect(screen.getAllByText('2 proposed').length).toBeGreaterThan(0)
@@ -87,5 +91,32 @@ describe('ProjectPage (a folder of videos)', () => {
     render(<ProjectPage me={ME} projectId="f9" onUpload={() => {}} />)
     expect(await screen.findByRole('alert')).toHaveTextContent('That project is gone.')
     expect(screen.getByRole('link', { name: '← Home' })).toHaveAttribute('href', '#home')
+  })
+})
+
+
+describe('ProjectPage: the shared voice row (bug 2)', () => {
+  afterEach(() => { vi.unstubAllGlobals(); window.location.hash = '' })
+
+  it('shows name · kind · Consent date, never 1970, and the name keeps its width', async () => {
+    vi.stubGlobal('fetch', routeFetch())
+    const { container } = render(<ProjectPage me={ME} projectId="f1" onUpload={() => {}} />)
+    const rows = await screen.findAllByTestId('shared-voice')
+    expect(rows[0]).toHaveTextContent('Diwali Narrator')
+    expect(rows[0]).toHaveTextContent('Designed · No consent needed · 2 videos')
+    expect(rows[1]).toHaveTextContent('Deewar song')
+    expect(rows[1]).toHaveTextContent(/Recorded · Consent 19 Oct 2026 · 1 video/)
+    expect(rows[2]).toHaveTextContent('Recorded · Consent not recorded')
+    // The name has its own line: it is a block of its own, not a flex item beside the tags.
+    expect(within(rows[1]).getByText('Deewar song').parentElement).toHaveClass('min-w-0', 'flex-col')
+    expect(container.textContent).not.toMatch(/1970/)
+  })
+
+  it('shows a legacy boolean consent as not recorded, not as 1 Jan 1970', async () => {
+    const legacy = { ...DETAIL, voices: [{ voice_id: 'v9', name: 'Old', kind: 'recorded', seconds: 15, at: '2026-10-19T16:10:24.983Z', consent: true, consent_granted_at: undefined }] }
+    vi.stubGlobal('fetch', vi.fn(async () => ok(legacy)))
+    const { container } = render(<ProjectPage me={ME} projectId="f1" onUpload={() => {}} />)
+    expect(await screen.findByTestId('shared-voice')).toHaveTextContent('Recorded · Consent not recorded')
+    expect(container.textContent).not.toMatch(/1970/)
   })
 })

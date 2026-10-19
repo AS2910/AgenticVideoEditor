@@ -203,13 +203,12 @@ def test_a_rejected_upload_allocates_no_project(client, sample_audio_only):
 # ── consent (design spec §2/§7: non-negotiable, binds before generation) ─────
 
 def test_consent_given_at_upload_is_recorded(project):
-    assert project["consent"] is not None
-    assert project["consent"]["granted_at"]  # ISO timestamp
+    assert project["consent_granted_at"].endswith("Z")  # ISO 8601 UTC
 
 
 def test_uploading_without_consent_is_allowed_but_records_none(project_without_consent):
     # Ingesting and transcribing clones nobody; the gate is on generation.
-    assert project_without_consent["consent"] is None
+    assert project_without_consent["consent_granted_at"] is None
     assert project_without_consent["transcript"]
 
 
@@ -242,15 +241,15 @@ def test_granting_consent_afterwards_unblocks_generation(client, project_without
 
     granted = client.post("/videos/p1/consent")
     assert granted.status_code == 200
-    assert granted.json()["consent"]["granted_at"]
+    assert granted.json()["consent_granted_at"].endswith("Z")
 
     [item] = send(client, "make it 30% off")["plan"]["items"]
     assert item["status"] == "ready" and item["candidate"]["continuity"]["passed"] is True
 
 
 def test_re_confirming_consent_does_not_restamp_it(client, project):
-    first = client.post("/videos/p1/consent").json()["consent"]["granted_at"]
-    second = client.post("/videos/p1/consent").json()["consent"]["granted_at"]
+    first = client.post("/videos/p1/consent").json()["consent_granted_at"]
+    second = client.post("/videos/p1/consent").json()["consent_granted_at"]
     assert first == second
 
 
@@ -1417,7 +1416,7 @@ def test_a_variant_is_the_same_clip_with_the_plan_as_a_draft(client, project, mo
 
     assert variant["video_id"] == "p2" and variant["filename"] == "ad.mp4"
     assert variant["media"]["sha256"] == project["media"]["sha256"]
-    assert variant["consent"] is not None and variant["settings"]["effort"] == "xhigh"
+    assert variant["consent_granted_at"] is not None and variant["settings"]["effort"] == "xhigh"
     assert variant["speakers"] == [{"label": "A", "name": "Presenter", "voice_id": "nPczCjzI2devNBz1zQrb"}]
     plan = variant["plan"]
     assert plan["plan_id"] == "plan1" and plan["goal"] == "make it 30% off" and plan["status"] == "proposed"

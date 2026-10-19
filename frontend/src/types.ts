@@ -174,7 +174,8 @@ export interface Project {
   /** Measured server-side by ffprobe — the client never asserts this. */
   duration: number
   media: MediaArtifact
-  consent: ConsentRecord | null
+  /** Bug 2: when the uploader confirmed they may edit and clone this speaker (ISO), or null. */
+  consent_granted_at: string | null
   transcript: Word[]
   /** Absent from responses of servers before Phase 10. */
   statements?: Statement[]
@@ -403,7 +404,7 @@ export interface ProjectFolder {
 }
 export interface ProjectFile { name: string; sha256: string; size: number; kind: string; at: string }
 export interface BriefSuggestion { id: string; text: string; why?: string | null; video_id?: string | null; filename?: string | null; at: string }
-export interface ProjectVoice extends MyVoice { project_id?: string; project_name?: string; used_in_project?: number; consent?: string | null }
+export interface ProjectVoice extends MyVoice { project_id?: string; project_name?: string; used_in?: number; /** Bug 2: the moment consent was given (ISO) or null; approximate when backfilled; not needed for a designed voice. */ consent_granted_at?: string | null; consent_approximate?: boolean; consent_needed?: boolean }
 export interface ProjectDetailFolder {
   project: ProjectFolder
   videos: ProjectSummary[]

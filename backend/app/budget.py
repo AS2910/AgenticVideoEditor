@@ -6,6 +6,8 @@ Charged to the usage ledger (Phase 9b), so the budget survives restarts.
 """
 from __future__ import annotations
 
+from app.timefmt import now_iso
+
 from datetime import datetime, timezone
 
 from app.errors import NonRetryableError
@@ -64,7 +66,7 @@ class VoiceBudget:
                 "INSERT INTO usage (project_id, vendor, what, units, unit, usd, at, folder_id) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 (project_id, self.VENDOR, self.WHAT, amount, self.UNIT,
-                 amount * self.usd_per_1k / 1000, datetime.now(timezone.utc).isoformat(), folder_of(c, project_id)),
+                 amount * self.usd_per_1k / 1000, now_iso(), folder_of(c, project_id)),
             )
 
     def refund(self, project_id: str, amount: int) -> None:

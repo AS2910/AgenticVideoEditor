@@ -25,7 +25,8 @@ LOCAL_OWNER = "local"
 
 
 def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    from app.timefmt import now_iso
+    return now_iso()
 
 
 @dataclass(frozen=True)

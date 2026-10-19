@@ -31,7 +31,7 @@ def test_full_journey_ingest_turn_approve_export(sample_video, monkeypatch):
         ).json()
     project_id = created["video_id"]
     assert created["duration"] == pytest.approx(2.3, abs=0.05)
-    assert created["consent"] is not None
+    assert created["consent_granted_at"] is not None
 
     # The uploaded video is served straight back, seekable
     media = client.get(f"/videos/{project_id}/artifacts/{created['media']['sha256']}")

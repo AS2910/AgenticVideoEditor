@@ -284,7 +284,7 @@ function Studio() {
    *  say; ones with a plan or edits open straight in the editor. */
   const takeIn = (loaded: Project, edited = false) => {
     setProject(loaded)
-    consentGiven.current = loaded.consent !== null && loaded.consent !== undefined
+    consentGiven.current = !!loaded.consent_granted_at
     setTranscript(loaded.transcript)
     setAutonomy(loaded.settings?.autonomy ?? 'ask')
     setMayDo({ autonomy: loaded.settings?.autonomy ?? 'ask', turn_usd: loaded.settings?.turn_usd ?? MAY_DO.turn_usd,
@@ -369,7 +369,7 @@ function Studio() {
     try {
       const r = await grantConsent(projectId)
       consentGiven.current = true
-      setProject((p) => (p ? { ...p, consent: r.consent } : p))
+      setProject((p) => (p ? { ...p, consent_granted_at: r.consent_granted_at } : p))
       const { go } = consentAsk
       setConsentAsk(null)
       go()

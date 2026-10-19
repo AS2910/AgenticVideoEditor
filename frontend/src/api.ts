@@ -326,7 +326,7 @@ export const getMessages = (id: string, after = 0) => get<ChatMessage[]>(`/video
 /** Confirms the rights for a project uploaded without them — asked once, the
  *  first time a voice is about to be made (UX-3). */
 export const grantConsent = (id: string) =>
-  post<{ project_id: string; consent: { granted_at: string } }>(`/videos/${id}/consent`)
+  post<{ video_id: string; consent_granted_at: string | null }>(`/videos/${id}/consent`)
 
 /** A variant: the same clip as a new project, with the plan as a draft. */
 export const createVariant = (id: string) => post<Project>(`/videos/${id}/variants`)

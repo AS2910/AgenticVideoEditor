@@ -238,7 +238,7 @@ def _list_voices(wb: Workbench, turn: Turn, args: dict) -> ToolResult:
     for v in shared:
         # Folders: the project's voices first; one that carries consent needs no new consent here.
         out.append(f"- {v['voice_id']} · {v['name']} · in this project" + (f" · {v['description']}" if v.get("description") else "")
-                   + (" · consent given" if v.get("consent") else ""))
+                   + (" · consent given" if v.get("consent_granted_at") else ""))
     for v in voices:
         who = ", ".join(str(x).replace("_", " ") for x in (v.get("gender"), v.get("accent"), v.get("age")) if x)
         tag = ""

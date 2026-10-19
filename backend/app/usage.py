@@ -11,6 +11,8 @@ USD is an estimate from list prices, not an invoice: ElevenLabs bills by plan
 """
 from __future__ import annotations
 
+from app.timefmt import now_iso
+
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
@@ -97,7 +99,7 @@ class Ledger:
             c.execute(
                 "INSERT INTO usage (project_id, vendor, what, units, unit, usd, at, folder_id) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                (project_id, vendor, what, units, unit, usd, datetime.now(timezone.utc).isoformat(),
+                (project_id, vendor, what, units, unit, usd, now_iso(),
                  folder_of(c, project_id)),
             )
 

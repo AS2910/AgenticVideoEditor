@@ -26,6 +26,7 @@ from app.domain.transcript import (
 )
 from app.media.fit import speaking_rate, syllable_budget, syllables
 from app.config import load_settings
+from app.timefmt import iso, now_iso
 from app.media import frames as frames_mod, motion, shots
 from app.media import stems as stems_module
 from app.media import ffmpeg, ingest
@@ -210,7 +211,8 @@ async def _spool(upload: UploadFile, dest: Path) -> None:
 
 
 def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    # Bug 2: one format for every moment — ISO 8601 UTC with ms and Z (app/timefmt.py).
+    return now_iso()
 
 
 def _clock(seconds: float) -> str:
@@ -437,7 +439,8 @@ def _project_dict(record: ProjectRecord) -> dict:
         "filename": source.filename,
         "duration": source.duration,
         "media": _artifact_dict(source.media),
-        "consent": _consent_dict(record.consent),
+        # Bug 2: when the uploader confirmed they may edit and clone this speaker, or null.
+        "consent_granted_at": record.consent.granted_at if record.consent else None,
         "created_at": record.created_at,
         "transcript": [
             {"text": w.text, "start": w.start, "end": w.end} for w in record.transcript.words
@@ -777,8 +780,9 @@ async def add_my_voice(
             raise HTTPException(status_code=502, detail=str(exc) or "The voice could not be made.") from None
         # The recording stays with the owner, so the voices page can play it back.
         sample = artifacts.put_file(_user_store(owner), wav, kind="audio", container="wav", duration=seconds)
-    entry = {"voice_id": voice_id, "name": label, "seconds": round(seconds, 1), "at": _now(),
-             "kind": "recorded", "sample_sha": sample.sha256, "description": None}
+    ticked = _now()   # the request carries the ticked box: this is the moment of consent
+    entry = {"voice_id": voice_id, "name": label, "seconds": round(seconds, 1), "at": ticked,
+             "kind": "recorded", "sample_sha": sample.sha256, "description": None, "consent_granted_at": ticked}
     _set_my_voices(owner, [*_my_voices(owner), entry])
     return _voice_entry(entry)
 
@@ -846,7 +850,7 @@ def keep_made_voice(req: KeepRequest, owner: str = Depends(current_owner)) -> di
         repo.set_settings(pid, made_voices=[m for m in made if m["voice_id"] != req.voice_id])
     entry = {"voice_id": req.voice_id, "name": label, "seconds": float(found.get("seconds") or 0.0), "at": _now(),
              "kind": found["kind"], "sample_sha": None, "description": found.get("description"),
-             "source": {"video_id": pid, "filename": found["filename"]}}
+             "source": {"video_id": pid, "filename": found["filename"]}, **_made_voice_consent({**found, "video_id": pid})}
     _set_my_voices(owner, [*mine, entry])
     getattr(voice, "register_clone", lambda vid: None)(req.voice_id)
     return _voice_entry(entry)
@@ -899,7 +903,7 @@ def add_my_voice_from_speaker(req: FromSpeakerRequest, owner: str = Depends(curr
         raise HTTPException(status_code=502, detail=str(exc) or "The voice could not be made.") from None
     # The sample is kept with the owner, so it outlives the project it came from.
     sample = artifacts.put_file(_user_store(owner), reference.path, kind="audio", container="wav", duration=reference.duration)
-    entry = {"voice_id": voice_id, "name": label, "seconds": round(seconds, 1), "at": _now(), "kind": "cloned",
+    entry = {"voice_id": voice_id, "name": label, "seconds": round(seconds, 1), "at": _now(), "kind": "cloned", "consent_granted_at": _now(),
              "sample_sha": sample.sha256, "description": None,
              "source": {"video_id": req.video_id, "filename": record.source.filename, "label": spk.label}}
     _set_my_voices(owner, [*_my_voices(owner), entry])
@@ -970,7 +974,7 @@ def add_my_voice_from_preview(req: FromPreviewRequest, owner: str = Depends(curr
         voice_id = voice.save_voice(req.generated_voice_id, f"voltage-mine-{label}", description)
     except Exception as exc:  # noqa: BLE001 — the vendor's refusal, in its own words
         raise HTTPException(status_code=502, detail=str(exc) or "The voice could not be kept.") from None
-    entry = {"voice_id": voice_id, "name": label, "seconds": 0.0, "at": _now(), "kind": "designed",
+    entry = {"voice_id": voice_id, "name": label, "seconds": 0.0, "at": _now(), "kind": "designed", "consent_granted_at": _now(),
              "sample_sha": req.sha256 or designed.get("sha256"), "description": description or None}
     _set_my_voices(owner, [*_my_voices(owner), entry])
     return _voice_entry(entry)
@@ -1130,9 +1134,9 @@ def _period_start(period: str) -> str | None:
     """When the period began, in the ledger's own time (UTC ISO); None for all time."""
     now = datetime.now(timezone.utc)
     if period == "week":
-        return (now - timedelta(days=7)).isoformat()
+        return iso(now - timedelta(days=7))
     if period == "month":
-        return now.replace(day=1, hour=0, minute=0, second=0, microsecond=0).isoformat()
+        return iso(now.replace(day=1, hour=0, minute=0, second=0, microsecond=0))
     return None
 
 
@@ -1713,6 +1717,15 @@ def delete_folder_file(project_id: str, sha256: str, owner: str = Depends(curren
 
 # ── shared voices ──
 
+def _made_voice_consent(made: dict) -> dict:
+    """A voice Voltage made in a video: a speaker's clone carries that video's
+    consent; a designed or library voice is nobody's, so it needs none."""
+    if made.get("kind") != "cloned":
+        return {"consent_granted_at": None, "consent_needed": False}
+    record = repo.get(made.get("video_id") or made.get("project_id") or "")
+    return {"consent_granted_at": record.consent.granted_at if record and record.consent else None, "consent_needed": True}
+
+
 class ShareVoiceRequest(BaseModel):
     voice_id: str
 
@@ -1729,13 +1742,14 @@ def share_voice(project_id: str, req: ShareVoiceRequest, owner: str = Depends(cu
     if found is not None:
         entry = {"voice_id": found["voice_id"], "name": found["name"], "kind": found.get("kind") or "recorded",
                  "description": found.get("description"), "sample_sha": found.get("sample_sha"), "at": _now(),
-                 "consent": True}
+                 # The moment its owner's consent was given goes with it — never a boolean.
+                 "consent_granted_at": found.get("consent_granted_at"), "consent_approximate": bool(found.get("consent_approximate"))}
     else:
         made = next((m for m in _made_voices_of(owner) if m["voice_id"] == req.voice_id), None)
         if made is None:
             raise HTTPException(status_code=404, detail="No such voice of yours.")
         entry = {"voice_id": made["voice_id"], "name": made["name"], "kind": made["kind"], "description": made.get("description"),
-                 "sample_sha": None, "at": _now(), "consent": made["kind"] != "cloned"}
+                 "sample_sha": None, "at": _now(), **_made_voice_consent(made)}
     _set_project_voices(project_id, [*shared, entry])
     getattr(voice, "register_clone", lambda vid: None)(entry["voice_id"])
     return _voice_entry(entry)
@@ -1825,6 +1839,7 @@ def move_video(project_id: str, req: MoveVideoRequest, owner: str = Depends(curr
                     continue
                 name = v["name"] if v["name"].lower() not in taken else f"{v['name']} ({repo.get_project(leaving).name})"
                 mine.append({"voice_id": v["voice_id"], "name": name, "seconds": 0.0, "at": _now(), "kind": v.get("kind") or "designed",
+                             "consent_granted_at": v.get("consent_granted_at"), "consent_approximate": bool(v.get("consent_approximate")),
                              "sample_sha": v.get("sample_sha"), "description": v.get("description"),
                              "source": {"project_id": leaving}})
                 taken.add(name.lower())
@@ -1882,7 +1897,7 @@ def grant_consent(project_id: str, owner: str = Depends(current_owner)) -> dict:
     """
     _owned(project_id, owner)
     recorded = repo.grant_consent(project_id, Consent(granted_at=_now()))
-    return {"video_id": project_id, "consent": _consent_dict(recorded)}
+    return {"video_id": project_id, "consent_granted_at": recorded.granted_at if recorded else None}
 
 
 @app.get("/videos/{project_id}/artifacts/{sha256}")

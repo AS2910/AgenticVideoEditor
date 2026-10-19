@@ -9,7 +9,7 @@ const SOURCE_MEDIA = {
 
 const PROJECT = {
   statements: [{ text: 'Get 20% off today only.', start: 0.0, end: 2.3 }],
-  consent: { granted_at: '2026-09-26T08:00:00Z' },
+  consent_granted_at: '2026-09-26T08:00:00.000Z',
   video_id: 'p1',
   project_id: null,
   filename: 'sample-ad.mp4',
@@ -255,8 +255,8 @@ describe('App full journey', () => {
     const base = fetch as unknown as (url: string, init?: RequestInit) => Promise<Response>
     const granted: string[] = []
     const f = vi.fn(async (url: string, init?: RequestInit) => {
-      if (url.endsWith('/videos') && init?.method === 'POST') return ok({ ...PROJECT, consent: null })
-      if (url.endsWith('/consent')) { granted.push(url); return ok({ project_id: 'p1', consent: { granted_at: '2026-10-04T10:00:00Z' } }) }
+      if (url.endsWith('/videos') && init?.method === 'POST') return ok({ ...PROJECT, consent_granted_at: null })
+      if (url.endsWith('/consent')) { granted.push(url); return ok({ video_id: 'p1', consent_granted_at: '2026-10-04T10:00:00.000Z' }) }
       if (url.endsWith('/turns') && granted.length === 0) {
         return { ok: false, status: 403, json: async () => ({ detail: refusal }), text: async () => JSON.stringify({ detail: refusal }) } as Response
       }

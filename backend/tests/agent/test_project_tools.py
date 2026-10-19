@@ -6,7 +6,7 @@ from app.agent.tools import BY_NAME, MAX_STRICT, MAX_UNIONS, strict_count, union
 
 PROJECT = {
     "project_id": "f1", "name": "Spring sale", "brief": "Price first.",
-    "voices": [{"voice_id": "SHARED1", "name": "Priya", "kind": "recorded", "description": "warm", "consent": True}],
+    "voices": [{"voice_id": "SHARED1", "name": "Priya", "kind": "recorded", "description": "warm", "consent_granted_at": "2026-10-19T16:09:46.615Z"}],
     "videos": [{"filename": "sister.mp4", "duration": 12.0, "state": "shipped",
                 "shipped": [{"text": "Get 30% off.", "voice": "Priya's voice"}]},
                {"filename": "draft.mp4", "duration": 8.0, "state": "new", "shipped": []}],
