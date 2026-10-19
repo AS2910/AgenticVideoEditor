@@ -15,8 +15,10 @@ const at = (t: number, s: { start: number; end: number }) => t >= s.start && t <
  *  it now starts. With `original`, the words as shot, whatever has changed. */
 export function captionAt(
   t: number, statements: Statement[], revisions: Revision[] = [], pending: CaptionPending[] = [], words: Word[] = [], original = false,
+  placed: ({ start: number; end: number } | undefined)[] = [],
 ): Run[] | null {
-  const s = statements.find((x) => at(t, x))
+  // The arrangement (2026-10-19): a moved line is captioned where it plays now.
+  const s = original ? statements.find((x) => at(t, x)) : statements.find((x, i) => at(t, placed[i] ?? x))
   if (!s) {
     if (original) return null
     const moved = revisions.find((r) => r.mix === 'layer' && r.partner && at(t, r))

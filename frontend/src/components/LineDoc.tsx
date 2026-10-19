@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useRef, useState } from 'react'
+import { Fragment, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type React from 'react'
 import type { ReactNode } from 'react'
 import type {
@@ -10,7 +10,10 @@ import { verdict } from '../transcript/verdict'
 import { takeFacts } from '../transcript/facts'
 import { parseTime, timecode } from '../transcript/time'
 import { PlaceEditor } from './PlaceEditor'
-import { GripVertical, Loader2 } from 'lucide-react'
+import { GripVertical, Loader2, Pin } from 'lucide-react'
+import { EMPTY, moveTo, place, playingOrder } from '../transcript/arrange'
+import type { Arrangement, LineSpec, Placed } from '../transcript/arrange'
+import type { ArrangementView } from '../api'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
@@ -82,8 +85,14 @@ interface LineDocProps {
   onDelivery?: (item: PlanItem, delivery: string) => void
   /** p60: a line whose latest attempt failed (and has no take) asks Voltage to try again, as a turn. */
   onRetry?: (item: PlanItem) => void
-  /** UX-1c: move this line of the original speech to start at `to`. */
-  onShift?: (s: Statement, to: number) => void
+  /** The arrangement (2026-10-19): where every spoken line plays, in playback order. */
+  arranged?: ArrangementView | null
+  /** A move, a pin, Tighten gaps or how the end is handled: the whole arrangement, one action. */
+  onArrange?: (arrangement: Arrangement) => void | Promise<unknown>
+  /** Undo the last arrangement action. */
+  onArrangeUndo?: () => void | Promise<unknown>
+  /** While a line is dragged: where every line would play, for the lanes; null when it is let go. */
+  onPreview?: (placed: Placed[] | null) => void
   /** A take dragged to a new start; the moved take replaces it under the line. */
   onMove?: (item: PlanItem, candidate: Candidate, start: number) => void
   /** A kept line dragged to a new start. */
@@ -130,7 +139,7 @@ const rowClass = [
   'data-[selected=true]:bg-sunk data-[state=reading]:bg-sunk hover:bg-sunk',
   'data-[state=ready]:prop data-[state=ready]:my-1.5 data-[state=ready]:hover:bg-card data-[state=needs-you]:waiting data-[state=failed]:waiting',
   'data-[state=removed]:opacity-75 data-[state=removed]:hover:opacity-100 data-[state=adding]:border-[1.5px] data-[state=adding]:border-dashed data-[state=adding]:border-foreground',
-  'data-[dragging]:opacity-50',
+  'data-[dragging]:opacity-50 data-[reordering]:z-10 data-[reordering]:bg-card data-[reordering]:shadow-lg data-[reordering]:ring-2 data-[reordering]:ring-primary',
 ].join(' ')
 const timeClass = 'tnum flex min-h-6 items-start pt-[3px] rounded-md text-left text-xs text-faint outline-none hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50 group-data-[current=true]/row:font-semibold group-data-[current=true]/row:text-foreground'
 const gripClass = [
@@ -168,7 +177,8 @@ export function LineDoc({
   statements, words = [], speakers = [], voices = [], revisions = [], selection, currentTime,
   pendingLines = [], items = [], disabled, usdPerChar, playing,
   onSeek, onHear, onAdd, onDiscard, onAddAll, onUndo, onRemove, onHearTake, onLevel, backgroundDb = -12, onDelivery, onRetry,
-  onEditingChange, onMove, onMoveKept, placing, onPlacing, onShift, duration, version = 'edited',
+  onEditingChange, onMove, onMoveKept, placing, onPlacing, duration, version = 'edited',
+  arranged, onArrange, onArrangeUndo, onPreview,
 }: LineDocProps) {
   const asShot = version === 'as-shot'
   const [at, setAt] = useState<string>('')          // the add editor's "starts at", as typed
@@ -219,6 +229,55 @@ export function LineDoc({
   const dragged = useRef(false)
   // The rows as last rendered, for effects that need a row by its order.
   const rowsRef = useRef<Row[]>([])
+  // The arrangement (2026-10-19): a spoken line dragged to another place in
+  // the order (its key, and the place among the others it would take), the
+  // original timing shown instead, the "Starts at" being typed, the gap Tighten gaps uses.
+  const [reorder, setReorder] = useState<{ key: string; index: number; moved: boolean } | null>(null)
+  const [showOriginal, setShowOriginal] = useState(false)
+  const [startsAt, setStartsAt] = useState<{ key: string; text: string } | null>(null)
+  const [gapText, setGapText] = useState(String(arranged?.min_gap_default ?? 0.15))
+  const arrangement: Arrangement = arranged?.arrangement ?? EMPTY
+  const specsOf: LineSpec[] = arranged && arranged.lines.length === statements.length
+    ? [...arranged.lines].sort((a, b) => a.index - b.index).map((ln) => ({ key: ln.key, orig_start: ln.orig_start, orig_end: ln.orig_end, length: ln.length, gap: ln.gap }))
+    : []
+  const committed = specsOf.length ? place(specsOf, arrangement) : []
+  /** The arrangement a drag would make: the line at its new place in the order, no longer pinned. */
+  const dragged_ = (r: { key: string; index: number }): Arrangement => {
+    const pins = { ...arrangement.pins }
+    delete pins[r.key]
+    return { ...arrangement, order: moveTo(playingOrder(committed), r.key, r.index), pins }
+  }
+  const placedNow: Placed[] = reorder && reorder.moved && specsOf.length ? place(specsOf, dragged_(reorder)) : committed
+  const placedByLine = new Map<number, Placed>(placedNow.map((p) => [Number(p.key.slice(1)), p]))
+  useEffect(() => { onPreview?.(reorder && reorder.moved ? placedNow : null) }, [reorder?.key, reorder?.index, reorder?.moved])   // eslint-disable-line react-hooks/exhaustive-deps
+  // Rows glide to their new places (about 200 ms), as a drag reorders them or
+  // a move lands; with reduced motion they simply appear there.
+  const tops = useRef(new Map<string, number>())
+  useLayoutEffect(() => {
+    const root = list.current
+    if (!root) return
+    const still = typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    const base = root.getBoundingClientRect().top
+    const seen = new Map<string, number>()
+    for (const el of Array.from(root.querySelectorAll<HTMLElement>('[data-line-key]'))) {
+      const key = el.dataset.lineKey!
+      const top = el.getBoundingClientRect().top - base
+      seen.set(key, top)
+      const was = tops.current.get(key)
+      if (!still && was !== undefined && Math.abs(was - top) > 1 && typeof el.animate === 'function') {
+        el.animate([{ transform: `translateY(${was - top}px)` }, { transform: 'none' }], { duration: 200, easing: 'cubic-bezier(0.2, 0, 0, 1)' })
+      }
+    }
+    tops.current = seen
+  })
+  // After a move, focus stays on the line that moved.
+  const refocus = useRef<string | null>(null)
+  useEffect(() => {
+    if (!refocus.current) return
+    const el = list.current?.querySelector<HTMLElement>(`[data-line-key="${refocus.current}"]`)
+    refocus.current = null
+    el?.focus()
+  }, [arranged])
 
   useEffect(() => { box.current?.focus() }, [editing])
   // The row to put focus back on when its editor closes, so the keys keep working.
@@ -285,33 +344,29 @@ export function LineDoc({
   /** The plan's change to the line itself (a replacement, a removal). */
   const ownItem = (s: Statement) => items.find((i) => overlaps(i.selection, s) && !isAdd(i) && i.status !== 'dismissed') ?? null
 
-  /** The rows in time order: every spoken line; a shifted line again where it
-   *  now plays; every added line in the video; every proposed or working one. */
-  type Row = { kind: 'line'; s: Statement; i: number; start: number; end: number }
-    | { kind: 'moved'; s: Statement; i: number; rev: Revision; from: Revision; start: number; end: number }
+  /** The rows in playback order: every spoken line once, where the
+   *  arrangement plays it (or as shot, with Show original timing); every
+   *  added line in the video; every proposed or working one. */
+  type Row = { kind: 'line'; s: Statement; i: number; start: number; end: number; placed: Placed | null }
     | { kind: 'layer'; rev: Revision; start: number; end: number }
     | { kind: 'item'; item: PlanItem; start: number; end: number }
-  const rows: Row[] = statements.map((s, i): Row => ({ kind: 'line', s, i, start: s.start, end: s.end }))
-  for (const from of revisions) {
-    if (from.mix !== 'remove' || !from.partner) continue
-    const rev = revisions.find((r) => r.edit_id === from.partner)
-    const i = statements.findIndex((s) => overlaps(from, s))
-    if (!rev || i < 0) continue
-    rows.push({ kind: 'moved', s: statements[i], i, rev, from, start: rev.start, end: rev.end })
-  }
+  const rows: Row[] = statements.map((s, i): Row => {
+    // As shot plays the lines where they were shot; so does Show original timing.
+    const placed = showOriginal || (asShot && !reorder) ? null : placedByLine.get(i) ?? null
+    return { kind: 'line', s, i, start: placed?.start ?? s.start, end: placed?.end ?? s.end, placed }
+  })
   for (const rev of layerRevisions) rows.push({ kind: 'layer', rev, start: rev.start, end: rev.end })
   for (const item of addedItems) {
     const span = item.candidate?.plan.selection ?? item.selection
     rows.push({ kind: 'item', item, start: span.start, end: item.candidate ? span.start + item.candidate.audio.duration : span.end })
   }
-  const rank = (r: Row) => (r.kind === 'line' ? 0 : r.kind === 'moved' ? 1 : r.kind === 'layer' ? 2 : 3)
+  const rank = (r: Row) => (r.kind === 'line' ? 0 : r.kind === 'layer' ? 2 : 3)
   rows.sort((a, b) => a.start - b.start || rank(a) - rank(b))
   rowsRef.current = rows
-  const rowKey = (r: Row) => (r.kind === 'moved' ? `moved-${r.rev.edit_id}` : r.kind === 'layer' ? `layer-${r.rev.edit_id}` : r.kind === 'item' ? `item-${r.item.item_id}` : keyOf({ start: r.s.start, end: r.s.end }))
+  const rowKey = (r: Row) => (r.kind === 'layer' ? `layer-${r.rev.edit_id}` : r.kind === 'item' ? `item-${r.item.item_id}` : keyOf({ start: r.s.start, end: r.s.end }))
   /** What a row says and when, as a statement, for the editor, the player and the hint. */
   const rowStatement = (r: Row): Statement => (
     r.kind === 'line' ? r.s
-    : r.kind === 'moved' ? { ...r.s, start: r.rev.start, end: r.rev.end }
     : r.kind === 'layer' ? { text: r.rev.text, start: r.rev.start, end: r.rev.end, speaker: null }
     : { text: r.item.new_text, start: r.start, end: r.end, speaker: r.item.speaker ?? null })
 
@@ -364,22 +419,18 @@ export function LineDoc({
       case 'ArrowDown': case 'j': e.preventDefault(); move(order + 1); break
       case 'ArrowUp': e.preventDefault(); move(order - 1); break
       case 'Enter': {
-        if (row.kind === 'moved') break
         e.preventDefault(); open(order, row.kind === 'line' ? 'edit' : 'layer'); break
       }
       case ' ': {
         e.preventDefault()
         if (row.kind === 'item' && row.item.status === 'ready' && row.item.candidate) onHearTake(row.item, row.item.candidate)
-        else onSeek(s)
+        else onSeek(row.kind === 'line' ? { ...s, start: row.start, end: row.end } : s)
         break
       }
       case 'a': case 'A': if (row.kind === 'line') { e.preventDefault(); open(order, 'add') } break
       case 's': case 'S': {
-        if (row.kind === 'line' && onShift && onPlacing && ownRevisions(row.s).length === 0) {
-          e.preventDefault()
-          onPlacing({ id: `shift-${keyOf(row.s)}`, start: s.start, duration: Math.max(0.05, s.end - s.start) })
-          setPlaceText(timecode(s.start))
-        }
+        // Starts at: type where the line plays; Enter pins it there.
+        if (row.kind === 'line' && specsOf.length && !showOriginal && onArrange) { e.preventDefault(); setStartsAt({ key: `L${row.i}`, text: timecode(row.start) }) }
         break
       }
       case 'k': case 'K': {
@@ -387,12 +438,12 @@ export function LineDoc({
         break
       }
       case 'u': case 'U': {
-        const editId = row.kind === 'layer' || row.kind === 'moved' ? row.rev.edit_id : row.kind === 'line' ? ownRevisions(row.s).at(-1)?.edit_id : undefined
+        const editId = row.kind === 'layer' ? row.rev.edit_id : row.kind === 'line' ? ownRevisions(row.s).at(-1)?.edit_id : undefined
         if (editId) { e.preventDefault(); onUndo(editId) }
         break
       }
       case 'Delete': case 'Backspace': {
-        if (disabled || row.kind === 'moved' || row.kind === 'layer') break
+        if (disabled || row.kind === 'layer') break
         if (proposal && proposal.status !== 'approved') { e.preventDefault(); void onDiscard(proposal); break }
         if (row.kind !== 'line' || ownRevisions(row.s).some((r) => r.mix === 'remove')) break
         e.preventDefault()
@@ -759,14 +810,61 @@ export function LineDoc({
     )
   }
 
-  /** Move up / Move down, without dragging: the line lands where the row
-   *  above the gap ends, as a drop would. */
-  const stepTo = (key: string, direction: -1 | 1): number | null => {
-    const order = rows.findIndex((r) => rowKey(r) === key)
-    if (order < 0) return null
-    if (direction < 0) return order === 0 ? null : order === 1 ? 0 : Math.round(rows[order - 2].end * 100) / 100
-    const next = rows[order + 1]
-    return next ? Math.round(next.end * 100) / 100 : null
+  // ── The arrangement's actions (2026-10-19): each is one action, one undo. ──
+  const arrangeTo = (next: Arrangement) => { if (onArrange) void run('arrange', () => onArrange(next)) }
+  const withoutPin = (key: string) => { const pins = { ...arrangement.pins }; delete pins[key]; return pins }
+  /** A line one place earlier or later in the order; it follows its new neighbour, unpinned. */
+  const stepLine = (key: string, dir: -1 | 1) => {
+    const order = playingOrder(committed)
+    const at = order.indexOf(key)
+    if (at < 0 || at + dir < 0 || at + dir >= order.length) return
+    refocus.current = key
+    arrangeTo({ ...arrangement, order: moveTo(order, key, at + dir), pins: withoutPin(key) })
+  }
+  /** Starts at, typed: the line is pinned there; the others flow around it. */
+  const pinAt = (key: string, text: string) => {
+    const t = parseTime(text)
+    if (t === null) return
+    setStartsAt(null)
+    refocus.current = key
+    arrangeTo({ ...arrangement, pins: { ...arrangement.pins, [key]: Math.round(Math.max(0, t) * 1000) / 1000 } })
+  }
+  const unpin = (key: string) => { refocus.current = key; arrangeTo({ ...arrangement, pins: withoutPin(key) }) }
+
+  /** Drag a spoken line up or down the transcript: the rows make room as it
+   *  goes, each showing where it would start, and the lanes follow; the drop
+   *  is one action. Escape lets go without moving anything. */
+  const startReorder = (e: React.PointerEvent, key: string) => {
+    if (!onArrange || disabled) return
+    e.preventDefault()
+    const order = playingOrder(committed)
+    const from = order.indexOf(key)
+    if (from < 0) return
+    dragged.current = false
+    let current = { key, index: from, moved: false }
+    setReorder(current)
+    const move = (ev: PointerEvent) => {
+      const others = Array.from(list.current?.querySelectorAll<HTMLElement>('[data-line-key]') ?? []).filter((el) => el.dataset.lineKey !== key)
+      let index = 0
+      for (const el of others) {
+        const box = el.getBoundingClientRect()
+        if (ev.clientY > box.top + box.height / 2) index += 1
+      }
+      dragged.current = true
+      if (index !== current.index || !current.moved) { current = { key, index, moved: index !== from || current.moved }; setReorder(current) }
+    }
+    const done = (commit: boolean) => {
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', up)
+      window.removeEventListener('keydown', esc)
+      setReorder(null)
+      if (commit && current.moved && current.index !== from) { refocus.current = key; arrangeTo(dragged_(current)) }
+    }
+    const up = () => done(true)
+    const esc = (ev: KeyboardEvent) => { if (ev.key === 'Escape') { ev.preventDefault(); done(false) } }
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', up)
+    window.addEventListener('keydown', esc)
   }
 
   // Volt: long runs of untouched lines fold to "+ N more lines" once the
@@ -782,7 +880,7 @@ export function LineDoc({
   const folds = (() => {
     const hidden = new Set<number>()
     const after = new Map<number, number>()   // the order a "+ N more lines" button follows → N
-    if (drag || rows.length <= 8 || !rows.some((r, o) => !isPlain(r, o))) return { hidden, after }
+    if (drag || reorder || rows.length <= 8 || !rows.some((r, o) => !isPlain(r, o))) return { hidden, after }
     let start = -1
     const close = (end: number) => {
       const n = end - start
@@ -815,6 +913,13 @@ export function LineDoc({
     role: 'listitem' as const,
     'aria-label': label,
     onKeyDown: (e: React.KeyboardEvent<HTMLDivElement>) => {
+      // Alt+↑ / Alt+↓: the line takes the place before or after in the order.
+      const row = rows[order]
+      if (e.target === e.currentTarget && e.altKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown') && row?.kind === 'line' && specsOf.length && !showOriginal) {
+        e.preventDefault()
+        stepLine(`L${row.i}`, e.key === 'ArrowUp' ? -1 : 1)
+        return
+      }
       if (e.target === e.currentTarget && (e.key === 'ArrowDown' || e.key === 'ArrowUp' || e.key === 'j')) {
         const to = e.key === 'ArrowUp' ? order - 1 : order + 1
         if (folds.hidden.has(to)) {
@@ -852,34 +957,6 @@ export function LineDoc({
     </div>
   )
 
-  /** A line's words where they now play, after a shift: its own row, with
-   *  where it came from, Undo, Move, and a grip to drag it again. */
-  const movedRow = (entry: Extract<Row, { kind: 'moved' }>, order: number) => {
-    const { s, rev, from } = entry
-    const label = name(s.speaker)
-    const key = `moved-${rev.edit_id}`
-    return (
-      <Fragment key={key}>
-        {drag && dropIndexFor(drag.to) === order && dropMarker()}
-        <div className={cn(rowClass, asShot && 'opacity-50')} data-state="moved" data-version={version} {...rowProps(order, key, `Moved line at ${clock(rev.start)}${label ? `, ${label}` : ''}`, rev.end)}>
-          <span className="flex items-start">
-            {rev.edit_id && onMoveKept && gripButton(key, `edit-${rev.edit_id}`, s.text, rev.start, Math.max(0.05, rev.end - rev.start), (t) => onMoveKept(rev.edit_id!, t))}
-          </span>
-          <button className={timeClass} onClick={() => onSeek({ ...s, start: rev.start, end: rev.end })} aria-label={`Go to ${clock(rev.start)}`}>{clock(rev.start)}</button>
-          <div className="flex min-w-0 flex-col gap-1.5">
-            {whoLine(label, <>{<StatusBadge status="kept">Moved</StatusBadge>}{asShot && NOT_IN_VERSION}</>)}
-            <span className="say">{s.text}</span>
-            <div className={metaClass}>
-              Moved from {clock(from.start)}, as spoken, over the sound here.
-              {rev.edit_id && <> <LinkButton onClick={() => onUndo(rev.edit_id!)}>Undo</LinkButton></>}
-            </div>
-            {rev.edit_id && onMoveKept && placeControl(`edit-${rev.edit_id}`, rev.start, Math.max(0.05, rev.end - rev.start), (t) => onMoveKept(rev.edit_id!, t))}
-          </div>
-        </div>
-      </Fragment>
-    )
-  }
-
   /** An added line that is in the video (20f): its own row at its own time,
    *  however many play at that moment. Hear it, Take it out, Edit it. */
   const layerRow = (entry: Extract<Row, { kind: 'layer' }>, order: number) => {
@@ -887,7 +964,7 @@ export function LineDoc({
     const key = `layer-${rev.edit_id}`
     const s = rowStatement(entry)
     const isEditing = editing?.order === order && editing.mode === 'layer'
-    const others = rows.filter((r) => r !== entry && r.kind !== 'moved' && overlaps(r, entry)).length
+    const others = rows.filter((r) => r !== entry && overlaps(r, entry)).length
     const voice = voices.find((v) => v.voice_id === rev.voice_profile_id)?.name
     return (
       <Fragment key={key}>
@@ -957,17 +1034,92 @@ export function LineDoc({
     )
   }
 
+  /** Where a dragged line would land: a bar above it, with its new start. */
+  const insertionBar = (start: number) => (
+    <div className="relative mx-2.5 h-0 border-t-2 border-primary" data-testid="insertion-bar" role="presentation">
+      <span className="tnum absolute -top-3 right-0 rounded-full bg-primary px-2 py-0.5 text-xs font-semibold text-primary-foreground">Starts at {timecode(start)}</span>
+    </div>
+  )
+
+  /** The grip on a spoken line: drag it up or down; Alt+↑ / Alt+↓ do the same from the row. */
+  const reorderGrip = (lineKey: string, start: number) => (
+    <button
+      type="button"
+      className={gripClass}
+      aria-label={`Move the line at ${clock(start)}: drag it up or down, or press Alt with the arrow keys`}
+      onPointerDown={(e) => startReorder(e, lineKey)}
+      onClick={() => { if (dragged.current) { dragged.current = false; return } setStartsAt({ key: lineKey, text: timecode(start) }) }}
+    >
+      <GripVertical size={16} aria-hidden="true" />
+    </button>
+  )
+
+  /** Where a spoken line plays: Starts at (typed, it pins the line), the pin,
+   *  why it moved, and what moving it means for the picture. */
+  const whereItPlays = (p: Placed, s: Statement, label: string | null) => {
+    const typing = startsAt?.key === p.key
+    const bad = typing && parseTime(startsAt!.text) === null
+    if (!typing && !p.moved && !p.pinned) return null
+    return (
+      <div className="flex flex-col gap-1" data-testid="where-it-plays">
+        <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+          {typing ? (
+            <>
+              <label className="flex items-center gap-2">
+                <span>Starts at</span>
+                <Input
+                  className="tnum h-8 w-28"
+                  autoFocus
+                  aria-invalid={bad || undefined}
+                  aria-describedby={`starts-hint-${p.key}`}
+                  value={startsAt!.text}
+                  onChange={(e) => setStartsAt({ key: p.key, text: e.target.value })}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') { e.preventDefault(); pinAt(p.key, startsAt!.text) }
+                    if (e.key === 'Escape') { e.preventDefault(); setStartsAt(null) }
+                  }}
+                />
+              </label>
+              <span id={`starts-hint-${p.key}`} className={cn('text-xs', bad && 'text-needs')}>{bad ? 'Type a time like 0:04.2' : 'Enter pins it there'}</span>
+              <Button type="button" size="sm" onClick={() => pinAt(p.key, startsAt!.text)} disabled={disabled || bad}>Pin it here</Button>
+              <Button type="button" variant="ghost" size="sm" onClick={() => setStartsAt(null)}>Cancel</Button>
+            </>
+          ) : (
+            <>
+              <button type="button" className="tnum rounded-sm underline decoration-dotted underline-offset-4 outline-none hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50" onClick={() => setStartsAt({ key: p.key, text: timecode(p.start) })} aria-label={`Starts at ${timecode(p.start)}: type another time to pin it`}>
+                Starts at {timecode(p.start)}
+              </button>
+              {p.pinned && (
+                <button type="button" className="act h-8 gap-1" onClick={() => unpin(p.key)} aria-label="Pinned. Unpin it so it follows the line before it" data-testid="pin">
+                  <Pin size={14} aria-hidden="true" className="fill-current" />Pinned
+                </button>
+              )}
+              {p.pushed_after !== null && <span data-testid="pushed">pushed after {timecode(p.pushed_after)} (pinned)</span>}
+              {p.moved && <span>· as shot at {timecode(s.start)}; the room's own sound fills that place</span>}
+            </>
+          )}
+        </div>
+        {p.moved && (
+          <div className={cn(metaClass, 'text-needs')} data-testid="lips">
+            Lines move, the picture doesn't. If {label ?? 'the speaker'} is on screen here, the lips won't match.
+          </div>
+        )}
+      </div>
+    )
+  }
+
   /** One spoken line of the transcript, as a row with everything about it inside. */
-  const lineRow = (s: Statement, i: number, order: number) => {
+  const lineRow = (entry: Extract<Row, { kind: 'line' }>, order: number) => {
+    const { s, i, placed } = entry
     const key = keyOf({ start: s.start, end: s.end })
-    const current = currentTime >= s.start && currentTime < s.end
+    const at = { ...s, start: entry.start, end: entry.end }   // where it plays now
+    const current = currentTime >= entry.start && currentTime < entry.end
     const selected = !!selection && overlaps(selection, s)
     // The line's own change: a replacement or a removal (an added line is its own row).
     const pending = pendingLines.find((p) => overlaps(p.selection, s) && STATUS[p.status] && !isAdd({ mix: p.mix ?? 'replace' }))
     const live = ownRevisions(s)
     const revision = live.length ? live[live.length - 1] : null
     const removed = revision?.mix === 'remove'
-    const movedTo = removed && revision?.partner ? revisions.find((r) => r.edit_id === revision.partner) ?? null : null
     const shown: Revision | null = pending?.text
       ? { start: pending.selection.start, end: pending.selection.end, text: pending.text, mix: pending.mix ?? 'replace' }
       : revision && !removed && !asShot ? revision : null
@@ -980,16 +1132,14 @@ export function LineDoc({
     const isAdding = editing?.order === order && editing.mode === 'add'
     const proposed = own?.status === 'ready' && !!own.candidate
     const inDepth = proposed && expanded === own!.item_id
-    // UX-7e: an untouched line shifts; a kept line moves with its take; the rest stay put.
-    const mover: { id: string; start: number; duration: number; apply: (to: number) => void } | null =
-      !revision && onShift ? { id: `shift-${key}`, start: s.start, duration: Math.max(0.05, s.end - s.start), apply: (t) => onShift(s, t) }
-      : revision && !removed && revision.edit_id && onMoveKept ? { id: `edit-${revision.edit_id}`, start: revision.start, duration: Math.max(0.05, revision.end - revision.start), apply: (t) => onMoveKept(revision.edit_id!, t) }
-      : null
-    const up = mover ? stepTo(key, -1) : null
-    const down = mover ? stepTo(key, 1) : null
+    // 2026-10-19: every spoken line moves in the arrangement, its replacement with it; a removed one has nothing to move.
+    // In As shot a line can still be moved while nothing has been yet (a fresh video starts there); the move switches to Edited.
+    const lineKey = specsOf.length && !showOriginal && !(asShot && committed.some((p) => p.moved)) ? `L${i}` : null
+    const movable = !!lineKey && !!onArrange && !removed
+    const position = lineKey ? playingOrder(committed).indexOf(lineKey) : -1
     const plain = !isEditing && !isAdding && !proposed && !(revision && !removed)
     const stamp = status && STATUS[status] && status !== 'removed' ? <StatusBadge status={status} role="status">{STATUS[status]}</StatusBadge>
-      : status === 'removed' ? <StatusBadge status="removed" role="status">{movedTo ? 'Moved away' : 'Removed'}</StatusBadge> : null
+      : status === 'removed' ? <StatusBadge status="removed" role="status">Removed</StatusBadge> : null
     const wordsButton = (
       <button className={cn(lineClass, proposed && 'text-lg')} onClick={() => open(order, 'edit')} title="Change the words" data-testid={shown ? 'revision' : undefined}>
         {(removed && !asShot) || (own?.mix === 'remove' && own.status === 'ready') ? <del>{s.text}</del>
@@ -1003,19 +1153,23 @@ export function LineDoc({
     return (
       <Fragment key={`${s.start}-${i}`}>
         {drag && dropIndexFor(drag.to) === order && dropMarker()}
+        {reorder?.moved && reorder.key === lineKey && insertionBar(entry.start)}
         <div
           className={rowClass}
+          data-line-key={lineKey ?? undefined}
+          data-reordering={reorder?.moved && reorder.key === lineKey ? true : undefined}
+          data-moved={placed?.moved || undefined}
           data-current={current}
           data-selected={selected}
           data-state={asShot && revision ? undefined : status ?? undefined} data-version={version}
           data-depth={inDepth || undefined}
           data-actions-open={actionsOpen === order || undefined}
-          {...rowProps(order, key, `Line at ${clock(s.start)}${label ? `, ${label}` : ''}`, s.end)}
+          {...rowProps(order, key, `Line at ${clock(entry.start)}${label ? `, ${label}` : ''}`, entry.end)}
         >
           <span className="flex items-start">
-            {mover && !isEditing && !isAdding && gripButton(key, mover.id, s.text, mover.start, mover.duration, mover.apply)}
+            {movable && !isEditing && !isAdding && reorderGrip(lineKey!, entry.start)}
           </span>
-          <button className={timeClass} onClick={() => onSeek(s)} aria-label={`Go to ${clock(s.start)}`}>{clock(s.start)}</button>
+          <button className={timeClass} onClick={() => onSeek(at)} aria-label={`Go to ${clock(entry.start)}`}>{clock(entry.start)}</button>
           <div className={cn('flex min-w-0 flex-col', proposed ? 'gap-2.5' : 'gap-1.5')}>
             {whoLine(label, <>{stamp}{asShot && revision && NOT_IN_VERSION}</>)}
             {isEditing ? <div className={unfold}>{editor(s, 'edit')}</div> : inDepth ? depth(own!, own!.candidate!, s, order, 'edit') : (
@@ -1023,16 +1177,10 @@ export function LineDoc({
                 {wordsButton}
                 {(revision || removed) && !asShot && (
                   <div className={metaClass}>
-                    {movedTo ? `Moved to ${timecode(movedTo.start)}; the room's own sound stays here.`
-                      : removed ? "Removed. The gap is closed with the room's own sound; the picture is untouched." : `${shown && MIX_NOTE[shown.mix] ? (MIX_NOTE[shown.mix] ?? '').replace(/^./, (ch) => ch.toUpperCase()) : 'In place of the words as shot'}.`}
+                    {removed ? "Removed. The gap is closed with the room's own sound; the picture is untouched." : `${shown && MIX_NOTE[shown.mix] ? (MIX_NOTE[shown.mix] ?? '').replace(/^./, (ch) => ch.toUpperCase()) : 'In place of the words as shot'}.`}
                   </div>
                 )}
-                {revision && !removed && revision.edit_id && onMoveKept && (
-                  placeControl(`edit-${revision.edit_id}`, revision.start, Math.max(0.05, revision.end - revision.start), (t) => onMoveKept(revision.edit_id!, t))
-                )}
-                {!revision && onShift && placing?.id === `shift-${key}` && (
-                  placeControl(`shift-${key}`, s.start, Math.max(0.05, s.end - s.start), (t) => onShift(s, t))
-                )}
+                {lineKey && !removed && whereItPlays(placed ?? placedByLine.get(i)!, s, label)}
                 {own?.mix === 'remove' && own.status === 'ready' && (
                   <div className={cn(metaClass, 'text-needs')}>Proposed: these words go, and the room's own sound stays in their place.</div>
                 )}
@@ -1049,10 +1197,10 @@ export function LineDoc({
                       {!removed && <button type="button" className="act" onClick={() => { setActionsOpen(null); open(order, 'edit') }}>Edit it</button>}
                       {!removed && !own && <button type="button" className="act" onClick={() => { setActionsOpen(null); onRemove(s) }}>Discard</button>}
                       <button type="button" className="act" onClick={() => { setActionsOpen(null); open(order, 'add') }}>Add a line after</button>
-                      {mover && up !== null && <button type="button" className="act" onClick={() => { setActionsOpen(null); mover.apply(up) }}>Move up</button>}
-                      {mover && down !== null && <button type="button" className="act" onClick={() => { setActionsOpen(null); mover.apply(down) }}>Move down</button>}
-                      {mover && onPlacing && (
-                        <button type="button" className="act" onClick={() => { onPlacing({ id: mover.id, start: mover.start, duration: mover.duration }); setPlaceText(timecode(mover.start)) }}>Shift to a time…</button>
+                      {movable && position > 0 && <button type="button" className="act" onClick={() => { setActionsOpen(null); stepLine(lineKey!, -1) }}>Move up</button>}
+                      {movable && position >= 0 && position < committed.length - 1 && <button type="button" className="act" onClick={() => { setActionsOpen(null); stepLine(lineKey!, 1) }}>Move down</button>}
+                      {movable && startsAt?.key !== lineKey && (
+                        <button type="button" className="act" onClick={() => { setActionsOpen(null); setStartsAt({ key: lineKey!, text: timecode(entry.start) }) }}>Starts at…</button>
                       )}
                     </span>
                     <button
@@ -1107,20 +1255,63 @@ export function LineDoc({
         <span className={hint}>
           {editing && editingAt ? (editing.mode === 'add' ? `Adding a line after ${clock(editingAt.start)}. Esc to cancel.` : `Editing ${clock(editingAt.start)}. Enter to voice it, Esc to cancel.`)
             : pendingLines.some((p) => p.status === 'reading') ? "Voltage is reading. The line it's on is lit."
-            : focusedRow !== null ? <span className="whitespace-nowrap max-[960px]:hidden" data-testid="keys"><kbd className={kbd}>↑</kbd><kbd className={kbd}>↓</kbd> move · <kbd className={kbd}>Enter</kbd> edit it · <kbd className={kbd}>␣</kbd> hear it · <kbd className={kbd}>K</kbd> add it · <kbd className={kbd}>⌫</kbd> discard · <kbd className={kbd}>A</kbd> add after · <kbd className={kbd}>S</kbd> shift (or drag ⋮⋮) · <kbd className={kbd}>U</kbd> take it out · <kbd className={kbd}>/</kbd> ask Voltage</span>
+            : focusedRow !== null ? <span className="whitespace-nowrap max-[960px]:hidden" data-testid="keys"><kbd className={kbd}>↑</kbd><kbd className={kbd}>↓</kbd> move · <kbd className={kbd}>Enter</kbd> edit it · <kbd className={kbd}>␣</kbd> hear it · <kbd className={kbd}>K</kbd> add it · <kbd className={kbd}>⌫</kbd> discard · <kbd className={kbd}>A</kbd> add after · <kbd className={kbd}>Alt</kbd><kbd className={kbd}>↑</kbd><kbd className={kbd}>↓</kbd> reorder (or drag ⋮⋮) · <kbd className={kbd}>S</kbd> starts at · <kbd className={kbd}>U</kbd> take it out · <kbd className={kbd}>/</kbd> ask Voltage</span>
             : armedRow !== null && rows[armedRow] ? <span role="status">Press Backspace again to propose removing the line at {clock(rows[armedRow].start)}.</span>
             : proposals.length > 0 ? `${proposals.length === 1 ? 'One line is proposed' : `${proposals.length} lines are proposed`}: hear it, then Add it, Edit it or Discard. Nothing is in the video until you add it.`
             : 'One transcript: what is in the video, and what is proposed. Lines at the same moment play together. Hover a line for Hear it, Edit it, Discard.'}
         </span>
       </div>
 
+      {specsOf.length > 1 && onArrange && (
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2 px-1 text-sm" role="group" aria-label="Timing of the lines" data-testid="arrange-bar">
+          <button type="button" className="act" aria-pressed={showOriginal} onClick={() => setShowOriginal((v) => !v)}>
+            <span aria-hidden="true" className={cn('inline-block h-3.5 w-6 rounded-full border border-line2 p-px transition-colors', showOriginal && 'bg-foreground')}>
+              <span className={cn('block h-2.5 w-2.5 rounded-full bg-muted-foreground transition-transform motion-reduce:transition-none', showOriginal && 'translate-x-2.5 bg-background')} />
+            </span>
+            Show original timing
+          </button>
+          {arrangement.min_gap === null ? (
+            <span className="flex items-center gap-1.5">
+              <button type="button" className="act" onClick={() => { const g = Number(gapText); if (Number.isFinite(g) && g >= 0) arrangeTo({ ...arrangement, min_gap: g }) }} disabled={disabled || !(Number(gapText) >= 0)}>Tighten gaps</button>
+              <label className="flex items-center gap-1 text-muted-foreground">
+                to at most
+                <Input className="tnum h-8 w-16" inputMode="decimal" aria-label="Longest pause, in seconds" value={gapText} onChange={(e) => setGapText(e.target.value)} />
+                s
+              </label>
+            </span>
+          ) : (
+            <span className="text-muted-foreground">
+              Pauses at most {arrangement.min_gap} s · <LinkButton onClick={() => arrangeTo({ ...arrangement, min_gap: null })}>Restore the pauses</LinkButton>
+            </span>
+          )}
+          <span className="flex-1" />
+          {arranged?.can_undo && onArrangeUndo && (
+            <button type="button" className="act" onClick={() => void run('arrange-undo', () => onArrangeUndo())} disabled={disabled || pending !== null}>Undo the last move</button>
+          )}
+        </div>
+      )}
+      {arranged && arranged.overrun > 0 && !showOriginal && (
+        <div className="waiting flex flex-col gap-2 rounded-[10px] px-3.5 py-3" role="status" data-testid="overrun">
+          <span className="font-semibold">Runs {arranged.overrun.toFixed(1)} s past the end</span>
+          <span className="text-sm text-muted-foreground">
+            {arrangement.end === 'trim' ? 'The last line fades out where the clip ends.'
+              : arranged.ease_ok ? 'For now the picture holds its last frame until the line ends. Nothing is cut.'
+              : 'For now the picture holds its last frame until the line ends, longer than it should. Nothing is cut.'}
+          </span>
+          <span className="-ml-2 flex flex-wrap items-center gap-1">
+            <button type="button" className="act" onClick={() => arrangeTo({ ...arrangement, min_gap: Number(gapText) >= 0 ? Number(gapText) : arranged.min_gap_default })} disabled={disabled || arrangement.min_gap !== null}>Tighten gaps</button>
+            <button type="button" className="act" aria-pressed={arrangement.end === 'hold'} onClick={() => arrangeTo({ ...arrangement, end: 'hold' })} disabled={disabled || !arranged.ease_ok} title={arranged.ease_ok ? undefined : 'Too long to hold the last frame'}>Let the picture ease</button>
+            <button type="button" className="act" aria-pressed={arrangement.end === 'trim'} onClick={() => arrangeTo({ ...arrangement, end: 'trim' })} disabled={disabled}>Trim the last line</button>
+          </span>
+        </div>
+      )}
+
       <div role="list" className="flex flex-col gap-1.5" ref={list} onFocusCapture={() => setFocusTick((t) => t + 1)} onBlurCapture={() => setFocusTick((t) => t + 1)} data-focus-tick={focusTick}>
         {shownRows.map(({ r: entry, order }) => (
           <Fragment key={`r-${order}`}>
-            {entry.kind === 'moved' ? movedRow(entry, order)
-              : entry.kind === 'layer' ? layerRow(entry, order)
+            {entry.kind === 'layer' ? layerRow(entry, order)
               : entry.kind === 'item' ? itemRow(entry, order)
-              : lineRow(entry.s, entry.i, order)}
+              : lineRow(entry, order)}
             {foldButton(order)}
           </Fragment>
         ))}

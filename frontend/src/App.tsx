@@ -36,9 +36,10 @@ import { go, hrefFor, useRoute } from './lib/route'
 import { cn } from '@/lib/utils'
 import { clock } from './transcript/format'
 import {
-  createProject, confirmPlace, exportProject, artifactUrl, pollJob, PollCancelled, ApiError, listVideos, listFolders, createFolder, startTutorial, getProject, deleteProject, getUsage, listVoices, updateSpeaker, detectSpeakers, revertEdit, updateSettings, removeLine, dismissItem, setEditLevel, setCandidateLevel, BACKGROUND_DB, moveCandidate, moveEdit, shiftLine, getPlan, approvePlan, readProject, grantConsent, getMe, postTurn, getMessages,
+  createProject, confirmPlace, exportProject, artifactUrl, pollJob, PollCancelled, ApiError, listVideos, listFolders, createFolder, startTutorial, getProject, deleteProject, getUsage, listVoices, updateSpeaker, detectSpeakers, revertEdit, updateSettings, removeLine, dismissItem, setEditLevel, setCandidateLevel, BACKGROUND_DB, moveCandidate, moveEdit, getArrangement, putArrangement, undoArrangement, getPlan, approvePlan, readProject, grantConsent, getMe, postTurn, getMessages,
 } from './api'
-import type { Me, PlanApproval } from './api'
+import type { ArrangementView, Me, PlanApproval } from './api'
+import type { Arrangement, Placed } from './transcript/arrange'
 import type {
   Word, Selection, Candidate, Segment, Project, ChatMessage,
   Insert, ProjectSummary, Usage, Statement, Voice, Revision,
@@ -145,6 +146,9 @@ function Studio() {
   const [seekRequest, setSeekRequest] = useState<{ time: number; id: number; play?: boolean; until?: number } | null>(null)
   const [detecting, setDetecting] = useState(false)
   const [approved, setApproved] = useState<Revision[]>([])
+  // The arrangement (2026-10-19): where every spoken line plays, and, while one is dragged, where they would.
+  const [arranged, setArranged] = useState<ArrangementView | null>(null)
+  const [arrangePreview, setArrangePreview] = useState<Placed[] | null>(null)
   const [autonomy, setAutonomy] = useState<Autonomy>('ask')
   const [mayDo, setMayDo] = useState<MayDo>(MAY_DO)
   const [mayDoOpen, setMayDoOpen] = useState(false)
@@ -206,6 +210,8 @@ function Studio() {
     setError(null)
     setUsage(null)
     setApproved([])
+    setArranged(null)
+    setArrangePreview(null)
     setAutonomy('ask')
     setMayDo(MAY_DO)
     setMayDoOpen(false)
@@ -268,6 +274,12 @@ function Studio() {
   }, [])
 
   useEffect(() => { void refreshUsage(projectId) }, [projectId, refreshUsage])
+  useEffect(() => {
+    if (!projectId) return
+    let live = true
+    getArrangement(projectId).then((a) => { if (live) setArranged(a) }).catch(() => {})
+    return () => { live = false }
+  }, [projectId])
 
   // The voices, once a project is open: they don't change while the app is open.
   useEffect(() => {
@@ -481,24 +493,19 @@ function Studio() {
       setError(e instanceof ApiError ? e.message : 'Could not propose removing that line.')
     }
   }
-  /** Move a line of the original speech to another time (UX-1c): two paired
-   *  edits — room tone where it was, the words over the picture from `to`. */
-  const shiftStatement = async (s: Statement, to: number) => {
+  /** The arrangement, as one action: saved, then the video rendered with it. */
+  const arrange = async (next: Arrangement | 'undo') => {
     if (!projectId) return
     setError(null)
-    setPlacing(null)
     try {
-      const r = await shiftLine(projectId, { start: s.start, end: s.end, to })
-      setApproved((a) => [...a,
-        { edit_id: r.removed_edit_id, start: r.from.start, end: r.from.end, text: '', mix: 'remove', partner: r.edit_id, speaker: s.speaker },
-        { edit_id: r.edit_id, start: r.selection.start, end: r.selection.end, text: s.text, mix: 'layer', partner: r.removed_edit_id, speaker: s.speaker },
-      ])
+      setArranged(next === 'undo' ? await undoArrangement(projectId) : await putArrangement(projectId, next))
       setDownload(null)
       if (await runExport()) setView('final')
     } catch (e) {
       setError(e instanceof ApiError ? e.message : 'Could not move that line.')
     }
   }
+
   /** Play a take in place: the video runs from the line while the take's
    *  audio plays over it (the original muted for a replacement). Over the
    *  final render when there is one and its clock is the source's (20e), so
@@ -681,9 +688,14 @@ function Studio() {
     const before = approved.map((r) => r.edit_id).sort().join(',')
     const after = live.map((r) => r.edit_id).sort().join(',')
     setApproved(live)
-    if (before === after) return { changed: false, render: null }
+    // Voltage may have moved a line (shift_line pins it): the arrangement is part of what plays.
+    const nextArrangement = await getArrangement(projectId).catch(() => null)
+    const moved = (v: ArrangementView | null) => JSON.stringify(v?.lines.map((l) => [l.key, l.start]) ?? [])
+    const rearranged = nextArrangement !== null && moved(nextArrangement) !== moved(arranged)
+    if (nextArrangement) setArranged(nextArrangement)
+    if (before === after && !rearranged) return { changed: false, render: null }
     setPreview(null)
-    if (live.length === 0) { setRendered(null); setDownload(null); setSegments([]); setInserts([]); setPieces([]); setView('original'); return { changed: true, render: null } }
+    if (live.length === 0 && !nextArrangement?.lines.some((l) => l.moved)) { setRendered(null); setDownload(null); setSegments([]); setInserts([]); setPieces([]); setView('original'); return { changed: true, render: null } }
     const render = await runExport()
     if (render) setView('final')
     return { changed: true, render }
@@ -1042,6 +1054,14 @@ function Studio() {
     const speakers = project.speakers ?? []
     // 20f: the spoken lines only; added lines and proposals are rows of their own in LineDoc.
     const statements: Statement[] = project.statements ?? []
+    // Where each spoken line plays now (by its place in the transcript): the drag's preview while one is dragged, else the arrangement.
+    const placedSpans: ({ start: number; end: number } | undefined)[] = (() => {
+      const placed = arrangePreview ?? arranged?.lines ?? null
+      if (!placed || (arranged && arranged.lines.length !== statements.length)) return []
+      const out: ({ start: number; end: number } | undefined)[] = []
+      for (const p of placed) out[Number(p.key.slice(1))] = { start: p.start, end: p.end }
+      return out
+    })()
   
     // Where things stand line by line: the plan's items, and nothing else.
     const planItems = plan?.items.filter((i) => i.kind === 'planned' && i.enabled) ?? []
@@ -1093,7 +1113,7 @@ function Studio() {
     const takesInHand: CaptionPending[] = readyItems.flatMap((i) => (
       i.candidate ? [{ selection: i.candidate.plan.selection, text: i.candidate.plan.new_text, mix: i.candidate.plan.mix }] : []
     ))
-    const captionRuns = captionAt(sourceClock, statements, approved, [...pendingLines, ...takesInHand], transcript, rendered !== null && view === 'original')
+    const captionRuns = captionAt(sourceClock, statements, approved, [...pendingLines, ...takesInHand], transcript, rendered !== null && view === 'original', placedSpans)
     // A take playing in place with word times (the polish pass): its words, lit as they are said.
     const spoken = playingTake && playingCandidate.current?.candidate_id === playingTake && playingCandidate.current.words?.length
       ? takeCaption(playingCandidate.current.words, currentTime - playingCandidate.current.plan.selection.start)
@@ -1250,6 +1270,7 @@ function Studio() {
                     duration={project.duration}
                     currentTime={sourceClock}
                     statements={statements}
+                    placedAt={version === 'as-shot' ? undefined : placedSpans}
                     speakers={speakers}
                     revisions={approved}
                     asShot={version === 'as-shot'}
@@ -1310,7 +1331,10 @@ function Studio() {
             onRetry={(item) => void takeTurn(`Try ${item.item_id} again (“${item.new_text}”): ${item.error ?? 'the last try failed'}`)}
                 onUndo={(id) => void revert(id)}
                 onRemove={(s) => void removeStatement(s)}
-                onShift={(s, to) => void shiftStatement(s, to)}
+                arranged={arranged}
+                onArrange={(next) => arrange(next)}
+                onArrangeUndo={() => arrange('undo')}
+                onPreview={setArrangePreview}
                 onMove={(item, c, start) => void moveTake(item, c, start)}
                 onMoveKept={(id, start) => void moveKept(id, start)}
                 placing={placing}

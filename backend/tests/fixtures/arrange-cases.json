@@ -74,24 +74,24 @@
   "placed": [
    {
     "key": "L2",
-    "start": 0.3,
-    "end": 2.0,
+    "start": 0.4,
+    "end": 2.1,
     "pinned": false,
     "pushed_after": null,
     "moved": true
    },
    {
     "key": "L0",
-    "start": 2.4,
-    "end": 4.0,
+    "start": 2.6,
+    "end": 4.2,
     "pinned": false,
     "pushed_after": null,
     "moved": true
    },
    {
     "key": "L1",
-    "start": 4.5,
-    "end": 6.0,
+    "start": 4.7,
+    "end": 6.2,
     "pinned": false,
     "pushed_after": null,
     "moved": true
@@ -127,16 +127,16 @@
   "placed": [
    {
     "key": "L1",
-    "start": 0.5,
-    "end": 2.0,
+    "start": 0.4,
+    "end": 1.9,
     "pinned": false,
     "pushed_after": null,
     "moved": true
    },
    {
     "key": "L2",
-    "start": 2.3,
-    "end": 4.0,
+    "start": 2.2,
+    "end": 3.9,
     "pinned": false,
     "pushed_after": null,
     "moved": true
@@ -338,8 +338,8 @@
   "placed": [
    {
     "key": "L1",
-    "start": 0.5,
-    "end": 2.4,
+    "start": 0.4,
+    "end": 2.3,
     "pinned": false,
     "pushed_after": null,
     "moved": true

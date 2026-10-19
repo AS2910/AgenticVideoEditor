@@ -4,6 +4,9 @@ import userEvent from '@testing-library/user-event'
 import { LineDoc } from './LineDoc'
 import { keyOf, addKeyOf } from '../transcript/keys'
 import type { Candidate, PlanItem } from '../types'
+import type { ArrangementView } from '../api'
+import { EMPTY, overrun, place, specs } from '../transcript/arrange'
+import type { Arrangement } from '../transcript/arrange'
 
 const STATEMENTS = [
   { text: 'Hi, I want to buy groceries.', start: 5.2, end: 6.94, speaker: 'A' },
@@ -354,12 +357,13 @@ describe('LineDoc: a take can go anywhere on the timeline', () => {
     expect(onPlacing).toHaveBeenLastCalledWith(null)
   })
 
-  it('moves a kept line too', async () => {
-    const onMoveKept = vi.fn()
+  it('moves a kept line with its replacement, in the arrangement', () => {
+    const onArrange = vi.fn()
     doc({ revisions: [{ edit_id: 'e1', start: 7.54, end: 9.02, text: 'Start a live Bhaji Cam session.', mix: 'replace' }],
-      onMoveKept, onPlacing: vi.fn(), placing: { id: 'edit-e1', start: 8.0, duration: 1.48 } })
-    await userEvent.click(within(screen.getByTestId('place')).getByRole('button', { name: 'Put it here' }))
-    expect(onMoveKept).toHaveBeenCalledWith('e1', 8.0)
+      arranged: view(), onArrange })
+    expect(screen.getByRole('button', { name: /move the line at 0:07/i })).toBeInTheDocument()
+    fireEvent.keyDown(screen.getByRole('listitem', { name: 'Line at 0:07, the Customer' }), { key: 'ArrowDown', altKey: true })
+    expect(onArrange).toHaveBeenLastCalledWith(expect.objectContaining({ order: ['L0', 'L2', 'L1'] }))
   })
 
   it('lets an added line start at a chosen time', async () => {
@@ -421,118 +425,123 @@ describe('LineDoc: keyboard (UX-4)', () => {
 })
 
 
-describe('LineDoc: shifting a line of the original speech (UX-1c)', () => {
-  it('offers Shift on an untouched line and places it from the control', async () => {
+/** The arrangement as the server would send it for STATEMENTS. */
+const view = (arrangement: Partial<Arrangement> = {}, extra: Partial<ArrangementView> = {}): ArrangementView => {
+  const lines = specs(STATEMENTS)
+  const full = { ...EMPTY, ...arrangement }
+  const placed = place(lines, full)
+  return {
+    arrangement: full, duration: 10, overrun: overrun(placed, 10), ease_ok: false, min_gap_default: 0.15, can_undo: false,
+    lines: placed.map((p) => {
+      const i = Number(p.key.slice(1))
+      const ln = lines[i]
+      return { ...p, index: i + 1, text: STATEMENTS[i].text, speaker: STATEMENTS[i].speaker, orig_start: ln.orig_start, orig_end: ln.orig_end, length: ln.length, gap: ln.gap, replaced_by: null }
+    }),
+    ...extra,
+  }
+}
+const rowLabels = () => screen.getAllByRole('listitem', { name: /^line at/i }).map((r) => r.getAttribute('aria-label'))
+
+describe('LineDoc: the arrangement, the transcript in playback order (2026-10-19)', () => {
+  it('lists every line once, in the order it plays, with where it was shot and the lips warning', () => {
+    doc({ arranged: view({ order: ['L1', 'L0', 'L2'] }), onArrange: vi.fn() })
+    // The second line plays first, at the clip's lead-in; the first follows after the pause that followed it.
+    expect(rowLabels()).toEqual(['Line at 0:05, the Customer', 'Line at 0:07, the Customer', 'Line at 0:09, the Shopkeeper'])
+    const rows = screen.getAllByRole('listitem', { name: /^line at/i })
+    expect(rows[0]).toHaveTextContent('Start a live Bajicam session.')
+    expect(rows[1]).toHaveTextContent('Hi, I want to buy groceries.')
+    expect(screen.getAllByText('Start a live Bajicam session.')).toHaveLength(1)
+    expect(screen.getAllByTestId('lips')[0]).toHaveTextContent("Lines move, the picture doesn't. If the Customer is on screen here, the lips won't match.")
+    expect(screen.queryByText(/Moved away/)).not.toBeInTheDocument()
+  })
+
+  it('shows the original timing on request', async () => {
     const user = userEvent.setup()
-    const onShift = vi.fn()
-    const onPlacing = vi.fn()
-    const h = doc({ onShift, onPlacing })
-    void h
-    const actions = screen.getByRole('group', { name: 'Actions for 0:07' })
-    await user.click(within(actions).getByRole('button', { name: 'Shift to a time…' }))
-    expect(onPlacing).toHaveBeenCalledWith({ id: `shift-${KEY}`, start: 7.54, duration: expect.closeTo(1.48, 2) })
+    doc({ arranged: view({ order: ['L1', 'L0', 'L2'] }), onArrange: vi.fn() })
+    await user.click(screen.getByRole('button', { name: 'Show original timing' }))
+    expect(screen.getAllByRole('listitem', { name: /^line at/i })[0]).toHaveTextContent('Hi, I want to buy groceries.')
+    expect(screen.queryByTestId('lips')).not.toBeInTheDocument()
   })
 
-  it('shows the control while placing, and "Put it here" shifts the line', async () => {
-    const user = userEvent.setup()
-    const onShift = vi.fn()
-    doc({ onShift, onPlacing: vi.fn(), placing: { id: `shift-${KEY}`, start: 12.3, duration: 1.48 } })
-    await user.click(screen.getByRole('button', { name: 'Put it here' }))
-    expect(onShift).toHaveBeenCalledWith(STATEMENTS[1], 12.3)
-  })
-
-  it('shows a moved line where it was, and as its own row where it now plays', () => {
-    doc({
-      onMoveKept: vi.fn(),
-      onShift: vi.fn(),
-      onPlacing: vi.fn(),
-      revisions: [
-        { edit_id: 'e1', start: 7.54, end: 9.02, text: '', mix: 'remove', partner: 'e2' },
-        { edit_id: 'e2', start: 12.3, end: 13.78, text: 'Start a live Bajicam session.', mix: 'layer', partner: 'e1' },
-      ],
-    })
-    // Where it was: struck through, with where it went and Undo.
-    expect(screen.getByText(/Moved to 0:12\.30/)).toBeInTheDocument()
-    const texts = screen.getAllByText('Start a live Bajicam session.')
-    expect(texts.map((t) => t.tagName)).toEqual(['DEL', 'SPAN'])
-    // Where it plays now: its own row, last in time order, with Move and a grip.
-    const rows = screen.getAllByRole('listitem', { name: /line at/i }).map((r) => r.getAttribute('aria-label'))
-    expect(rows).toEqual(['Line at 0:05, the Customer', 'Line at 0:07, the Customer', 'Line at 0:09, the Shopkeeper', 'Moved line at 0:12, the Customer'])
-    expect(screen.getByText(/Moved from 0:07, as spoken/)).toBeInTheDocument()
-    expect(screen.getByText('Starts at 0:12.30')).toBeInTheDocument()
-    expect(screen.getAllByRole('button', { name: 'Undo' })).toHaveLength(1)
-    expect(screen.getByRole('button', { name: /move the line at 0:12/i })).toBeInTheDocument()
-    // The line it landed on is left alone.
-    expect(screen.queryByText('✓ In the video')).not.toBeInTheDocument()
-  })
-
-  it('drags a row down the transcript: the drop shows the time, and the line lands where the row above ends', async () => {
-    const onShift = vi.fn()
-    const onPlacing = vi.fn()
-    doc({ onShift, onPlacing })
-    // jsdom has no layout: give each row a box, top to bottom.
-    const rowsEls = screen.getAllByRole('listitem', { name: /line at/i })
-    rowsEls.forEach((el, k) => {
+  it('drags a line: the rows take their new places live, Escape lets go, and the drop is one action', () => {
+    const onArrange = vi.fn()
+    const onPreview = vi.fn()
+    doc({ arranged: view(), onArrange, onPreview })
+    const box = () => screen.getAllByRole('listitem', { name: /^line at/i }).forEach((el, k) => {
       el.getBoundingClientRect = () => ({ top: k * 100, height: 100, bottom: k * 100 + 100, left: 0, right: 500, width: 500, x: 0, y: k * 100, toJSON: () => ({}) })
     })
-    const grip = screen.getByRole('button', { name: /move the line at 0:05/i })
-    fireEvent.pointerDown(grip, { clientY: 50, pointerId: 1 })
-    expect(onPlacing).toHaveBeenCalledWith({ id: KEY0, start: 5.2, duration: expect.closeTo(1.74, 2) })
-    // Below the third row's midpoint: it would start where that row ends.
+    box()
+    fireEvent.pointerDown(screen.getByRole('button', { name: /move the line at 0:05/i }), { clientY: 50 })
     fireEvent.pointerMove(window, { clientY: 280 })
-    expect(await screen.findByTestId('drop-line')).toHaveTextContent('Starts at 0:09.88')
-    expect(onPlacing).toHaveBeenLastCalledWith({ id: KEY0, start: 9.88, duration: expect.closeTo(1.74, 2) })
+    // The first line now sits last: the bar above it says where it starts, the others moved up.
+    expect(screen.getByTestId('insertion-bar')).toHaveTextContent('Starts at 0:08.14')
+    expect(onPreview).toHaveBeenLastCalledWith(expect.arrayContaining([expect.objectContaining({ key: 'L0', start: 8.14 })]))
+    fireEvent.keyDown(window, { key: 'Escape' })
+    expect(onArrange).not.toHaveBeenCalled()
+    expect(screen.queryByTestId('insertion-bar')).not.toBeInTheDocument()
+
+    box()
+    fireEvent.pointerDown(screen.getByRole('button', { name: /move the line at 0:05/i }), { clientY: 50 })
+    fireEvent.pointerMove(window, { clientY: 280 })
     fireEvent.pointerUp(window)
-    expect(onShift).toHaveBeenCalledWith(STATEMENTS[0], 9.88)
-    expect(onPlacing).toHaveBeenLastCalledWith(null)
-    expect(screen.queryByTestId('drop-line')).not.toBeInTheDocument()
-  })
-})
-const KEY0 = keyOf({ start: 5.2, end: 6.94 })
-
-describe('LineDoc: the grip on every row, and moving without dragging (UX-7e)', () => {
-  it('nudges on the bar from the grip with the arrow keys: a tenth, or a second with Shift; Escape lets go', () => {
-    const onPlacing = vi.fn()
-    doc({ onShift: vi.fn(), onPlacing })
-    const grip = screen.getByRole('button', { name: /move the line at 0:07/i })
-    fireEvent.keyDown(grip, { key: 'ArrowUp' })
-    expect(onPlacing).toHaveBeenLastCalledWith({ id: `shift-${KEY}`, start: 7.44, duration: expect.closeTo(1.48, 2) })
-    fireEvent.keyDown(grip, { key: 'ArrowDown', shiftKey: true })
-    expect(onPlacing).toHaveBeenLastCalledWith({ id: `shift-${KEY}`, start: 8.54, duration: expect.closeTo(1.48, 2) })
+    expect(onArrange).toHaveBeenCalledTimes(1)
+    expect(onArrange).toHaveBeenCalledWith({ order: ['L1', 'L2', 'L0'], pins: {}, min_gap: null, end: null })
   })
 
-  it('continues a nudge from where the bar already is, and Escape lets go', () => {
-    const onPlacing = vi.fn()
-    doc({ onShift: vi.fn(), onPlacing, placing: { id: `shift-${KEY}`, start: 12.3, duration: 1.48 } })
-    const grip = screen.getByRole('button', { name: /move the line at 0:07/i })
-    fireEvent.keyDown(grip, { key: 'ArrowDown' })
-    expect(onPlacing).toHaveBeenLastCalledWith({ id: `shift-${KEY}`, start: 12.4, duration: expect.closeTo(1.48, 2) })
-    fireEvent.keyDown(grip, { key: 'Escape' })
-    expect(onPlacing).toHaveBeenLastCalledWith(null)
-  })
-
-  it('moves a line up or down from its menu: it lands where the row above the gap ends', async () => {
+  it('moves a line with Alt and the arrow keys, and from its menu', async () => {
     const user = userEvent.setup()
-    const onShift = vi.fn()
-    doc({ onShift, onPlacing: vi.fn() })
-    // The second line, up: before the first, at 0.
-    await user.click(within(screen.getByRole('group', { name: 'Actions for 0:07' })).getByRole('button', { name: 'Move up' }))
-    expect(onShift).toHaveBeenLastCalledWith(STATEMENTS[1], 0)
-    // The first line, down: where the second ends.
+    const onArrange = vi.fn()
+    doc({ arranged: view(), onArrange })
+    fireEvent.keyDown(screen.getByRole('listitem', { name: 'Line at 0:07, the Customer' }), { key: 'ArrowUp', altKey: true })
+    expect(onArrange).toHaveBeenLastCalledWith(expect.objectContaining({ order: ['L1', 'L0', 'L2'] }))
     await user.click(within(screen.getByRole('group', { name: 'Actions for 0:05' })).getByRole('button', { name: 'Move down' }))
-    expect(onShift).toHaveBeenLastCalledWith(STATEMENTS[0], 9.02)
-    // The first line has nothing above it; the last has nothing below.
+    expect(onArrange).toHaveBeenLastCalledWith(expect.objectContaining({ order: ['L1', 'L0', 'L2'] }))
     expect(within(screen.getByRole('group', { name: 'Actions for 0:05' })).queryByRole('button', { name: 'Move up' })).not.toBeInTheDocument()
-    expect(within(screen.getByRole('group', { name: 'Actions for 0:09' })).queryByRole('button', { name: 'Move down' })).not.toBeInTheDocument()
   })
 
-  it('gives a kept line a grip that moves it with its take', () => {
-    const onMoveKept = vi.fn()
-    const onPlacing = vi.fn()
-    doc({ onMoveKept, onPlacing, onShift: vi.fn(), revisions: [{ edit_id: 'e1', start: 7.54, end: 9.02, text: 'Start a live Bhaji Cam session.', mix: 'replace' }] })
-    const grip = screen.getByRole('button', { name: /move the line at 0:07/i })
-    fireEvent.keyDown(grip, { key: 'ArrowDown' })
-    expect(onPlacing).toHaveBeenLastCalledWith({ id: 'edit-e1', start: 7.64, duration: expect.closeTo(1.48, 2) })
+  it('pins a line at a typed start with Enter, and the pin unpins it', async () => {
+    const user = userEvent.setup()
+    const onArrange = vi.fn()
+    doc({ arranged: view(), onArrange })
+    await user.click(within(screen.getByRole('group', { name: 'Actions for 0:09' })).getByRole('button', { name: 'Starts at…' }))
+    const field = screen.getByRole('textbox', { name: 'Starts at' })
+    await user.clear(field)
+    await user.type(field, '0:02.5{Enter}')
+    expect(onArrange).toHaveBeenLastCalledWith({ order: [], pins: { L2: 2.5 }, min_gap: null, end: null })
+  })
+
+  it('says a line was pushed after a pinned one, and unpins from the pin', async () => {
+    const user = userEvent.setup()
+    const onArrange = vi.fn()
+    doc({ arranged: view({ pins: { L2: 5.0 } }), onArrange })
+    expect(screen.getByTestId('pushed')).toHaveTextContent('pushed after 0:05.00 (pinned)')
+    await user.click(screen.getByRole('button', { name: /^Pinned\. Unpin it/ }))
+    expect(onArrange).toHaveBeenLastCalledWith(expect.objectContaining({ pins: {} }))
+  })
+
+  it('never cuts silently past the end: tighten, ease or trim', async () => {
+    const user = userEvent.setup()
+    const onArrange = vi.fn()
+    doc({ arranged: view({ pins: { L2: 9.8 } }, { ease_ok: true }), onArrange })
+    expect(screen.getByTestId('overrun')).toHaveTextContent('Runs 0.3 s past the end')
+    await user.click(within(screen.getByTestId('overrun')).getByRole('button', { name: 'Trim the last line' }))
+    expect(onArrange).toHaveBeenLastCalledWith(expect.objectContaining({ end: 'trim' }))
+    await user.click(within(screen.getByTestId('overrun')).getByRole('button', { name: 'Tighten gaps' }))
+    expect(onArrange).toHaveBeenLastCalledWith(expect.objectContaining({ min_gap: 0.15 }))
+  })
+
+  it('tightens the gaps to a chosen pause, and undoes the last move', async () => {
+    const user = userEvent.setup()
+    const onArrange = vi.fn()
+    const onArrangeUndo = vi.fn()
+    doc({ arranged: view({}, { can_undo: true }), onArrange, onArrangeUndo })
+    const gap = screen.getByRole('textbox', { name: 'Longest pause, in seconds' })
+    await user.clear(gap)
+    await user.type(gap, '0.2')
+    await user.click(within(screen.getByTestId('arrange-bar')).getByRole('button', { name: 'Tighten gaps' }))
+    expect(onArrange).toHaveBeenLastCalledWith(expect.objectContaining({ min_gap: 0.2 }))
+    await user.click(screen.getByRole('button', { name: 'Undo the last move' }))
+    expect(onArrangeUndo).toHaveBeenCalledTimes(1)
   })
 })
 

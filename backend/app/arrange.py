@@ -79,11 +79,21 @@ def ordered(lines: list[LineSpec], arrangement: Arrangement) -> list[LineSpec]:
     return named + [ln for ln in lines if ln.key not in seen]
 
 
+def _gap(lines: list[LineSpec], seq: list[LineSpec], i: int, min_gap: float | None) -> float:
+    """The pause before the i-th line played. The first keeps the clip's
+    lead-in, whichever line it is; the line that was first, played later,
+    takes the pause that followed it, so it does not carry the lead-in along."""
+    if i == 0:
+        return lines[0].gap if lines else 0.0
+    ln = seq[i]
+    gap = (lines[1].gap if len(lines) > 1 else 0.0) if lines and ln.key == lines[0].key else ln.gap
+    return min(gap, min_gap) if min_gap is not None else gap
+
+
 def place(lines: list[LineSpec], arrangement: Arrangement) -> list[Placed]:
     """Where each line plays, sorted by when it starts (the transcript's order)."""
     seq = ordered(lines, arrangement)
-    gap_of = {ln.key: (min(ln.gap, arrangement.min_gap) if arrangement.min_gap is not None and i > 0 else ln.gap)
-              for i, ln in enumerate(seq)}
+    gap_of = {ln.key: _gap(lines, seq, i, arrangement.min_gap) for i, ln in enumerate(seq)}
     pinned = {ln.key: (round(arrangement.pins[ln.key], 3), round(arrangement.pins[ln.key] + ln.length, 3))
               for ln in seq if ln.key in arrangement.pins}
     out: list[Placed] = []

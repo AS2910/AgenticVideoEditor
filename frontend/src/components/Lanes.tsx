@@ -20,6 +20,8 @@ export interface LanesProps {
   currentTime: number
   /** The spoken lines. */
   statements: Statement[]
+  /** Where each spoken line plays now, by its place in `statements` (the arrangement, 2026-10-19); missing = as shot. */
+  placedAt?: ({ start: number; end: number } | undefined)[]
   /** The cast; an unnamed speaker shows as "Speaker N" by order of appearance. */
   speakers: Speaker[]
   /** The live edits: the added lines are in the video, a removal strikes its line. */
@@ -183,7 +185,7 @@ const ADDED_NAME: Record<Added['state'], string> = {
 }
 
 export function Lanes({
-  duration, currentTime, statements, speakers, revisions, items, pieces = [], onSeek, placing, onPlace, asShot,
+  duration, currentTime, statements, placedAt = [], speakers, revisions, items, pieces = [], onSeek, placing, onPlace, asShot,
 }: LanesProps) {
   const addedRef = useRef<HTMLDivElement>(null)
   const at = (start: number, end: number) => place(duration, start, end)
@@ -320,7 +322,7 @@ export function Lanes({
                       : `Spoken line at ${clock(s.start)}, ${who}`
               const title = st.kind === 'changed' ? st.text : s.text
               return (
-                <Pill key={i} at={at(s.start, s.end)} tone={tone} label={label} title={title} onClick={() => onSeek(s.start)} className={cn(st.kind === 'removed' && 'text-muted-foreground line-through')} data-state={st.kind}>
+                <Pill key={i} at={at(placedAt[i]?.start ?? s.start, placedAt[i]?.end ?? s.end)} tone={tone} label={label} title={title} onClick={() => onSeek(placedAt[i]?.start ?? s.start)} data-moved={placedAt[i] && Math.abs(placedAt[i]!.start - s.start) > 0.005 ? true : undefined} className={cn(st.kind === 'removed' && 'text-muted-foreground line-through')} data-state={st.kind}>
                   <span className="shrink-0">{who} {time(s.start)}</span>
                   {st.kind === 'removed' && <span className="truncate">Removed</span>}
                   {st.kind === 'removing' && <span className="truncate">Removal proposed</span>}

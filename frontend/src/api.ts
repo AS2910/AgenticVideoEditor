@@ -1,3 +1,4 @@
+import type { Arrangement } from './transcript/arrange'
 import type {
   MyVoice, UserSettings, UsageReport, MadeVoice, CloneableSpeaker, DesignedPreview, Receipt,
   Project, ExportManifest, Job, ProjectSummary, ProjectDetail, Usage, Voice, Speaker,
@@ -338,10 +339,43 @@ export const getMe = () => get<Me>('/auth/me')
 export const loginUrl = `${BASE}/auth/login`
 export const logout = () => post<{ signed_out: boolean }>('/auth/logout')
 
-/** Moves a line of the original speech to another time, as spoken: room tone
- *  where it was, the words over the picture from `to`. Two edits, paired. */
-export const shiftLine = (id: string, req: { start: number; end: number; to: number }) =>
-  post<{ edit_id: string; removed_edit_id: string; candidate: Candidate; from: Selection; selection: Selection; mix: Mix }>(`/videos/${id}/lines/shift`, req)
+// ── The arrangement (2026-10-19): the transcript's order is the playback order ──
+
+/** One spoken line where it plays now, with what placed it there. */
+export interface ArrangedLine {
+  key: string
+  /** 1-based, as the transcript numbers lines. */
+  index: number
+  text: string
+  speaker: string | null
+  orig_start: number
+  orig_end: number
+  length: number
+  gap: number
+  start: number
+  end: number
+  pinned: boolean
+  /** The pinned line's start this one was pushed after, if it was. */
+  pushed_after: number | null
+  moved: boolean
+  /** The replacement that travels with the line, if it has one. */
+  replaced_by: string | null
+}
+export interface ArrangementView {
+  arrangement: Arrangement
+  duration: number
+  lines: ArrangedLine[]
+  /** Seconds the lines run past the end of the clip (0 when they fit). */
+  overrun: number
+  /** Whether the picture may hold its last frame that long. */
+  ease_ok: boolean
+  min_gap_default: number
+  can_undo: boolean
+}
+export const getArrangement = (id: string) => get<ArrangementView>(`/videos/${id}/arrangement`)
+/** The whole arrangement, as one action (one undo). */
+export const putArrangement = (id: string, arrangement: Arrangement) => put<ArrangementView>(`/videos/${id}/arrangement`, arrangement)
+export const undoArrangement = (id: string) => post<ArrangementView>(`/videos/${id}/arrangement/undo`)
 
 // ── Volt (2026-10-18): the account pages ─────────────────────────────────────
 

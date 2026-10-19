@@ -2,6 +2,9 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import App from './App'
+import type { ArrangementView } from './api'
+import { EMPTY as ARRANGE_EMPTY, overrun as arrangeOverrun, place as arrangePlace, specs as arrangeSpecs } from './transcript/arrange'
+import type { Arrangement } from './transcript/arrange'
 
 const SOURCE_MEDIA = {
   kind: 'video', sha256: 's'.repeat(64), duration: 2.3, container: 'mp4',
@@ -95,14 +98,25 @@ const saidTo = (calls: { url: string; body: unknown }[]) =>
   calls.filter((c) => c.url.endsWith('/turns')).map((c) => (c.body as { text: string }).text)
 
 /** Routes by URL. `job` overrides the polled job so a test can exercise the failure path. */
+/** The test clip's one line, arranged as the server would answer. */
+function arrangedView(arrangement: Partial<Arrangement> = {}): ArrangementView {
+  const full = { ...ARRANGE_EMPTY, ...arrangement }
+  const lines = arrangeSpecs([{ start: 0, end: 2.3 }])
+  const placed = arrangePlace(lines, full)
+  return {
+    arrangement: full, duration: 2.3, overrun: arrangeOverrun(placed, 2.3), ease_ok: arrangeOverrun(placed, 2.3) <= 1.5, min_gap_default: 0.15,
+    can_undo: Object.keys(full.pins).length > 0,
+    lines: placed.map((p) => ({ ...p, index: 1, text: 'Get 20% off today only.', speaker: null, orig_start: 0, orig_end: 2.3, length: 2.3, gap: 0, replaced_by: null })),
+  }
+}
+
 function routeFetch(job: unknown = JOB_TURN) {
   return vi.fn(async (url: string, _init?: RequestInit) => {
     if (url.includes('/jobs/')) return ok(job)
     if (url.endsWith('/revert')) return ok({ edit_id: 'e1', reverted: true })
     if (url.endsWith('/lines/remove')) return ok({ item_id: 'i7', candidate_id: 'c7', selection: { start: 0, end: 2.3 }, mix: 'remove', plan: PLAN_REMOVAL })
-    if (url.endsWith('/lines/shift')) {
-      return ok({ edit_id: 'e9', removed_edit_id: 'e8', candidate: CANDIDATE, from: { start: 0, end: 2.3 }, selection: { start: 1.0, end: 2.3 }, mix: 'layer' })
-    }
+    if (url.endsWith('/arrangement/undo')) return ok(arrangedView())
+    if (url.endsWith('/arrangement')) return ok(arrangedView(_init?.method === 'PUT' ? JSON.parse(String(_init.body)) : {}))
     if (url.endsWith('/settings')) return ok({ settings: JSON.parse(String(_init?.body)) })
     if (url.endsWith('/auth/me')) return ok({ mode: 'off', user: null })
     if (url.endsWith('/reading')) return ok(READING)
@@ -1146,31 +1160,27 @@ describe('App: the line is the unit (UX-1)', () => {
   })
 })
 
-describe('App: shifting original speech (UX-1c)', () => {
-  it('shifts a line to a typed time: room tone where it was, the words over the picture there, undo for both', async () => {
+describe('App: the arrangement (2026-10-19)', () => {
+  it('pins a line at a typed start: one row, saved as the arrangement, rendered, past the end said', async () => {
     const f = routeFetch()
     vi.stubGlobal('fetch', f)
     const user = userEvent.setup()
     render(<App />)
     await reachEditor(user)
 
-    await user.click(within(screen.getByRole('group', { name: 'Actions for 0:00' })).getByRole('button', { name: 'Shift to a time…' }))
+    await user.click(await within(screen.getByRole('group', { name: 'Actions for 0:00' })).findByRole('button', { name: 'Starts at…' }))
     const box = screen.getByRole('textbox', { name: 'Starts at' })
     await user.clear(box)
-    await user.type(box, '0:01.00')
-    await user.click(screen.getByRole('button', { name: 'Put it here' }))
+    await user.type(box, '0:01.00{Enter}')
 
-    await waitFor(() => expect(f.mock.calls.some(([url, init]) => String(url).endsWith('/lines/shift')
-      && JSON.parse(String(init?.body)).to === 1)).toBe(true))
-    // Where it was, and its own row where it now plays.
-    expect(await screen.findByText('Moved away')).toBeInTheDocument()
-    expect(screen.getByText(/Moved to 0:01\.00/)).toBeInTheDocument()
-    expect(screen.getByRole('listitem', { name: 'Moved line at 0:01' })).toHaveTextContent('Get 20% off today only.')
-    expect(screen.getByText('Moved')).toBeInTheDocument()
-    await user.click(screen.getByRole('button', { name: 'Put it back' }))
-    await waitFor(() => expect(f.mock.calls.some(([url]) => String(url).endsWith('/edits/e8/revert'))).toBe(true))
-    await waitFor(() => expect(screen.queryByText('Moved')).not.toBeInTheDocument())
-    expect(screen.queryByText('Moved away')).not.toBeInTheDocument()
+    await waitFor(() => expect(f.mock.calls.some(([url, init]) => String(url).endsWith('/arrangement') && init?.method === 'PUT'
+      && JSON.parse(String(init.body)).pins.L0 === 1)).toBe(true))
+    await waitFor(() => expect(f.mock.calls.some(([url]) => String(url).endsWith('/export'))).toBe(true))
+    // One row for the line, where it plays now; nothing past the end is cut without a choice.
+    expect(await screen.findByRole('listitem', { name: 'Line at 0:01' })).toHaveTextContent('Get 20% off today only.')
+    expect(screen.getAllByText('Get 20% off today only.').filter((el) => el.closest('[role="listitem"]'))).toHaveLength(1)
+    expect(screen.getByTestId('pin')).toBeInTheDocument()
+    expect(screen.getByTestId('overrun')).toHaveTextContent('Runs 1.0 s past the end')
   })
 })
 
@@ -1228,31 +1238,6 @@ describe('App: moving audio on the timeline (UX-1b)', () => {
     await waitFor(() => expect(calls).toEqual([{ url: '/api/videos/p1/candidates/c1/move', body: { start: 1.5 } }]))
     await waitFor(() => expect(screen.getByTestId('place')).toHaveTextContent('Starts at 0:01.50'))
     expect(screen.queryByRole('slider', { name: 'Where the take starts' })).not.toBeInTheDocument()
-  })
-
-  it('moves a kept line in one step and re-renders', async () => {
-    const calls: string[] = []
-    const base = routeFetch()
-    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
-      if (url.endsWith('/edits/e1/move')) {
-        calls.push(String(init?.body))
-        return ok({ edit_id: 'e2', reverted: 'e1', candidate: { ...CANDIDATE, candidate_id: 'c3', plan: { ...CANDIDATE.plan, selection: { start: 1.3, end: 1.8 } } } })
-      }
-      if (url.endsWith('/videos/p1')) {
-        return ok({ ...PROJECT, created_at: '2026-10-02T08:00:00Z', messages: [{ role: 'user', text: 'x' }], settings: { autonomy: 'ask' },
-          edits: [{ edit_id: 'e1', candidate_id: 'c1', new_text: '30% off', selection: { start: 0.4, end: 0.9 }, mix: 'replace', overridden: false, reverted: false }] })
-      }
-      return base(url, init)
-    }))
-    window.location.hash = 'p1'
-    const user = userEvent.setup()
-    render(<App />)
-    const place = await screen.findByTestId('place')
-    await user.click(within(place).getByRole('button', { name: 'Move' }))
-    await user.click(within(screen.getByTestId('place')).getByRole('button', { name: 'Put it here' }))
-
-    await waitFor(() => expect(calls).toEqual(['{"start":0.4}']))
-    await waitFor(() => expect(screen.getByTestId('place')).toHaveTextContent('Starts at 0:01.30'))
   })
 
   it('adds a line at a chosen time: said to Voltage with the time', async () => {
