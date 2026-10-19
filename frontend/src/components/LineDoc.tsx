@@ -80,6 +80,8 @@ interface LineDocProps {
   backgroundDb?: number
   /** UX-9: a delivery chip on a proposal asks Voltage for that take again, said that way. */
   onDelivery?: (item: PlanItem, delivery: string) => void
+  /** p60: a line whose latest attempt failed (and has no take) asks Voltage to try again, as a turn. */
+  onRetry?: (item: PlanItem) => void
   /** UX-1c: move this line of the original speech to start at `to`. */
   onShift?: (s: Statement, to: number) => void
   /** A take dragged to a new start; the moved take replaces it under the line. */
@@ -96,6 +98,9 @@ interface LineDocProps {
    *  added and moved lines dim with "not in this version", removed and replaced lines read as shot. */
   version?: 'edited' | 'proposals' | 'as-shot'
 }
+
+/** The picture's flex for a take, as a factor ("0.94"), or null when it plays as shot. */
+const eased = (c: Candidate) => (c.plan.flex && Math.abs(c.plan.flex - 1) > 0.005 ? c.plan.flex.toFixed(2) : null)
 
 const NOT_IN_VERSION = <span className="tag rounded-[4px] border border-dashed border-line2 px-1.5 py-px text-faint" data-testid="not-in-version">not in this version</span>
 
@@ -162,7 +167,7 @@ const Spinner = () => <Loader2 size={16} aria-hidden="true" className="shrink-0 
 export function LineDoc({
   statements, words = [], speakers = [], voices = [], revisions = [], selection, currentTime,
   pendingLines = [], items = [], disabled, usdPerChar, playing,
-  onSeek, onHear, onAdd, onDiscard, onAddAll, onUndo, onRemove, onHearTake, onLevel, backgroundDb = -12, onDelivery,
+  onSeek, onHear, onAdd, onDiscard, onAddAll, onUndo, onRemove, onHearTake, onLevel, backgroundDb = -12, onDelivery, onRetry,
   onEditingChange, onMove, onMoveKept, placing, onPlacing, onShift, duration, version = 'edited',
 }: LineDocProps) {
   const asShot = version === 'as-shot'
@@ -572,16 +577,15 @@ export function LineDoc({
   const takeMeta = (item: PlanItem, c: Candidate, speaker: string | null | undefined) => {
     const v = verdict(c, name(speaker))
     const voice = voices.find((x) => x.voice_id === c.plan.voice_profile_id)?.name
-    const facts = takeFacts(c, voice)
-    const picture = facts.grid.find((f) => f.label === 'Picture')?.value
     const held = item.mix === 'over' && c.plan.mix === 'concatenate'
     return (
       <div className="flex flex-col gap-1.5" data-testid="take">
         <div className={cn(metaClass, !v.passed && 'text-needs')}>
           {voice ? `${voice}'s voice` : 'The default voice'} · {v.text}
-          {picture && picture !== 'as shot' ? ` The picture ${picture}.` : ''}{held ? ' Held the picture: no room to play over it.' : ''}
+          {eased(c) ? ` Picture eased to ${eased(c)}× for this line.` : ''}{held ? ' Held the picture: no room to play over it.' : ''}
           {!v.passed && ' Add it anyway if it sounds right to you.'}
         </div>
+        {item.note && <div className={metaClass} data-testid="item-note">{item.note}</div>}
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
           {onMove && placeControl(c.candidate_id, c.plan.selection.start, c.audio.duration, (t) => onMove(item, c, t))}
           {isAdd(item) && levelControl(c.plan.level_db, { candidate: c, item })}
@@ -671,7 +675,14 @@ export function LineDoc({
       )
     }
     if (item.status === 'ready' && item.candidate) return takeMeta(item, item.candidate, speaker)
-    if (item.status === 'failed' && item.error) return <div className={cn(metaClass, 'text-needs')}>{item.error}</div>
+    if (item.status === 'failed') {
+      return (
+        <div className="flex flex-col gap-1.5" data-testid="failed">
+          {item.error && <div className={cn(metaClass, 'text-needs')}>{item.error}</div>}
+          {onRetry && <span className="-ml-2 flex"><button type="button" className="act" onClick={() => onRetry(item)} disabled={disabled}>Ask Voltage to try again</button></span>}
+        </div>
+      )
+    }
     return null
   }
 
@@ -932,7 +943,7 @@ export function LineDoc({
                 <div className={metaClass}>
                   {after && statements.length > 0 ? `New line after ${clock(after.start)}` : 'New line'} · {item.mix === 'concatenate' ? 'the picture makes room' : 'over the picture'}
                 </div>
-                {item.note && <div className={cn(metaClass, 'text-needs')}>{item.note}</div>}
+                {item.note && !(item.status === 'ready' && c) && <div className={cn(metaClass, 'text-needs')}>{item.note}</div>}
                 <div className={unfold}>{lineBlock(item, item.speaker)}</div>
                 {item.status === 'ready' && c && verbs(item, c, order, 'layer')}
                 {(item.status === 'needs-you' || item.status === 'failed' || item.status === 'planned') && (

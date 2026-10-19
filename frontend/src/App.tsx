@@ -675,6 +675,8 @@ function Studio() {
     if (!projectId) return { changed: false, render: null }
     const latest = await getProject(projectId).catch(() => null)
     if (!latest) return { changed: false, render: null }
+    // p60: the items too, not only the edits, so the rows, the header's counts and Voltage's words come from one record.
+    if (latest.plan) setPlan(latest.plan)
     const live = latest.edits.filter((e) => !e.reverted).map(asRevision)
     const before = approved.map((r) => r.edit_id).sort().join(',')
     const after = live.map((r) => r.edit_id).sort().join(',')
@@ -1157,7 +1159,7 @@ function Studio() {
       <div className="flex h-dvh flex-col bg-background text-foreground max-[960px]:h-auto max-[960px]:min-h-dvh">
         <a className="skip" href="#main" onClick={(e) => { e.preventDefault(); document.getElementById('main')?.focus() }}>Skip to the transcript</a>
         {/* Volt: the editor's header — the wordmark, the file, the play switch, the autonomy, the spend, Export, the account. */}
-        <header className="flex min-h-[62px] flex-wrap items-center gap-x-4 gap-y-2 border-b-[1.5px] border-foreground bg-card px-4 py-2 sm:px-6">
+        <header className="flex min-h-[62px] flex-wrap items-center gap-x-4 gap-y-2 border-b-[1.5px] border-foreground bg-card px-4 py-2 sm:px-6 lg:flex-nowrap lg:[&>*:not(h1)]:shrink-0" data-testid="editor-header">
           <Wordmark />
           <span className="text-faint max-sm:hidden" aria-hidden="true">/</span>
           {/* Folders: the project the video is in, with its menu; or a dashed "No project" that opens the move dialog. */}
@@ -1187,7 +1189,7 @@ function Studio() {
             )}
           </div>
           <span className="text-faint max-sm:hidden" aria-hidden="true">/</span>
-          <h1 className="disp m-0 min-w-0 max-w-[28ch] truncate text-[15px] font-semibold" title={project.filename}>{project.filename}</h1>
+          <h1 className="disp m-0 min-w-0 max-w-[28ch] truncate text-[15px] font-semibold lg:max-w-none lg:flex-[1_1_0]" title={project.filename}>{project.filename}</h1>
           <span className="tag text-faint">{timecode(project.duration)}{speakers.length > 0 ? ` · ${speakers.length} ${speakers.length === 1 ? 'voice' : 'voices'}` : ''}</span>
           {views.length > 1 ? (
             <div className="segs" role="group" aria-label="Play" data-tour="playback-switch">
@@ -1305,6 +1307,7 @@ function Studio() {
                 onLevel={(target, levelDb) => void changeLevel(target, levelDb)}
                 backgroundDb={BACKGROUND_DB}
                 onDelivery={(item, delivery) => void takeTurn(`Voice ${item.item_id} again, said ${delivery}`)}
+            onRetry={(item) => void takeTurn(`Try ${item.item_id} again (“${item.new_text}”): ${item.error ?? 'the last try failed'}`)}
                 onUndo={(id) => void revert(id)}
                 onRemove={(s) => void removeStatement(s)}
                 onShift={(s, to) => void shiftStatement(s, to)}

@@ -535,3 +535,43 @@ describe('LineDoc: the grip on every row, and moving without dragging (UX-7e)', 
     expect(onPlacing).toHaveBeenLastCalledWith({ id: 'edit-e1', start: 7.64, duration: expect.closeTo(1.48, 2) })
   })
 })
+
+describe('LineDoc: the transcript agrees with the record (p60)', () => {
+  const ERR = 'Too long for its gap: needs 3.8 s, has 2.3 s. Ask Voltage to shorten it, or let the picture ease.'
+
+  it('counts in the heading exactly the items that are ready', () => {
+    doc({ items: [
+      item(),
+      item({ item_id: 'i2', selection: { start: 9.38, end: 9.88 }, old_text: 'Sure, sir.', new_text: 'Of course, sir.', status: 'failed', candidate: null, error: ERR }),
+    ] })
+    expect(screen.getByTestId('counts')).toHaveTextContent(/^1 proposed/)
+  })
+
+  it('shows Couldn’t voice it only when the latest attempt failed, with Ask Voltage to try again', async () => {
+    const onRetry = vi.fn()
+    const failed = item({ status: 'failed', candidate: null, error: ERR })
+    doc({ items: [failed], onRetry })
+    const row = screen.getByRole('listitem', { name: /Line at 0:07/ })
+    expect(row).toHaveTextContent("Couldn't voice it")
+    expect(row).toHaveTextContent(ERR)
+    expect(row.textContent).not.toMatch(/—|widen the selection/)
+    await userEvent.click(within(row).getByRole('button', { name: 'Ask Voltage to try again' }))
+    expect(onRetry).toHaveBeenCalledWith(expect.objectContaining({ item_id: 'i1' }))
+  })
+
+  it('keeps a line with a good take proposed when a later try failed, and says so', () => {
+    doc({ items: [item({ note: 'The last try could not be made; the take before it stands.' })] })
+    const row = screen.getByRole('listitem', { name: /Line at 0:07/ })
+    expect(row).toHaveTextContent('Proposed')
+    expect(row).not.toHaveTextContent("Couldn't voice it")
+    expect(screen.getByTestId('item-note')).toHaveTextContent('the take before it stands')
+  })
+
+  it('says the picture’s flex once', () => {
+    doc({ items: [item({ candidate: take({ plan: { ...take().plan, flex: 0.94 }, fit_notes: ['nearest of 3 takes', 'opened the pauses by 36 ms', 'the picture at 0.94×'] }) })] })
+    const meta = screen.getByTestId('take')
+    expect(meta).toHaveTextContent('Picture eased to 0.94× for this line.')
+    expect(meta.textContent!.match(/0\.94/g)).toHaveLength(1)
+    expect(meta).not.toHaveTextContent(/flexed/)
+  })
+})

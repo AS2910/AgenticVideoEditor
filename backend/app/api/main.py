@@ -3021,6 +3021,12 @@ def take_turn(project_id: str, req: TurnRequest, owner: str = Depends(current_ow
                     "question": None, "spent_usd": 0.0, "calls": 0, "stopped": "error", "error": why}
         question = outcome.question
         status = "clarifying" if question else "done"
+        # p60: the closing words are checked against the record; a claim it does not support is corrected.
+        from app.agent.reply_check import corrections
+        fixes = corrections(outcome.reply or "", repo.get_plan(project_id, plan.plan_id).items, _lines(record))
+        if fixes:
+            logging.getLogger(__name__).info("reply corrected for %s: %s", project_id, fixes)
+            outcome = replace(outcome, reply=(outcome.reply or "").rstrip() + "\n\n" + " ".join(fixes))
         if outcome.reply:
             repo.add_message(project_id, "assistant", outcome.reply)
         # What Voltage's own thinking cost this turn, as a step of its own (20d):

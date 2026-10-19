@@ -540,6 +540,14 @@ def _synthesize_take(wb: Workbench, turn: Turn, args: dict) -> ToolResult:
     item_id = args.get("item_id")
     plan = _plan(wb, turn)
     existing = plan.item(item_id) if item_id else None
+    if existing is None and line_no and not item_id:
+        # One line, one item (20d, p60): a retry that names only the line re-voices
+        # the item already on that line instead of starting a second one.
+        hit = next((ln for ln in lines if ln.index == int(line_no)), None) if str(line_no).isdigit() else None
+        if hit is not None:
+            existing = next((i for i in reversed(plan.items) if i.kind == "planned" and i.old_text
+                             and i.status not in ("dismissed", "approved")
+                             and abs(i.selection.start - hit.start) < 0.01 and abs(i.selection.end - hit.end) < 0.01), None)
 
     moved = False
     if existing is not None:
@@ -604,10 +612,14 @@ def _synthesize_take(wb: Workbench, turn: Turn, args: dict) -> ToolResult:
     if existing is None:
         item = PlanItem(item_id=f"i{len(plan.items) + 1}", selection=selection, old_text=old_text, new_text=text,
                         speaker=speaker, mix=mix, delivery=delivery, reason=direction or "", kind="planned",
-                        enabled=True, status="working")
+                        enabled=True, status="planned")
         wb.repo.update_plan(turn.project_id, turn.plan_id, items=plan.items + (item,))
     else:
         item = existing
+    begin = getattr(wb.repo, "begin_attempt", None)
+    attempt = begin(turn.project_id, turn.plan_id, item.item_id, new_text=text, delivery=delivery, reason=direction or "",
+                    error=None, selection=selection, mix=mix) if begin else 0
+    if not begin:
         wb.repo.update_item(turn.project_id, turn.plan_id, item.item_id, status="working", new_text=text,
                             delivery=delivery, reason=direction or "", error=None, selection=selection, mix=mix)
 
@@ -627,11 +639,23 @@ def _synthesize_take(wb: Workbench, turn: Turn, args: dict) -> ToolResult:
                                 level_db=level_db)
     except Exception as exc:  # noqa: BLE001 — the model hears why and decides; nothing crashes the turn
         reason = str(exc) or type(exc).__name__
-        wb.repo.update_item(turn.project_id, turn.plan_id, item.item_id, status="failed", error=reason, progress=None)
-        return ToolResult(f"The take could not be made: {reason}", step=f"Could not voice “{text[:40]}” — {reason[:80]}")
+        finish = getattr(wb.repo, "finish_attempt", None)
+        state = finish(turn.project_id, turn.plan_id, item.item_id, attempt, error=reason) if finish else "failed"
+        if not finish:
+            wb.repo.update_item(turn.project_id, turn.plan_id, item.item_id, status="failed", error=reason, progress=None)
+        kept = (f" {item.item_id} keeps its earlier take {wb.repo.get_plan(turn.project_id, turn.plan_id).item(item.item_id).candidate_id}, ready to hear."
+                if state == "ready" else f" {item.item_id} has no take.")
+        return ToolResult(f"The take could not be made: {reason}{kept}", step=f"Could not voice “{text[:40]}” — {reason[:80]}")
     cost = max(0.0, wb.ledger.spent_usd(turn.project_id) - before)
-    wb.repo.update_item(turn.project_id, turn.plan_id, item.item_id, status="ready", candidate_id=candidate.candidate_id,
-                        progress=None, error=None, fit=candidate.plan.fit)
+    finish = getattr(wb.repo, "finish_attempt", None)
+    if finish:
+        state = finish(turn.project_id, turn.plan_id, item.item_id, attempt, candidate_id=candidate.candidate_id, fit=candidate.plan.fit, note=None)
+        if state == "stale":
+            return ToolResult(f"Take {candidate.candidate_id} was made, but a newer attempt on {item.item_id} has started; "
+                              "it is kept in the item's history, not shown.")
+    else:
+        wb.repo.update_item(turn.project_id, turn.plan_id, item.item_id, status="ready", candidate_id=candidate.candidate_id,
+                            progress=None, error=None, fit=candidate.plan.fit)
     turn.takes.append(candidate.candidate_id)
     report = candidate.continuity
     verdict = "sounds right" if report.passed else "did not pass the sound check" + (

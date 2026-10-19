@@ -557,6 +557,58 @@ class ProjectRepository:
                       (json.dumps(codec.dump(plan)), project_id, plan_id))
         return plan
 
+    # ── p60 (2026-10-19): an item's state is written by its latest attempt only ──
+
+    def begin_attempt(self, project_id: str, plan_id: str, item_id: str, **changes) -> int:
+        """Start a take attempt on an item: it gets the next attempt number, and
+        the item shows it is being voiced. Returns the number."""
+        with self.db.tx() as c:
+            row = c.execute("SELECT body FROM plans WHERE project_id = ? AND plan_id = ?", (project_id, plan_id)).fetchone()
+            if row is None:
+                return 0
+            plan = plan_from_dict(json.loads(row["body"]))
+            item = plan.item(item_id)
+            if item is None:
+                return 0
+            n = item.attempt + 1
+            plan = plan.with_item(item_id, attempt=n, status="working", progress=None, **changes)
+            c.execute("UPDATE plans SET body = ? WHERE project_id = ? AND plan_id = ?", (json.dumps(codec.dump(plan)), project_id, plan_id))
+        return n
+
+    def finish_attempt(self, project_id: str, plan_id: str, item_id: str, attempt: int, *,
+                       candidate_id: str | None = None, error: str | None = None, **changes) -> str:
+        """The one way an attempt's outcome reaches an item's state. An attempt
+        older than the item's latest is history only. A failed latest attempt on
+        an item that already has a usable take leaves the item ready with that
+        take (the failure is history, never its state). Returns the state the
+        item is left in: "ready", "failed" or "stale"."""
+        with self.db.tx() as c:
+            row = c.execute("SELECT body FROM plans WHERE project_id = ? AND plan_id = ?", (project_id, plan_id)).fetchone()
+            if row is None:
+                return "stale"
+            plan = plan_from_dict(json.loads(row["body"]))
+            item = plan.item(item_id)
+            if item is None:
+                return "stale"
+            entry = {"attempt": attempt, "at": _now(), "outcome": "ready" if error is None else "failed",
+                     "candidate_id": candidate_id, "error": error}
+            history = (*item.history, entry)
+            if attempt < item.attempt:
+                plan = plan.with_item(item_id, history=history)
+                state = "stale"
+            elif error is None:
+                plan = plan.with_item(item_id, history=history, status="ready", candidate_id=candidate_id, error=None, progress=None, **changes)
+                state = "ready"
+            elif item.candidate_id:
+                plan = plan.with_item(item_id, history=history, status="ready", error=None, progress=None,
+                                      note="The last try could not be made; the take before it stands.")
+                state = "ready"
+            else:
+                plan = plan.with_item(item_id, history=history, status="failed", error=error, progress=None)
+                state = "failed"
+            c.execute("UPDATE plans SET body = ? WHERE project_id = ? AND plan_id = ?", (json.dumps(codec.dump(plan)), project_id, plan_id))
+        return state
+
     def update_plan(self, project_id: str, plan_id: str, **changes) -> Plan | None:
         """Change the plan's own fields (status, log) under the same lock."""
         from dataclasses import replace as _replace

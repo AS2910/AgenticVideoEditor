@@ -382,9 +382,13 @@ def test_two_takes_in_one_turn_get_separate_candidates_and_media(client, project
         reply(take("c", text="Get 30% off today only."), take("d", text="Get 50% off today only."), stop="tool_use"),
         reply(said("Two to hear.")),
     ])
-    a, b = [i["candidate"] for i in done["plan"]["items"]]
-    assert a["candidate_id"] != b["candidate_id"]
-    assert a["frames"]["sha256"] != b["frames"]["sha256"]
+    # One line, one item (p60): both takes are attempts on the same item; the latest is its take.
+    import app.api.main as main
+    (item,) = done["plan"]["items"]
+    tried = [h["candidate_id"] for h in main.repo.latest_plan("p1").item(item["item_id"]).history]
+    assert len(tried) == 2 and item["candidate"]["candidate_id"] == tried[-1]
+    a, b = (main.repo.get_candidate("p1", c) for c in tried)
+    assert a.candidate_id != b.candidate_id and a.frames.sha256 != b.frames.sha256
 
 
 class Broken(MockVoiceAdapter):

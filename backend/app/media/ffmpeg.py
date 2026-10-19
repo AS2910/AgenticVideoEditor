@@ -50,11 +50,12 @@ class SpanMismatch(NonRetryableError):
     def __init__(self, natural: float, target: float) -> None:
         self.natural = natural
         self.target = target
+        # p60: agent-era wording, said once, no dash; there is no selection for the user to widen any more.
         if natural > target:
-            advice = "The new line is too long for the selection — widen the selection or shorten the line."
+            message = f"Too long for its gap: needs {natural:.1f} s, has {target:.1f} s. Ask Voltage to shorten it, or let the picture ease."
         else:
-            advice = "The new line is too short for the selection — narrow the selection or lengthen the line."
-        super().__init__(f"{advice} (needs {natural:.2f}s, selection is {target:.2f}s)")
+            message = f"Too short for its gap: needs {natural:.1f} s, has {target:.1f} s. Ask Voltage to lengthen it, or move it."
+        super().__init__(message)
 
 
 def available() -> bool:

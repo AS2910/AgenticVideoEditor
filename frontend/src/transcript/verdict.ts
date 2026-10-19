@@ -7,7 +7,8 @@ export function verdict(candidate: Candidate, speaker?: string | null): { text: 
   const measured = ['prosody', 'audio_integration', 'voice_match', 'lip_sync'] as const
   const scores = measured.filter((k) => c.measured.includes(k) && c[k] !== null).map((k) => c[k] as number)
   const score = scores.length ? Math.min(...scores) : null
-  const notes = (candidate.fit_notes ?? []).filter((n) => !n.startsWith('nearest'))
+  // The picture's flex is said once, by the row ("Picture eased to 0.94× for this line."), not again here.
+  const notes = (candidate.fit_notes ?? []).filter((n) => !n.startsWith('nearest') && !n.startsWith('the picture at'))
   const tail = notes.length ? ` ${notes.join(', ').replace(/^./, (ch) => ch.toUpperCase())}.` : ''
   if (score === null) return { text: `Sounds right (not measured yet).${tail}`, score: null, passed: c.passed }
   const pitch = c.warnings.map((w) => /Pitch is (-?[\d.]+) semitones/.exec(w)).find(Boolean)

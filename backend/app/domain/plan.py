@@ -37,6 +37,10 @@ class PlanItem:
     error: str | None = None
     note: str | None = None        # e.g. "The shorter line you picked"
     progress: str | None = None    # what is happening to it right now, in words
+    # p60 (2026-10-19): every take attempt on the item is numbered; only the latest
+    # may set its state, and each outcome is kept here (newest last).
+    attempt: int = 0
+    history: tuple = ()
 
 
 @dataclass(frozen=True)
@@ -87,7 +91,7 @@ def item_from_dict(d: dict) -> PlanItem:
         reason=d.get("reason", ""), kind=d.get("kind", "planned"), enabled=d.get("enabled", True),
         status=d.get("status", "planned"), fit=d.get("fit"), candidate_id=d.get("candidate_id"),
         edit_id=d.get("edit_id"), question=d.get("question"), error=d.get("error"), note=d.get("note"),
-        progress=d.get("progress"),
+        progress=d.get("progress"), attempt=int(d.get("attempt", 0)), history=tuple(d.get("history", ())),
     )
 
 

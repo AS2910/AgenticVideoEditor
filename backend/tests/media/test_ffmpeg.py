@@ -141,7 +141,8 @@ def test_fit_duration_refuses_a_stretch_that_would_sound_wrong(tmp_path, target)
     assert err.value.natural == pytest.approx(1.0, abs=0.01)
     assert err.value.target == target
     assert isinstance(err.value, NonRetryableError)
-    assert "selection" in str(err.value)  # tells the user what to change
+    assert "for its gap" in str(err.value) and "Ask Voltage" in str(err.value)  # says what to do, in the agent era
+    assert "\u2014" not in str(err.value)
 
 
 def test_extract_segment_cuts_the_requested_span(tmp_path):
