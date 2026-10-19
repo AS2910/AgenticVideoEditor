@@ -12,9 +12,11 @@ and scope; which voice, tone or wording to prefer is the model's call.
 """
 from __future__ import annotations
 
+import math
 import time
 from dataclasses import dataclass, field
 from enum import Enum
+from typing import Callable
 
 
 class Guard(str, Enum):
@@ -28,10 +30,13 @@ class WaitingForUser(Exception):
     the user's answer is the next turn, and the agent carries on from there."""
 
     def __init__(self, question: str, options: tuple[str, ...] = ("Go ahead", "Not yet"),
-                 guess: str | None = "Go ahead", *, gate: bool = True, cost_usd: float | None = None) -> None:
+                 guess: str | None = "Go ahead", *, gate: bool = True, cost_usd: float | None = None,
+                 details: tuple[str | None, ...] | None = None) -> None:
         super().__init__(question)
         self.question = question
         self.options = options
+        # A quieter line under each option's short label (the full sentence); None where there is none.
+        self.details = tuple(details) if details and any(details) else None
         self.guess = guess if guess in options else options[0]
         # A gate question (a paid or committing step waits); its first option is the yes.
         self.gate = gate
@@ -60,6 +65,13 @@ class TurnBudget:
     seconds: float = 600.0
     started: float = field(default_factory=time.monotonic)
     calls_made: int = 0
+    # The paid step the cap last refused: what it would have cost (0: none
+    # refused), so the question that follows can offer exactly what it needs.
+    refused_usd: float = 0.0
+    # What `refuses` leaves out of the spent figure: on a turn carried on after
+    # "allow $x more", that continuation's own thinking, so the raise covers
+    # the step it was for (the thinking still shows in the trace).
+    excused: Callable[[], float] | None = None
 
     def elapsed(self) -> float:
         return time.monotonic() - self.started
@@ -74,7 +86,21 @@ class TurnBudget:
 
     def refuses(self, spent_usd: float, next_usd: float) -> str | None:
         """Why a paid step may not run now, in a sentence; None when it may."""
+        if self.excused is not None:
+            spent_usd = max(0.0, spent_usd - self.excused())
         if spent_usd + next_usd > self.usd + 1e-9:
+            self.refused_usd = next_usd
             return (f"This step would cost about ${next_usd:.2f}; the turn's cap is ${self.usd:.2f} and "
-                    f"${spent_usd:.2f} is spent. Ask the user whether to go on, or do it next turn.")
+                    f"${spent_usd:.2f} is spent. Ask the user whether to go on, or do it next turn; "
+                    "their card offers to allow exactly what this step needs, so leave that option out of yours.")
         return None
+
+    def needed_usd(self, spent_usd: float) -> float:
+        """What the cap must rise by, to the cent upwards, for the step it last
+        refused to run after `spent_usd`; 0 when nothing was refused or it fits."""
+        if self.refused_usd <= 0:
+            return 0.0
+        if self.excused is not None:
+            spent_usd = max(0.0, spent_usd - self.excused())
+        short = spent_usd + self.refused_usd - self.usd
+        return math.ceil(round(short * 100, 6)) / 100 if short > 1e-9 else 0.0

@@ -71,7 +71,21 @@ export interface PlanItem {
 }
 
 /** One thing the planner wants to know first, with its own guess. */
-export interface PlanQuestion { text: string; options: string[]; guess: string | null; /** Phase 20: a paid or committing step waits; the first option is the yes. */ gate?: boolean; /** Volt: what the waiting step would cost, and what the turn has left. */ cost_usd?: number | null; left_usd?: number | null }
+export interface PlanQuestion {
+  text: string
+  options: string[]
+  guess: string | null
+  /** Phase 20: a paid or committing step waits; the first option is the yes. */
+  gate?: boolean
+  /** Volt: what the waiting step would cost, and what the turn has left of its cap (`cap_usd`). */
+  cost_usd?: number | null
+  left_usd?: number | null
+  cap_usd?: number | null
+  /** Pane-render: the full sentence under each option's short label; null where there is none. */
+  details?: (string | null)[] | null
+  /** The turn's cap caused this question: the first option allows exactly `needed_usd` more (`POST /turns/allow-more`). */
+  turn_cap?: { needed_usd: number; cap_usd: number } | null
+}
 
 export interface PlanLogEntry { at: string; text: string; detail: string }
 
