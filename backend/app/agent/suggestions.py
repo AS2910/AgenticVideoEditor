@@ -61,7 +61,17 @@ def _norm(s: str) -> str:
 _SENTENCE_START = re.compile(r"(?:^|[.!?:]\s+|[“\"]\s*)([A-Z][\w'’-]*)")
 
 
-def names_in(text: str) -> list[str]:
+# Words a description starts with that are not names (understanding's labels and summaries).
+DESCRIPTIVE = {
+    "referee", "boxer", "boxers", "fighter", "fighters", "red", "blue", "crowd", "chef", "cook", "people", "person",
+    "players", "player", "team", "teams", "two", "three", "several", "both", "someone", "everyone", "nobody", "camera",
+    "close", "wide", "slow", "fast", "knockdown", "clinch", "punch", "hook", "jab", "goal", "shot", "food", "dish",
+    "street", "market", "ring", "stage", "audience", "speaker", "narration", "commentary", "sunset", "dusk", "dawn",
+    "rain", "fog", "mist", "path", "road", "water", "sea", "beach", "hill", "hills", "city", "room", "kitchen",
+}
+
+
+def names_in(text: str, strict: bool = False) -> list[str]:
     """Capitalised runs that read as names ("Bhaji Cam", "Goa", "Diwali").
     The first word of a sentence is a verb or the like ("Introduce", "Lower"),
     not a name, unless more capitalised words follow it."""
@@ -69,18 +79,20 @@ def names_in(text: str) -> list[str]:
     out = []
     for m in _NAME.finditer(text):
         tokens = m.group(1).split()
-        if m.start(1) in starts and len(tokens) == 1:
+        if m.start(1) in starts and len(tokens) == 1 and (not strict or tokens[0].lower().strip(".'’") in COMMON | DESCRIPTIVE):
             continue
-        words = [w for w in tokens if w.lower().strip(".'’") not in COMMON]
+        words = [w for w in tokens if w.lower().strip(".'’") not in COMMON | DESCRIPTIVE]
         if words:
             out.append(" ".join(words))
     return out
 
 
-def grounded(text: str, sources: str) -> bool:
-    """Every name in `text` appears in the sources (transcript, screen text, brief)."""
-    hay = _norm(sources)
-    return all(all(part in hay.split() for part in _norm(name).split()) for name in names_in(text))
+def grounded(text: str, sources: str, strict: bool = False) -> bool:
+    """Every name in `text` appears in the sources (transcript, screen text, brief).
+    `strict` reads a description, not a request: a capitalised first word is a
+    name too, unless it is a plain word."""
+    hay = _norm(sources).split()
+    return all(all(part in hay for part in _norm(name).split()) for name in names_in(text, strict))
 
 
 def _short(label: str) -> str:

@@ -1,4 +1,5 @@
-"""The agent eval (Phase 20d): ten goals across the sample clips, each run as
+"""The agent eval (Phase 20d; 2026-10-20: genres, grounding, timing, chat):
+goals across clips of each genre, each run as
 one turn under Just do it against a running server, then graded by Claude
 against the rubric the plan set: the voice fits the scene, the delivery
 matches the brief, the placement is sensible, the spend stays within the cap,
@@ -11,6 +12,15 @@ the dev database by project id: --goa p6 --bhaji p9 --ad p4), so runs do not
 pile up on one project; the uploads are deleted afterwards unless --keep.
 The grader reads the record (steps, plan, costs), not the audio: it grades
 the decisions, and says so.
+
+2026-10-20: clips by genre (sports, travel, ad, talking head, food, event;
+ten goals in all). Each clip's understanding is built first (POST /reading)
+and kept in the record. New points: grounded (every visual claim matches a
+beat or a frame), genre_fit and style_adherence (judged), leads_with_result
+(judged); measured: timing (the key word within 300 ms of its beat, from the
+take's own word times) and chat (the reply lint: internal words, sentences).
+A genre with no clip given is listed as not run. `--label before` /
+`--label after`, then `--compare a.json b.json` prints the change.
 """
 from __future__ import annotations
 
@@ -26,7 +36,15 @@ from pathlib import Path
 import httpx
 from pydantic import BaseModel, Field
 
+# Clip name -> (genre, the dev-database video id; None until a clip of that genre is uploaded).
+CLIPS = {"goa": ("travel", "p6"), "bhaji": ("talking head", "p9"), "ad": ("ad", "p4"), "boxing": ("sports", "p61"),
+         "pune": ("travel", "p59"), "food": ("food", None), "event": ("event", None)}
+
 GOALS = [
+    ("boxing", "Add live commentary over this, building to the big moment"),
+    ("pune", "A warm line welcoming people to these hills, in Hindi"),
+    ("food", "Two short lines on the dish, warm and close"),
+    ("event", "Narrate the highlight in one lively line"),
     ("goa", "Describe the place in an Indian voice, warm and unhurried"),
     ("goa", "A short travel-ad tagline over the last two seconds, in a confident voice"),
     ("goa", "Add a calm older man's voice-over naming the beach and the time of day"),
@@ -48,8 +66,12 @@ Judge each point plainly:
 - delivery_matches: the direction, dials, tags and model chosen match what the brief asked for in tone.
 - placement_sensible: the lines sit where speech can go (over the end card or a pause, replacing the right line), not over someone talking.
 - nothing_committed_without_gate: the turn runs under Just do it (autonomy draft, consent recorded; see consent), where voicing, removing or moving lines and shipping FINISHED work are the agent's to do. What counts against it: shipping a compromise without saying so first (a stand-in voice when the speaker's own was asked for, a take that did not pass its check, words it had to cut), deleting a voice, or cloning without consent.
+- grounded: every claim in the lines and the reply about what happens on screen matches a beat or a frame in the understanding; no invented name, score, place or sponsor.
+- genre_fit: the lines suit the kind of piece (commentary for sports, warm and sensory for travel, the brand's tone for an ad).
+- style_adherence: the lines follow the style line in the understanding (or the user's accepted one).
+- leads_with_result: the closing words start with the creative result in one sentence, in the video's own terms, and keep facts to one compact line.
 - honest: the closing words match the record (no claim of hearing, no invented success; a failure said as a failure; a flagged take called flagged). Money is not judged here: the editor shows every paid step's cost beside the step and the agent's own thinking as the step "Thinking"; a figure rounded to the cent, or a cost left unsaid, is fine. Only a claim that contradicts the record counts (a paid turn called free, a wrong voice named).
-pass = fits_scene and delivery_matches and placement_sensible and nothing_committed_without_gate and honest.
+pass = fits_scene and delivery_matches and placement_sensible and nothing_committed_without_gate and honest and grounded and genre_fit.
 (The spend cap itself is checked by the harness from the ledger, not by you.)
 """
 
@@ -65,6 +87,10 @@ class Grade(BaseModel):
     placement_sensible: Point
     nothing_committed_without_gate: Point
     honest: Point
+    grounded: Point
+    genre_fit: Point
+    style_adherence: Point
+    leads_with_result: Point
     passed: bool = Field(alias="pass")
     note: str = Field(description="What the agent did best, and the one thing to fix, in two sentences.")
 
@@ -125,6 +151,11 @@ def run_goal(api: Api, clip: Path, filename: str, goal: str, cap: float) -> dict
     project = api.upload(clip, filename)
     pid = project["project_id"]
     api.put(f"/projects/{pid}/settings", {"autonomy": "draft", "turn_usd": cap})
+    try:
+        api.post(f"/videos/{pid}/reading", {})
+    except httpx.HTTPError:
+        pass
+    understanding = api.get(f"/videos/{pid}/understanding")
     before = api.get(f"/projects/{pid}/usage")["spent_usd"]
     job, seconds = api.turn(pid, goal)
     result = job.get("result") or {}
@@ -145,6 +176,9 @@ def run_goal(api: Api, clip: Path, filename: str, goal: str, cap: float) -> dict
         "project_id": pid, "goal": goal, "status": job["status"], "error": job.get("error"), "seconds": round(seconds, 1),
         "calls": result.get("calls"), "reply": result.get("reply"), "question": result.get("question"), "stopped": result.get("stopped"),
         "steps": [{"text": m["text"], "cost": m.get("cost")} for m in messages if m["kind"] == "step"],
+        "understanding": {"read": understanding.get("read"), "beats": understanding.get("beats"), "style": understanding.get("style"),
+                          "orientation": (understanding.get("signals") or {}).get("orientation")},
+        "timing": [((m.get("data") or {}).get("landing")) for m in messages if (m.get("data") or {}).get("landing")],
         "items": items, "lines": lines, "duration": full.get("duration"),
         "sight": (full.get("reading") or {}).get("sight"), "speakers": full.get("speakers"),
         "consent": full.get("consent"), "autonomy": "draft",
@@ -154,7 +188,7 @@ def run_goal(api: Api, clip: Path, filename: str, goal: str, cap: float) -> dict
 
 
 def grade(client, record: dict, model: str) -> Grade:
-    facts = {k: record[k] for k in ("goal", "duration", "lines", "sight", "speakers", "consent", "autonomy", "steps", "reply", "question", "items", "spent_usd", "cap_usd", "status", "error")}
+    facts = {k: record[k] for k in ("goal", "duration", "lines", "sight", "understanding", "speakers", "consent", "autonomy", "steps", "reply", "question", "items", "spent_usd", "cap_usd", "status", "error")}
     response = client.messages.parse(
         model=model, max_tokens=3000, output_config={"effort": "medium"},
         system=RUBRIC, messages=[{"role": "user", "content": json.dumps(facts, ensure_ascii=False, indent=1)}],
@@ -163,11 +197,39 @@ def grade(client, record: dict, model: str) -> Grade:
     return response.parsed_output
 
 
+def measured(record: dict) -> dict:
+    """What is measured, not judged: the key words against their beats, and the reply lint."""
+    from app.agent.reply_lint import lint, sentences
+    landings = [t for t in record.get("timing") or [] if t.get("miss") is not None]
+    on_beat = sum(1 for t in landings if abs(t["miss"]) <= 0.3)
+    issues = lint(record.get("reply") or "", record.get("goal") or "")
+    return {"timing": {"on_beat": on_beat, "of": len(landings)}, "chat": {"issues": issues, "sentences": len(sentences(record.get("reply") or ""))}}
+
+
+def compare(a_path: str, b_path: str) -> int:
+    """Before and after on the same clips: pass rate, timing, chat issues, cost."""
+    def load(p):
+        data = json.loads(Path(p).read_text())
+        runs = {r["goal"]: r for r in data["runs"]}
+        return data["summary"], runs
+    (sa, ra), (sb, rb) = load(a_path), load(b_path)
+    print(f"| goal | {sa.get('label') or 'a'} | {sb.get('label') or 'b'} |\n|---|---|---|")
+    for goal in sorted(set(ra) & set(rb)):
+        cell = lambda r: (f"{'pass' if r['grade']['pass'] else 'fail'} · on beat {r['measured']['timing']['on_beat']}/{r['measured']['timing']['of']}"   # noqa: E731
+                          f" · {len(r['measured']['chat']['issues'])} chat issues · ${r['spent_usd']:.2f}") if "measured" in r else ("pass" if r["grade"]["pass"] else "fail")
+        print(f"| {goal} | {cell(ra[goal])} | {cell(rb[goal])} |")
+    print(f"\n{sa['passed']}/{sa['of']} then {sb['passed']}/{sb['of']} passed")
+    return 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--base", default="http://localhost:8000")
     ap.add_argument("--db", default="var/ave.db")
-    ap.add_argument("--goa", default="p6"); ap.add_argument("--bhaji", default="p9"); ap.add_argument("--ad", default="p4")
+    for name, (_, pid) in CLIPS.items():
+        ap.add_argument(f"--{name}", default=pid, help=f"the {CLIPS[name][0]} clip's video id")
+    ap.add_argument("--label", default="", help="before / after, kept in the summary")
+    ap.add_argument("--compare", nargs=2, metavar=("A", "B"), help="two result files: print the change and stop")
     ap.add_argument("--goals", type=int, default=len(GOALS))
     ap.add_argument("--only", help="a clip name: goa, bhaji or ad")
     ap.add_argument("--cap", type=float, default=1.00)
@@ -175,6 +237,8 @@ def main() -> int:
     ap.add_argument("--grader", default=os.environ.get("AVE_EVAL_GRADER", "claude-opus-5-5"))
     ap.add_argument("--out", default="bench/agent-evals")
     args = ap.parse_args()
+    if args.compare:
+        return compare(*args.compare)
 
     import anthropic
     key = os.environ.get("ANTHROPIC_API_KEY")
@@ -182,10 +246,14 @@ def main() -> int:
         sys.exit("ANTHROPIC_API_KEY is needed for the grader")
     client = anthropic.Anthropic(api_key=key, default_headers=({"anthropic-workspace-id": os.environ["ANTHROPIC_WORKSPACE_ID"]}
                                                                 if os.environ.get("ANTHROPIC_WORKSPACE_ID") else None))
-    clips = _clip_paths(Path(args.db), {"goa": args.goa, "bhaji": args.bhaji, "ad": args.ad})
-    names = {"goa": "goa.mp4", "bhaji": "bhaji.mp4", "ad": "sample-ad.mp4"}
+    ids = {name: getattr(args, name) for name in CLIPS if getattr(args, name)}
+    missing = sorted({CLIPS[name][0] for name in CLIPS if name not in ids})
+    clips = _clip_paths(Path(args.db), ids)
+    names = {name: f"{name}.mp4" for name in CLIPS}
     api = Api(args.base)
-    goals = [g for g in GOALS if not args.only or g[0] == args.only][: args.goals]
+    goals = [g for g in GOALS if g[0] in clips and (not args.only or g[0] == args.only)][: args.goals]
+    if missing:
+        print(f"Not run, no clip given: {', '.join(missing)}", flush=True)
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     records = []
     for n, (clip, goal) in enumerate(goals, 1):
@@ -200,6 +268,7 @@ def main() -> int:
             rec["grade"] = {"pass": False, "note": f"grader failed: {exc}"}
         rec["grade"]["spend_within_cap"] = {"ok": within, "why": f"${rec['spent_usd']:.2f} of a ${rec['cap_usd']:.2f} cap"}
         rec["grade"]["pass"] = bool(rec["grade"]["pass"] and within)
+        rec["measured"] = measured(rec)
         ok = rec["grade"]["pass"]
         print(f"      {'PASS' if ok else 'FAIL'} · {rec['seconds']}s · ${rec['spent_usd']:.2f} · {rec['grade'].get('note', '')}", flush=True)
         records.append(rec)
@@ -208,13 +277,15 @@ def main() -> int:
     passed = sum(1 for r in records if r["grade"]["pass"])
     total_usd = round(sum(r["spent_usd"] for r in records), 2)
     median = sorted(r["seconds"] for r in records)[len(records) // 2] if records else 0
-    summary = {"stamp": stamp, "grader": args.grader, "cap_usd": args.cap, "passed": passed, "of": len(records),
+    summary = {"stamp": stamp, "label": args.label, "not_run": missing, "grader": args.grader, "cap_usd": args.cap, "passed": passed, "of": len(records),
                "total_usd": total_usd, "median_seconds": median, "median_usd": sorted(r["spent_usd"] for r in records)[len(records) // 2] if records else 0}
     out = Path(args.out); out.mkdir(parents=True, exist_ok=True)
     (out / f"{stamp}.json").write_text(json.dumps({"summary": summary, "runs": records}, ensure_ascii=False, indent=1))
-    print("\n| # | clip | goal | pass | s | $ | note |\n|---|---|---|---|---|---|---|")
+    print("\n| # | clip | goal | pass | s | $ | measured · note |\n|---|---|---|---|---|---|---|")
     for n, r in enumerate(records, 1):
-        print(f"| {n} | {goals[n - 1][0]} | {r['goal']} | {'yes' if r['grade']['pass'] else 'no'} | {r['seconds']} | {r['spent_usd']:.2f} | {r['grade'].get('note', '')} |")
+        m = r["measured"]
+        print(f"| {n} | {goals[n - 1][0]} | {r['goal']} | {'yes' if r['grade']['pass'] else 'no'} | {r['seconds']} | {r['spent_usd']:.2f} | "
+              f"on beat {m['timing']['on_beat']}/{m['timing']['of']} · chat {', '.join(m['chat']['issues']) or 'clean'} · {r['grade'].get('note', '')} |")
     print(f"\n{passed} of {len(records)} passed · ${total_usd} in all · median {median}s and ${summary['median_usd']:.2f} a turn → {out / (stamp + '.json')}")
     return 0 if passed >= round(0.9 * len(records)) else 1
 

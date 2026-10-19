@@ -706,12 +706,22 @@ def _synthesize_take(wb: Workbench, turn: Turn, args: dict) -> ToolResult:
         f", {', '.join(f'{k} {v:g}' for k, v in settings.items())}" if settings else "") + "."
     if voice_notes:
         how_said += " " + " ".join(voice_notes)
-    text_out = (f"Take {candidate.candidate_id} on {item.item_id}, {whose}, {where}. It {verdict}.{notes}{wps}{how_said} "
+    beat_at, key_word = args.get("beat_at"), (args.get("key_word") or "").strip()
+    landing, landed = "", None
+    if key_word and isinstance(beat_at, (int, float)) and beat_at >= 0:
+        from app.agent.landing import landing_note
+        landing, miss = landing_note(candidate.words, took.start, key_word, float(beat_at))
+        landed = {"beat_at": float(beat_at), "key_word": key_word, "miss": miss}
+        if miss is not None:
+            wb.repo.update_item(turn.project_id, turn.plan_id, item.item_id,
+                                note=None if abs(miss) <= 0.3 else f"“{key_word}” lands {abs(miss):.1f} s {'late' if miss > 0 else 'early'} for its beat.")
+    text_out = (f"Take {candidate.candidate_id} on {item.item_id}, {whose}, {where}. It {verdict}.{notes}{wps}{landing}{how_said} "
                 f"Cost ${cost:.2f}.{' The item moved to the new span.' if moved else ''} "
                 f"The user can hear it now; voice it again (same item_id) to try another direction or wording, "
                 f"or with a new start and end to move it.")
     how = f" · {direction}" if direction else ""
-    return ToolResult(text_out, step=f"Voiced “{text[:48]}{'…' if len(text) > 48 else ''}” with {name}{how}", cost_usd=cost)
+    return ToolResult(text_out, step=f"Voiced “{text[:48]}{'…' if len(text) > 48 else ''}” with {name}{how}", cost_usd=cost,
+                      data={"landing": landed} if landed else None)
 
 
 def _statements(record) -> list:
@@ -1135,7 +1145,9 @@ TOOLS: tuple[Tool, ...] = (
                   "picture": {"type": "string", "enum": ["default", "as shot", "may flex"], "description": "Whether the picture under the take may run a little slower or faster to fit it. default = as shot for a placed line, may flex for a replacement."},
                   "role": {"type": "string", "enum": ["voice", "bed", "effect"], "description": "What the line is in the mix. voice = words meant to be understood (at the clip's speech level). bed = music, a crowd, cheers, ambience: under the words and ducking while they play. effect = a sound at the speech level."},
                   "offset_db": {"type": "number", "description": "A fine-tune on top of the role's level, -24 to +6 dB; 0 for none. Speech wanted 'in the background' is a voice with a negative offset."},
-                  "item_id": {"type": "string", "description": "An existing item to voice again; empty for a new one."}}), Guard.SPEND, _synthesize_take, strict=True),
+                  "item_id": {"type": "string", "description": "An existing item to voice again; empty for a new one."},
+                  "beat_at": {"type": "number", "description": "The time of the beat this line is written for (seconds); -1 for none. With key_word, the take reports where the word lands."},
+                  "key_word": {"type": "string", "description": "The word that should land on the beat; empty for none."}}), Guard.SPEND, _synthesize_take, strict=True),
     Tool("keep_take", "Put an earlier take back on an item (after voicing it again and preferring the first).",
          _schema({"item_id": {"type": "string"}, "candidate_id": {"type": "string"}}), Guard.FREE, _keep_take),
     Tool("drop_item", "Drop a planned or voiced line from the plan (not one that has shipped).",

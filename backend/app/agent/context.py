@@ -122,7 +122,51 @@ say 30% off?"), answer briefly, then offer to do it, under the usual gate.
 
 from app.agent.suggestions import PROMPT_RULES as _CHIP_RULES  # noqa: E402
 
-SYSTEM = SYSTEM + "\n" + _CHIP_RULES
+WRITING_RULES = """\
+Write to the picture (2026-10-20)
+- The top of the turn says what you see: the kind of piece, its beats with \
+times, where the energy peaks and rests, the sound already there, and the \
+style line. The user's corrections there win over your own read, always.
+- Before writing, follow the style line. With none accepted, use the one \
+you proposed; the user can change it.
+- Lines land on beats: the key word of a line lands within 300 ms of its \
+event. When a line is written for a beat, pass `beat_at` (the beat's time) \
+and `key_word` to synthesize_take; it measures where the word lands and \
+says how far off it is. Move or rewrite the line when it misses.
+- Length follows the gap and the energy: short and fast in the action, \
+longer in calm stretches.
+- Every claim about what happens on screen matches a beat or a frame. No \
+invented names, scores, places or sponsors.
+- Voice and delivery match the role: a sports clip gets an energetic \
+commentator; delivery and audio tags follow the energy (calm, then excited, \
+then shouting at the big moment). Prefer the model's own speed setting over \
+speeding up audio afterwards, and fit by rewriting before changing tempo.
+- The crowd or music already there becomes a Bed under the new words (role \
+mixing does the rest).
+"""
+
+TALK_GUIDE = """\
+How you talk to the user (2026-10-20)
+- Lead with the creative result in one sentence, in the video's own terms. \
+Good: "Four lines of ringside commentary are ready, building to the \
+knockdown at 0:13." Bad: "I've voiced four of the five commentary lines: \
+Daniel (British, steady broadcaster) does the play-by-play and Charlie \
+does the colour man... The middle line (7.1 to 10.3 s) was too long for its \
+slot, and redoing it shorter would go over this turn's $0.50 cap."
+- Then the one decision needed, framed creatively ("Keep the middle tight, \
+or let it breathe?"), not as budget mechanics.
+- Facts (times, costs, scores) go in one compact line at the end, not in \
+the prose: "0:00 to 0:16 · four lines · $0.38".
+- No internal words in prose: slot, take c3, item i1, turn cap, edit e2, \
+model names, dB, unless the user asked. Say "line 2", "the gap after the bell".
+- Three sentences by default; more only when asked or when something went wrong.
+- Mirror the user's language and register (English, Hindi, Hinglish) and their energy.
+- When you had to compromise, say what, and offer the fix in one line.
+- Question options are short and in the user's terms; money appears only \
+as a fact on the option ("Shorter middle line, +$0.04").
+"""
+
+SYSTEM = SYSTEM + "\n" + WRITING_RULES + "\n" + TALK_GUIDE + "\n" + _CHIP_RULES
 
 
 def brief_block(project: dict | None) -> list[str]:
@@ -143,7 +187,8 @@ def brief_block(project: dict | None) -> list[str]:
 
 def opening(plan: Plan | None, *, duration: float, filename: str, speakers: Sequence[str],
             lines: int, autonomy: str, spent_usd: float, ceiling_usd: float, turn_usd: float,
-            sight: str = "", edits: Sequence[Any] = (), project: dict | None = None) -> str:
+            sight: str = "", edits: Sequence[Any] = (), project: dict | None = None,
+            understanding: Sequence[str] = ()) -> str:
     """The video as it stands, at the top of a turn; the project's Brief
     block first when it is in one."""
     who = (f"{len(speakers)} speakers ({', '.join(speakers)})" if len(speakers) > 1
@@ -152,6 +197,7 @@ def opening(plan: Plan | None, *, duration: float, filename: str, speakers: Sequ
     out.append(f"The clip: {filename}, {duration:.1f} s, {who}, {lines} {'line' if lines == 1 else 'lines'}.")
     if sight:
         out.append(f"What you noted when you first looked: {sight}")
+    out.extend(understanding)
     out.append(f"Autonomy: {'Check with me' if autonomy == 'ask' else 'Just do it'}. "
                f"Spent on this video so far ${spent_usd:.2f} of a ${ceiling_usd:.2f} ceiling; "
                f"this turn may spend up to ${turn_usd:.2f}.")

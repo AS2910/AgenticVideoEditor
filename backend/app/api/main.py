@@ -30,6 +30,8 @@ from app.config import load_settings
 from app.timefmt import iso, now_iso
 from app.agent.prose import plain
 from app.agent import suggestions as chips
+from app import understanding as understanding_mod
+from app.media import understand as understand_mod
 from app import arrange
 from app.media import frames as frames_mod, motion, shots
 from app.media import stems as stems_module
@@ -1570,6 +1572,134 @@ def chip_stats(owner: str = Depends(current_owner)) -> dict:
     return {"by_kind": out}
 
 
+# ── The video as a piece (2026-10-20) ───────────────────────────────────────
+
+def _signals(project_id: str, record: ProjectRecord) -> dict:
+    """The clip's beats, energy and sound, read once per source and kept."""
+    saved = repo.settings(project_id).get("signals")
+    if saved and saved.get("sha256") == record.source.media.sha256:
+        return saved["data"]
+    words = [(w.start, w.end) for w in record.transcript.words]
+    sig = understand_mod.read_signals(record.source.media.path, record.source.duration, words,
+                                      cache_dir=artifacts.root / project_id / "understand")
+    data = sig.as_dict()
+    repo.set_settings(project_id, signals={"sha256": record.source.media.sha256, "data": data})
+    return data
+
+
+def _adaptive_frames(project_id: str, record: ProjectRecord, times: list[float]) -> list[Frame]:
+    """Frames at the times the signals chose (every cut and peak, one a second, up to 24), kept."""
+    out_dir = artifacts.root / project_id / "frames-adaptive"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    frames = []
+    for at in times:
+        dest = out_dir / f"at-{at:07.2f}.jpg"
+        if not dest.exists():
+            try:
+                ffmpeg.extract_frame(record.source.media.path, dest, at, width=frames_mod.FRAME_WIDTH)
+            except Exception:  # noqa: BLE001 - one missing frame is not worth the read
+                continue
+        frames.append(Frame(at=at, path=str(dest)))
+    return frames
+
+
+def _understand(project_id: str, record: ProjectRecord, lines: list[Line]) -> dict | None:
+    """The first read as one look at the whole piece: the understanding, the
+    opening, the roles, the style line and the chips, in one call. None when
+    this planner cannot (the plain reads follow)."""
+    if planner is None or not hasattr(planner, "understand"):
+        return None
+    try:
+        _ensure_spend(project_id)
+        signals = _signals(project_id, record)
+        frames = _adaptive_frames(project_id, record, signals.get("frame_times") or [])
+        vision = planner.understand(frames, signals, lines, meter=_meter(project_id, "looking"), brief=_brief_text(project_id))
+    except SpendCeilingReached as exc:
+        raise HTTPException(status_code=402, detail=str(exc)) from exc
+    except NonRetryableError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    except VendorError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    if vision is None:
+        return None
+    sources = _chip_sources(project_id, record)
+    record_ = understanding_mod.build(signals, vision, sources, repo.settings(project_id).get("understanding"))
+    repo.set_settings(project_id, understanding=record_)
+    by_name = {s.name: s.label for s in repo.speakers(project_id)}
+    out = {"opening": plain(vision.get("opening") or ""), "at": _now(),
+           "roles": [{"label": by_name[r["speaker"]], "role": r["role"].strip().rstrip("."), "why": r.get("why", "")}
+                     for r in vision.get("roles") or [] if r.get("speaker") in by_name],
+           "suggestions": _clean_chips(project_id, record, vision.get("suggestions"))}
+    if not lines:
+        read = record_["read"]
+        sight = Sight(opening=out["opening"], setting=read.get("setting", ""), mood=vision.get("mood", ""),
+                      people=vision.get("people", ""), text_on_screen="; ".join(read.get("on_screen_text") or []),
+                      place_guess=vision.get("place_guess", ""), confidence=vision.get("confidence", ""),
+                      beats=tuple({"at": b["at"], "note": b["label"]} for b in record_["beats"] if b.get("kind") == "visual"),
+                      details=tuple((vision.get("details") or [])[:5]))
+        repo.set_settings(project_id, sight=asdict(sight))
+        out = {**out, "sight": asdict(sight)}
+    repo.set_settings(project_id, reading=out)
+    return out
+
+
+def _understanding_view(project_id: str, record: ProjectRecord) -> dict:
+    """The record with the user's corrections applied; signals only, without Claude."""
+    saved = repo.settings(project_id).get("understanding")
+    if saved is None:
+        saved = understanding_mod.build(_signals(project_id, record), None, "", None)
+    return understanding_mod.view(saved)
+
+
+@app.get("/videos/{project_id}/understanding")
+def get_understanding(project_id: str, owner: str = Depends(current_owner)) -> dict:
+    """What Voltage sees in the video: its kind, a summary, the beats with times and confidences, the energy, the style line."""
+    record = _owned(project_id, owner)
+    return _understanding_view(project_id, record)
+
+
+class CorrectionRequest(BaseModel):
+    # In the user's words: "This is Muay Thai", "That's not a knockdown, he slipped".
+    text: str
+    # A beat it is about, by time, with a new label or removed.
+    beat_at: float | None = None
+    label: str | None = None
+    remove: bool = False
+
+
+@app.post("/videos/{project_id}/understanding/corrections")
+def correct_understanding(project_id: str, req: CorrectionRequest, owner: str = Depends(current_owner)) -> dict:
+    """A correction to Voltage's read; kept, and it wins in every later turn."""
+    record = _owned(project_id, owner)
+    if not req.text.strip() and req.beat_at is None:
+        raise HTTPException(status_code=422, detail="Say what to correct.")
+    current = repo.settings(project_id).get("understanding") or understanding_mod.build(_signals(project_id, record), None, "", None)
+    updated = understanding_mod.correct(current, req.text, req.beat_at, req.label, req.remove)
+    repo.set_settings(project_id, understanding=updated)
+    repo.add_message(project_id, "user", f"Correction: {req.text.strip()}" if req.text.strip() else "Corrected a beat")
+    return understanding_mod.view(updated)
+
+
+class StyleRequest(BaseModel):
+    # The style line as accepted or rewritten by the user.
+    line: str
+    accepted: bool = True
+
+
+@app.put("/videos/{project_id}/style")
+def set_style(project_id: str, req: StyleRequest, owner: str = Depends(current_owner)) -> dict:
+    """The style line for the piece, accepted as Voltage proposed it or changed."""
+    record = _owned(project_id, owner)
+    if not req.line.strip():
+        raise HTTPException(status_code=422, detail="Say how the new words should sound.")
+    current = repo.settings(project_id).get("understanding") or understanding_mod.build(_signals(project_id, record), None, "", None)
+    before = (current.get("style") or {}).get("line", "")
+    style = {"line": plain(req.line.strip()), "accepted": req.accepted, "by": "user" if req.line.strip() != before else "voltage", "shown": True}
+    updated = {**current, "style": style}
+    repo.set_settings(project_id, understanding=updated)
+    return understanding_mod.view(updated)
+
+
 class ReadRequest(BaseModel):
     # Read the clip again even though a reading is saved.
     again: bool = False
@@ -1586,6 +1716,9 @@ def read_project(project_id: str, req: ReadRequest, owner: str = Depends(current
     if saved and not req.again:
         return saved
     lines = _lines(record)
+    understood = _understand(project_id, record, lines)
+    if understood is not None:
+        return understood
     if not lines:
         # UX-5: nothing to read, so Voltage looks at the picture instead.
         try:
@@ -3643,12 +3776,20 @@ def take_turn(project_id: str, req: TurnRequest, owner: str = Depends(current_ow
                          report=report, commit_approved=approve, ask_before=prefs["ask_before"])
         lines = _lines(record)
         names = [s.name for s in repo.speakers(project_id)]
+        # 2026-10-20: the style line is shown before the first paid step: at the start of the first turn it is there.
+        understood = repo.settings(project_id).get("understanding")
+        style = (understood or {}).get("style") or {}
+        if style.get("line") and not style.get("shown"):
+            repo.add_message(project_id, "assistant", f"Style for this video: {style['line']}", kind="step",
+                             data={"tool": "style", "t": 0.0})
+            repo.set_settings(project_id, understanding={**understood, "style": {**style, "shown": True}})
         from app.agent.context import opening
         head = opening(repo.get_plan(project_id, plan.plan_id), duration=record.source.duration,
                        filename=record.source.filename, speakers=names, lines=len(lines), autonomy=autonomy,
                        spent_usd=ledger.spent_usd(project_id), ceiling_usd=ledger.ceiling_usd,
                        turn_usd=prefs["turn_usd"], sight=_sight_text(project_id) if not lines else "",
-                       edits=[e for e in repo.list_edits(project_id) if not e.reverted], project=_project_view(project_id))
+                       edits=[e for e in repo.list_edits(project_id) if not e.reverted], project=_project_view(project_id),
+                       understanding=understanding_mod.context_lines(repo.settings(project_id).get("understanding")))
         content = [{"type": "text", "text": head}, {"type": "text", "text": f"The user says: {text}"
                    + (" (They are answering yes to what you asked.)" if approve else "")}]
         history = repo.turns(project_id)
@@ -3692,6 +3833,9 @@ def take_turn(project_id: str, req: TurnRequest, owner: str = Depends(current_ow
             outcome = replace(outcome, reply=(outcome.reply or "").rstrip() + "\n\n" + " ".join(fixes))
         if outcome.reply:
             outcome = replace(outcome, reply=plain(outcome.reply, text))
+            from app.agent.reply_lint import lint
+            if issues := lint(outcome.reply, text):
+                logging.getLogger(__name__).info("reply lint for %s: %s", project_id, ", ".join(issues))
             repo.add_message(project_id, "assistant", outcome.reply)
         # What Voltage's own thinking cost this turn, as a step of its own (20d):
         # the tools say what they spent; this is the rest of the turn's money.
