@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Billing</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&amp;family=Geist:wght@400;500;600&amp;family=JetBrains+Mono:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+.v{--bg:#F3F3EF;--surface:#FFFFFF;--sunk:#EAEAE4;--line:#E0E0D9;--line2:#C9C9C1;--ink:#0B0B0C;--text:#0B0B0C;--muted:#55555C;--faint:#66666D;--volt:var(--accent);font-family:'Geist',system-ui,sans-serif;font-size:14px;line-height:1.5;color:var(--text);background:var(--bg);-webkit-font-smoothing:antialiased;box-sizing:border-box}
+.v *{box-sizing:border-box}
+.v.dark{--bg:#0E0E10;--surface:#17171B;--sunk:#202025;--line:#2A2A30;--line2:#3C3C44;--text:#F2F2EE;--muted:#A6A6AE;--faint:#8F8F98}
+.disp{font-family:'Space Grotesk',system-ui,sans-serif;letter-spacing:-0.025em}
+.mono{font-family:'JetBrains Mono',ui-monospace,monospace;font-variant-numeric:tabular-nums}
+.tag{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:12px;font-weight:500;letter-spacing:.06em;text-transform:uppercase}
+.btn{font-family:'Space Grotesk',system-ui,sans-serif;font-size:14px;font-weight:600;height:40px;padding:0 16px;border-radius:8px;border:1.5px solid var(--text);background:transparent;color:var(--text);display:inline-flex;align-items:center;justify-content:center;gap:8px;cursor:pointer;text-decoration:none;white-space:nowrap;transition:transform .15s ease,box-shadow .15s ease,background-color .15s ease}
+.btn:hover{background:var(--sunk)}
+.btn.volt{background:var(--volt);border-color:var(--ink);color:#0B0B0C;box-shadow:3px 3px 0 var(--ink)}
+.btn.volt:hover{background:var(--volt);transform:translate(-2px,-2px);box-shadow:5px 5px 0 var(--ink)}
+.btn.sm{height:34px;padding:0 12px;font-size:13px}
+.nav a{font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:500;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);text-decoration:none;padding:7px 10px;border-radius:6px}
+.nav a:hover{color:var(--text);background:var(--sunk)}
+.side a{display:block;padding:9px 12px;border-radius:8px;text-decoration:none;color:var(--muted);font-weight:500}
+.side a:hover{background:var(--sunk);color:var(--text)}
+.side a.on{color:var(--text);background:var(--surface);border:1.5px solid var(--text)}
+.card{background:var(--surface);border:1.5px solid var(--text);border-radius:12px;padding:22px}
+.ph{font-family:'JetBrains Mono',monospace;background:var(--sunk);border:1px dashed var(--line2);border-radius:4px;padding:0 6px;color:var(--muted)}
+table{width:100%;border-collapse:collapse}
+th{text-align:left;font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:500;letter-spacing:.06em;text-transform:uppercase;color:var(--faint);padding:0 0 10px;border-bottom:1.5px solid var(--text)}
+td{padding:14px 0;border-bottom:1px solid var(--line)}
+@keyframes rise{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:none}}
+@keyframes fill{from{width:0}}
+@keyframes shine{0%,70%{left:-50%}100%{left:150%}}
+h1{animation:rise .6s cubic-bezier(.2,.8,.2,1) both}
+.card{animation:rise .5s cubic-bezier(.2,.8,.2,1) both}.card.c2{animation-delay:.1s}.card.c3{animation-delay:.2s}.card.c4{animation-delay:.3s}
+.fillin{animation:fill 1.2s .4s cubic-bezier(.2,.8,.2,1) both}
+.shine{position:relative;overflow:hidden}
+.shine::after{content:"";position:absolute;top:-10%;bottom:-10%;width:28%;left:-50%;background:rgba(255,255,255,.6);transform:skewX(-20deg);animation:shine 3.6s 1s ease-in-out infinite;pointer-events:none}
+@media (prefers-reduced-motion: reduce){.v *,.v *::after{animation:none!important;transition:none!important}}
+a{color:inherit}
+</style>
+</helmet>
+<div class="v {{mode}}" style="--accent: {{accent}}; min-height: 100vh">
+
+<header style="display: flex; align-items: center; gap: 22px; flex-wrap: wrap; padding: 10px 24px; min-height: 62px; border-bottom: 1.5px solid var(--text); background: var(--surface)">
+  <a href="Projects.dc.html" aria-label="Voltage home" class="disp" style="display: flex; align-items: center; gap: 10px; text-decoration: none; color: var(--text); font-weight: 700; font-size: 17px; letter-spacing: .02em">
+    <svg width="26" height="26" viewBox="0 0 24 24" aria-hidden="true"><rect x=".75" y=".75" width="22.5" height="22.5" rx="6" style="fill: var(--volt); stroke: var(--ink)" stroke-width="1.5"></rect><path d="M13.5 4 7 13h4.5l-1 7L17 11h-4.5z" fill="#0B0B0C"></path></svg>
+    VOLTAGE
+  </a>
+  <nav class="nav" aria-label="Main" style="display: flex; gap: 4px; flex-wrap: wrap">
+    <a href="Projects.dc.html">Projects</a>
+    <a href="Voices.dc.html">Voices</a>
+    <a href="Usage.dc.html">Usage</a>
+    <a href="Settings.dc.html">Settings</a>
+  </nav>
+  <div style="flex: 1"></div>
+  <a href="Settings.dc.html" aria-label="Account" class="disp" style="width: 34px; height: 34px; border-radius: 50%; border: 1.5px solid var(--text); display: grid; place-items: center; text-decoration: none; color: var(--text); font-weight: 700; font-size: 14px">A</a>
+</header>
+
+<main style="max-width: 1100px; margin: 0 auto; padding: 48px 24px 88px; display: flex; flex-wrap: wrap; gap: 48px">
+  <nav class="side" aria-label="Settings sections" style="flex: 0 1 220px; display: flex; flex-direction: column; gap: 4px">
+    <a href="Settings.dc.html">What Voltage may do</a>
+    <a href="Settings.dc.html">Appearance</a>
+    <a href="Settings.dc.html">Account</a>
+    <a href="Usage.dc.html">Usage</a>
+    <a href="Billing.dc.html" class="on" aria-current="page">Billing</a>
+  </nav>
+
+  <div style="flex: 999 1 560px; min-width: 0; display: flex; flex-direction: column; gap: 22px">
+    <h1 class="disp" style="margin: 0 0 12px; font-size: 56px; line-height: 1; font-weight: 700">Billing</h1>
+
+    <div class="card" style="display: flex; flex-wrap: wrap; gap: 24px; align-items: center; background: var(--ink); color: #F2F2EE; border-color: var(--ink); box-shadow: 6px 6px 0 var(--volt)">
+      <div style="flex: 1 1 280px; display: flex; flex-direction: column; gap: 6px">
+        <span class="tag" style="color: var(--volt)">Your plan</span>
+        <span class="disp" style="font-size: 36px; font-weight: 700">[PLAN NAME]</span>
+        <span style="color: #A6A6AE">[PRICE] a month · renews [DATE]</span>
+      </div>
+      <a href="Billing.dc.html" class="btn volt shine">Change plan</a>
+    </div>
+
+    <div class="card c2" style="display: flex; flex-direction: column; gap: 16px">
+      <div style="display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap"><h2 class="disp" style="margin: 0; font-size: 22px; font-weight: 700">Spending ceilings</h2><span class="tag" style="color: var(--faint)">what keeps a session from running away</span></div>
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 14px">
+        <div style="display: flex; flex-direction: column; gap: 8px; padding: 16px; border-radius: 10px; background: var(--sunk)">
+          <span class="tag" style="color: var(--faint)">Monthly</span>
+          <span class="disp" style="font-size: 30px; font-weight: 700">$2.06 <span style="font-size: 16px; color: var(--muted)">/ $10.00</span></span>
+          <div style="height: 10px; border-radius: 3px; border: 1.5px solid var(--text); overflow: hidden"><span class="fillin" style="display: block; height: 100%; width: 21%; background: var(--volt)"></span></div>
+        </div>
+        <div style="display: flex; flex-direction: column; gap: 8px; padding: 16px; border-radius: 10px; background: var(--sunk)">
+          <span class="tag" style="color: var(--faint)">Per project</span>
+          <span class="disp" style="font-size: 30px; font-weight: 700">$2.00</span>
+          <span style="font-size: 13px; color: var(--muted)">Highest so far: bhaji-cam-ad at $1.07</span>
+        </div>
+        <div style="display: flex; flex-direction: column; gap: 8px; padding: 16px; border-radius: 10px; background: var(--sunk)">
+          <span class="tag" style="color: var(--faint)">Per turn</span>
+          <span class="disp" style="font-size: 30px; font-weight: 700">$0.50</span>
+          <a href="Settings.dc.html" style="font-size: 13px; color: var(--muted)">Change in settings</a>
+        </div>
+      </div>
+      <div style="display: flex; gap: 10px; flex-wrap: wrap"><button class="btn sm">Raise the monthly ceiling</button></div>
+    </div>
+
+    <div class="card c3" style="display: flex; align-items: center; gap: 18px; flex-wrap: wrap">
+      <span aria-hidden="true" style="width: 54px; height: 36px; border-radius: 6px; border: 1.5px solid var(--text); background: var(--sunk)"></span>
+      <div style="flex: 1 1 220px; display: flex; flex-direction: column"><span style="font-weight: 600">Payment method</span><span style="color: var(--muted)"><span class="ph">[CARD BRAND] ending [LAST 4]</span> · expires <span class="ph">[MM/YY]</span></span></div>
+      <button class="btn sm">Update</button>
+    </div>
+
+    <div class="card c4">
+      <div style="display: flex; align-items: baseline; gap: 10px; margin-bottom: 14px"><h2 class="disp" style="margin: 0; font-size: 22px; font-weight: 700">Invoices</h2></div>
+      <div style="overflow-x: auto">
+        <table>
+          <thead><tr><th>Date</th><th>Plan</th><th style="text-align: right">Amount</th><th style="text-align: right">Receipt</th></tr></thead>
+          <tbody>
+            <tr><td><span class="ph">[DATE]</span></td><td><span class="ph">[PLAN NAME]</span></td><td style="text-align: right"><span class="ph">[AMOUNT]</span></td><td style="text-align: right"><a href="Billing.dc.html" class="tag">PDF ↓</a></td></tr>
+            <tr><td><span class="ph">[DATE]</span></td><td><span class="ph">[PLAN NAME]</span></td><td style="text-align: right"><span class="ph">[AMOUNT]</span></td><td style="text-align: right"><a href="Billing.dc.html" class="tag">PDF ↓</a></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"dark":{"editor":"boolean","default":false},"accent":{"editor":"color","default":"#D7FF3A","options":["#D7FF3A","#FF6B3D","#7CFFB2","#A99BFF"]},"$preview":{"width":1440,"height":1000}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return { mode: this.props.dark ? 'dark' : '', accent: this.props.accent ?? '#D7FF3A' };
+  }
+}
+</script>
+</body>
+</html>

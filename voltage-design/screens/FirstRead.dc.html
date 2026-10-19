@@ -1,0 +1,212 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>First read of the clip</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&amp;family=Geist:wght@400;500;600&amp;family=JetBrains+Mono:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+@keyframes wv{0%,100%{transform:scaleY(.3)}50%{transform:scaleY(1)}}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.2}}
+.v{--bg:#F3F3EF;--surface:#FFFFFF;--sunk:#EAEAE4;--line:#E0E0D9;--line2:#C9C9C1;--ink:#0B0B0C;--text:#0B0B0C;--muted:#55555C;--faint:#66666D;--pic:#141416;--pane:#0B0B0C;--ptext:#F2F2EE;--pmuted:#A6A6AE;--pline:#26262C;--psunk:#17171A;--volt:var(--accent);font-family:'Geist',system-ui,sans-serif;font-size:14px;line-height:1.5;color:var(--text);background:var(--bg);-webkit-font-smoothing:antialiased;box-sizing:border-box}
+.v *{box-sizing:border-box}
+.v.dark{--bg:#0E0E10;--surface:#17171B;--sunk:#202025;--line:#2A2A30;--line2:#3C3C44;--text:#F2F2EE;--muted:#A6A6AE;--faint:#8F8F98;--pic:#000000;--pane:#050506;--pline:#1F1F24;--psunk:#111114}
+.disp{font-family:'Space Grotesk',system-ui,sans-serif;letter-spacing:-0.02em}
+.mono{font-family:'JetBrains Mono',ui-monospace,monospace;font-variant-numeric:tabular-nums}
+.tag{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:12px;font-weight:500;letter-spacing:.06em;text-transform:uppercase}
+.btn{font-family:'Space Grotesk',system-ui,sans-serif;font-size:14px;font-weight:600;height:38px;padding:0 14px;border-radius:8px;border:1.5px solid var(--text);background:transparent;color:var(--text);display:inline-flex;align-items:center;justify-content:center;gap:8px;cursor:pointer;text-decoration:none;white-space:nowrap}
+.btn:hover{background:var(--sunk)}
+.btn.volt{background:var(--volt);border-color:var(--ink);color:#0B0B0C}
+.btn.volt:hover{background:var(--volt);box-shadow:2px 2px 0 var(--ink)}
+.btn.sm{height:32px;padding:0 11px;font-size:13px;border-radius:7px}
+.act{font:inherit;font-size:13px;font-weight:500;background:none;border:0;height:32px;padding:0 9px;border-radius:7px;color:var(--muted);cursor:pointer;display:inline-flex;align-items:center;gap:6px;text-decoration:none}
+.act:hover{background:var(--sunk);color:var(--text)}
+.who{font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:500;letter-spacing:.05em;text-transform:uppercase;color:var(--faint)}
+.row{display:grid;grid-template-columns:70px 110px minmax(0,1fr);gap:12px;padding:8px 14px;border-radius:8px;font-size:15px}
+.row .t{font-size:12px;color:var(--faint);padding-top:3px}
+.row.flag{background:var(--surface);border:1.5px solid var(--text)}
+.wave{display:inline-flex;align-items:center;gap:2px;height:20px}
+.wave i{display:block;width:3px;height:20px;border-radius:2px;background:var(--volt);animation:wv 2.2s ease-in-out infinite;transform-origin:center}
+.wave i:nth-child(2){animation-delay:.2s}.wave i:nth-child(3){animation-delay:.4s}.wave i:nth-child(4){animation-delay:.6s}.wave i:nth-child(5){animation-delay:.8s}
+@media (prefers-reduced-motion: reduce){.wave i{animation:none;transform:scaleY(.6)}}
+.pane{background:var(--pane);color:var(--ptext)}
+.pane .pm{color:var(--pmuted)}
+.ex{display:flex;align-items:center;gap:10px;text-decoration:none;font-size:15px;padding:12px 14px;border-radius:10px;border:1px solid var(--pline);color:var(--ptext);background:var(--psunk)}
+.ex:hover{border-color:var(--volt)}
+.ex .arr{margin-left:auto;color:var(--volt);font-family:'JetBrains Mono',monospace}
+.vh{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+@keyframes rise{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+@keyframes scan{from{left:0}to{left:100%}}
+@keyframes shine{0%,70%{left:-50%}100%{left:150%}}
+.btn{transition:transform .15s ease,box-shadow .15s ease,background-color .15s ease}
+.btn.volt:hover{transform:translate(-2px,-2px);box-shadow:4px 4px 0 var(--ink)}
+.scan{animation:scan 3s linear infinite}
+.row{animation:rise .4s cubic-bezier(.2,.8,.2,1) both}
+.row:nth-child(2){animation-delay:.06s}.row:nth-child(3){animation-delay:.12s}.row:nth-child(4){animation-delay:.18s}.row:nth-child(5){animation-delay:.24s}.row:nth-child(6){animation-delay:.3s}.row:nth-child(7){animation-delay:.36s}.row:nth-child(8){animation-delay:.42s}.row:nth-child(9){animation-delay:.48s}
+.pane p{animation:rise .7s .3s cubic-bezier(.2,.8,.2,1) both}
+.ex{animation:rise .5s cubic-bezier(.2,.8,.2,1) both;transition:transform .15s ease,border-color .15s ease}
+.ex:nth-of-type(1){animation-delay:.8s}.ex:nth-of-type(2){animation-delay:.95s}.ex:nth-of-type(3){animation-delay:1.1s}
+.ex:hover{transform:translateX(4px)}
+.shine{position:relative;overflow:hidden}
+.shine::after{content:"";position:absolute;top:-10%;bottom:-10%;width:28%;left:-50%;background:rgba(255,255,255,.6);transform:skewX(-20deg);animation:shine 3.6s 1s ease-in-out infinite;pointer-events:none}
+@media (prefers-reduced-motion: reduce){.v *,.v *::after{animation:none!important;transition:none!important}}
+a{color:inherit}
+textarea:focus{outline:none}
+</style>
+</helmet>
+<div class="v {{mode}}" style="--accent: {{accent}}; min-height: 100vh; display: flex; flex-direction: column">
+
+<header style="display: flex; align-items: center; gap: 14px; flex-wrap: wrap; padding: 10px 20px; min-height: 62px; border-bottom: 1.5px solid var(--text); background: var(--surface)">
+  <a href="Projects.dc.html" aria-label="Voltage, all projects" class="disp" style="display: flex; align-items: center; gap: 10px; text-decoration: none; color: var(--text); font-weight: 700; font-size: 17px; letter-spacing: .02em">
+    <svg width="26" height="26" viewBox="0 0 24 24" aria-hidden="true"><rect x=".75" y=".75" width="22.5" height="22.5" rx="6" style="fill: var(--volt); stroke: var(--ink)" stroke-width="1.5"></rect><path d="M13.5 4 7 13h4.5l-1 7L17 11h-4.5z" fill="#0B0B0C"></path></svg>
+    VOLTAGE
+  </a>
+  <span aria-hidden="true" style="color: var(--line2)">/</span>
+  <span style="font-weight: 500">bhaji-cam-ad.mp4</span>
+  <span class="tag" style="color: var(--faint)">0:48.9 · just landed</span>
+  <div style="flex: 1"></div>
+  <a href="Settings.dc.html" class="act" style="color: var(--text)"><span class="tag">Check with me</span></a>
+  <a href="Usage.dc.html" class="mono" style="text-decoration: none; font-weight: 600">$0.01 <span style="color: var(--faint); font-weight: 400">/ $2</span></a>
+  <a href="Settings.dc.html" aria-label="Account" class="disp" style="width: 34px; height: 34px; border-radius: 50%; border: 1.5px solid var(--text); display: grid; place-items: center; text-decoration: none; color: var(--text); font-weight: 700; font-size: 14px">A</a>
+</header>
+
+<main style="flex: 1; display: flex; flex-wrap: wrap; min-height: 0">
+
+  <section aria-label="Picture and transcript" style="flex: 999 1 620px; min-width: 0; padding: 28px 32px 48px">
+    <div style="max-width: 820px; margin: 0 auto; display: flex; flex-direction: column; gap: 24px">
+
+      <div style="position: relative; width: 100%; max-width: 640px; margin: 0 auto; aspect-ratio: 16 / 9; background: var(--pic); border-radius: 12px; overflow: hidden; border: 1.5px solid var(--ink)">
+        <div style="position: absolute; left: 6%; right: 6%; bottom: 0; height: 32%; background: #232327; border-radius: 12px 12px 0 0"></div>
+        <div style="position: absolute; left: 58%; bottom: 30%; width: 22%; height: 26%; background: #2A2A2F; border-radius: 8px"></div>
+        <div style="position: absolute; left: 22%; bottom: 31%; width: 11%; aspect-ratio: 1; border-radius: 50%; background: #34343A"></div>
+        <div style="position: absolute; left: 17%; bottom: 0; width: 21%; height: 33%; background: #34343A; border-radius: 45% 45% 0 0"></div>
+        <span aria-hidden="true" class="scan" style="position: absolute; top: 0; bottom: 0; left: 15%; width: 2px; background: var(--volt); opacity: .8"></span>
+        <span class="tag" style="position: absolute; top: 14px; left: 14px; display: inline-flex; align-items: center; gap: 7px; color: var(--volt); background: rgba(0,0,0,.6); padding: 4px 9px; border-radius: 5px"><span style="width: 7px; height: 7px; border-radius: 50%; background: var(--volt); animation: blink 1.6s infinite"></span>Read · 8 frames · 20 lines</span>
+        <button class="btn volt" aria-label="Play" style="position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: 56px; height: 56px; border-radius: 50%; padding: 0">
+          <svg width="20" height="20" viewBox="0 0 16 16" aria-hidden="true"><path d="M4.5 2.5v11l9-5.5z" fill="currentColor"></path></svg>
+        </button>
+      </div>
+
+      <div style="border: 1.5px solid var(--text); background: var(--surface); border-radius: 12px; padding: 18px; display: flex; flex-direction: column; gap: 14px">
+        <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap">
+          <span class="disp" style="font-weight: 700; font-size: 20px">Who's speaking</span>
+          <span class="tag" style="color: var(--faint)">{{speakerNote}}</span>
+          <div style="flex: 1"></div>
+          <sc-if value="{{unconfirmed}}" hint-placeholder-val="{{ true }}">
+            <button class="btn volt sm shine" onClick="{{confirm}}">✓ Looks right</button>
+          </sc-if>
+        </div>
+        <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px">
+          <sc-for list="{{speakers}}" as="s" hint-placeholder-count="2">
+            <div style="display: flex; align-items: center; gap: 12px; padding: 12px; border-radius: 10px; background: var(--sunk)">
+              <span aria-hidden="true" class="disp" style="width: 36px; height: 36px; border-radius: 50%; background: {{s.bg}}; color: {{s.fg}}; border: 1.5px solid var(--ink); display: grid; place-items: center; font-size: 14px; font-weight: 700">{{s.n}}</span>
+              <div style="display: flex; flex-direction: column; flex: 1; min-width: 0">
+                <span class="disp" style="font-weight: 600; font-size: 16px">{{s.role}}</span>
+                <span class="tag" style="color: var(--faint)">Speaker {{s.n}} · {{s.lines}} lines · {{s.secs}}</span>
+              </div>
+              <button class="act">Rename</button>
+            </div>
+          </sc-for>
+        </div>
+      </div>
+
+      <div style="display: flex; flex-direction: column; gap: 4px">
+        <div style="display: flex; align-items: flex-end; gap: 12px; padding: 0 4px 10px">
+          <h2 class="disp" style="margin: 0; font-size: 26px; font-weight: 700">Transcript</h2>
+          <span class="tag" style="color: var(--faint); padding-bottom: 4px">20 lines · as shot</span>
+        </div>
+        <sc-for list="{{lines}}" as="l" hint-placeholder-count="8">
+          <div class="{{l.cls}}">
+            <span class="t mono">{{l.t}}</span>
+            <span class="who" style="padding-top: 3px">{{l.who}}</span>
+            <span style="display: flex; flex-direction: column; gap: 4px"><span>{{l.say}}</span><sc-if value="{{l.flagged}}" hint-placeholder-val="{{ false }}"><span class="tag" style="color: var(--text)"><span style="background: var(--volt); color: #0B0B0C; padding: 1px 5px; border-radius: 3px">Voltage</span> {{l.note}}</span></sc-if></span>
+          </div>
+        </sc-for>
+        <div style="padding: 6px 14px"><button class="act" style="margin-left: -9px"><span class="tag">+ 12 more lines</span></button></div>
+      </div>
+    </div>
+  </section>
+
+  <aside class="pane" aria-label="Voltage" style="flex: 1 1 390px; min-width: 0; display: flex; flex-direction: column">
+    <div style="display: flex; align-items: center; gap: 12px; padding: 18px 22px; border-bottom: 1px solid var(--pline)">
+      <span class="wave" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span>
+      <span class="disp" style="font-weight: 700; font-size: 18px">Voltage</span>
+      <span class="tag pm">· read the clip</span>
+    </div>
+
+    <div style="flex: 1; padding: 30px 22px; display: flex; flex-direction: column; gap: 26px">
+      <p class="disp" style="margin: 0; font-size: 24px; line-height: 1.3; font-weight: 500">A customer orders through a shop's live cam. The brand is said once, at 0:07, and comes out as <span style="background: var(--volt); color: #0B0B0C; padding: 0 5px; border-radius: 3px">“Bajicam”</span>. The expiry question at 0:28 never gets an answer.</p>
+
+      <div style="display: flex; flex-direction: column; gap: 10px">
+        <span class="tag pm">Try one, or say your own</span>
+        <a href="EditorWorking.dc.html" class="ex">Turn it into a Diwali ad, 30% off <span class="arr">→</span></a>
+        <a href="EditorWorking.dc.html" class="ex">Say the brand clearly as Bhaji Cam <span class="arr">→</span></a>
+        <a href="EditorWorking.dc.html" class="ex">Have the shopkeeper answer the expiry question <span class="arr">→</span></a>
+      </div>
+
+      <div class="pm" style="font-size: 13px; display: flex; flex-direction: column; gap: 4px">
+        <span class="tag" style="color: var(--ptext)">What I can do</span>
+        <span>Change, add or remove spoken lines · voice-overs · pick, clone or design voices · ease the picture. Not yet: change what's on screen.</span>
+      </div>
+    </div>
+
+    <div style="padding: 14px 22px 22px">
+      <label for="ask-goal" class="vh">Your goal for this video</label>
+      <div style="border: 1.5px solid var(--volt); border-radius: 12px; padding: 12px 12px 10px 14px; display: flex; flex-direction: column; gap: 8px; background: var(--psunk)">
+        <textarea id="ask-goal" rows="3" placeholder="What should this video say?" style="border: 0; resize: none; background: transparent; font-size: 15px; padding: 0; color: var(--ptext)"></textarea>
+        <div style="display: flex; align-items: center; gap: 8px">
+          <span class="tag pm">Nothing is spent until you say go</span>
+          <div style="flex: 1"></div>
+          <a href="EditorWorking.dc.html" class="btn volt sm" aria-label="Send" style="width: 34px; padding: 0">
+            <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 13V3M3.5 7.5 8 3l4.5 4.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+          </a>
+        </div>
+      </div>
+    </div>
+  </aside>
+</main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"dark":{"editor":"boolean","default":false},"accent":{"editor":"color","default":"#D7FF3A","options":["#D7FF3A","#FF6B3D","#7CFFB2","#A99BFF"]},"$preview":{"width":1440,"height":1000}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { confirmed: false };
+  }
+  renderVals() {
+    const c = this.state.confirmed;
+    const speakers = [
+      { n: 1, role: 'the Customer', lines: 11, secs: '14 s', bg: 'var(--volt)', fg: '#0B0B0C' },
+      { n: 2, role: 'the Shopkeeper', lines: 9, secs: '11 s', bg: 'var(--ink)', fg: 'var(--volt)' }
+    ];
+    const plain = { cls: 'row', flagged: false, note: '' };
+    const lines = [
+      Object.assign({ t: '0:01.2', who: 'Customer', say: 'Hello, are you open? I wanted to try the cam.' }, plain),
+      { t: '0:04.9', who: 'Customer', say: 'Start a live Bajicam session.', cls: 'row flag', flagged: true, note: 'brand comes out as one word' },
+      Object.assign({ t: '0:07.5', who: 'Shopkeeper', say: 'Feed is live.' }, plain),
+      Object.assign({ t: '0:09.0', who: 'Customer', say: 'Do you have fresh tomatoes today?' }, plain),
+      Object.assign({ t: '0:11.3', who: 'Shopkeeper', say: 'Yes, these came in this morning.' }, plain),
+      Object.assign({ t: '0:17.0', who: 'Shopkeeper', say: 'These are the regular ones.' }, plain),
+      Object.assign({ t: '0:24.3', who: 'Shopkeeper', say: 'Done, sir.' }, plain),
+      { t: '0:28.0', who: 'Customer', say: 'What’s the expiry date on these?', cls: 'row flag', flagged: true, note: 'never answered' }
+    ];
+    return {
+      mode: this.props.dark ? 'dark' : '',
+      accent: this.props.accent ?? '#D7FF3A',
+      speakers,
+      lines,
+      unconfirmed: !c,
+      speakerNote: c ? 'Confirmed' : 'My guess, from what they say',
+      confirm: () => this.setState({ confirmed: true })
+    };
+  }
+}
+</script>
+</body>
+</html>

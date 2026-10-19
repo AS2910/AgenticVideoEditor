@@ -1,0 +1,278 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Voices</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&amp;family=Geist:wght@400;500;600&amp;family=JetBrains+Mono:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+.v{--bg:#F3F3EF;--surface:#FFFFFF;--sunk:#EAEAE4;--line:#E0E0D9;--line2:#C9C9C1;--ink:#0B0B0C;--text:#0B0B0C;--muted:#55555C;--faint:#66666D;--pane:#0B0B0C;--ptext:#F2F2EE;--pmuted:#A6A6AE;--pline:#26262C;--psunk:#17171A;--volt:var(--accent);font-family:'Geist',system-ui,sans-serif;font-size:14px;line-height:1.5;color:var(--text);background:var(--bg);-webkit-font-smoothing:antialiased;box-sizing:border-box}
+.v *{box-sizing:border-box}
+.v.dark{--bg:#0E0E10;--surface:#17171B;--sunk:#202025;--line:#2A2A30;--line2:#3C3C44;--text:#F2F2EE;--muted:#A6A6AE;--faint:#8F8F98;--pane:#050506;--pline:#1F1F24;--psunk:#111114}
+.disp{font-family:'Space Grotesk',system-ui,sans-serif;letter-spacing:-0.025em}
+.mono{font-family:'JetBrains Mono',ui-monospace,monospace;font-variant-numeric:tabular-nums}
+.tag{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:12px;font-weight:500;letter-spacing:.06em;text-transform:uppercase}
+.btn{font-family:'Space Grotesk',system-ui,sans-serif;font-size:14px;font-weight:600;height:40px;padding:0 16px;border-radius:8px;border:1.5px solid var(--text);background:transparent;color:var(--text);display:inline-flex;align-items:center;justify-content:center;gap:8px;cursor:pointer;text-decoration:none;white-space:nowrap}
+.btn:hover{background:var(--sunk)}
+.btn.volt{background:var(--volt);border-color:var(--ink);color:#0B0B0C;box-shadow:3px 3px 0 var(--ink)}
+.btn.volt:hover{background:var(--volt);transform:translate(1px,1px);box-shadow:2px 2px 0 var(--ink)}
+.btn.sm{height:32px;padding:0 11px;font-size:13px;border-radius:7px}
+.btn.ghost{border-color:var(--pline);color:var(--ptext)}
+.btn.ghost:hover{background:var(--psunk)}
+.act{font:inherit;font-size:13px;font-weight:500;background:none;border:0;height:32px;padding:0 9px;border-radius:7px;color:var(--muted);cursor:pointer}
+.act:hover{background:var(--sunk);color:var(--text)}
+.nav a{font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:500;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);text-decoration:none;padding:7px 10px;border-radius:6px}
+.nav a:hover{color:var(--text);background:var(--sunk)}
+.nav a.on{color:var(--volt);background:var(--ink)}
+.v.dark .nav a.on{color:#0B0B0C;background:var(--volt)}
+.tab{font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:500;letter-spacing:.05em;text-transform:uppercase;height:32px;padding:0 12px;border-radius:6px;border:0;background:transparent;color:var(--muted);cursor:pointer}
+.tab.on{background:var(--ink);color:var(--volt)}
+.v.dark .tab.on{background:var(--volt);color:#0B0B0C}
+.stamp{font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;padding:2px 7px;border-radius:4px;white-space:nowrap}
+.vcard{display:flex;flex-direction:column;gap:14px;padding:18px;border-radius:12px;background:var(--surface);border:1.5px solid var(--text)}
+.vcard:hover{box-shadow:4px 4px 0 var(--text)}
+.bars{display:flex;align-items:center;gap:3px;height:36px}
+.bars span{width:4px;border-radius:2px}
+.rowv{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:14px;align-items:center;padding:12px 14px;border-radius:10px;background:var(--surface);border:1px solid var(--line)}
+.cat{display:inline-flex;align-items:center;gap:8px;height:36px;padding:0 12px 0 6px;border-radius:999px;border:1px solid var(--line2);background:var(--surface);font-size:13px}
+.way{display:flex;flex-direction:column;gap:4px;text-align:left;padding:12px 14px;border-radius:10px;border:1.5px solid var(--pline);background:transparent;color:var(--ptext);cursor:pointer;font:inherit}
+.way.on{border-color:var(--volt);background:var(--psunk)}
+.way .h{font-family:'Space Grotesk',sans-serif;font-weight:600;font-size:15px}
+.vh{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+@keyframes rise{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:none}}
+@keyframes wv2{0%,100%{transform:scaleY(.35)}50%{transform:scaleY(1)}}
+@keyframes pulse{0%{box-shadow:0 0 0 0 rgba(215,255,58,.6)}100%{box-shadow:0 0 0 14px rgba(215,255,58,0)}}
+.btn{transition:transform .15s ease,box-shadow .15s ease,background-color .15s ease}
+h1{animation:rise .6s cubic-bezier(.2,.8,.2,1) both}
+.vcard{animation:rise .5s cubic-bezier(.2,.8,.2,1) both;transition:transform .2s ease,box-shadow .2s ease}
+.vcard:hover{transform:translate(-2px,-2px)}
+.vcard:nth-child(2){animation-delay:.1s}.vcard:nth-child(3){animation-delay:.2s}
+.vcard:hover .bars span{animation:wv2 .9s ease-in-out infinite;transform-origin:center}
+.vcard .bars span:nth-child(2n){animation-delay:.15s}.vcard .bars span:nth-child(3n){animation-delay:.3s}
+.rowv{animation:rise .5s .3s cubic-bezier(.2,.8,.2,1) both}
+.cat{transition:transform .15s ease,border-color .15s ease}.cat:hover{transform:translateY(-2px);border-color:var(--text)}
+.way{transition:border-color .15s ease,background-color .15s ease}
+.rec{animation:pulse 1.6s ease-out infinite}
+@media (prefers-reduced-motion: reduce){.v *,.v *::after{animation:none!important;transition:none!important}}
+a{color:inherit}
+textarea:focus,input:focus{outline:none}
+</style>
+</helmet>
+<div class="v {{mode}}" style="--accent: {{accent}}; min-height: 100vh; display: flex; flex-direction: column">
+
+<header style="display: flex; align-items: center; gap: 22px; flex-wrap: wrap; padding: 10px 24px; min-height: 62px; border-bottom: 1.5px solid var(--text); background: var(--surface)">
+  <a href="Projects.dc.html" aria-label="Voltage home" class="disp" style="display: flex; align-items: center; gap: 10px; text-decoration: none; color: var(--text); font-weight: 700; font-size: 17px; letter-spacing: .02em">
+    <svg width="26" height="26" viewBox="0 0 24 24" aria-hidden="true"><rect x=".75" y=".75" width="22.5" height="22.5" rx="6" style="fill: var(--volt); stroke: var(--ink)" stroke-width="1.5"></rect><path d="M13.5 4 7 13h4.5l-1 7L17 11h-4.5z" fill="#0B0B0C"></path></svg>
+    VOLTAGE
+  </a>
+  <nav class="nav" aria-label="Main" style="display: flex; gap: 4px; flex-wrap: wrap">
+    <a href="Projects.dc.html">Projects</a>
+    <a href="Voices.dc.html" class="on" aria-current="page">Voices</a>
+    <a href="Usage.dc.html">Usage</a>
+    <a href="Settings.dc.html">Settings</a>
+  </nav>
+  <div style="flex: 1"></div>
+  <span class="tag" style="color: var(--muted)">Voice slots <span class="mono" style="color: var(--text); font-weight: 600">14</span> / 30</span>
+  <a href="Settings.dc.html" aria-label="Account" class="disp" style="width: 34px; height: 34px; border-radius: 50%; border: 1.5px solid var(--text); display: grid; place-items: center; text-decoration: none; color: var(--text); font-weight: 700; font-size: 14px">A</a>
+</header>
+
+<main style="flex: 1; display: flex; flex-wrap: wrap; min-height: 0">
+
+  <section style="flex: 999 1 640px; min-width: 0; padding: 40px 32px 72px">
+    <div style="max-width: 900px; margin: 0 auto; display: flex; flex-direction: column; gap: 36px">
+
+      <div style="display: flex; align-items: flex-end; gap: 16px; flex-wrap: wrap">
+        <div style="display: flex; flex-direction: column; gap: 8px; flex: 1 1 400px">
+          <h1 class="disp" style="margin: 0; font-size: 56px; line-height: 1; font-weight: 700">Voices</h1>
+          <p style="margin: 0; color: var(--muted); font-size: 16px">Save a voice once, and Voltage can use it in any project. Just say “in my voice” or “use Goa Narrator”.</p>
+        </div>
+      </div>
+
+      <div role="tablist" aria-label="Which voices" style="display: inline-flex; gap: 2px; padding: 3px; border: 1.5px solid var(--text); border-radius: 9px; align-self: flex-start; flex-wrap: wrap">
+        <sc-for list="{{tabs}}" as="t" hint-placeholder-count="4">
+          <button role="tab" class="{{t.cls}}" aria-selected="{{t.sel}}" onClick="{{t.pick}}">{{t.label}}</button>
+        </sc-for>
+      </div>
+
+      <sc-if value="{{showYours}}" hint-placeholder-val="{{ true }}">
+        <div style="display: flex; flex-direction: column; gap: 14px">
+          <div style="display: flex; align-items: baseline; gap: 10px"><h2 class="disp" style="margin: 0; font-size: 24px; font-weight: 700">Yours</h2><span class="tag" style="color: var(--faint)">kept across projects</span></div>
+          <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 16px">
+            <sc-for list="{{mine}}" as="m" hint-placeholder-count="3">
+              <div class="vcard">
+                <div style="display: flex; align-items: center; gap: 10px">
+                  <span class="stamp" style="background: {{m.stampBg}}; color: {{m.stampFg}}">{{m.kind}}</span>
+                  <div style="flex: 1"></div>
+                  <button class="act" aria-label="More for {{m.name}}">•••</button>
+                </div>
+                <div class="bars" aria-hidden="true">
+                  <sc-for list="{{m.bars}}" as="b" hint-placeholder-count="24"><span style="height: {{b}}px; background: var(--text)"></span></sc-for>
+                </div>
+                <div style="display: flex; flex-direction: column; gap: 4px">
+                  <span class="disp" style="font-size: 22px; font-weight: 700">{{m.name}}</span>
+                  <span style="font-size: 13px; color: var(--muted)">{{m.desc}}</span>
+                </div>
+                <div style="display: flex; align-items: center; gap: 8px">
+                  <button class="btn volt sm" aria-label="Hear {{m.name}}" style="width: 34px; padding: 0; box-shadow: none"><svg width="12" height="12" viewBox="0 0 16 16" aria-hidden="true"><path d="M4.5 2.5v11l9-5.5z" fill="currentColor"></path></svg></button>
+                  <span class="tag" style="color: var(--faint)">{{m.used}}</span>
+                </div>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{showProject}}" hint-placeholder-val="{{ true }}">
+        <div style="display: flex; flex-direction: column; gap: 14px">
+          <div style="display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap"><h2 class="disp" style="margin: 0; font-size: 24px; font-weight: 700">Made inside a project</h2><span class="tag" style="color: var(--faint)">deleted with the project unless you keep them</span></div>
+          <sc-for list="{{projectVoices}}" as="p" hint-placeholder-count="2">
+            <div class="rowv">
+              <span class="stamp" style="border: 1px solid var(--line2); color: var(--muted)">{{p.kind}}</span>
+              <div style="display: flex; flex-direction: column; min-width: 0">
+                <span class="disp" style="font-weight: 600; font-size: 16px">{{p.name}} <span class="tag" style="color: var(--faint); font-weight: 400">· {{p.project}}</span></span>
+                <span style="font-size: 13px; color: var(--muted)">{{p.desc}}</span>
+              </div>
+              <button class="{{p.cls}}" onClick="{{p.save}}">{{p.label}}</button>
+            </div>
+          </sc-for>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{showCatalogue}}" hint-placeholder-val="{{ true }}">
+        <div style="display: flex; flex-direction: column; gap: 14px">
+          <div style="display: flex; align-items: baseline; gap: 10px"><h2 class="disp" style="margin: 0; font-size: 24px; font-weight: 700">Catalogue</h2><span class="tag" style="color: var(--faint)">25 voices · Voltage browses these first</span></div>
+          <div style="display: flex; gap: 8px; flex-wrap: wrap">
+            <sc-for list="{{catalogue}}" as="c" hint-placeholder-count="8">
+              <span class="cat"><button class="btn sm" aria-label="Hear {{c.name}}" style="width: 26px; height: 26px; padding: 0; border-radius: 50%"><svg width="9" height="9" viewBox="0 0 16 16" aria-hidden="true"><path d="M4.5 2.5v11l9-5.5z" fill="currentColor"></path></svg></button>{{c.name}} <span class="tag" style="color: var(--faint)">{{c.accent}}</span></span>
+            </sc-for>
+          </div>
+        </div>
+      </sc-if>
+    </div>
+  </section>
+
+  <aside style="flex: 1 1 380px; min-width: 0; background: var(--pane); color: var(--ptext); padding: 32px 24px; display: flex; flex-direction: column; gap: 22px">
+    <div style="display: flex; flex-direction: column; gap: 6px">
+      <span class="tag" style="color: var(--volt)">+ New voice</span>
+      <h2 class="disp" style="margin: 0; font-size: 28px; font-weight: 700">Add a voice to keep</h2>
+    </div>
+
+    <div role="radiogroup" aria-label="How to make it" style="display: flex; flex-direction: column; gap: 8px">
+      <sc-for list="{{ways}}" as="w" hint-placeholder-count="3">
+        <button role="radio" class="{{w.cls}}" aria-checked="{{w.sel}}" onClick="{{w.pick}}"><span class="h">{{w.h}}</span><span style="font-size: 13px; color: var(--pmuted)">{{w.d}}</span></button>
+      </sc-for>
+    </div>
+
+    <sc-if value="{{wayRecord}}" hint-placeholder-val="{{ false }}">
+      <div style="display: flex; flex-direction: column; gap: 14px">
+        <div style="display: flex; align-items: center; gap: 14px; padding: 18px; border: 1.5px dashed var(--pline); border-radius: 12px">
+          <button class="btn volt rec" aria-label="Start recording" style="width: 52px; height: 52px; border-radius: 50%; padding: 0; box-shadow: none"><span style="width: 16px; height: 16px; border-radius: 50%; background: #0B0B0C"></span></button>
+          <div style="display: flex; flex-direction: column"><span style="font-weight: 500">Record, or drop a file</span><span style="font-size: 13px; color: var(--pmuted)">10 s at least; a minute sounds best</span></div>
+        </div>
+        <label for="vname-r" class="tag" style="color: var(--pmuted)">Name</label>
+        <input id="vname-r" type="text" value="Ashish" style="height: 42px; padding: 0 12px; border-radius: 8px; border: 1.5px solid var(--pline); background: var(--psunk); color: var(--ptext); font: inherit; font-size: 15px">
+      </div>
+    </sc-if>
+
+    <sc-if value="{{wayDescribe}}" hint-placeholder-val="{{ true }}">
+      <div style="display: flex; flex-direction: column; gap: 10px">
+        <label for="vdesc" class="tag" style="color: var(--pmuted)">Describe the voice</label>
+        <textarea id="vdesc" rows="4" style="padding: 12px; border-radius: 10px; border: 1.5px solid var(--pline); background: var(--psunk); color: var(--ptext); font: inherit; font-size: 15px; resize: none">A calm British man in his thirties, low and close to the mic, a dry smile in it. For tech explainers.</textarea>
+        <span style="font-size: 13px; color: var(--pmuted)">Voltage writes a sample line and designs three previews. You pick one; it can't hear them.</span>
+        <label for="vname-d" class="tag" style="color: var(--pmuted); margin-top: 6px">Name</label>
+        <input id="vname-d" type="text" value="Explainer" style="height: 42px; padding: 0 12px; border-radius: 8px; border: 1.5px solid var(--pline); background: var(--psunk); color: var(--ptext); font: inherit; font-size: 15px">
+      </div>
+    </sc-if>
+
+    <sc-if value="{{wayClone}}" hint-placeholder-val="{{ false }}">
+      <div style="display: flex; flex-direction: column; gap: 10px">
+        <label for="vspk" class="tag" style="color: var(--pmuted)">Speaker</label>
+        <select id="vspk" style="height: 42px; padding: 0 10px; border-radius: 8px; border: 1.5px solid var(--pline); background: var(--psunk); color: var(--ptext); font: inherit; font-size: 15px">
+          <option>The Shopkeeper · bhaji-cam-ad · 11 s</option>
+          <option>The Customer · bhaji-cam-ad · 14 s</option>
+        </select>
+        <span style="font-size: 13px; color: var(--pmuted)">Cloned from everything they say in the clip.</span>
+      </div>
+    </sc-if>
+
+    <label style="display: flex; gap: 10px; align-items: flex-start; font-size: 14px; cursor: pointer">
+      <input type="checkbox" checked style="width: 18px; height: 18px; margin-top: 2px; accent-color: var(--volt)">
+      <span>I have the right to use this voice. <span style="color: var(--pmuted)">Recorded with the voice. Deleting the voice withdraws it.</span></span>
+    </label>
+
+    <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: auto">
+      <button class="btn volt" style="flex: 1 1 auto"><svg width="13" height="13" viewBox="0 0 16 16" aria-hidden="true"><path d="M9 1.5 3.5 9H8l-1 5.5L12.5 7H8z" fill="currentColor"></path></svg>{{cta}}</button>
+      <span class="mono" style="font-size: 13px; color: var(--pmuted)">{{ctaCost}}</span>
+    </div>
+  </aside>
+</main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"dark":{"editor":"boolean","default":false},"accent":{"editor":"color","default":"#D7FF3A","options":["#D7FF3A","#FF6B3D","#7CFFB2","#A99BFF"]},"$preview":{"width":1440,"height":1100}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { tab: 'all', way: 'describe', saved: {} };
+  }
+  renderVals() {
+    const tab = this.state.tab;
+    const tabDefs = [['all', 'All'], ['yours', 'Yours · 3'], ['project', 'In projects · 2'], ['catalogue', 'Catalogue · 25']];
+    const tabs = tabDefs.map(([k, label]) => ({ label, cls: k === tab ? 'tab on' : 'tab', sel: k === tab ? 'true' : 'false', pick: () => this.setState({ tab: k }) }));
+    const bar = (seed) => Array.from({ length: 24 }, (_, i) => 8 + Math.round(Math.abs(Math.sin(i * seed)) * 26));
+    const volt = { stampBg: 'var(--volt)', stampFg: '#0B0B0C' };
+    const ink = { stampBg: 'var(--ink)', stampFg: 'var(--volt)' };
+    const mine = [
+      Object.assign({ name: 'Ashish', kind: 'Recorded', desc: 'Your own voice, from a 42 s recording', used: 'Used in 1 project', bars: bar(0.7) }, volt),
+      Object.assign({ name: 'Goa Narrator', kind: 'Designed', desc: '“An Indian woman near fifty, soft and slightly husky, unhurried and wistful”', used: 'Saved from goa-beach', bars: bar(1.3) }, ink),
+      Object.assign({ name: 'Bubbly Promo', kind: 'Library', desc: 'Added from the voice library · bright, fast, young', used: 'Used in 2 projects', bars: bar(2.1) }, ink)
+    ];
+    const saved = this.state.saved;
+    const pv = [
+      { id: 'dn', kind: 'Designed', name: 'Diwali Narrator', project: 'bhaji-cam-ad', desc: 'Warm, unhurried Indian woman near fifty, a smile in it' },
+      { id: 'cu', kind: 'Cloned', name: 'The Customer', project: 'bhaji-cam-ad', desc: 'From 14 s of his own speech · consent recorded 18 Oct' }
+    ];
+    const projectVoices = pv.map((p) => Object.assign({}, p, {
+      cls: saved[p.id] ? 'btn sm' : 'btn volt sm',
+      label: saved[p.id] ? '✓ Kept in yours' : 'Keep in my voices',
+      save: () => this.setState({ saved: Object.assign({}, saved, { [p.id]: true }) })
+    }));
+    const catalogue = [
+      { name: 'Varsha', accent: 'Indian' }, { name: 'Riya Rao', accent: 'Indian' }, { name: 'Viraj', accent: 'Indian' }, { name: 'Jeevan', accent: 'Indian' },
+      { name: 'Sarah', accent: 'American' }, { name: 'Brian', accent: 'American' }, { name: 'George', accent: 'British' }, { name: 'Charlie', accent: 'Australian' }
+    ];
+    const way = this.state.way;
+    const wayDefs = [
+      ['record', 'Record or upload', 'Your voice, or anyone who said yes'],
+      ['describe', 'Describe it', 'Voltage designs it from words'],
+      ['clone', 'From a project speaker', 'Keep someone from a clip']
+    ];
+    const ways = wayDefs.map(([k, h, d]) => ({ h, d, cls: k === way ? 'way on' : 'way', sel: k === way ? 'true' : 'false', pick: () => this.setState({ way: k }) }));
+    const ctas = { record: ['Clone and keep', 'free · 1 slot'], describe: ['Design 3 previews', '~$0.06 · 1 slot'], clone: ['Clone and keep', 'free · 1 slot'] };
+    return {
+      mode: this.props.dark ? 'dark' : '',
+      accent: this.props.accent ?? '#D7FF3A',
+      tabs,
+      mine,
+      projectVoices,
+      catalogue,
+      ways,
+      showYours: tab === 'all' || tab === 'yours',
+      showProject: tab === 'all' || tab === 'project',
+      showCatalogue: tab === 'all' || tab === 'catalogue',
+      wayRecord: way === 'record',
+      wayDescribe: way === 'describe',
+      wayClone: way === 'clone',
+      cta: ctas[way][0],
+      ctaCost: ctas[way][1]
+    };
+  }
+}
+</script>
+</body>
+</html>

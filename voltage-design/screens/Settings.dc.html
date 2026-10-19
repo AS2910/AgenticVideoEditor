@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Settings</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&amp;family=Geist:wght@400;500;600&amp;family=JetBrains+Mono:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+.v{--bg:#F3F3EF;--surface:#FFFFFF;--sunk:#EAEAE4;--line:#E0E0D9;--line2:#C9C9C1;--ink:#0B0B0C;--text:#0B0B0C;--muted:#55555C;--faint:#66666D;--danger:#C2321F;--volt:var(--accent);font-family:'Geist',system-ui,sans-serif;font-size:14px;line-height:1.5;color:var(--text);background:var(--bg);-webkit-font-smoothing:antialiased;box-sizing:border-box}
+.v *{box-sizing:border-box}
+.v.dark{--bg:#0E0E10;--surface:#17171B;--sunk:#202025;--line:#2A2A30;--line2:#3C3C44;--text:#F2F2EE;--muted:#A6A6AE;--faint:#8F8F98;--danger:#FF7A66}
+.disp{font-family:'Space Grotesk',system-ui,sans-serif;letter-spacing:-0.025em}
+.mono{font-family:'JetBrains Mono',ui-monospace,monospace;font-variant-numeric:tabular-nums}
+.tag{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:12px;font-weight:500;letter-spacing:.06em;text-transform:uppercase}
+.btn{font-family:'Space Grotesk',system-ui,sans-serif;font-size:14px;font-weight:600;height:40px;padding:0 16px;border-radius:8px;border:1.5px solid var(--text);background:transparent;color:var(--text);display:inline-flex;align-items:center;justify-content:center;gap:8px;cursor:pointer;text-decoration:none;white-space:nowrap;transition:transform .15s ease,box-shadow .15s ease,background-color .15s ease}
+.btn:hover{background:var(--sunk)}
+.btn.sm{height:34px;padding:0 12px;font-size:13px}
+.nav a{font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:500;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);text-decoration:none;padding:7px 10px;border-radius:6px}
+.nav a:hover{color:var(--text);background:var(--sunk)}
+.nav a.on{color:var(--volt);background:var(--ink)}
+.v.dark .nav a.on{color:#0B0B0C;background:var(--volt)}
+.side a{display:block;padding:9px 12px;border-radius:8px;text-decoration:none;color:var(--muted);font-weight:500}
+.side a:hover{background:var(--sunk);color:var(--text)}
+.side a.on{color:var(--text);background:var(--surface);border:1.5px solid var(--text)}
+.sect{display:flex;flex-direction:column;gap:18px;padding-bottom:36px;border-bottom:1.5px solid var(--line)}
+.auto{display:flex;flex-direction:column;gap:8px;text-align:left;padding:18px;border-radius:12px;border:1.5px solid var(--line2);background:var(--surface);color:var(--text);cursor:pointer;font:inherit;transition:transform .15s ease,box-shadow .15s ease,border-color .15s ease}
+.auto:hover{border-color:var(--text)}
+.auto.on{border-color:var(--ink);box-shadow:5px 5px 0 var(--ink);background:var(--volt);color:#0B0B0C;transform:translate(-2px,-2px)}
+.seg{font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:500;letter-spacing:.05em;text-transform:uppercase;height:34px;padding:0 14px;border:0;border-radius:6px;background:transparent;color:var(--muted);cursor:pointer}
+.seg.on{background:var(--ink);color:var(--volt)}
+.v.dark .seg.on{background:var(--volt);color:#0B0B0C}
+.set{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:20px;align-items:center;padding:14px 0;border-top:1px solid var(--line)}
+.sw{position:relative;width:46px;height:26px;border-radius:999px;border:1.5px solid var(--text);background:var(--sunk);cursor:pointer;padding:0;transition:background-color .2s ease}
+.sw span{position:absolute;top:2px;left:2px;width:19px;height:19px;border-radius:50%;background:var(--text);transition:transform .25s cubic-bezier(.3,1.5,.5,1)}
+.sw.on{background:var(--volt);border-color:var(--ink)}
+.sw.on span{transform:translateX(20px);background:#0B0B0C}
+.sw:disabled{opacity:.55;cursor:not-allowed}
+.step{width:36px;height:36px;border-radius:8px;border:1.5px solid var(--text);background:transparent;color:var(--text);font-size:18px;cursor:pointer}
+@keyframes rise{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:none}}
+@keyframes pop{0%{transform:scale(1)}40%{transform:scale(1.12)}100%{transform:scale(1)}}
+h1{animation:rise .6s cubic-bezier(.2,.8,.2,1) both}
+.sect{animation:rise .5s cubic-bezier(.2,.8,.2,1) both}.sect:nth-of-type(2){animation-delay:.1s}.sect:nth-of-type(3){animation-delay:.2s}
+.cap{display:inline-block;animation:pop .3s ease}
+@media (prefers-reduced-motion: reduce){.v *{animation:none!important;transition:none!important}}
+a{color:inherit}
+</style>
+</helmet>
+<div class="v {{mode}}" style="--accent: {{accent}}; min-height: 100vh">
+
+<header style="display: flex; align-items: center; gap: 22px; flex-wrap: wrap; padding: 10px 24px; min-height: 62px; border-bottom: 1.5px solid var(--text); background: var(--surface)">
+  <a href="Projects.dc.html" aria-label="Voltage home" class="disp" style="display: flex; align-items: center; gap: 10px; text-decoration: none; color: var(--text); font-weight: 700; font-size: 17px; letter-spacing: .02em">
+    <svg width="26" height="26" viewBox="0 0 24 24" aria-hidden="true"><rect x=".75" y=".75" width="22.5" height="22.5" rx="6" style="fill: var(--volt); stroke: var(--ink)" stroke-width="1.5"></rect><path d="M13.5 4 7 13h4.5l-1 7L17 11h-4.5z" fill="#0B0B0C"></path></svg>
+    VOLTAGE
+  </a>
+  <nav class="nav" aria-label="Main" style="display: flex; gap: 4px; flex-wrap: wrap">
+    <a href="Projects.dc.html">Projects</a>
+    <a href="Voices.dc.html">Voices</a>
+    <a href="Usage.dc.html">Usage</a>
+    <a href="Settings.dc.html" class="on" aria-current="page">Settings</a>
+  </nav>
+  <div style="flex: 1"></div>
+  <a href="Settings.dc.html" aria-label="Account" class="disp" style="width: 34px; height: 34px; border-radius: 50%; border: 1.5px solid var(--text); display: grid; place-items: center; text-decoration: none; color: var(--text); font-weight: 700; font-size: 14px">A</a>
+</header>
+
+<main style="max-width: 1100px; margin: 0 auto; padding: 48px 24px 88px; display: flex; flex-wrap: wrap; gap: 48px">
+  <nav class="side" aria-label="Settings sections" style="flex: 0 1 220px; display: flex; flex-direction: column; gap: 4px">
+    <a href="#agent" class="on">What Voltage may do</a>
+    <a href="#look">Appearance</a>
+    <a href="#account">Account</a>
+    <a href="Usage.dc.html">Usage</a>
+    <a href="Billing.dc.html">Billing</a>
+  </nav>
+
+  <div style="flex: 999 1 560px; min-width: 0; display: flex; flex-direction: column; gap: 36px">
+    <h1 class="disp" style="margin: 0; font-size: 56px; line-height: 1; font-weight: 700">Settings</h1>
+
+    <section id="agent" class="sect" aria-labelledby="agent-h">
+      <div style="display: flex; flex-direction: column; gap: 4px">
+        <h2 id="agent-h" class="disp" style="margin: 0; font-size: 26px; font-weight: 700">What Voltage may do</h2>
+        <span style="color: var(--muted)">Your defaults for new projects. Each project can change them from its header.</span>
+      </div>
+
+      <div role="radiogroup" aria-label="Autonomy" style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px">
+        <sc-for list="{{autos}}" as="a" hint-placeholder-count="2">
+          <button role="radio" class="{{a.cls}}" aria-checked="{{a.sel}}" onClick="{{a.pick}}">
+            <span class="tag">{{a.tag}}</span>
+            <span class="disp" style="font-size: 22px; font-weight: 700">{{a.title}}</span>
+            <span style="font-size: 14px; opacity: .8">{{a.desc}}</span>
+          </button>
+        </sc-for>
+      </div>
+
+      <div style="display: flex; flex-direction: column">
+        <div class="set">
+          <div><div style="font-weight: 600">Money per turn</div><div style="font-size: 13px; color: var(--muted)">Voltage stops and asks before a turn spends more than this.</div></div>
+          <div style="display: flex; align-items: center; gap: 10px">
+            <button class="step" aria-label="Lower the turn cap" onClick="{{capDown}}">−</button>
+            <span class="mono cap" style="font-size: 20px; font-weight: 600; min-width: 64px; text-align: center">${{cap}}</span>
+            <button class="step" aria-label="Raise the turn cap" onClick="{{capUp}}">+</button>
+          </div>
+        </div>
+        <div class="set">
+          <div><div style="font-weight: 600">Project ceiling</div><div style="font-size: 13px; color: var(--muted)">No project spends past this. Set by your plan.</div></div>
+          <span class="mono" style="font-size: 20px; font-weight: 600">$2.00</span>
+        </div>
+        <div class="set">
+          <div><div style="font-weight: 600">How hard Voltage thinks</div><div style="font-size: 13px; color: var(--muted)">Higher is slower and costs more, but handles hard clips better.</div></div>
+          <div role="group" aria-label="Effort" style="display: inline-flex; gap: 2px; padding: 3px; border: 1.5px solid var(--text); border-radius: 9px">
+            <sc-for list="{{efforts}}" as="e" hint-placeholder-count="3">
+              <button class="{{e.cls}}" aria-pressed="{{e.sel}}" onClick="{{e.pick}}">{{e.label}}</button>
+            </sc-for>
+          </div>
+        </div>
+      </div>
+
+      <div style="display: flex; flex-direction: column">
+        <span class="tag" style="color: var(--faint); padding-bottom: 8px">Under Just do it, still ask before</span>
+        <sc-for list="{{asks}}" as="k" hint-placeholder-count="4">
+          <div class="set">
+            <div><div style="font-weight: 600">{{k.label}}</div><div style="font-size: 13px; color: var(--muted)">{{k.desc}}</div></div>
+            <button class="{{k.cls}}" role="switch" aria-checked="{{k.sel}}" aria-label="{{k.label}}" onClick="{{k.toggle}}" disabled="{{k.locked}}"><span></span></button>
+          </div>
+        </sc-for>
+      </div>
+    </section>
+
+    <section id="look" class="sect" aria-labelledby="look-h">
+      <h2 id="look-h" class="disp" style="margin: 0; font-size: 26px; font-weight: 700">Appearance</h2>
+      <div role="group" aria-label="Theme" style="display: inline-flex; gap: 2px; padding: 3px; border: 1.5px solid var(--text); border-radius: 9px; align-self: flex-start">
+        <sc-for list="{{themes}}" as="t" hint-placeholder-count="3">
+          <button class="{{t.cls}}" aria-pressed="{{t.sel}}" onClick="{{t.pick}}">{{t.label}}</button>
+        </sc-for>
+      </div>
+    </section>
+
+    <section id="account" class="sect" aria-labelledby="acc-h" style="border-bottom: 0">
+      <h2 id="acc-h" class="disp" style="margin: 0; font-size: 26px; font-weight: 700">Account</h2>
+      <div style="display: flex; align-items: center; gap: 16px; flex-wrap: wrap">
+        <span class="disp" aria-hidden="true" style="width: 56px; height: 56px; border-radius: 50%; background: var(--volt); color: #0B0B0C; border: 1.5px solid var(--ink); display: grid; place-items: center; font-size: 22px; font-weight: 700">A</span>
+        <div style="flex: 1 1 200px; display: flex; flex-direction: column"><span style="font-weight: 600; font-size: 16px">Ashish</span><span class="mono" style="font-size: 13px; color: var(--muted)">Signed in with Google</span></div>
+        <a href="Login.dc.html" class="btn sm">Sign out</a>
+      </div>
+      <div class="set">
+        <div><div style="font-weight: 600; color: var(--danger)">Delete everything</div><div style="font-size: 13px; color: var(--muted)">Every project, take and voice, and the consent records with them. This can't be undone.</div></div>
+        <button class="btn sm" style="border-color: var(--danger); color: var(--danger)">Delete…</button>
+      </div>
+    </section>
+  </div>
+</main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"dark":{"editor":"boolean","default":false},"accent":{"editor":"color","default":"#D7FF3A","options":["#D7FF3A","#FF6B3D","#7CFFB2","#A99BFF"]},"$preview":{"width":1440,"height":1000}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { auto: 'check', cap: 50, effort: 'high', theme: 'system', asks: { ship: false, clone: true, design: false, del: true } };
+  }
+  renderVals() {
+    const s = this.state;
+    const autos = [
+      ['check', 'Default', 'Check with me', 'Every paid step or change to the video waits for your go.'],
+      ['just', 'Fast', 'Just do it', 'Voltage voices, fixes and keeps going. It still asks for the steps below.']
+    ].map(([k, tag, title, desc]) => ({ tag, title, desc, cls: k === s.auto ? 'auto on' : 'auto', sel: k === s.auto ? 'true' : 'false', pick: () => this.setState({ auto: k }) }));
+    const efforts = [['medium', 'Medium'], ['high', 'High'], ['xhigh', 'Extra']].map(([k, label]) => ({ label, cls: k === s.effort ? 'seg on' : 'seg', sel: k === s.effort ? 'true' : 'false', pick: () => this.setState({ effort: k }) }));
+    const themes = [['light', 'Light'], ['dark', 'Dark'], ['system', 'System']].map(([k, label]) => ({ label, cls: k === s.theme ? 'seg on' : 'seg', sel: k === s.theme ? 'true' : 'false', pick: () => this.setState({ theme: k }) }));
+    const askDefs = [
+      ['ship', 'Exporting the video', 'Rendering a new file with what is added', false],
+      ['clone', 'Cloning a speaker', 'Uses a voice slot and their speech', false],
+      ['design', 'Designing a new voice', 'About $0.06 and a voice slot', false],
+      ['del', 'Deleting a voice', 'Always asks', true]
+    ];
+    const asks = askDefs.map(([k, label, desc, locked]) => ({
+      label, desc, locked,
+      cls: s.asks[k] ? 'sw on' : 'sw',
+      sel: s.asks[k] ? 'true' : 'false',
+      toggle: () => { if (!locked) this.setState({ asks: Object.assign({}, s.asks, { [k]: !s.asks[k] }) }); }
+    }));
+    const cap = (s.cap / 100).toFixed(2);
+    return {
+      mode: this.props.dark ? 'dark' : '',
+      accent: this.props.accent ?? '#D7FF3A',
+      autos, efforts, themes, asks, cap,
+      capDown: () => this.setState({ cap: Math.max(10, s.cap - 10) }),
+      capUp: () => this.setState({ cap: Math.min(200, s.cap + 10) })
+    };
+  }
+}
+</script>
+</body>
+</html>

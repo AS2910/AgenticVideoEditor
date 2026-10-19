@@ -1,0 +1,365 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Voltage editor, depth on demand</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&amp;family=Geist:wght@400;500;600&amp;family=JetBrains+Mono:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+@keyframes wv{0%,100%{transform:scaleY(.3)}50%{transform:scaleY(1)}}
+.v{--bg:#F3F3EF;--surface:#FFFFFF;--sunk:#EAEAE4;--line:#E0E0D9;--line2:#C9C9C1;--ink:#0B0B0C;--text:#0B0B0C;--muted:#55555C;--faint:#66666D;--warn:#FFB020;--ok:#1F7A4D;--pic:#141416;--lane:#E2E2DB;--lane2:#C4C4BC;--pane:#0B0B0C;--ptext:#F2F2EE;--pmuted:#A6A6AE;--pline:#26262C;--psunk:#17171A;--volt:var(--accent);font-family:'Geist',system-ui,sans-serif;font-size:14px;line-height:1.5;color:var(--text);background:var(--bg);-webkit-font-smoothing:antialiased;box-sizing:border-box}
+.v *{box-sizing:border-box}
+.v.dark{--bg:#0E0E10;--surface:#17171B;--sunk:#202025;--line:#2A2A30;--line2:#3C3C44;--text:#F2F2EE;--muted:#A6A6AE;--faint:#8F8F98;--ok:#5CC98E;--pic:#000000;--lane:#26262C;--lane2:#3A3A42;--pane:#050506;--pline:#1F1F24;--psunk:#111114}
+.disp{font-family:'Space Grotesk',system-ui,sans-serif;letter-spacing:-0.02em}
+.mono{font-family:'JetBrains Mono',ui-monospace,monospace;font-variant-numeric:tabular-nums}
+.tag{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:12px;font-weight:500;letter-spacing:.06em;text-transform:uppercase}
+.btn{font-family:'Space Grotesk',system-ui,sans-serif;font-size:14px;font-weight:600;height:38px;padding:0 14px;border-radius:8px;border:1.5px solid var(--text);background:transparent;color:var(--text);display:inline-flex;align-items:center;justify-content:center;gap:8px;cursor:pointer;text-decoration:none;white-space:nowrap}
+.btn:hover{background:var(--sunk)}
+.btn.volt{background:var(--volt);border-color:var(--ink);color:#0B0B0C}
+.btn.volt:hover{background:var(--volt);box-shadow:2px 2px 0 var(--ink)}
+.btn.ink{background:var(--ink);border-color:var(--ink);color:var(--volt)}
+.btn.ink:hover{background:var(--ink);opacity:.9}
+.v.dark .btn.ink{background:var(--volt);color:#0B0B0C}
+.btn.sm{height:32px;padding:0 11px;font-size:13px;border-radius:7px}
+.btn.ghost{border-color:var(--pline);color:var(--ptext)}
+.btn.ghost:hover{background:var(--psunk)}
+.act{font:inherit;font-size:13px;font-weight:500;background:none;border:0;height:32px;padding:0 9px;border-radius:7px;color:var(--muted);cursor:pointer;display:inline-flex;align-items:center;gap:6px;text-decoration:none}
+.act:hover{background:var(--sunk);color:var(--text)}
+.kbd{font-family:'JetBrains Mono',monospace;font-size:11px;line-height:1;padding:3px 5px;border-radius:4px;border:1px solid currentColor;opacity:.7}
+.seg{font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:500;letter-spacing:.05em;text-transform:uppercase;height:30px;padding:0 12px;border:0;border-radius:6px;background:transparent;color:var(--muted);cursor:pointer}
+.seg.on{background:var(--ink);color:var(--volt)}
+.v.dark .seg.on{background:var(--volt);color:#0B0B0C}
+.who{font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:500;letter-spacing:.05em;text-transform:uppercase;color:var(--faint)}
+.say{font-size:16px;line-height:1.55}
+.meta{font-size:13px;color:var(--muted)}
+.row{display:grid;grid-template-columns:76px minmax(0,1fr);gap:12px;padding:12px 14px;border-radius:10px}
+.row .t{font-size:12px;color:var(--faint);padding-top:3px}
+.prop{background:var(--surface);border:1.5px solid var(--text);box-shadow:4px 4px 0 var(--text)}
+.stamp{font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;background:var(--volt);color:#0B0B0C;padding:2px 7px;border-radius:4px}
+del{color:var(--faint);text-decoration-thickness:1.5px}
+ins{text-decoration:none;background:var(--volt);color:#0B0B0C;border-radius:2px;padding:0 3px}
+.pill{font:inherit;font-size:13px;font-weight:500;height:32px;padding:0 12px;border-radius:999px;border:1.5px solid var(--line2);background:var(--surface);color:var(--muted);cursor:pointer}
+.pill:hover{border-color:var(--text);color:var(--text)}
+.pill.on{border-color:var(--ink);background:var(--volt);color:#0B0B0C}
+.lane{display:grid;grid-template-columns:70px minmax(0,1fr);gap:10px;align-items:center;height:30px}
+.lane .n{font-family:'JetBrains Mono',monospace;font-size:12px;letter-spacing:.05em;text-transform:uppercase;color:var(--faint)}
+.track{position:relative;height:22px}
+.blk{position:absolute;top:0;height:22px;border-radius:4px;font-size:11px;line-height:20px;padding:0 6px;overflow:hidden;white-space:nowrap;color:var(--text);font-family:'JetBrains Mono',monospace}
+.blk.p{background:var(--volt);border:1.5px solid var(--ink);color:#0B0B0C}
+.fact{display:flex;flex-direction:column;gap:3px}
+.fact .k{font-family:'JetBrains Mono',monospace;font-size:12px;letter-spacing:.05em;text-transform:uppercase;color:var(--faint)}
+.fact .val{font-size:14px}
+.m{display:flex;flex-direction:column;gap:4px;padding:12px;border-radius:8px;border:1.5px solid var(--line2);background:var(--surface)}
+.m .k{font-family:'JetBrains Mono',monospace;font-size:12px;letter-spacing:.05em;text-transform:uppercase;color:var(--faint)}
+.m .val{font-family:'Space Grotesk',sans-serif;font-size:24px;font-weight:700;letter-spacing:-0.02em}
+.m .bar{font-size:12px}
+.meter{height:6px;border-radius:2px;background:var(--line);overflow:hidden}
+.meter span{display:block;height:100%;background:var(--text)}
+.wave{display:inline-flex;align-items:center;gap:2px;height:20px}
+.wave i{display:block;width:3px;height:20px;border-radius:2px;background:var(--volt);animation:wv 2.2s ease-in-out infinite;transform-origin:center}
+.wave i:nth-child(2){animation-delay:.2s}.wave i:nth-child(3){animation-delay:.4s}.wave i:nth-child(4){animation-delay:.6s}.wave i:nth-child(5){animation-delay:.8s}
+.wave.need i{background:var(--warn);animation-duration:1.4s}
+@media (prefers-reduced-motion: reduce){.wave i{animation:none;transform:scaleY(.6)}}
+.pane{background:var(--pane);color:var(--ptext)}
+.pane .pm{color:var(--pmuted)}
+.prev{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:12px;align-items:center;padding:10px 12px;border-radius:10px;background:var(--psunk)}
+.pwave{display:flex;align-items:center;gap:2px;height:24px}
+.pwave span{width:3px;border-radius:1px}
+.vh{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+@keyframes rise{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+@keyframes pop{0%{opacity:0;transform:translateY(6px) scale(.98)}60%{opacity:1;transform:scale(1.005)}100%{opacity:1;transform:none}}
+@keyframes sweep{from{background-size:0% 100%}to{background-size:100% 100%}}
+@keyframes fill{from{width:0}}
+@keyframes grow{from{transform:scaleX(0)}to{transform:none}}
+@keyframes wv2{0%,100%{transform:scaleY(.35)}50%{transform:scaleY(1)}}
+.btn{transition:transform .15s ease,box-shadow .15s ease,background-color .15s ease}
+.btn.volt:hover{transform:translate(-2px,-2px);box-shadow:4px 4px 0 var(--ink)}
+.btn.volt:active{transform:translate(1px,1px);box-shadow:none}
+.prop{animation:pop .6s .2s cubic-bezier(.2,.8,.2,1) both}
+.blk{transform-origin:left center;animation:grow .6s cubic-bezier(.2,.8,.2,1) both}
+.lane:nth-child(2) .blk{animation-delay:.1s}.lane:nth-child(3) .blk{animation-delay:.2s}.lane:nth-child(4) .blk{animation-delay:.3s}
+.meter span{animation:fill 1.2s .6s cubic-bezier(.2,.8,.2,1) both}
+.pwave span{animation:wv2 1.1s ease-in-out infinite;transform-origin:center}
+.pwave span:nth-child(2n){animation-delay:.18s}.pwave span:nth-child(3n){animation-delay:.36s}
+.prev{animation:rise .5s cubic-bezier(.2,.8,.2,1) both;transition:transform .15s ease}
+.prev:hover{transform:translateX(3px)}
+.pane p{animation:rise .6s .7s cubic-bezier(.2,.8,.2,1) both}
+.pill{transition:all .15s ease}
+.pill.on{animation:pop .35s cubic-bezier(.2,.8,.2,1)}
+ins{background-color:transparent;background-image:linear-gradient(var(--volt),var(--volt));background-repeat:no-repeat;background-size:0% 100%;animation:sweep .7s .7s cubic-bezier(.7,0,.2,1) forwards}
+@media (prefers-reduced-motion: reduce){.v *,.v *::after{animation:none!important;transition:none!important}ins{background-size:100% 100%}}
+a{color:inherit}
+textarea:focus{outline:none}
+</style>
+</helmet>
+<div class="v {{mode}}" style="--accent: {{accent}}; min-height: 100vh; display: flex; flex-direction: column">
+
+<header style="display: flex; align-items: center; gap: 14px; flex-wrap: wrap; padding: 10px 20px; min-height: 62px; border-bottom: 1.5px solid var(--text); background: var(--surface)">
+  <a href="Projects.dc.html" aria-label="Voltage, all projects" class="disp" style="display: flex; align-items: center; gap: 10px; text-decoration: none; color: var(--text); font-weight: 700; font-size: 17px; letter-spacing: .02em">
+    <svg width="26" height="26" viewBox="0 0 24 24" aria-hidden="true"><rect x=".75" y=".75" width="22.5" height="22.5" rx="6" style="fill: var(--volt); stroke: var(--ink)" stroke-width="1.5"></rect><path d="M13.5 4 7 13h4.5l-1 7L17 11h-4.5z" fill="#0B0B0C"></path></svg>
+    VOLTAGE
+  </a>
+  <span aria-hidden="true" style="color: var(--line2)">/</span>
+  <span style="font-weight: 500">bhaji-cam-ad.mp4</span>
+  <span class="tag" style="color: var(--faint)">0:48.9 · 2 voices</span>
+  <div style="flex: 1 1 16px"></div>
+  <div role="group" aria-label="What the player plays" style="display: inline-flex; padding: 3px; gap: 2px; border: 1.5px solid var(--text); border-radius: 9px">
+    <button class="seg" aria-pressed="false">Final</button><button class="seg on" aria-pressed="true">With proposals</button><button class="seg" aria-pressed="false">Original</button>
+  </div>
+  <div style="flex: 1 1 16px"></div>
+  <a href="Settings.dc.html" class="act" style="color: var(--text)"><span class="tag">Check with me</span></a>
+  <a href="Usage.dc.html" aria-label="Project spend: $0.91 of $2.00" style="display: inline-flex; align-items: center; gap: 8px; text-decoration: none; color: var(--text)">
+    <span class="mono" style="font-weight: 600">$0.91</span>
+    <span aria-hidden="true" style="display: inline-block; width: 52px; height: 8px; border-radius: 2px; border: 1.5px solid var(--text); overflow: hidden"><span style="display: block; width: 45%; height: 100%; background: var(--volt)"></span></span>
+    <span class="mono" style="color: var(--faint)">$2</span>
+  </a>
+  <a href="Export.dc.html" class="btn ink sm">Export</a>
+  <a href="Settings.dc.html" aria-label="Account" class="disp" style="width: 34px; height: 34px; border-radius: 50%; border: 1.5px solid var(--text); display: grid; place-items: center; text-decoration: none; color: var(--text); font-weight: 700; font-size: 14px">A</a>
+</header>
+
+<main style="flex: 1; display: flex; flex-wrap: wrap; min-height: 0">
+
+  <section aria-label="Picture, tracks and transcript" style="flex: 999 1 620px; min-width: 0; padding: 24px 32px 48px">
+    <div style="max-width: 840px; margin: 0 auto; display: flex; flex-direction: column; gap: 18px">
+
+      <div style="position: relative; width: 100%; max-width: 560px; margin: 0 auto; aspect-ratio: 16 / 9; background: var(--pic); border-radius: 12px; overflow: hidden; border: 1.5px solid var(--ink)">
+        <div style="position: absolute; left: 6%; right: 6%; bottom: 0; height: 32%; background: #232327; border-radius: 12px 12px 0 0"></div>
+        <div style="position: absolute; left: 22%; bottom: 31%; width: 11%; aspect-ratio: 1; border-radius: 50%; background: #34343A"></div>
+        <div style="position: absolute; left: 17%; bottom: 0; width: 21%; height: 33%; background: #34343A; border-radius: 45% 45% 0 0"></div>
+        <div style="position: absolute; left: 0; right: 0; bottom: 16px; text-align: center"><span style="display: inline-block; background: rgba(0,0,0,.7); color: #FFFFFF; padding: 5px 11px; border-radius: 6px; font-size: 15px">Start a <span style="background: var(--volt); color: #0B0B0C; padding: 0 4px; border-radius: 2px">Bhaji Cam</span> session.</span></div>
+      </div>
+
+      <div style="border: 1.5px solid var(--text); border-radius: 12px; background: var(--surface); padding: 14px 16px; display: flex; flex-direction: column; gap: 6px">
+        <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 6px">
+          <button class="btn ink sm" aria-label="Play" style="width: 32px; padding: 0"><svg width="13" height="13" viewBox="0 0 16 16" aria-hidden="true"><path d="M4.5 2.5v11l9-5.5z" fill="currentColor"></path></svg></button>
+          <span class="mono" style="font-size: 13px">0:05.1 <span style="color: var(--faint)">/ 0:48.9</span></span>
+          <div style="flex: 1"></div>
+          <button class="act"><span class="tag">Word timeline</span></button>
+          <a href="Main.dc.html" class="act"><span class="tag">Hide tracks</span></a>
+        </div>
+        <div class="lane" aria-hidden="true">
+          <span></span>
+          <div class="track mono" style="font-size: 11px; color: var(--faint)">
+            <span style="position: absolute; left: 0">0:00</span><span style="position: absolute; left: 20.4%">0:10</span><span style="position: absolute; left: 40.9%">0:20</span><span style="position: absolute; left: 61.3%">0:30</span><span style="position: absolute; left: 81.8%">0:40</span>
+          </div>
+        </div>
+        <div style="position: relative; display: flex; flex-direction: column; gap: 6px">
+          <div class="lane">
+            <span class="n">V1 Pic</span>
+            <div class="track">
+              <span class="blk" style="left: 0; width: 100%; background: var(--lane)"></span>
+              <span class="blk p" style="left: 10%; width: 3.6%; padding: 0 3px">1.12×</span>
+            </div>
+          </div>
+          <div class="lane">
+            <span class="n">A1 Said</span>
+            <div class="track">
+              <span class="blk" style="left: 2.4%; width: 5%; background: var(--lane2)">Hello</span>
+              <span class="blk p" style="left: 10%; width: 3.6%">Start</span>
+              <span class="blk" style="left: 15.3%; width: 2.5%; background: var(--lane)">Feed</span>
+              <span class="blk" style="left: 18.4%; width: 4.2%; background: var(--lane2)">Do you</span>
+              <span class="blk" style="left: 23.1%; width: 5.8%; background: var(--lane)">Yes, these</span>
+              <span class="blk" style="left: 34.8%; width: 4%; background: var(--lane)">These</span>
+              <span class="blk" style="left: 44%; width: 6%; background: var(--lane2)">Is it</span>
+              <span class="blk" style="left: 57.3%; width: 6.4%; background: var(--lane2)">What's the</span>
+              <span class="blk" style="left: 66%; width: 9%; background: var(--lane)">It's printed</span>
+            </div>
+          </div>
+          <div class="lane">
+            <span class="n">A2 Added</span>
+            <div class="track">
+              <span class="blk" style="left: 17.2%; width: 3.6%; background: var(--text); color: var(--bg)">Thirty off.</span>
+              <span class="blk p" style="left: 81.8%; width: 17.4%; border-style: dashed">Proposed · This Diwali…</span>
+            </div>
+          </div>
+          <div class="lane">
+            <span class="n">A3 Tone</span>
+            <div class="track">
+              <span class="blk" style="left: 50.5%; width: 2%; background: var(--lane2); height: 10px; top: 6px"></span>
+            </div>
+          </div>
+          <span aria-hidden="true" style="position: absolute; top: -8px; bottom: -2px; left: calc(80px + (100% - 80px) * 0.104); width: 2px; background: var(--text)"></span>
+        </div>
+        <div class="tag" style="display: flex; gap: 16px; flex-wrap: wrap; color: var(--faint); padding-left: 80px; margin-top: 6px">
+          <span>▮ dark · Customer</span><span>▮ light · Shopkeeper</span><span><span style="background: var(--volt); color: #0B0B0C; padding: 0 4px; border-radius: 2px">▮</span> proposed</span>
+        </div>
+      </div>
+
+      <div style="display: flex; align-items: flex-end; gap: 14px; margin-top: 10px; padding: 0 4px">
+        <h2 class="disp" style="margin: 0; font-size: 26px; font-weight: 700">Transcript</h2>
+        <span class="tag" style="color: var(--faint); padding-bottom: 4px">line 2 open</span>
+      </div>
+
+      <div class="row prop" style="padding: 20px 18px">
+        <span class="t mono">0:04.9</span>
+        <div style="display: flex; flex-direction: column; gap: 18px">
+          <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap">
+            <span class="who">Customer</span><span class="stamp">Proposed</span>
+            <div style="flex: 1"></div>
+            <div role="group" aria-label="Takes" style="display: inline-flex; padding: 3px; gap: 2px; border: 1.5px solid var(--text); border-radius: 9px">
+              <sc-for list="{{takes}}" as="tk" hint-placeholder-count="2">
+                <button class="{{tk.cls}}" aria-pressed="{{tk.pressed}}" onClick="{{tk.pick}}">{{tk.label}}</button>
+              </sc-for>
+            </div>
+          </div>
+
+          <div style="display: grid; grid-template-columns: 64px minmax(0,1fr); gap: 8px 12px; align-items: baseline">
+            <span class="who">Before</span><span class="say" style="color: var(--muted)"><del>Start a live Bajicam session.</del></span>
+            <span class="who">After</span><span class="say disp" style="font-size: 22px; font-weight: 600"><ins>{{takeText}}</ins></span>
+          </div>
+
+          <div style="display: flex; flex-direction: column; gap: 8px">
+            <span class="tag" style="color: var(--faint)">Delivery</span>
+            <div style="display: flex; gap: 6px; flex-wrap: wrap">
+              <sc-for list="{{deliveries}}" as="d" hint-placeholder-count="7">
+                <button class="{{d.cls}}" aria-pressed="{{d.pressed}}" onClick="{{d.pick}}">{{d.label}}</button>
+              </sc-for>
+            </div>
+            <p style="margin: 2px 0 0; font-size: 14px; color: var(--muted)"><span class="tag" style="color: var(--text)">Voltage's direction ›</span> “Casual, matter-of-fact, a touch brisk to fit the slot; Bhaji Cam as two clear words, BAH-jee cam.”</p>
+          </div>
+
+          <div style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; padding: 14px 0; border-top: 1.5px solid var(--line); border-bottom: 1.5px solid var(--line)">
+            <div class="fact"><span class="k">Voice</span><span class="val">{{takeVoice}}</span></div>
+            <div class="fact"><span class="k">Model</span><span class="val mono">multilingual v2</span></div>
+            <div class="fact"><span class="k">Dials</span><span class="val mono">stab 0.5 · spd 1.1</span></div>
+            <div class="fact"><span class="k">Fit</span><span class="val">Picture 1.12× · 1.5 s</span></div>
+          </div>
+
+          <div style="display: flex; flex-direction: column; gap: 10px">
+            <span class="tag" style="color: var(--faint)">Measured</span>
+            <div style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px">
+              <div class="m"><span class="k">Voice match</span><span class="val">{{simo}}</span><div class="meter"><span style="width: {{simoPct}}; background: {{simoBar}}"></span></div><span class="bar" style="color: var(--muted)">{{simoNote}}</span></div>
+              <div class="m"><span class="k">Natural</span><span class="val">3.8</span><div class="meter"><span style="width: 76%"></span></div><span class="bar" style="color: var(--muted)">bar 3.0 · pass</span></div>
+              <div class="m"><span class="k">Prosody</span><span class="val">0.93</span><div class="meter"><span style="width: 93%"></span></div><span class="bar" style="color: var(--muted)">bar 0.80 · pass</span></div>
+              <div class="m"><span class="k">Seam</span><span class="val">0.9<span style="font-size: 14px"> dB</span></span><div class="meter"><span style="width: 18%"></span></div><span class="bar" style="color: var(--muted)">vs the shot</span></div>
+            </div>
+            <span class="tag" style="color: var(--faint)">Lip-sync · not measured yet</span>
+          </div>
+
+          <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap">
+            <button class="btn sm"><svg width="12" height="12" viewBox="0 0 16 16" aria-hidden="true"><path d="M4.5 2.5v11l9-5.5z" fill="currentColor"></path></svg>Hear it <span class="kbd">␣</span></button>
+            <button class="btn volt sm"><svg width="13" height="13" viewBox="0 0 16 16" aria-hidden="true"><path d="M9 1.5 3.5 9H8l-1 5.5L12.5 7H8z" fill="currentColor"></path></svg>Add it <span class="kbd">K</span></button>
+            <button class="btn sm">Voice it again</button>
+            <button class="act">Discard</button>
+            <div style="flex: 1"></div>
+            <a href="Main.dc.html" class="act"><span class="tag">Less ↑</span></a>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <aside class="pane" aria-label="Voltage" style="flex: 1 1 390px; min-width: 0; display: flex; flex-direction: column">
+    <div style="display: flex; align-items: center; gap: 12px; padding: 18px 22px; border-bottom: 1px solid var(--pline)">
+      <span class="wave need" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span>
+      <span class="disp" style="font-weight: 700; font-size: 18px">Voltage</span>
+      <span class="tag" style="color: var(--warn)">· one question</span>
+    </div>
+
+    <div style="flex: 1; padding: 24px 22px; display: flex; flex-direction: column; gap: 18px">
+      <div style="align-self: flex-end; max-width: 88%; background: var(--psunk); border: 1px solid var(--pline); padding: 10px 14px; border-radius: 14px 14px 4px 14px">Go ahead</div>
+
+      <div class="mono" style="display: grid; grid-template-columns: 44px 14px minmax(0,1fr) auto; gap: 8px; font-size: 12.5px; padding: 12px 14px; border: 1px solid var(--pline); border-radius: 10px">
+        <span style="color: #7C7C85">00:17</span><span style="color: #5A5A62">└</span><span>Designed a voice, 3 previews <span style="color: #7C7C85">design_voice</span></span><span>$0.06</span>
+      </div>
+
+      <div style="display: flex; flex-direction: column; gap: 8px">
+        <span class="tag pm">Three previews · you choose</span>
+        <sc-for list="{{previews}}" as="p" hint-placeholder-count="3">
+          <div class="prev" style="outline: {{p.outline}}">
+            <button class="btn volt sm" aria-label="Play {{p.name}}" style="width: 34px; padding: 0"><svg width="12" height="12" viewBox="0 0 16 16" aria-hidden="true"><path d="M4.5 2.5v11l9-5.5z" fill="currentColor"></path></svg></button>
+            <div style="display: flex; flex-direction: column; gap: 4px; min-width: 0">
+              <span class="mono" style="font-size: 12px; color: var(--ptext)">{{p.name}} <span class="pm">· 0:{{p.len}}</span></span>
+              <div class="pwave" aria-hidden="true">
+                <sc-for list="{{p.bars}}" as="b" hint-placeholder-count="28"><span style="height: {{b.h}}px; background: {{b.c}}"></span></sc-for>
+              </div>
+            </div>
+            <button class="{{p.cls}}" onClick="{{p.pick}}">{{p.action}}</button>
+          </div>
+        </sc-for>
+      </div>
+
+      <p style="margin: 0; font-size: 15px; line-height: 1.6">Which one should I keep for the offer line? I can't hear them, so the choice is yours. I'll keep it in this project as <span style="color: var(--volt)">“Diwali Narrator”</span>, and you can save it to your voices.</p>
+    </div>
+
+    <div style="padding: 14px 22px 22px">
+      <label for="ask-depth" class="vh">Ask Voltage</label>
+      <div style="border: 1.5px solid var(--pline); border-radius: 12px; padding: 12px 12px 10px 14px; display: flex; flex-direction: column; gap: 8px; background: var(--psunk)">
+        <textarea id="ask-depth" rows="2" placeholder="Pick one, or say what to change…" style="border: 0; resize: none; background: transparent; font-size: 15px; padding: 0; color: var(--ptext)"></textarea>
+        <div style="display: flex; align-items: center; gap: 8px">
+          <span class="tag pm">Turn cap $0.50</span>
+          <div style="flex: 1"></div>
+          <button class="btn volt sm" aria-label="Send" style="width: 34px; padding: 0">
+            <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 13V3M3.5 7.5 8 3l4.5 4.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+          </button>
+        </div>
+      </div>
+    </div>
+  </aside>
+</main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"dark":{"editor":"boolean","default":false},"accent":{"editor":"color","default":"#D7FF3A","options":["#D7FF3A","#FF6B3D","#7CFFB2","#A99BFF"]},"$preview":{"width":1440,"height":1240}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { delivery: 'As spoken', take: 2, preview: 0 };
+  }
+  renderVals() {
+    const ds = ['As spoken', 'Warmer', 'Calmer', 'Slower', 'Firmer', 'More excited', 'Your words…'];
+    const deliveries = ds.map((label) => ({
+      label,
+      cls: label === this.state.delivery ? 'pill on' : 'pill',
+      pressed: label === this.state.delivery ? 'true' : 'false',
+      pick: () => this.setState({ delivery: label })
+    }));
+    const takes = [1, 2].map((n) => ({
+      label: 'Take ' + n,
+      cls: n === this.state.take ? 'seg on' : 'seg',
+      pressed: n === this.state.take ? 'true' : 'false',
+      pick: () => this.setState({ take: n })
+    }));
+    const t2 = this.state.take === 2;
+    const shapes = [
+      [8,12,18,10,14,22,16,9,6,12,18,24,14,10,8,14,18,12,9,6,10,14,8,6,10,12,8,5],
+      [6,10,14,18,12,8,10,16,22,14,10,6,8,12,16,20,12,8,10,14,10,8,6,5,8,10,6,4],
+      [10,14,12,8,16,22,18,12,10,8,12,14,18,16,12,10,8,10,12,8,6,8,6,5,7,9,6,4]
+    ];
+    const lens = ['27', '31', '25'];
+    const sel = this.state.preview;
+    const previews = [0, 1, 2].map((i) => {
+      const chosen = sel === i + 1;
+      return {
+        name: 'Preview ' + (i + 1),
+        len: lens[i],
+        bars: shapes[i].map((h, j) => ({ h, c: j < 9 ? 'var(--volt)' : '#4A4A52' })),
+        outline: chosen ? '1.5px solid var(--volt)' : 'none',
+        cls: chosen ? 'btn volt sm' : 'btn ghost sm',
+        action: chosen ? '✓ Chosen' : 'Use this',
+        pick: () => this.setState({ preview: i + 1 })
+      };
+    });
+    return {
+      mode: this.props.dark ? 'dark' : '',
+      accent: this.props.accent ?? '#D7FF3A',
+      deliveries,
+      takes,
+      previews,
+      takeText: t2 ? 'Start a Bhaji Cam session.' : 'Start a live Bhaji Cam session.',
+      takeVoice: t2 ? 'His own · cloned from 14 s' : 'Brian · stand-in',
+      simo: t2 ? '0.82' : '0.61',
+      simoPct: t2 ? '82%' : '61%',
+      simoBar: t2 ? 'var(--text)' : 'var(--warn)',
+      simoNote: t2 ? 'bar 0.75 · pass' : 'bar 0.75 · below'
+    };
+  }
+}
+</script>
+</body>
+</html>

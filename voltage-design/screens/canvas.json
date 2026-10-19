@@ -1,0 +1,27 @@
+{
+  "v": 3,
+  "createdOnFiles": {"v": 1, "at": "2026-10-18T12:00:00Z"},
+  "title": "Voltage Minimal",
+  "launch": {"view": "canvas"},
+  "pages": [],
+  "boards": {
+    "Login.dc.html": {"x": 0, "y": 0, "w": 1440, "h": 900, "title": "Sign in", "expand": "fill", "is_interactive": true},
+    "Projects.dc.html": {"x": 1520, "y": 0, "w": 1440, "h": 1000, "title": "Projects and upload", "expand": "fill", "is_interactive": true},
+    "FirstRead.dc.html": {"x": 3040, "y": 0, "w": 1440, "h": 1000, "title": "First read of the clip", "expand": "fill", "is_interactive": true},
+    "Main.dc.html": {"x": 0, "y": 1380, "w": 1440, "h": 1000, "title": "Editor · proposals ready", "expand": "fill", "is_interactive": true},
+    "EditorWorking.dc.html": {"x": 1520, "y": 1380, "w": 1440, "h": 1000, "title": "Editor · Voltage asks for a go", "expand": "fill", "is_interactive": true},
+    "EditorDepth.dc.html": {"x": 3040, "y": 1380, "w": 1440, "h": 1240, "title": "Editor · depth on demand", "expand": "fill", "is_interactive": true},
+    "Export.dc.html": {"x": 0, "y": 3000, "w": 1440, "h": 1000, "title": "Export", "expand": "fill", "is_interactive": true},
+    "Voices.dc.html": {"x": 1520, "y": 3000, "w": 1440, "h": 1100, "title": "Voice library", "expand": "fill", "is_interactive": true},
+    "Usage.dc.html": {"x": 3040, "y": 3000, "w": 1440, "h": 1000, "title": "Usage", "expand": "fill", "is_interactive": true},
+    "Settings.dc.html": {"x": 4560, "y": 3000, "w": 1440, "h": 1000, "title": "Settings", "expand": "fill", "is_interactive": true},
+    "Billing.dc.html": {"x": 6080, "y": 3000, "w": 1440, "h": 1000, "title": "Billing", "expand": "fill", "is_interactive": true}
+  },
+  "order": ["Login.dc.html", "Projects.dc.html", "FirstRead.dc.html", "Main.dc.html", "EditorWorking.dc.html", "EditorDepth.dc.html", "Export.dc.html", "Voices.dc.html", "Usage.dc.html", "Settings.dc.html", "Billing.dc.html"],
+  "notes": {
+    "row1": {"x": 0, "y": -300, "text": "1 · Getting in", "kind": "title1", "maxW": 4480},
+    "row2": {"x": 0, "y": 1080, "text": "2 · Editing", "kind": "title1", "maxW": 4480},
+    "row3": {"x": 0, "y": 2700, "text": "3 · Finishing, voices and account", "kind": "title1", "maxW": 7520}
+  },
+  "designSystems": []
+}

@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Usage</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&amp;family=Geist:wght@400;500;600&amp;family=JetBrains+Mono:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+.v{--bg:#F3F3EF;--surface:#FFFFFF;--sunk:#EAEAE4;--line:#E0E0D9;--line2:#C9C9C1;--ink:#0B0B0C;--text:#0B0B0C;--muted:#55555C;--faint:#66666D;--volt:var(--accent);font-family:'Geist',system-ui,sans-serif;font-size:14px;line-height:1.5;color:var(--text);background:var(--bg);-webkit-font-smoothing:antialiased;box-sizing:border-box}
+.v *{box-sizing:border-box}
+.v.dark{--bg:#0E0E10;--surface:#17171B;--sunk:#202025;--line:#2A2A30;--line2:#3C3C44;--text:#F2F2EE;--muted:#A6A6AE;--faint:#8F8F98}
+.disp{font-family:'Space Grotesk',system-ui,sans-serif;letter-spacing:-0.025em}
+.mono{font-family:'JetBrains Mono',ui-monospace,monospace;font-variant-numeric:tabular-nums}
+.tag{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:12px;font-weight:500;letter-spacing:.06em;text-transform:uppercase}
+.nav a{font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:500;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);text-decoration:none;padding:7px 10px;border-radius:6px}
+.nav a:hover{color:var(--text);background:var(--sunk)}
+.nav a.on{color:var(--volt);background:var(--ink)}
+.v.dark .nav a.on{color:#0B0B0C;background:var(--volt)}
+.seg{font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:500;letter-spacing:.05em;text-transform:uppercase;height:32px;padding:0 12px;border:0;border-radius:6px;background:transparent;color:var(--muted);cursor:pointer}
+.seg.on{background:var(--ink);color:var(--volt)}
+.v.dark .seg.on{background:var(--volt);color:#0B0B0C}
+.card{background:var(--surface);border:1.5px solid var(--text);border-radius:12px;padding:22px}
+.vrow{display:grid;grid-template-columns:150px minmax(0,1fr) 70px;gap:14px;align-items:center}
+.bar{height:14px;border-radius:3px;background:var(--sunk);overflow:hidden;border:1px solid var(--line2)}
+.bar span{display:block;height:100%;background:var(--volt);border-right:1.5px solid var(--ink)}
+table{width:100%;border-collapse:collapse}
+th{text-align:left;font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:500;letter-spacing:.06em;text-transform:uppercase;color:var(--faint);padding:0 0 10px;border-bottom:1.5px solid var(--text)}
+td{padding:14px 0;border-bottom:1px solid var(--line)}
+td.n,th.n{text-align:right;font-family:'JetBrains Mono',monospace}
+@keyframes rise{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:none}}
+@keyframes fill{from{width:0}}
+h1,.big{animation:rise .6s cubic-bezier(.2,.8,.2,1) both}
+.bar span,.fillin{animation:fill 1.2s .3s cubic-bezier(.2,.8,.2,1) both}
+.vrow:nth-child(2) .bar span{animation-delay:.45s}.vrow:nth-child(3) .bar span{animation-delay:.6s}.vrow:nth-child(4) .bar span{animation-delay:.75s}
+tbody tr{animation:rise .45s cubic-bezier(.2,.8,.2,1) both}
+tbody tr:nth-child(2){animation-delay:.08s}tbody tr:nth-child(3){animation-delay:.16s}
+tbody tr{transition:background-color .15s ease}tbody tr:hover{background:var(--sunk)}
+@media (prefers-reduced-motion: reduce){.v *{animation:none!important;transition:none!important}}
+a{color:inherit}
+</style>
+</helmet>
+<div class="v {{mode}}" style="--accent: {{accent}}; min-height: 100vh">
+
+<header style="display: flex; align-items: center; gap: 22px; flex-wrap: wrap; padding: 10px 24px; min-height: 62px; border-bottom: 1.5px solid var(--text); background: var(--surface)">
+  <a href="Projects.dc.html" aria-label="Voltage home" class="disp" style="display: flex; align-items: center; gap: 10px; text-decoration: none; color: var(--text); font-weight: 700; font-size: 17px; letter-spacing: .02em">
+    <svg width="26" height="26" viewBox="0 0 24 24" aria-hidden="true"><rect x=".75" y=".75" width="22.5" height="22.5" rx="6" style="fill: var(--volt); stroke: var(--ink)" stroke-width="1.5"></rect><path d="M13.5 4 7 13h4.5l-1 7L17 11h-4.5z" fill="#0B0B0C"></path></svg>
+    VOLTAGE
+  </a>
+  <nav class="nav" aria-label="Main" style="display: flex; gap: 4px; flex-wrap: wrap">
+    <a href="Projects.dc.html">Projects</a>
+    <a href="Voices.dc.html">Voices</a>
+    <a href="Usage.dc.html" class="on" aria-current="page">Usage</a>
+    <a href="Settings.dc.html">Settings</a>
+  </nav>
+  <div style="flex: 1"></div>
+  <a href="Settings.dc.html" aria-label="Account" class="disp" style="width: 34px; height: 34px; border-radius: 50%; border: 1.5px solid var(--text); display: grid; place-items: center; text-decoration: none; color: var(--text); font-weight: 700; font-size: 14px">A</a>
+</header>
+
+<main style="max-width: 1080px; margin: 0 auto; padding: 48px 24px 88px; display: flex; flex-direction: column; gap: 32px">
+
+  <div style="display: flex; align-items: flex-end; gap: 16px; flex-wrap: wrap">
+    <h1 class="disp" style="margin: 0; font-size: 56px; line-height: 1; font-weight: 700; flex: 1 1 300px">Usage</h1>
+    <div role="group" aria-label="Period" style="display: inline-flex; gap: 2px; padding: 3px; border: 1.5px solid var(--text); border-radius: 9px">
+      <sc-for list="{{periods}}" as="p" hint-placeholder-count="3">
+        <button class="{{p.cls}}" aria-pressed="{{p.sel}}" onClick="{{p.pick}}">{{p.label}}</button>
+      </sc-for>
+    </div>
+  </div>
+
+  <div style="display: flex; flex-wrap: wrap; gap: 20px">
+    <div class="card big" style="flex: 2 1 420px; display: flex; flex-direction: column; gap: 16px; box-shadow: 6px 6px 0 var(--volt)">
+      <span class="tag" style="color: var(--faint)">Spent · {{periodLabel}}</span>
+      <div style="display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap">
+        <span class="disp" style="font-size: 84px; line-height: .9; font-weight: 700">${{spent}}</span>
+        <span class="mono" style="font-size: 16px; color: var(--muted)">of your $10.00 monthly ceiling</span>
+      </div>
+      <div style="height: 18px; border-radius: 4px; border: 1.5px solid var(--text); overflow: hidden">
+        <span class="fillin" style="display: block; height: 100%; width: {{pct}}; background: var(--volt); border-right: 1.5px solid var(--ink)"></span>
+      </div>
+      <span style="font-size: 13px; color: var(--muted)">New paid work stops at the ceiling, with the reason said. Each project also has its own $2.00 cap. <a href="Billing.dc.html" style="color: var(--text)">Raise the ceiling</a></span>
+    </div>
+    <div style="flex: 1 1 260px; display: grid; grid-template-columns: 1fr 1fr; gap: 12px">
+      <div class="card" style="padding: 16px"><div class="tag" style="color: var(--faint)">Turns</div><div class="disp" style="font-size: 36px; font-weight: 700">{{turns}}</div></div>
+      <div class="card" style="padding: 16px"><div class="tag" style="color: var(--faint)">Takes voiced</div><div class="disp" style="font-size: 36px; font-weight: 700">{{takes}}</div></div>
+      <div class="card" style="padding: 16px"><div class="tag" style="color: var(--faint)">Voices made</div><div class="disp" style="font-size: 36px; font-weight: 700">3</div></div>
+      <div class="card" style="padding: 16px; background: var(--ink); color: var(--volt); border-color: var(--ink)"><div class="tag">Avg turn</div><div class="disp" style="font-size: 36px; font-weight: 700">$0.14</div></div>
+    </div>
+  </div>
+
+  <div class="card" style="display: flex; flex-direction: column; gap: 18px">
+    <div style="display: flex; align-items: baseline; gap: 10px"><h2 class="disp" style="margin: 0; font-size: 22px; font-weight: 700">Where it went</h2><span class="tag" style="color: var(--faint)">by vendor</span></div>
+    <div style="display: flex; flex-direction: column; gap: 14px">
+      <div class="vrow"><span style="font-weight: 500">Voltage thinking<br><span class="tag" style="color: var(--faint)">Claude</span></span><div class="bar"><span style="width: 64%"></span></div><span class="mono" style="text-align: right">$1.31</span></div>
+      <div class="vrow"><span style="font-weight: 500">Voices and takes<br><span class="tag" style="color: var(--faint)">ElevenLabs</span></span><div class="bar"><span style="width: 34%"></span></div><span class="mono" style="text-align: right">$0.70</span></div>
+      <div class="vrow"><span style="font-weight: 500">Transcription<br><span class="tag" style="color: var(--faint)">OpenAI</span></span><div class="bar"><span style="width: 2.5%"></span></div><span class="mono" style="text-align: right">$0.05</span></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div style="display: flex; align-items: baseline; gap: 10px; margin-bottom: 16px"><h2 class="disp" style="margin: 0; font-size: 22px; font-weight: 700">By project</h2><span class="tag" style="color: var(--faint)">each capped at $2.00</span></div>
+    <div style="overflow-x: auto">
+      <table>
+        <thead><tr><th>Project</th><th class="n">Turns</th><th class="n">Voice chars</th><th class="n">Spent</th><th style="width: 160px; padding-left: 24px">Of its cap</th></tr></thead>
+        <tbody>
+          <tr><td><a href="Main.dc.html" style="font-weight: 600; text-decoration: none">bhaji-cam-ad.mp4</a></td><td class="n">5</td><td class="n">612</td><td class="n">$1.07</td><td style="padding-left: 24px"><div class="bar" style="height: 10px"><span style="width: 54%"></span></div></td></tr>
+          <tr><td style="font-weight: 600">goa-beach.mov</td><td class="n">10</td><td class="n">488</td><td class="n">$0.94</td><td style="padding-left: 24px"><div class="bar" style="height: 10px"><span style="width: 47%"></span></div></td></tr>
+          <tr><td style="font-weight: 600">sample-ad.mp4</td><td class="n">1</td><td class="n">25</td><td class="n">$0.05</td><td style="padding-left: 24px"><div class="bar" style="height: 10px"><span style="width: 3%"></span></div></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"dark":{"editor":"boolean","default":false},"accent":{"editor":"color","default":"#D7FF3A","options":["#D7FF3A","#FF6B3D","#7CFFB2","#A99BFF"]},"$preview":{"width":1440,"height":1000}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { period: 'month' };
+  }
+  renderVals() {
+    const data = {
+      week: { label: 'This week', spent: '1.12', pct: '11%', turns: 9, takes: 7 },
+      month: { label: 'October', spent: '2.06', pct: '21%', turns: 16, takes: 14 },
+      all: { label: 'All time', spent: '3.40', pct: '34%', turns: 27, takes: 25 }
+    };
+    const p = this.state.period;
+    const periods = [['week', 'Week'], ['month', 'Month'], ['all', 'All time']].map(([k, label]) => ({
+      label, cls: k === p ? 'seg on' : 'seg', sel: k === p ? 'true' : 'false', pick: () => this.setState({ period: k })
+    }));
+    const d = data[p];
+    return { mode: this.props.dark ? 'dark' : '', accent: this.props.accent ?? '#D7FF3A', periods, periodLabel: d.label, spent: d.spent, pct: d.pct, turns: d.turns, takes: d.takes };
+  }
+}
+</script>
+</body>
+</html>
