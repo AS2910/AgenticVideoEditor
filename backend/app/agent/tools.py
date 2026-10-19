@@ -175,7 +175,7 @@ def _read_transcript(wb: Workbench, turn: Turn, args: dict) -> ToolResult:
     lines = list(wb.lines(turn.record))
     if not lines:
         return ToolResult(f"No one speaks in this clip. It is {turn.record.source.duration:.1f} s of picture and sound.",
-                          step="Listened — no one speaks")
+                          step="Listened: no one speaks")
     out = ["Transcript (line. [start–end s] speaker: words  (syllables now, up to N fit in the slot)):"]
     labels = {s.name: s.label for s in wb.speakers(turn.project_id)}
     for ln in lines:
@@ -184,7 +184,7 @@ def _read_transcript(wb: Workbench, turn: Turn, args: dict) -> ToolResult:
         out.append(f"{ln.index}. [{ln.start:.1f}–{ln.end:.1f}]{who} {ln.text}{fits}")
     spk = [s for s in wb.speakers(turn.project_id)]
     if spk:
-        out.append("Speakers: " + "; ".join(f"{s.name} ({s.label})" + (" — own voice made" if s.clone_voice_id else "") for s in spk)
+        out.append("Speakers: " + "; ".join(f"{s.name} ({s.label})" + (", own voice made" if s.clone_voice_id else "") for s in spk)
                    + ". A replacement in a speaker's line speaks in their own voice when voice_id is empty.")
     del labels
     return ToolResult("\n".join(out), step=f"Read all {len(lines)} {'line' if len(lines) == 1 else 'lines'}")
@@ -231,7 +231,7 @@ def _hear(wb: Workbench, turn: Turn, args: dict) -> ToolResult:
 def _list_voices(wb: Workbench, turn: Turn, args: dict) -> ToolResult:
     voices = list(wb.voices())
     if not voices:
-        return ToolResult("No voices are available.", step="Looked for voices — none")
+        return ToolResult("No voices are available.", step="Looked for voices: none")
     made = {m["voice_id"]: m for m in _made_voices(wb, turn)}
     out = ["Voices that can speak a line (voice_id · name · who · how they sound):"]
     shared = _project_voices(wb, turn)
@@ -267,20 +267,20 @@ def _search_library(wb: Workbench, turn: Turn, args: dict) -> ToolResult:
     try:
         hits = list(wb.library(accent or "", language="en")) if accent else []
     except Exception as exc:  # noqa: BLE001
-        return ToolResult(f"The voice library could not be searched ({exc}).", step="Searched the voice library — unavailable")
+        return ToolResult(f"The voice library could not be searched ({exc}).", step="Searched the voice library: unavailable")
     if gender:
         hits = [h for h in hits if (h.get("gender") or "").lower() == gender]
     hits = hits[:8]
     if not hits:
         return ToolResult("Nothing in the library matched. Searching needs an accent "
                           "(indian, british, american, australian, …); the description narrows it in your own judgement.",
-                          step="Searched the voice library — nothing")
+                          step="Searched the voice library: nothing found")
     out = ["Library voices, most used first (name · who · how they sound · voice_id · owner_id). Not in the catalogue yet: "
            "add_voice_from_library puts one there (a voice slot, no credits); the description is yours to judge against:"]
     for h in hits:
         who = ", ".join(str(x).replace("_", " ") for x in (h.get("gender"), h.get("accent"), h.get("age")) if x)
         out.append(f"- {h['name']} · {who} · {h.get('description', '')[:120]} · {h['voice_id']} · {h.get('public_owner_id', '')}")
-    return ToolResult("\n".join(out), step=f"Searched the voice library — {len(hits)} found")
+    return ToolResult("\n".join(out), step=f"Searched the voice library: {len(hits)} found")
 
 
 def _estimate(wb: Workbench, turn: Turn, args: dict) -> ToolResult:
@@ -299,7 +299,7 @@ def _project_state(wb: Workbench, turn: Turn, args: dict) -> ToolResult:
     if not items:
         out.append("No lines planned or voiced yet.")
     for i in items:
-        out.append(f"- {i.item_id} at {i.selection.start:.1f}–{i.selection.end:.1f} s: “{i.new_text}” — {i.status}"
+        out.append(f"- {i.item_id} at {i.selection.start:.1f}–{i.selection.end:.1f} s: “{i.new_text}”: {i.status}"
                    + (f", take {i.candidate_id}" if i.candidate_id else ""))
     out.extend(shipped_lines(wb.edits(turn.project_id)))
     out.append(render_line(wb.render_state(turn.project_id)))
@@ -334,7 +334,7 @@ def shipped_lines(edits: Sequence[Any]) -> list[str]:
     for e in live:
         sel = e.plan.selection
         words = f"“{e.plan.new_text}”" if e.plan.new_text else "(silence)"
-        out.append(f"- {e.edit_id} at {sel.start:.1f}–{sel.end:.1f} s: {words} — {_MIX_WORDS.get(e.plan.mix, e.plan.mix)}")
+        out.append(f"- {e.edit_id} at {sel.start:.1f}–{sel.end:.1f} s: {words}, {_MIX_WORDS.get(e.plan.mix, e.plan.mix)}")
     return out
 
 
@@ -343,11 +343,11 @@ def shipped_lines(edits: Sequence[Any]) -> list[str]:
 def _list_project_videos(wb: Workbench, turn: Turn, args: dict) -> ToolResult:
     project = wb.project(turn.project_id)
     if not project:
-        return ToolResult("This video is in no project; it has no sister videos.", step="Looked for sister videos — none")
+        return ToolResult("This video is in no project; it has no sister videos.", step="Looked for sister videos: none")
     sisters = list(project.get("videos") or [])
     if not sisters:
-        return ToolResult(f"{project.get('name')} holds no other video yet.", step="Looked for sister videos — none")
-    out = [f"The other videos in {project.get('name')} (read only — this turn changes only its own video):"]
+        return ToolResult(f"{project.get('name')} holds no other video yet.", step="Looked for sister videos: none")
+    out = [f"The other videos in {project.get('name')} (read only; this turn changes only its own video):"]
     for v in sisters:
         shipped = list(v.get("shipped") or [])
         said = "; ".join(f"“{e.get('text')}”" + (f" in {e['voice']}" if e.get("voice") else "") for e in shipped if e.get("text"))
@@ -390,10 +390,10 @@ def passages_of(files: Sequence[dict], query: str, limit: int = MAX_PASSAGES, wi
 def _read_project_files(wb: Workbench, turn: Turn, args: dict) -> ToolResult:
     project = wb.project(turn.project_id)
     if not project:
-        return ToolResult("This video is in no project; there are no reference files.", step="Looked for reference files — none")
+        return ToolResult("This video is in no project; there are no reference files.", step="Looked for reference files: none")
     files = list(project.get("files") or [])
     if not files:
-        return ToolResult(f"{project.get('name')} has no reference files yet.", step="Looked for reference files — none")
+        return ToolResult(f"{project.get('name')} has no reference files yet.", step="Looked for reference files: none")
     query = (args.get("query") or "").strip()
     unread = [f["name"] for f in files if not (f.get("text") or "").strip()]
     if not query:
@@ -403,10 +403,10 @@ def _read_project_files(wb: Workbench, turn: Turn, args: dict) -> ToolResult:
     if not found:
         return ToolResult(f"Nothing in the reference files mentions “{query}”. The files: " + ", ".join(f["name"] for f in files) + "."
                           + (f" No text could be read from {', '.join(unread)}." if unread else ""),
-                          step=f"Searched the reference files for “{query[:40]}” — nothing")
+                          step=f"Searched the reference files for “{query[:40]}”: nothing found")
     out = [f"Passages about “{query}” (file · passage):"]
     out.extend(f"- {name} · {piece}" for name, piece in found)
-    return ToolResult("\n".join(out), step=f"Searched the reference files for “{query[:40]}” — {len(found)} found")
+    return ToolResult("\n".join(out), step=f"Searched the reference files for “{query[:40]}”: {len(found)} found")
 
 
 def _suggest_brief(wb: Workbench, turn: Turn, args: dict) -> ToolResult:
@@ -433,10 +433,10 @@ def _search_help(wb: Workbench, turn: Turn, args: dict) -> ToolResult:
     try:
         hits = list(wb.help_search(query))[:3]
     except Exception as exc:  # noqa: BLE001 — Help that cannot be read is said, not raised
-        return ToolResult(f"Help could not be searched ({exc}).", step="Looked in Help — unavailable")
+        return ToolResult(f"Help could not be searched ({exc}).", step="Looked in Help: unavailable")
     if not hits:
         return ToolResult(f"Help has no article about “{query}”. Say so rather than guess at a feature.",
-                          step=f"Looked in Help for “{query[:40]}” — nothing")
+                          step=f"Looked in Help for “{query[:40]}”: nothing found")
     out = [f"Help articles about “{query}” (name the one you answer from):"]
     for h in hits:
         body = " ".join((h.get("body") or "").split())
@@ -513,7 +513,7 @@ def _slots_line(wb: Workbench) -> str:
     if not slots:
         return ""
     used, limit = slots
-    return f" {used} of {limit} voice slots are used" + (" — nearly full; delete a voice before making more." if limit - used <= 5 else ".")
+    return f" {used} of {limit} voice slots are used" + (", nearly full. Delete a voice before making more." if limit - used <= 5 else ".")
 
 
 def _plan(wb: Workbench, turn: Turn) -> Plan:
@@ -645,7 +645,7 @@ def _synthesize_take(wb: Workbench, turn: Turn, args: dict) -> ToolResult:
             wb.repo.update_item(turn.project_id, turn.plan_id, item.item_id, status="failed", error=reason, progress=None)
         kept = (f" {item.item_id} keeps its earlier take {wb.repo.get_plan(turn.project_id, turn.plan_id).item(item.item_id).candidate_id}, ready to hear."
                 if state == "ready" else f" {item.item_id} has no take.")
-        return ToolResult(f"The take could not be made: {reason}{kept}", step=f"Could not voice “{text[:40]}” — {reason[:80]}")
+        return ToolResult(f"The take could not be made: {reason}{kept}", step=f"Could not voice “{text[:40]}”: {reason[:80]}")
     cost = max(0.0, wb.ledger.spent_usd(turn.project_id) - before)
     finish = getattr(wb.repo, "finish_attempt", None)
     if finish:
@@ -676,7 +676,7 @@ def _synthesize_take(wb: Workbench, turn: Turn, args: dict) -> ToolResult:
                 f"Cost ${cost:.2f}.{' The item moved to the new span.' if moved else ''} "
                 f"The user can hear it now; voice it again (same item_id) to try another direction or wording, "
                 f"or with a new start and end to move it.")
-    how = f" — {direction}" if direction else ""
+    how = f" · {direction}" if direction else ""
     return ToolResult(text_out, step=f"Voiced “{text[:48]}{'…' if len(text) > 48 else ''}” with {name}{how}", cost_usd=cost)
 
 
@@ -726,7 +726,7 @@ def _design_voice(wb: Workbench, turn: Turn, args: dict) -> ToolResult:
     # A paid step: waits under Check with me like a take, and under Just do it
     # when the user asked to be asked before a voice is designed.
     if (turn.autonomy == "ask" and not turn.spend_approved) or (turn.ask_before.get("design") and not turn.commit_approved):
-        raise WaitingForUser(f"Design a voice from “{description}” — three previews to hear, about ${usd:.2f}?", cost_usd=usd)
+        raise WaitingForUser(f"Design a voice from “{description}”: three previews to hear, about ${usd:.2f}?", cost_usd=usd)
     wb.ensure_spend(turn.project_id)
     turn.report(turn.progress, "Designing a voice")
     before = wb.ledger.spent_usd(turn.project_id)
@@ -734,10 +734,10 @@ def _design_voice(wb: Workbench, turn: Turn, args: dict) -> ToolResult:
         previews = list(wb.design(turn.project_id, description, sample))
     except Exception as exc:  # noqa: BLE001 — the model hears why
         reason = str(exc) or type(exc).__name__
-        return ToolResult(f"The voice could not be designed: {reason}", step=f"Could not design a voice — {reason[:80]}")
+        return ToolResult(f"The voice could not be designed: {reason}", step=f"Could not design a voice: {reason[:80]}")
     cost = max(0.0, wb.ledger.spent_usd(turn.project_id) - before)
     if not previews:
-        return ToolResult("The vendor sent no previews back.", step="Designed a voice — nothing came back", cost_usd=cost)
+        return ToolResult("The vendor sent no previews back.", step="Designed a voice: nothing came back", cost_usd=cost)
     designs = dict(wb.repo.settings(turn.project_id).get("designs") or {})
     rows = []
     for n, pv in enumerate(previews, 1):
@@ -756,7 +756,7 @@ def _design_voice(wb: Workbench, turn: Turn, args: dict) -> ToolResult:
                 "You cannot hear them and they differ in ways only an ear tells, so either ask the user which one, or keep one "
                 "with save_voice and say that you picked without hearing. A kept voice is named for the clip (two words at most) "
                 f"and takes a voice slot.{_slots_line(wb)} Cost ${cost:.2f}.")
-    return ToolResult(text_out, step=f"Designed a voice from “{description[:56]}{'…' if len(description) > 56 else ''}” — {len(rows)} previews to hear",
+    return ToolResult(text_out, step=f"Designed a voice from “{description[:56]}{'…' if len(description) > 56 else ''}”: {len(rows)} previews to hear",
                       cost_usd=cost, card=card)
 
 
@@ -774,7 +774,7 @@ def _save_voice(wb: Workbench, turn: Turn, args: dict) -> ToolResult:
         voice_id = wb.save_voice(gid, name, designs[gid]["description"])
     except Exception as exc:  # noqa: BLE001
         reason = str(exc) or type(exc).__name__
-        return ToolResult(f"The voice could not be saved: {reason}", step=f"Could not keep the voice — {reason[:80]}")
+        return ToolResult(f"The voice could not be saved: {reason}", step=f"Could not keep the voice: {reason[:80]}")
     _remember_voice(wb, turn, voice_id, name, "designed", description=designs[gid]["description"])
     n = designs[gid].get("n")
     return ToolResult(f"Saved preview {n} as “{name}” ({voice_id}); it is in the catalogue now and can speak a line.{_slots_line(wb)}",
@@ -792,7 +792,7 @@ def _add_from_library(wb: Workbench, turn: Turn, args: dict) -> ToolResult:
         added = wb.add_from_library(owner, vid, name)
     except Exception as exc:  # noqa: BLE001
         reason = str(exc) or type(exc).__name__
-        return ToolResult(f"The voice could not be added: {reason}", step=f"Could not add {name} — {reason[:80]}")
+        return ToolResult(f"The voice could not be added: {reason}", step=f"Could not add {name}: {reason[:80]}")
     _remember_voice(wb, turn, added, name, "library")
     return ToolResult(f"{name} ({added}) is in the catalogue now and can speak a line.{_slots_line(wb)}",
                       step=f"Added {name} from the voice library")
@@ -924,7 +924,7 @@ def _set_level(wb: Workbench, turn: Turn, args: dict) -> ToolResult:
         if item is None or not item.candidate_id:
             return ToolResult(f"There is no voiced item {item_id}.")
         if item.status == "approved":
-            return ToolResult(f"{item_id} is in the video; name its edit (edit_id) instead — project_state lists them.")
+            return ToolResult(f"{item_id} is in the video; name its edit (edit_id) instead; project_state lists them.")
         candidate = wb.repo.get_candidate(turn.project_id, item.candidate_id)
         if candidate is None:
             return ToolResult(f"The take {item.candidate_id} is gone.")
@@ -955,7 +955,7 @@ def _measure(wb: Workbench, turn: Turn, args: dict) -> ToolResult:
                               ("voice match", "voice_match", r.voice_match), ("naturalness", "naturalness", r.naturalness)):
         if value is not None:
             scores.append(f"{label} {value:.2f}" + (" of 5" if key == "naturalness" else "") + ("" if key in r.measured else " (estimated)"))
-    out = [f"Take {c.candidate_id}: {'passed' if r.passed else 'did not pass'} the sound check" + (f" — {'; '.join(scores)}" if scores else "") + "."]
+    out = [f"Take {c.candidate_id}: {'passed' if r.passed else 'did not pass'} the sound check" + (f" ({'; '.join(scores)})" if scores else "") + "."]
     out.append(f"Runs {c.audio.duration:.2f} s" + (
         f"; {len(c.words)} words, {len(c.words) / max(0.1, c.words[-1].end - c.words[0].start):.1f} a second" if c.words else "") + ".")
     if c.fit_notes:
@@ -1055,7 +1055,7 @@ TOOLS: tuple[Tool, ...] = (
          "Voice a line and place it, as a take the user can hear. Costs money (see estimate). Either replace a transcript line (give `line`) "
          "or place new words by time (give `start` and `end`; `mix` layer = over the picture and sound, concatenate = the picture waits). "
          "To try again on the same item, give its `item_id`. How it is said is yours: `direction` in words (kept with the take), "
-         "`settings` as the vendor's dials, and for v3/v4 audio tags inside `text` — [sighs], [laughs], [whispers], [exhales], "
+         "`settings` as the vendor's dials, and for v3/v4 audio tags inside `text`, such as [sighs], [laughs], [whispers], [exhales], "
          "[long pause], [excited], [sad], [curious]; an ellipsis for a held beat, CAPITALS for weight. "
          "Models: v4 (the vendor's newest; the most emotive, performs tags, keeps the sentence around a seam), v3 (expressive, performs tags, "
          "but a replacement inside someone's sentence loses that context), v2 (the steadiest, finest style control, reads a tag as words so tags are stripped). "
@@ -1083,7 +1083,7 @@ TOOLS: tuple[Tool, ...] = (
     Tool("design_voice",
          "Make a voice from words when the catalogue has nothing that fits: three previews the user can hear (about 25 s each, the same sample text), "
          "for the price of the sample text (the vendor's own is about 350 characters). Keep one with save_voice. Costs money.",
-         _schema({"description": {"type": "string", "description": "Who is speaking: age, gender, accent, texture, manner — e.g. an Indian woman near fifty, unhurried, a smile in the voice, slight rasp."},
+         _schema({"description": {"type": "string", "description": "Who is speaking: age, gender, accent, texture, manner. For example: an Indian woman near fifty, unhurried, a smile in the voice, slight rasp."},
                   "sample_text": {"type": "string", "description": "What the previews read, 100 characters or more; empty lets the vendor write one."}}),
 
          Guard.SPEND, _design_voice, strict=True),

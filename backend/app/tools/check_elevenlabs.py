@@ -80,7 +80,7 @@ def report(findings: list[Finding], plan: dict) -> str:
     for f in findings:
         lines.append(f"  {'ok  ' if f.ok else 'FAIL'} {f.what} ({f.permission})" + (f": {f.detail}" if f.detail else ""))
     for what, permission in UNTESTED:
-        lines.append(f"  --   {what} ({permission}): not tested here — it spends credits or changes your account")
+        lines.append(f"  --   {what} ({permission}): not tested here; it spends credits or changes your account")
     if plan:
         lines.append("")
         lines.append(f"  Plan: {plan.get('tier', '?')} ({plan.get('status', '?')})")
@@ -100,7 +100,7 @@ def report(findings: list[Finding], plan: dict) -> str:
 def main(argv: list[str] | None = None) -> int:
     key = load_settings().elevenlabs_api_key
     if not key:
-        print("No ELEVENLABS_API_KEY in backend/.env — Voltage will use its offline mock voice.")
+        print("No ELEVENLABS_API_KEY in backend/.env. Voltage will use its offline mock voice.")
         return 1
     findings, plan = check(key)
     print(report(findings, plan))

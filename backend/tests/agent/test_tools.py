@@ -26,7 +26,7 @@ def test_a_silent_clip_reads_as_no_speech_and_the_whole_clip_as_room(world):
     t = world.turn()
     read = BY_NAME["read_transcript"].run(world.wb, t, {})
     assert read.text.startswith("No one speaks in this clip. It is 7.5 s")
-    assert read.step == "Listened — no one speaks"
+    assert read.step == "Listened: no one speaks"
     room = BY_NAME["find_room"].run(world.wb, t, {})
     assert "0.0–7.5 s with no speech" in room.text
     heard = BY_NAME["hear"].run(world.wb, t, {"start": 0, "end": 3})
@@ -46,7 +46,7 @@ def test_a_take_is_placed_by_time_as_a_ready_item_and_costs_what_the_ledger_says
         "text": "“Welcome to Goa.”", "voice_id": "kL06KYMvPY56NluIQ72m", "start": 0.4, "end": 2.4,
         "direction": "warm and unhurried, a half-smile", "mix": None, "line": None, "item_id": None,
     })
-    assert out.step == "Voiced “Welcome to Goa.” with Varsha — warm and unhurried, a half-smile"
+    assert out.step == "Voiced “Welcome to Goa.” with Varsha · warm and unhurried, a half-smile"
     assert out.cost_usd == pytest.approx(0.03)
     assert "Take c1 on i1, Varsha's voice, placed at 0.40 s, over the picture. It sounds right. Fit: nearest of 3 takes. The take itself runs 1.0 s, 3.0 words a second. Spoken with the default model. Cost $0.03." in out.text
     assert world.made[0]["mix"] == "layer" and world.made[0]["delivery"] == "calmer"   # "unhurried" wins
@@ -135,7 +135,7 @@ def test_project_state_lists_what_is_in_the_video_and_undo_edit_takes_one_out(wo
     world.live_edits.extend([_live_edit(), _live_edit("e2", "[excited] Where the sand runs WIDE.", start=0.0)])
     state = BY_NAME["project_state"].run(world.wb, world.turn(), {}).text
     assert "In the video already (shipped; undo_edit takes one out):" in state
-    assert "- e1 at 0.4–7.3 s: “Where the sand runs wide.” — layered over the picture and sound" in state
+    assert "- e1 at 0.4–7.3 s: “Where the sand runs wide.”, layered over the picture and sound" in state
     assert "- e2 at 0.0–7.3 s" in state
     with pytest.raises(WaitingForUser) as w:
         BY_NAME["undo_edit"].run(world.wb, world.turn(autonomy="ask"), {"edit_id": "e1"})
@@ -238,11 +238,11 @@ def test_designing_a_voice_is_gated_costed_and_leaves_previews_the_user_can_hear
     args = {"description": "An Indian woman near fifty, unhurried, a smile in the voice", "sample_text": None}
     with pytest.raises(WaitingForUser) as w:
         BY_NAME["design_voice"].run(world.wb, t, args)
-    assert w.value.question == "Design a voice from “An Indian woman near fifty, unhurried, a smile in the voice” — three previews to hear, about $0.10?"
+    assert w.value.question == "Design a voice from “An Indian woman near fifty, unhurried, a smile in the voice”: three previews to hear, about $0.10?"
     assert w.value.gate is True and world.designed == []
     out = BY_NAME["design_voice"].run(world.wb, world.turn("ask", approved=True), args)
     assert world.designed == [{"description": args["description"], "text": None}]
-    assert out.step == "Designed a voice from “An Indian woman near fifty, unhurried, a smile in the vo…” — 3 previews to hear"
+    assert out.step == "Designed a voice from “An Indian woman near fifty, unhurried, a smile in the vo…”: 3 previews to hear"
     assert out.cost_usd == pytest.approx(0.105)
     assert "preview 1: g1 (21 s); preview 2: g2 (22 s); preview 3: g3 (23 s)" in out.text
     assert "You cannot hear them" in out.text and "3 of 30 voice slots are used." in out.text

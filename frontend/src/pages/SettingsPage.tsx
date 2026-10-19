@@ -153,7 +153,7 @@ export function SettingsPage({ me, onSignedOut }: SettingsPageProps) {
             <Row title="Money per turn" desc="Voltage stops and asks before a turn spends more than this.">
               <div className="flex items-center gap-2.5">
                 <button type="button" className="size-9 rounded-lg border-[1.5px] border-foreground text-lg disabled:opacity-50" aria-label="Lower the turn cap" disabled={!settings || cents <= CAP_MIN} onClick={() => setCap(cents - CAP_STEP)}>−</button>
-                <span key={cents} className="tnum inline-block min-w-16 animate-[pop_.3s_ease] text-center text-xl font-semibold" data-testid="turn-cap">{settings ? usd(cents / 100) : '—'}</span>
+                <span key={cents} className="tnum inline-block min-w-16 animate-[pop_.3s_ease] text-center text-xl font-semibold" data-testid="turn-cap">{settings ? usd(cents / 100) : '…'}</span>
                 <button type="button" className="size-9 rounded-lg border-[1.5px] border-foreground text-lg disabled:opacity-50" aria-label="Raise the turn cap" disabled={!settings || cents >= CAP_MAX} onClick={() => setCap(cents + CAP_STEP)}>+</button>
               </div>
             </Row>

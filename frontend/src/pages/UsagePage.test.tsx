@@ -27,7 +27,7 @@ describe('UsagePage', () => {
     routeFetch()
     render(<UsagePage me={ME} />)
     expect(screen.getByRole('status')).toHaveTextContent(/Adding up/)
-    expect(screen.getByTestId('spent')).toHaveTextContent('—')
+    expect(screen.getByTestId('spent')).toHaveTextContent('…')
     expect(await screen.findByText('$2.06')).toBeInTheDocument()
     expect(screen.getByText('of your $10.00 monthly ceiling')).toBeInTheDocument()
     expect(screen.getByRole('meter', { name: 'Spent against the monthly ceiling' })).toHaveAttribute('aria-valuenow', '21')

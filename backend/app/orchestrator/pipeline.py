@@ -18,7 +18,7 @@ ReportFn = Callable[[float, str], None]
 # Shown on every candidate spoken in a premade voice, so a stock voice is never
 # passed off as the speaker's. (Phase 15a: when the line says why it is stock —
 # too little speech to clone — that sentence stands in its place.)
-STOCK_VOICE_WARNING = "Stock voice — this is not the speaker's voice yet."
+STOCK_VOICE_WARNING = "Stock voice: this is not the speaker's voice yet."
 
 
 def identity_of(voice: VoiceAdapter, plan: EditPlan) -> str:

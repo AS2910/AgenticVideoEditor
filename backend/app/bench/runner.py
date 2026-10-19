@@ -141,9 +141,9 @@ def table(results: Sequence[Result]) -> str:
     """A markdown table: one row per case."""
     head = "| case | label | ratio | rung | passed | prosody | integration | seam dB | seam st | frozen s | ok |"
     rule = "|---|---|---:|---|---|---:|---:|---:|---:|---:|---|"
-    fmt = lambda v: "—" if v is None else f"{v:.2f}"  # noqa: E731
+    fmt = lambda v: "none" if v is None else f"{v:.2f}"  # noqa: E731
     rows = [
-        f"| {r.name} | {r.label} | {r.ratio:.2f} | {r.rung} | {'—' if r.passed is None else ('yes' if r.passed else 'no')} "
+        f"| {r.name} | {r.label} | {r.ratio:.2f} | {r.rung} | {'n/a' if r.passed is None else ('yes' if r.passed else 'no')} "
         f"| {fmt(r.prosody)} | {fmt(r.audio_integration)} | {fmt(r.seam_level_db)} | {fmt(r.seam_colour_st)} | {r.frozen_seconds:.2f} | {'✓' if r.ok else '✗'} |"
         for r in results
     ]

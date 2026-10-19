@@ -42,17 +42,17 @@ export function BillingPage({ me }: { me: Me | null }) {
           <div className="grid grid-cols-[repeat(auto-fit,minmax(200px,1fr))] gap-3.5">
             <div className={cell}>
               <span className="tag text-faint">Monthly</span>
-              <span className="disp text-[30px] font-bold">{report ? usd(report.spent_usd) : '—'} <span className="text-base text-muted-foreground">/ {report ? usd(report.ceiling_usd) : '—'}</span></span>
+              <span className="disp text-[30px] font-bold">{report ? usd(report.spent_usd) : '…'} <span className="text-base text-muted-foreground">/ {report ? usd(report.ceiling_usd) : '…'}</span></span>
               <FillBar share={share} height={10} strong label="Spent against the monthly ceiling" />
             </div>
             <div className={cell}>
               <span className="tag text-faint">Per project</span>
-              <span className="disp text-[30px] font-bold">{report ? usd(report.project_cap_usd) : '—'}</span>
+              <span className="disp text-[30px] font-bold">{report ? usd(report.project_cap_usd) : '…'}</span>
               <span className="text-[13px] text-muted-foreground">{top ? `Highest so far: ${top.filename} at ${usd(top.spent_usd)}` : 'No project has spent anything this month.'}</span>
             </div>
             <div className={cell}>
               <span className="tag text-faint">Per turn</span>
-              <span className="disp text-[30px] font-bold">{settings ? usd(settings.turn_usd) : '—'}</span>
+              <span className="disp text-[30px] font-bold">{settings ? usd(settings.turn_usd) : '…'}</span>
               <a href={hrefFor({ page: 'settings' })} className="text-[13px] text-muted-foreground">Change in settings</a>
             </div>
           </div>

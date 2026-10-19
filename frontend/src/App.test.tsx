@@ -968,9 +968,9 @@ describe('App panel order', () => {
 
 describe('App with Voltage as an agent (Phase 20a)', () => {
   const STEPS = [
-    { role: 'assistant', text: 'Listened — no one speaks', kind: 'step', seq: 2 },
+    { role: 'assistant', text: 'Listened: no one speaks', kind: 'step', seq: 2 },
     { role: 'assistant', text: 'Looked through 25 voices', kind: 'step', seq: 3 },
-    { role: 'assistant', text: 'Voiced “Welcome to Goa.” with Varsha — warm and unhurried', kind: 'step', cost: 0.03, seq: 4 },
+    { role: 'assistant', text: 'Voiced “Welcome to Goa.” with Varsha · warm and unhurried', kind: 'step', cost: 0.03, seq: 4 },
     { role: 'assistant', text: 'One line over the opening shot, in Varsha\'s voice. Hear it below.', kind: 'say', seq: 5 },
   ]
 
@@ -1006,7 +1006,7 @@ describe('App with Voltage as an agent (Phase 20a)', () => {
 
     const list = await screen.findByRole('list', { name: 'What Voltage did' })
     expect(within(list).getAllByRole('listitem').map((li) => li.textContent)).toEqual([
-      '├Listened — no one speaksfree', '├Looked through 25 voicesfree', '└Voiced “Welcome to Goa.” with Varsha — warm and unhurried$0.03',
+      '├Listened: no one speaksfree', '├Looked through 25 voicesfree', '└Voiced “Welcome to Goa.” with Varsha · warm and unhurried$0.03',
     ])
     expect(screen.getByTestId('trace')).toHaveTextContent('Trace · 3 steps')
     expect(await screen.findByText("One line over the opening shot, in Varsha's voice. Hear it below.")).toBeInTheDocument()

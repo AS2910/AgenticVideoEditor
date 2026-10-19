@@ -600,7 +600,7 @@ export function LineDoc({
     const voice = voices.find((x) => x.voice_id === c.plan.voice_profile_id)?.name
     const facts = takeFacts(c, voice)
     const current = (item.delivery ?? c.plan.delivery ?? '').toLowerCase()
-    const fact = (label: string) => facts.grid.find((f) => f.label === label)?.value ?? '—'
+    const fact = (label: string) => facts.grid.find((f) => f.label === label)?.value ?? 'None'
     const before = item.mix === 'replace' ? standing(s) : null
     return (
       <div className="flex flex-col gap-4.5" data-testid="depth">

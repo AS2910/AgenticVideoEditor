@@ -44,7 +44,7 @@ def test_list_voices_puts_the_projects_voices_first(world):
 def test_list_project_videos_reads_the_sisters(world):
     out = BY_NAME["list_project_videos"].run(_in_project(world), world.turn(), {})
     assert out.text.splitlines() == [
-        "The other videos in Spring sale (read only — this turn changes only its own video):",
+        "The other videos in Spring sale (read only; this turn changes only its own video):",
         "- sister.mp4 (12.0 s, shipped): shipped “Get 30% off.” in Priya's voice",
         "- draft.mp4 (8.0 s, new): nothing shipped yet"]
     assert out.step == "Read the 2 sister videos"
@@ -55,7 +55,7 @@ def test_read_project_files_returns_passages_with_the_file_name(world):
     wb = _in_project(world)
     out = BY_NAME["read_project_files"].run(wb, world.turn(), {"query": "price"})
     assert out.text.splitlines()[1].startswith("- brief.txt · Always say the price first.")
-    assert out.step == "Searched the reference files for “price” — 1 found"
+    assert out.step == "Searched the reference files for “price”: 1 found"
     none = BY_NAME["read_project_files"].run(wb, world.turn(), {"query": "zebra"})
     assert none.text.startswith("Nothing in the reference files mentions “zebra”") and "No text could be read from deck.pdf" in none.text
     assert BY_NAME["read_project_files"].run(wb, world.turn(), {"query": ""}).text.startswith("The reference files: brief.txt, deck.pdf.")

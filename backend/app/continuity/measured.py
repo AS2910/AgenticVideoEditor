@@ -215,7 +215,7 @@ class MeasuredContinuityEngine:
             gain = context_level - generated_level
             if abs(gain) > MAX_GAIN_DB:
                 warnings.append(
-                    f"Level is {gain:+.1f} dB off the surrounding speech — too far to correct."
+                    f"Level is {gain:+.1f} dB off the surrounding speech, too far to correct."
                 )
                 gain = math.copysign(MAX_GAIN_DB, gain)
             corrected *= 10 ** (gain / 20)

@@ -1717,7 +1717,7 @@ def test_a_turn_voices_a_line_through_the_tools_and_the_thread_shows_each_step(c
     assert kinds[0] == ("user", "say", "make it 30% off")
     assert ("assistant", "step", "Read all 1 line") in kinds and ("assistant", "step", "Looked through 1 voices") in kinds
     voiced_ = next(m for m in messages if m["kind"] == "step" and m["text"].startswith("Voiced “Get 30% off"))
-    assert voiced_["text"] == "Voiced “Get 30% off today only.” with Test tone — brisk and confident"
+    assert voiced_["text"] == "Voiced “Get 30% off today only.” with Test tone · brisk and confident"
     assert kinds[-2] == ("assistant", "say", result["reply"]) and kinds[-1][:2] == ("assistant", "step")   # then "Thinking", its own cost
     later = client.get("/videos/p1/messages", params={"after": messages[-3]["seq"]}).json()
     assert [m["text"] for m in later] == [result["reply"], "Thinking"]

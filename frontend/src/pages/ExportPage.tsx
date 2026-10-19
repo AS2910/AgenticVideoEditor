@@ -165,9 +165,9 @@ export function ExportPage({ projectId, me, onBack }: ExportPageProps) {
           </div>
 
           <div className="grid grid-cols-3 gap-2.5">
-            <Tile label="Turns" value={receipt ? receipt.turns : '—'} size="md" className="rise" />
-            <Tile label="Takes" value={receipt ? receipt.takes : '—'} size="md" className="rise d1" />
-            <Tile label="Spent" value={receipt ? usd(receipt.spent_usd) : '—'} size="md" tone="volt" className="rise d1" />
+            <Tile label="Turns" value={receipt ? receipt.turns : '…'} size="md" className="rise" />
+            <Tile label="Takes" value={receipt ? receipt.takes : '…'} size="md" className="rise d1" />
+            <Tile label="Spent" value={receipt ? usd(receipt.spent_usd) : '…'} size="md" tone="volt" className="rise d1" />
           </div>
           <a href={hrefFor({ page: 'usage' })} className="tag text-muted-foreground no-underline hover:text-foreground">Full receipt →</a>
         </section>

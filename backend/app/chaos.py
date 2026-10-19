@@ -196,5 +196,5 @@ def from_settings(spec: str | None, auth_mode: str, force: bool) -> Chaos | None
         log.error("AVE_CHAOS is set but sign-in is on; refusing to inject faults (set AVE_CHAOS_FORCE=1 to insist)")
         return None
     chaos = Chaos(faults)
-    log.warning("CHAOS ON: %s — nothing is charged for an injected fault; unset AVE_CHAOS to stop", chaos.describe())
+    log.warning("CHAOS ON: %s. Nothing is charged for an injected fault; unset AVE_CHAOS to stop", chaos.describe())
     return chaos

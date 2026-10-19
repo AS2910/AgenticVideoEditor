@@ -12,7 +12,7 @@ const PERIODS: { key: Period; label: string }[] = [{ key: 'week', label: 'Week' 
 const periodWord = (p: Period) => (p === 'week' ? 'This week' : p === 'month' ? monthLong() : 'All time')
 
 /** Spend for a period against the ceiling, where it went by vendor, and by project. Every
- *  number is the report's; while it loads the space is held with a dash and a sentence. */
+ *  number is the report's; while it loads the space is held with an ellipsis and a sentence. */
 export function UsagePage({ me }: { me: Me | null }) {
   const [period, setPeriod] = useState<Period>('month')
   const [report, setReport] = useState<UsageReport | null>(null)
@@ -31,7 +31,7 @@ export function UsagePage({ me }: { me: Me | null }) {
 
   // Never one period's figures under another's label.
   const r = loading ? null : report
-  const dash = '—'
+  const dash = '…'   // a figure still loading; never a dash (no em dashes in Voltage's copy)
   const share = r && r.ceiling_usd > 0 ? r.spent_usd / r.ceiling_usd : 0
   const topVendor = r ? Math.max(0, ...r.by_vendor.map((v) => v.usd)) : 0
   const word = periodWord(period)

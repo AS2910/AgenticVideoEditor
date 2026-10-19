@@ -38,6 +38,6 @@ describe('BillingPage', () => {
     vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('offline') }))
     render(<BillingPage me={{ mode: 'off', user: null }} />)
     expect(screen.getByText('No plan yet')).toBeInTheDocument()
-    expect(screen.getAllByText('—').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('…').length).toBeGreaterThan(0)
   })
 })

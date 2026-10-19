@@ -138,7 +138,7 @@ export function Timeline({ words, duration, selection, currentTime, onSelect }: 
           onPointerDown={startDrag}
         >
           {words.length === 0 && (
-            <div className="pointer-events-none absolute inset-0 grid place-items-center text-sm text-muted-foreground">No speech found in this video — there are no words to edit.</div>
+            <div className="pointer-events-none absolute inset-0 grid place-items-center text-sm text-muted-foreground">No speech found in this video. There are no words to edit.</div>
           )}
 
           <Words words={words} duration={duration} selection={selection} onClickWord={clickWord} />

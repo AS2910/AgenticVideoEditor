@@ -27,6 +27,7 @@ from app.domain.transcript import (
 from app.media.fit import speaking_rate, syllable_budget, syllables
 from app.config import load_settings
 from app.timefmt import iso, now_iso
+from app.agent.prose import plain
 from app.media import frames as frames_mod, motion, shots
 from app.media import stems as stems_module
 from app.media import ffmpeg, ingest
@@ -1302,7 +1303,7 @@ def read_project(project_id: str, req: ReadRequest, owner: str = Depends(current
             raise HTTPException(status_code=502, detail=str(exc)) from exc
         except VendorError as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
-        out = {"opening": sight.opening, "roles": [], "sight": asdict(sight)}
+        out = {"opening": plain(sight.opening), "roles": [], "sight": asdict(sight)}
         repo.set_settings(project_id, reading=out)
         return out
     try:
@@ -1318,7 +1319,7 @@ def read_project(project_id: str, req: ReadRequest, owner: str = Depends(current
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     by_name = {s.name: s.label for s in repo.speakers(project_id)}
     out = {
-        "opening": reading.opening,
+        "opening": plain(reading.opening),
         "roles": [
             {"label": by_name[r.speaker], "role": r.role, "why": r.why}
             for r in reading.roles if r.speaker in by_name
@@ -2999,6 +3000,8 @@ def take_turn(project_id: str, req: TurnRequest, owner: str = Depends(current_ow
         def on_step(step: str, cost: float, tool: str = "", data: dict | None = None) -> None:
             # The trace shows which tool a step was and when in the turn it landed;
             # a search_help step also carries the articles it found (data.help).
+            # No em dashes in Voltage's own lines (quoted words and the user's own style excepted).
+            step = plain(step, text)
             repo.add_message(project_id, "assistant", step, kind="step", cost=cost or None,
                              data={"tool": tool, "t": round(budget_.elapsed(), 1), **(data or {})})
             repo.append_log(project_id, plan.plan_id, step, f"${cost:.2f}" if cost else "")
@@ -3028,6 +3031,7 @@ def take_turn(project_id: str, req: TurnRequest, owner: str = Depends(current_ow
             logging.getLogger(__name__).info("reply corrected for %s: %s", project_id, fixes)
             outcome = replace(outcome, reply=(outcome.reply or "").rstrip() + "\n\n" + " ".join(fixes))
         if outcome.reply:
+            outcome = replace(outcome, reply=plain(outcome.reply, text))
             repo.add_message(project_id, "assistant", outcome.reply)
         # What Voltage's own thinking cost this turn, as a step of its own (20d):
         # the tools say what they spent; this is the rest of the turn's money.
@@ -3038,7 +3042,8 @@ def take_turn(project_id: str, req: TurnRequest, owner: str = Depends(current_ow
         if question:
             # The gate card shows the step's price beside what the turn has left.
             left = prefs["turn_usd"] - ledger.spent_usd_since(project_id, started_at)
-            question = {**question, "left_usd": round(max(0.0, left), 2)}
+            question = {**question, "left_usd": round(max(0.0, left), 2), "text": plain(question["text"], text),
+                        "options": [plain(o, text) for o in question.get("options") or []], "guess": plain(question.get("guess"), text)}
             repo.add_message(project_id, "assistant", question["text"])
             repo.append_log(project_id, plan.plan_id, f"Asked: {question['text']}")
         updated = repo.get_plan(project_id, plan.plan_id)

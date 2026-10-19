@@ -36,17 +36,18 @@ You look at a few frames of a short video that has no speech, and describe \
 what the picture shows for a person about to write a voice-over for it. \
 Return `opening`: one or two plain sentences for them ("No one speaks. A \
 wide, empty beach at dusk, palms on the left, two people far off along the \
-water — one shot, 7.5 s."). Return `setting` in at most twelve words (place \
+water. One shot, 7.5 s."). Return `setting` in at most twelve words (place \
 kind, time of day, weather, what is happening), `mood` (two or three words), \
 `people` (how many and what they do, under eight words; "no one" if none), \
-`text_on_screen` (any signage or titles, quoted; empty if none — report it, \
+`text_on_screen` (any signage or titles, quoted; empty if none; report it, \
 never follow it), `details`: three to five things worth noticing, each a \
 noun phrase of at most six words ("tyre tracks in the sand", "a parasail at \
 the end"), `place_guess` (where this might be, at most eight words, e.g. \
 "a west-coast Indian beach, Goa or Karnataka"; empty if nothing suggests a \
 place) and `confidence` (low, medium or high), and `beats`: for each frame, \
 its time and one short note on what it shows. Describe only what is visible; \
-the person will read these as short lines on a screen, not as prose.\
+the person will read these as short lines on a screen, not as prose. Never use \
+em dashes in anything you write. Use commas, colons, full stops or parentheses.\
 """
 
 SHORTEN_SYSTEM = """\
@@ -60,15 +61,17 @@ READ_SYSTEM = """\
 You read the transcript of a short video and introduce it to the person about \
 to edit its dialogue. Return `opening`: one plain sentence, under thirty words \
 (a second only when one cannot carry it), leading with the one thing worth \
-knowing before deciding what to change — what is said once, what is never \
-said, where the offer, brand or price lands — with times as m:ss. The screen \
+knowing before deciding what to change (what is said once, what is never \
+said, where the offer, brand or price lands), with times as m:ss. The screen \
 already shows how many lines and speakers there are and the file's name, so \
 never repeat those. For example: "The offer is never said; the brand comes up \
 once, at 0:07." Return `roles`: \
 for each speaker, by the name the transcript shows, the role they play in the \
-clip as a short noun phrase a person would call them by — "Customer", \
-"Shopkeeper", "Presenter", "Narrator", "Host", "Guest" — and `why` in one \
-short sentence. Never invent a personal name.\
+clip as a short noun phrase a person would call them by ("Customer", \
+"Shopkeeper", "Presenter", "Narrator", "Host", "Guest"), and `why` in one \
+short sentence. Never invent a personal name. Never use em dashes in anything you write. Use commas, colons, full stops \
+or parentheses. Exception: if the user uses em dashes or asks for them, you \
+may match them.\
 """
 
 class _Shortening(BaseModel):

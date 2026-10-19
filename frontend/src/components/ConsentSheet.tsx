@@ -37,7 +37,7 @@ export function ConsentSheet({ who, onConfirm, onCancel, busy }: ConsentSheetPro
           <p className="m-0 text-sm text-muted-foreground">Asked once for this project, and remembered. Deleting the project withdraws it.</p>
         </div>
         <DialogFooter>
-          <Button variant="outline" onClick={onCancel} disabled={busy}>Not yet — keep it as a draft</Button>
+          <Button variant="outline" onClick={onCancel} disabled={busy}>Not yet, keep it as a draft</Button>
           <Button onClick={onConfirm} disabled={busy}>{busy ? 'Saving…' : 'Yes, I have it'}</Button>
         </DialogFooter>
       </DialogContent>

@@ -24,7 +24,7 @@ def test_a_turn_looks_voices_and_closes_with_a_sentence(world):
     out, persisted, steps = run(world, client)
     assert out.reply == "One line over the opening shot, in Varsha's voice. Hear it below."
     assert out.question is None and out.calls == 3
-    assert [s for s, _ in steps] == ["Listened — no one speaks", "Looked through 2 voices", "Voiced “Welcome to Goa.” with Varsha — warm"]
+    assert [s for s, _ in steps] == ["Listened: no one speaks", "Looked through 2 voices", "Voiced “Welcome to Goa.” with Varsha · warm"]
     assert steps[-1][1] == 0.03 and out.spent_usd == 0.03
     # The thread as the model saw it: user, assistant, results, assistant, results, assistant.
     assert [r for r, _ in persisted] == ["user", "assistant", "user", "assistant", "user", "assistant"]
@@ -168,7 +168,7 @@ def test_a_card_follows_its_step_and_the_turns_effort_goes_in_the_request(world)
                             on_step=lambda s, c: shown.append(("step", s)), on_card=lambda t, d: shown.append(("card", t, len(d["previews"]))),
                             effort="xhigh")
     assert out.reply == "Which one?"
-    assert shown == [("step", "Designed a voice from “an older woman” — 3 previews to hear"), ("card", "3 voices designed from “an older woman”", 3)]
+    assert shown == [("step", "Designed a voice from “an older woman”: 3 previews to hear"), ("card", "3 voices designed from “an older woman”", 3)]
     assert all(c["output_config"] == {"effort": "xhigh"} for c in client.calls)
     from app.agent.loop import BETAS, CONTEXT_MANAGEMENT
     assert "compact-2026-01-12" in BETAS and CONTEXT_MANAGEMENT["edits"][1] == {"type": "compact_20260112", "trigger": {"type": "input_tokens", "value": 100000}}
