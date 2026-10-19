@@ -53,3 +53,31 @@ Front-end display: `pages/fmt.ts` (`whenLabel`, `monthShort`, `monthLong`) and t
 ## 3. "謝您的觀看" at 0:06 on a silent stretch
 
 Whisper's answer for this clip's audio (re-run once): language `chinese`, one segment `5.5–6.9 "多謝您的觀看"` with no_speech_prob 0.608, avg_logprob −0.956. The filter drops the segment (0.608 > 0.6). Its words are `多 5.5–6.9`, then `謝 您 的 觀 看` each **zero-length at 6.9–6.9**. The word filter's overlap test is strict (`start < b and a < end`), so a zero-length word exactly on the dropped segment's end is never matched: `多` goes, the five others stay. Statements are filtered, words are not, and the transcript shows the words.
+
+## As built
+
+### 1. Renders — what the cause actually was
+
+Not one cause but four that compounded on an 8K HEVC phone clip: the renderer re-encoded an HEVC picture even when nothing was retimed (49 s alone, 20+ min with three at once); renders had no key, so the approval, the post-turn sync and *With proposals* each rendered the same edit set again, concurrently; the client took whichever answer came back last and ignored a newer preview request while one ran, so the status could stick; and Voltage said "ready" from memory. The layer running past the clip's end and a cached stale URL were ruled out.
+
+**Fix.** `edit_set_hash` (source, mode, each edit's take, span, mix, level, flex, fit, words) keys every render; a finished render for a key is reused (`settings.renders`, last 12); requests for the same key share one render, and one video renders one thing at a time; every request, reuse and completion is logged on `voltage.render` with video, mode, hash, sha, request id and seconds. `GET /videos/{id}/renders` reports each mode against the edits now. HEVC is stream-copied (tag `hvc1`). `project_state` and `ship` say "rendered" only from that record, and the prompt forbids saying it otherwise. The client numbers each request per mode, takes only the latest, clears "Rendering…" with it, counts an approval as a final request, plays Hear it over the final only when it is current, and the player resumes at the same moment when its file changes.
+
+**Tests.** `tests/api/test_render_keys.py`: reuse and a changed set; two overlapping renders out of order; identical requests in flight share one render; a mode switch mid-render; undo then re-add; an agent ship then an immediate preview; HEVC copied. Each checks the audio by correlation with the take (> 0.9 with the line, < 0.3 without). `App.test.tsx`: a late, older final render is dropped; a newer preview request is made while an older runs and only the latest shows. `test_tools.py`: Voltage never calls the video ready without a finished render.
+
+### 2. Dates — what the cause actually was
+
+A boolean (`consent: true`) on shared voices, formatted as a date. The missing name was layout, not data: squeezed to 0 px by the date tag and the button. One real field mismatch (`used_in_project` vs `used_in`). Beyond the bug: times were stored as `+00:00` ISO with microseconds, the ledger compares them as strings, and a recorded voice never stored when its consent box was ticked.
+
+**Fix.** `app/timefmt.py`: every moment is `YYYY-MM-DDTHH:MM:SS.mmmZ` or null, written by every writer; `to_iso` reads any old form (and numbers as seconds or ms); a one-time backfill (`times_v2`) rewrites every stored moment and turns a boolean consent into the entry's own time (a shared voice: its owner's), marked `consent_approximate`, or null — never 0. Consent on the wire is `consent_granted_at`. `src/lib/dates.ts` is the one formatter, in the viewer's zone; anything that is not a moment reads "Not recorded". The voice row is name, then kind · Consent 19 Oct 2026.
+
+**Tests.** `tests/api/test_dates.py` (schema over every answer, `to_iso`, the backfill), `src/lib/dates.test.ts` (null, seconds by mistake, a day-boundary zone, month names), `ProjectPage.test.tsx` (the row), `no-1970.test.tsx` (Home, Voices, a project, Export).
+
+### 3. The invented line — what the cause actually was
+
+The sign-off filter worked: the segment was dropped (no_speech_prob 0.61). Its **words** leaked: five were zero-length at 6.90–6.90 on the dropped segment's end, and the strict overlap test (`start < b and a < end`) never matches a zero-length word on an edge. The energy check would not have caught it either: the tail is 14 dB over the clip's floor (ambient sound), above the 8 dB bar. A second, latent bug: the normaliser stripped Devanagari vowel signs, so Hindi sign-offs could never match.
+
+**Fix.** A word inside or on the edge (±20 ms) of a dropped segment goes with it, in both filters. Sign-offs in Chinese, Japanese, Korean and Hindi, plus "thanks for watching" / "subscribe" stems in any language for segments of eight words or fewer. A segment in another script than the clip's own (read from its confident segments, else Whisper's guess) is dropped at a stricter bar (no_speech_prob > 0.3 or avg_logprob < −0.7); confident code-switching (Hinglish) stays. The normaliser drops only punctuation and symbols.
+
+**Tests.** `tests/adapters/test_invented_speech.py`: this clip's own Whisper answer and audio (`tests/fixtures/whisper-silent-tail-zh.json`, `silent-tail-zh.wav`), a silent tail with a sign-off in ten languages, the script rule both ways, real speech mentioning "watching" kept.
+
+**Not done.** Transcripts already stored keep their words (Whisper's raw answer was not kept); the video `p59` still shows "謝您的觀看" until it is uploaded again.

@@ -50,19 +50,115 @@ HALLUCINATIONS = {
     "see you next time", "please subscribe", "like and subscribe", "subscribe to my channel",
     "thank you", "thanks", "bye", "goodbye", "you", "the end", "music", "applause",
     "subtitles by the amara org community", "www mooji org",
+    # Bug 3 (2026-10-19): the same sign-offs in the languages Whisper invents them in.
+    # Chinese (traditional and simplified)
+    "謝謝觀看", "谢谢观看", "多謝您的觀看", "多谢您的观看", "謝謝您的觀看", "谢谢您的观看", "感謝觀看", "感谢观看",
+    "謝謝收看", "谢谢收看", "感謝收看", "感谢收看", "請訂閱", "请订阅", "請不吝點贊訂閱轉發打賞支持明鏡與點點欄目",
+    "字幕由amara org社區提供", "字幕由amara org社区提供",
+    # Japanese
+    "ご視聴ありがとうございました", "ご視聴ありがとうございます", "ありがとうございました", "チャンネル登録お願いします",
+    "チャンネル登録よろしくお願いします", "おやすみなさい",
+    # Korean
+    "시청해주셔서 감사합니다", "시청해 주셔서 감사합니다", "구독과 좋아요 부탁드립니다", "구독 부탁드립니다", "감사합니다",
+    # Hindi
+    "देखने के लिए धन्यवाद", "धन्यवाद", "सब्सक्राइब करें", "चैनल को सब्सक्राइब करें", "वीडियो देखने के लिए धन्यवाद",
+}
+# "Thanks for watching" and "subscribe" in any language: a short segment that
+# holds one of these is a sign-off too, however it is worded around them.
+SIGN_OFF_STEMS = (
+    "watching", "subscribe", "gracias por ver", "suscríbete", "suscribete", "merci davoir regardé", "abonnez",
+    "danke fürs zuschauen", "abonniert", "obrigado por assistir", "inscrevase", "grazie per la visione", "iscriviti",
+    "спасибо за просмотр", "подписывайтесь", "観看", "观看", "收看", "訂閱", "订阅", "視聴", "チャンネル登録",
+    "시청", "구독", "देखने के लिए धन्यवाद", "सब्सक्राइब",
+)
+SIGN_OFF_MAX_WORDS = 8
+
+# A segment in another script than the clip's own language is held to a
+# stricter doubt bar than ordinary speech (real code-switching — Hinglish —
+# speaks with confidence; an invented sign-off does not).
+OFF_LANGUAGE_NO_SPEECH = 0.3
+OFF_LANGUAGE_LOGPROB = -0.7
+SCRIPT_OF_LANGUAGE = {
+    "chinese": "han", "japanese": "kana", "korean": "hangul", "hindi": "devanagari", "marathi": "devanagari",
+    "nepali": "devanagari", "russian": "cyrillic", "ukrainian": "cyrillic", "arabic": "arabic", "urdu": "arabic",
+    "persian": "arabic", "hebrew": "hebrew", "greek": "greek", "thai": "thai", "tamil": "tamil", "telugu": "telugu",
+    "bengali": "bengali", "gujarati": "gujarati", "kannada": "kannada", "malayalam": "malayalam", "punjabi": "gurmukhi",
 }
 # Speech has to stand out from the recording's own noise by this much.
 SPEECH_ABOVE_FLOOR_DB = 8.0
+# A word this close to a dropped segment's edge belongs to it (seconds).
+EDGE = 0.02
 
 _PUNCT = re.compile(r"[^\w\s]")
 
 
 def _normal(text: str) -> str:
-    return re.sub(r"\s+", " ", _PUNCT.sub("", text.lower())).strip()
+    """Lower case, punctuation and symbols gone, spaces single. Only
+    punctuation and symbols go: Devanagari's vowel signs are marks, not
+    letters, and must stay (bug 3: Hindi sign-offs never matched)."""
+    import unicodedata
+    kept = "".join(" " if unicodedata.category(ch)[0] in "PS" else ch for ch in text.lower())
+    return re.sub(r"\s+", " ", kept).strip()
 
 
-def doubtful(segment: dict) -> str | None:
-    """Why a segment looks invented, or None when it looks like real speech."""
+def script_of(text: str) -> str | None:
+    """The writing system most of a text's letters are in, or None when it has none."""
+    counts: dict[str, int] = {}
+    for ch in text:
+        o = ord(ch)
+        name = ("han" if 0x4E00 <= o <= 0x9FFF or 0x3400 <= o <= 0x4DBF else
+                "kana" if 0x3040 <= o <= 0x30FF else
+                "hangul" if 0xAC00 <= o <= 0xD7AF or 0x1100 <= o <= 0x11FF else
+                "devanagari" if 0x0900 <= o <= 0x097F else
+                "cyrillic" if 0x0400 <= o <= 0x04FF else
+                "arabic" if 0x0600 <= o <= 0x06FF else
+                "hebrew" if 0x0590 <= o <= 0x05FF else
+                "greek" if 0x0370 <= o <= 0x03FF else
+                "thai" if 0x0E00 <= o <= 0x0E7F else
+                "latin" if ch.isalpha() and o < 0x0250 else None)
+        if name:
+            counts[name] = counts.get(name, 0) + 1
+    if not counts:
+        return None
+    # Japanese mixes kana and kanji: any kana makes it Japanese.
+    if counts.get("kana"):
+        return "kana"
+    return max(counts, key=counts.get)
+
+
+def clip_script(payload: dict) -> str | None:
+    """The clip's own writing system: from the confident segments' text when
+    there are any (Whisper's one `language` guess is unreliable on a mostly
+    silent clip), else from that guess."""
+    weights: dict[str, float] = {}
+    for seg in payload.get("segments") or []:
+        nsp = seg.get("no_speech_prob")
+        lp = seg.get("avg_logprob")
+        if (nsp is not None and float(nsp) > 0.2) or (lp is not None and float(lp) < -0.5):
+            continue
+        sc = script_of(seg.get("text") or "")
+        if sc:
+            try:
+                weights[sc] = weights.get(sc, 0.0) + max(0.0, float(seg["end"]) - float(seg["start"]))
+            except (KeyError, TypeError, ValueError):
+                continue
+    if weights:
+        return max(weights, key=weights.get)
+    lang = (payload.get("language") or "").lower()
+    return SCRIPT_OF_LANGUAGE.get(lang, "latin" if lang else None)
+
+
+def is_sign_off(text: str) -> bool:
+    n = _normal(text)
+    if n in HALLUCINATIONS:
+        return True
+    words = n.split()
+    return 0 < len(words) <= SIGN_OFF_MAX_WORDS and any(stem.replace(" ", "") in n.replace(" ", "") for stem in SIGN_OFF_STEMS)
+
+
+def doubtful(segment: dict, clip: str | None = None) -> str | None:
+    """Why a segment looks invented, or None when it looks like real speech.
+    `clip` is the clip's own writing system (see `clip_script`)."""
     nsp = segment.get("no_speech_prob")
     if nsp is not None and float(nsp) > NO_SPEECH_PROB_MAX:
         return f"no_speech_prob {float(nsp):.2f}"
@@ -72,8 +168,12 @@ def doubtful(segment: dict) -> str | None:
     cr = segment.get("compression_ratio")
     if cr is not None and float(cr) > COMPRESSION_RATIO_MAX:
         return f"compression_ratio {float(cr):.2f}"
-    if _normal(segment.get("text") or "") in HALLUCINATIONS and (nsp is None or float(nsp) > KNOWN_PHRASE_NO_SPEECH):
+    if is_sign_off(segment.get("text") or "") and (nsp is None or float(nsp) > KNOWN_PHRASE_NO_SPEECH):
         return "a phrase Whisper invents on silence"
+    script = script_of(segment.get("text") or "")
+    if clip and script and script != clip and (
+            (nsp is not None and float(nsp) > OFF_LANGUAGE_NO_SPEECH) or (lp is not None and float(lp) < OFF_LANGUAGE_LOGPROB)):
+        return f"{script} on a {clip} clip, and Whisper unsure of it"
     return None
 
 
@@ -81,8 +181,9 @@ def to_transcript(payload: dict) -> Transcript:
     """Turn a verbose_json response into the domain Transcript, leaving out
     the segments (and their words) that Whisper most likely made up."""
     dropped: list[tuple[float, float]] = []
+    clip = clip_script(payload)
     for raw in payload.get("segments") or []:
-        why = doubtful(raw)
+        why = doubtful(raw, clip)
         if why:
             try:
                 dropped.append((float(raw["start"]), float(raw["end"])))
@@ -91,7 +192,9 @@ def to_transcript(payload: dict) -> Transcript:
             log.info("dropped a doubtful segment %r: %s", (raw.get("text") or "").strip(), why)
 
     def invented(start: float, end: float) -> bool:
-        return any(start < b and a < end for a, b in dropped)
+        # Bug 3: a word inside a dropped segment goes with it, even a zero-length
+        # one sitting on its edge — Whisper's "謝您的觀看" were five words at 6.90–6.90 on a segment ending at 6.90.
+        return any(start < b and a < end or (a - EDGE <= start <= b + EDGE and a - EDGE <= end <= b + EDGE) for a, b in dropped)
 
     words: list[Word] = []
     for raw in payload.get("words") or []:
@@ -146,7 +249,8 @@ def without_silent_speech(transcript: Transcript, audio_path: Path) -> Transcrip
     if not dropped:
         return transcript
     words = tuple(w for w in transcript.words
-                  if not any(w.start < d.end and d.start < w.end for d in dropped))
+                  if not any(w.start < d.end and d.start < w.end
+                             or (d.start - EDGE <= w.start <= d.end + EDGE and d.start - EDGE <= w.end <= d.end + EDGE) for d in dropped))
     return Transcript(words=words, statements=tuple(kept))
 
 
