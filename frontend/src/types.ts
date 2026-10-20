@@ -963,3 +963,30 @@ export interface ProjectTemplate {
 }
 /** D1: a project's own voices need a yes before they go into a template. */
 export interface TemplateVoiceQuestion { detail: string; voices: { voice_id: string; name: string }[] }
+
+/** D2: a line a learned-style pass suggested, or one that was accepted. */
+export interface LearnedItem {
+  item_id: number
+  project_id: string
+  kind: 'brief' | 'rule'
+  text: string
+  why: string
+  status: 'suggested' | 'replaced' | 'accepted' | 'dismissed' | 'removed'
+  rule_id: number | null
+  brief_version: number | null
+  at_count: number
+  created_at: string
+  decided_at: string | null
+  decided_by: string | null
+}
+export interface LearnedPage {
+  pending: LearnedItem | null
+  learned: LearnedItem[]
+  /** Decisions on Voltage's lines in this project so far; a pass runs every `every`. */
+  decisions: number
+  every: number
+  /** Quick reasons for a discard. */
+  reasons: string[]
+  /** After accept or remove: the project as it now is (a new brief version). */
+  project?: ProjectFolder
+}

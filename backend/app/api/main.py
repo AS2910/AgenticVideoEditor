@@ -72,6 +72,7 @@ from app.store import comments as comments_store
 from app.store import bin as bin_store
 from app.store import home as home_store
 from app.store import templates as templates_store
+from app.store import learned as learned_store
 from app.notify import digest as digest_mod, email as email_mod
 from app.render import captions as captions_mod, deliver as deliver_mod
 from app.jobs import exports as exports_mod
@@ -3967,6 +3968,174 @@ def _folder_from_template(req: ProjectCreate, owner: str) -> dict:
     return _folder_dict(repo.get_project(project.project_id))
 
 
+# ── D2: learned style ────────────────────────────────────────────────────────
+#
+# Every decision the user makes on a line Voltage proposed is logged
+# (app/store/learned.py): added, rejected (discarded, with a reason when
+# given), or edited before adding (the words first voiced against the words
+# added). After every 10th decision in a project, one cheap Claude pass
+# (app/adapters/claude_style.py, the project check's model, metered to the
+# project as "Learned style") may suggest ONE line for the brief or a style
+# rule. It changes nothing until accepted; "What Voltage has learned" lists
+# what was, each removable. No Claude key, or the project at its ceiling:
+# the pass is skipped silently. The pass needs `projects.reuse`.
+
+# Tests swap in a fake reader here; None means the real one when a key is set.
+_learn_reader = None
+_learn_reader_built: tuple | None = None
+# Tests run the pass inline; the server runs it on the work pool after the response.
+LEARN_IN_BACKGROUND = True
+
+
+def _learn_reader_for():
+    global _learn_reader_built
+    if _learn_reader is not None:
+        return _learn_reader
+    if not settings.anthropic_api_key:
+        return None
+    key = (settings.anthropic_api_key, settings.anthropic_workspace_id, settings.check_model)
+    if _learn_reader_built is None or _learn_reader_built[0] != key:
+        from app.adapters.claude_style import ClaudeStyleReader
+        _learn_reader_built = (key, ClaudeStyleReader(settings.anthropic_api_key, settings.anthropic_workspace_id, model=settings.check_model))
+    return _learn_reader_built[1]
+
+
+def _first_shown_text(item: PlanItem) -> str:
+    """The words the item's first ready take said: what Voltage proposed
+    before any rewording. An item from before D2 has no record: its words now."""
+    for h in item.history:
+        if h.get("outcome") == "ready" and h.get("text") is not None:
+            return str(h["text"])
+    return item.new_text
+
+
+def _log_decision(video_id: str, plan_id: str, item: PlanItem, decision: str, *, final: str | None = None,
+                  reason: str | None = None) -> int | None:
+    """Log one decision on a proposal and start the pattern pass when it is
+    the project's 10th, 20th... Never fails the action it describes."""
+    try:
+        record = repo.get(video_id)
+        if record is None:
+            return None
+        proposed = _first_shown_text(item)
+        with database.tx() as c:
+            decision_id, n = learned_store.record_in(
+                c, video_id=video_id, decision=decision, proposed_text=proposed, final_text=final,
+                plan_id=plan_id, item_id=item.item_id, reason=reason, by=record.owner)
+        if record.folder_id and learned_store.due(n) and flags.enabled("projects.reuse", record.owner):
+            _start_learn_pass(record.folder_id, record.owner, n)
+        return decision_id
+    except Exception:  # noqa: BLE001 - the log is a by-product; the add or discard stands
+        log.exception("could not log a decision on %s/%s", video_id, item.item_id)
+        return None
+
+
+def _decided_add(video_id: str, plan_id: str, item: PlanItem) -> None:
+    """An add by the user: "edited" when the words differ from the first take's."""
+    if current_turn.get() or item.reason == "Removed by hand":
+        return
+    proposed = _first_shown_text(item)
+    if " ".join(proposed.split()) != " ".join(item.new_text.split()):
+        _log_decision(video_id, plan_id, item, "edited", final=item.new_text)
+    else:
+        _log_decision(video_id, plan_id, item, "added", final=item.new_text)
+
+
+def _start_learn_pass(project_id: str, owner: str, at_count: int) -> None:
+    def run() -> None:
+        try:
+            _learn_pass(project_id, owner, at_count)
+        except Exception:  # noqa: BLE001 - a pass that fails suggests nothing
+            log.exception("learned-style pass for %s", project_id)
+    if LEARN_IN_BACKGROUND:
+        work_pool.submit(run)
+    else:
+        run()
+
+
+def _learn_pass(project_id: str, owner: str, at_count: int) -> dict | None:
+    """One pass: the brief, rules and the last 30 decisions to Claude; at most
+    one suggestion back, stored as waiting. Skipped silently without a key,
+    on an archived project, or when the call would cross a ceiling."""
+    reader = _learn_reader_for()
+    project = repo.get_project(project_id)
+    if reader is None or project is None or project.archived_at:
+        return None
+    rule_lines = [f"{r.kind}: {' / '.join(str(v) for v in r.data.values())}" for r in rules.list_rules(database, project_id)]
+    text = learned_store.request_text({"name": project.name, "brief": project.brief},
+                                      learned_store.decisions(database, project_id, 30), rule_lines)
+    from app.adapters.claude_style import STYLE_MAX_TOKENS
+    estimate = claude_usd(settings.check_model, len(text) // 3 + 400, STYLE_MAX_TOKENS)
+    if _check_spend_refusal(project, estimate):
+        return None
+    spent: list[float] = []
+    out = reader.suggest(text, meter=_project_meter(project_id, "Learned style", spent))
+    if not out or out.get("kind") not in learned_store.KINDS:
+        return None
+    return learned_store.suggest(database, project_id, out["kind"], plain(out.get("text") or ""),
+                                 plain(out.get("why") or ""), at_count)
+
+
+def _learned_page(project_id: str) -> dict:
+    return {"pending": learned_store.pending(database, project_id), "learned": learned_store.learned(database, project_id),
+            "decisions": learned_store.count(database, project_id), "every": learned_store.EVERY,
+            "reasons": list(learned_store.REASONS)}
+
+
+@app.get("/projects/{project_id}/learned")
+def get_learned(project_id: str, owner: str = Depends(current_owner)) -> dict:
+    """The waiting suggestion, what Voltage has learned, and how many decisions so far."""
+    _reuse_flag(owner)
+    _owned_project(project_id, owner)
+    return _learned_page(project_id)
+
+
+def _learned_change(project_id: str, item_id: int, owner: str, change) -> dict:
+    _reuse_flag(owner)
+    _owned_project(project_id, owner)
+    try:
+        change(database, project_id, item_id, owner)
+    except learned_store.LearnedError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    return {**_learned_page(project_id), "project": _folder_dict(repo.get_project(project_id))}
+
+
+@app.post("/projects/{project_id}/learned/{item_id}/accept")
+def accept_learned(project_id: str, item_id: int, owner: str = Depends(current_owner)) -> dict:
+    """Apply the suggestion: a new brief version with the line, or a style rule."""
+    out = _learned_change(project_id, item_id, owner, learned_store.accept)
+    _auto_check(project_id, owner)   # A2: the free checks again after a brief or rule change
+    return out
+
+
+@app.post("/projects/{project_id}/learned/{item_id}/dismiss")
+def dismiss_learned(project_id: str, item_id: int, owner: str = Depends(current_owner)) -> dict:
+    return _learned_change(project_id, item_id, owner, learned_store.dismiss)
+
+
+@app.delete("/projects/{project_id}/learned/{item_id}")
+def remove_learned(project_id: str, item_id: int, owner: str = Depends(current_owner)) -> dict:
+    """Take a learned item back out of the brief or the rules."""
+    return _learned_change(project_id, item_id, owner, learned_store.remove)
+
+
+class DecisionReason(BaseModel):
+    reason: str
+
+
+@app.post("/videos/{video_id}/decisions/{decision_id}/reason")
+def give_decision_reason(video_id: str, decision_id: int, req: DecisionReason, owner: str = Depends(current_owner)) -> dict:
+    """Why a proposal was thrown out, said after Discard."""
+    _owned(video_id, owner)
+    try:
+        found = learned_store.reason(database, decision_id, video_id, req.reason)
+    except learned_store.LearnedError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    if found is None:
+        raise HTTPException(status_code=404, detail="That decision is not on this video.")
+    return found
+
+
 # ── D4: pins, archive, search ────────────────────────────────────────────────
 
 def _last_edited(video_id: str, created_at: str) -> str:
@@ -4730,7 +4899,11 @@ def approve_edit(
     if overridden and not req.override:
         raise HTTPException(status_code=422, detail="continuity check failed")
     _stage_gate([project_id], owner, req.confirm_stage)
+    plan = repo.latest_plan(project_id)
+    proposed = next((i for i in plan.items if i.candidate_id == candidate.candidate_id), None) if plan else None
     edit_id = _approve_candidate(project_id, candidate, overridden)
+    if proposed is not None and proposed.status != "approved":
+        _decided_add(project_id, plan.plan_id, proposed)   # D2
     return {
         "edit_id": edit_id,
         "candidate_id": candidate.candidate_id,
@@ -5412,6 +5585,7 @@ def _ship(project_id: str, record: ProjectRecord, plan_id: str, item_ids: list[s
             skipped.append({"item_id": item.item_id, "reason": "breaks a word rule: " + " ".join(item.word_rule["breaks"])})
             continue
         edit_id = _approve_candidate(project_id, candidate, overridden)
+        _decided_add(project_id, plan_id, item)   # D2: the user's add (Voltage's own ship is not a decision)
         approved.append({"item_id": item.item_id, "edit_id": edit_id, "overridden": overridden,
                          "speaker": item.speaker, "voice_profile_id": _voice_of(candidate.plan)})
     if approved:
@@ -5493,9 +5667,15 @@ def _remove_words(project_id: str, record: ProjectRecord, span: Selection) -> di
     }
 
 
+class DismissRequest(BaseModel):
+    # D2: why it was thrown out, when the user says (optional).
+    reason: str | None = None
+
+
 @app.post("/videos/{project_id}/plans/{plan_id}/items/{item_id}/dismiss")
 @app.post("/projects/{project_id}/plans/{plan_id}/items/{item_id}/dismiss", deprecated=True)
-def dismiss_item(project_id: str, plan_id: str, item_id: str, owner: str = Depends(current_owner)) -> dict:
+def dismiss_item(project_id: str, plan_id: str, item_id: str, req: DismissRequest | None = None,
+                 owner: str = Depends(current_owner)) -> dict:
     """Discard a proposal (20e): the line leaves the plan; a shipped one is
     taken out with Revert instead."""
     _owned(project_id, owner)
@@ -5508,7 +5688,8 @@ def dismiss_item(project_id: str, plan_id: str, item_id: str, owner: str = Depen
     plan = repo.update_item(project_id, plan_id, item_id, status="dismissed", enabled=False)
     repo.append_log(project_id, plan_id, f"You discarded the line at {_clock(item.selection.start)}")
     _resolve_question(project_id, plan_id, f"you discarded the line at {_clock(item.selection.start)}")
-    return _plan_dict(repo.get_plan(project_id, plan_id))
+    decision_id = _log_decision(project_id, plan_id, item, "rejected", reason=req.reason if req else None)
+    return {**_plan_dict(repo.get_plan(project_id, plan_id)), "decision_id": decision_id}
 
 
 @app.post("/videos/{project_id}/plans/{plan_id}/items/{item_id}/ease")

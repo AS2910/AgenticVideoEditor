@@ -726,7 +726,9 @@ class ProjectRepository:
             if item is None:
                 return "stale"
             entry = {"attempt": attempt, "at": _now(), "outcome": "ready" if error is None else "failed",
-                     "candidate_id": candidate_id, "error": error}
+                     "candidate_id": candidate_id, "error": error,
+                     # D2: the words this attempt voiced, so an add can tell whether they were rewritten first.
+                     "text": changes.get("new_text", item.new_text)}
             history = (*item.history, entry)
             if attempt < item.attempt:
                 plan = plan.with_item(item_id, history=history)

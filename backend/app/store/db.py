@@ -21,7 +21,7 @@ PROJECT_TABLES = ("candidates", "edits", "messages", "usage", "plans", "turns", 
 EXTRA_TABLES = ("project_briefs", "project_rules", "project_events", "purged_items",
                 "project_checks", "project_issues", "project_issue_ignores", "share_tokens",
                 "export_presets", "review_comments", "notify_queue", "notify_outbox", "pins",
-                "project_templates")
+                "project_templates", "proposal_decisions", "learned_items")
 
 
 class Database:

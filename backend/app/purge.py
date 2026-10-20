@@ -118,6 +118,7 @@ def purge(db: Database, artifacts_root: str | Path, older_than_days: float = 30,
             c.execute("DELETE FROM review_comments WHERE video_id = ?", (vid,))
             c.execute("DELETE FROM notify_queue WHERE video_id = ?", (vid,))
             c.execute("DELETE FROM pins WHERE kind = 'video' AND item_id = ?", (vid,))
+            c.execute("DELETE FROM proposal_decisions WHERE video_id = ?", (vid,))   # D2
 
         for p in projects:
             pid = p["id"]
@@ -131,7 +132,7 @@ def purge(db: Database, artifacts_root: str | Path, older_than_days: float = 30,
             c.execute("DELETE FROM projects WHERE id = ?", (pid,))
             for table in ("project_briefs", "project_rules", "project_events", "project_checks", "project_issues",
                           "project_issue_ignores", "share_tokens", "export_presets", "review_comments",
-                          "notify_queue"):
+                          "notify_queue", "proposal_decisions", "learned_items"):
                 c.execute(f"DELETE FROM {table} WHERE project_id = ?", (pid,))
             c.execute("DELETE FROM pins WHERE kind = 'project' AND item_id = ?", (pid,))
             # B3: the project's batch exports (their files go with the project's folder).

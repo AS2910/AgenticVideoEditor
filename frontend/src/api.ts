@@ -8,7 +8,7 @@ import type {
   ProjectSettings, Autonomy, Effort, Plan, Mix, Selection, Candidate, Reading, Sight, ChatMessage,
   ProjectFolder, ProjectDetailFolder, ProjectFile, HelpArticle, Onboarding, ProjectVoice,
   ActivityJob, TurnView, RenderState, BriefVersion, BriefChange, BriefUpdateRun, ProjectRule, RuleKind, RuleData, CheckPage, Batch, ExportPreset, ExportPresetPage, ExportPresetChange, Preflight, BatchExport, ShareLink, PublicShare,
-  PublicComment, ReviewAnswer, ReviewComment, ReviewLinkRequest, BinItem, BinKind, BinRestored, Pin, SearchResult, ProjectTemplate,
+  PublicComment, ReviewAnswer, ReviewComment, ReviewLinkRequest, BinItem, BinKind, BinRestored, Pin, SearchResult, ProjectTemplate, LearnedPage,
 } from './types'
 
 const BASE = '/api'
@@ -317,8 +317,8 @@ export const roleQuestion = (e: unknown): RoleQuestion | null => {
 }
 
 /** Discard a proposal (20e): it leaves the plan. */
-export const dismissItem = (id: string, planId: string, itemId: string) =>
-  post<Plan>(`/videos/${id}/plans/${planId}/items/${itemId}/dismiss`)
+export const dismissItem = (id: string, planId: string, itemId: string, reason?: string) =>
+  post<Plan & { decision_id?: number | null }>(`/videos/${id}/plans/${planId}/items/${itemId}/dismiss`, reason ? { reason } : undefined)
 
 /** p61: a line that ran long takes the take already voiced, the picture easing so it fits. Nothing is paid. */
 export const easeItem = (id: string, planId: string, itemId: string) =>
@@ -565,3 +565,13 @@ export const saveTemplate = (projectId: string, name: string, voice?: 'copy' | '
 export const renameTemplate = (id: string, name: string) => patch<ProjectTemplate>(`/templates/${id}`, { name })
 export const deleteTemplate = (id: string) => del(`/templates/${id}`)
 export const createFolderFrom = (name: string, templateId: string) => post<ProjectFolder>('/projects', { name, template_id: templateId })
+// D2: learned style.
+export const getLearned = (id: string) => get<LearnedPage>(`/projects/${id}/learned`)
+export const answerLearned = (id: string, itemId: number, answer: 'accept' | 'dismiss') => post<LearnedPage>(`/projects/${id}/learned/${itemId}/${answer}`)
+export async function removeLearned(id: string, itemId: number): Promise<LearnedPage> {
+  const res = await fetch(`${BASE}/projects/${id}/learned/${itemId}`, { method: 'DELETE', headers: FROM_VOLTAGE })
+  if (!res.ok) return failure(res)
+  return (await res.json()) as LearnedPage
+}
+export const giveDecisionReason = (videoId: string, decisionId: number, reason: string) =>
+  post<{ decision_id: number; reason: string }>(`/videos/${videoId}/decisions/${decisionId}/reason`, { reason })

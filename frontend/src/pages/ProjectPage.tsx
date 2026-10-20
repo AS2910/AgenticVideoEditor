@@ -27,6 +27,7 @@ import { SendForReview } from '../review/SendForReview'
 import { STAGE_LABEL } from './feedWords'
 import { ProjectFeed } from './ProjectFeed'
 import { SaveTemplateDialog } from './Templates'
+import { LearnedStyle } from './LearnedStyle'
 import type { Stage } from '../types'
 
 interface ProjectPageProps {
@@ -420,6 +421,8 @@ export function ProjectPage({ me, projectId, onUpload, uploading, error, onDelet
               </div>
             ))}
           </div>
+
+          {reuseOn && <LearnedStyle projectId={projectId} onProject={(p) => { setDetail((d) => (d ? { ...d, project: p } : d)); setBrief(p.brief) }} />}
 
           {reviewOn && <ProjectFeed projectId={projectId} tick={feedTick} nameOf={(id) => detail.videos.find((v) => v.video_id === id)?.filename ?? null} />}
 

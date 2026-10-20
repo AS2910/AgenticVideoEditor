@@ -49,6 +49,8 @@ import { useReviewComments } from './review/useReviewComments'
 import { useFlags } from './flags/useFlags'
 import { BinPage } from './pages/BinPage'
 import { TemplatesPage } from './pages/Templates'
+import { DiscardWhy } from './components/DiscardWhy'
+import { DISCARD_REASONS } from './lib/learned'
 import { LanguageDialog, SyncChip } from './pages/LanguageVersions'
 import { StageWarning } from './pages/StageWarning'
 import { approvedWords } from './pages/feedWords'
@@ -177,6 +179,8 @@ function Studio() {
   const reviewOn = useFlags().enabled('projects.review')
   // D4: an archived project's videos are read-only; the header says so.
   const reuseOn = useFlags().enabled('projects.reuse')
+  // D2: the optional "why?" after a discard.
+  const [discardWhy, setDiscardWhy] = useState<{ decisionId: number; line: string } | null>(null)
   const [stageAsk, setStageAsk] = useState<{ message: string; run: () => void } | null>(null)
   const [languagesOpen, setLanguagesOpen] = useState(false)
   // A3: the project's words, for the typed-line warning and Learn a word.
@@ -582,8 +586,11 @@ function Studio() {
     if (!projectId || !plan) return
     setError(null)
     try {
-      setPlan(await dismissItem(projectId, plan.plan_id, item.item_id))
+      const { decision_id: decisionId, ...next } = await dismissItem(projectId, plan.plan_id, item.item_id)
+      setPlan(next)
       setPreview(null)
+      // D2: in a project, one optional "why?" for what Voltage learns there.
+      if (reuseOn && project?.project_id && decisionId != null) setDiscardWhy({ decisionId, line: `the line at ${clock(item.selection.start)}` })
     } catch (e) {
       setError(e instanceof ApiError ? e.message : 'Could not discard that line.')
     }
@@ -1719,6 +1726,7 @@ function Studio() {
                 </section>
               )}
               {error && <div className="rounded-lg border-[1.5px] border-warn bg-card px-3.5 py-2.5 text-sm" role="alert">{error}</div>}
+              {discardWhy && projectId && <DiscardWhy key={discardWhy.decisionId} videoId={projectId} decisionId={discardWhy.decisionId} line={discardWhy.line} reasons={DISCARD_REASONS} onClose={() => setDiscardWhy(null)} />}
               {stageAsk && <StageWarning className="fixed bottom-6 left-1/2 z-40 w-[min(560px,calc(100vw-32px))] -translate-x-1/2 shadow-volt" message={stageAsk.message} onCancel={() => setStageAsk(null)} onAnyway={() => { const run = stageAsk.run; setStageAsk(null); run() }} />}
               {firstRead && speakers.length > 0 && (
                 <WhoSpeaks speakers={speakers} statements={statements} reading={readingBusy ? null : reading} onName={(label, name) => void changeSpeaker(label, { name })} />

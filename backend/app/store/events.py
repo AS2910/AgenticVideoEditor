@@ -31,7 +31,9 @@ VERBS = ("brief.saved", "rule.added", "rule.changed", "rule.removed", "stage.mov
          "review.commented", "review.approved", "review.changes_asked", "review.replied",
          "review.resolved", "review.reopened",
          # D1: templates saved, renamed, deleted, and a project made from one.
-         "template.saved", "template.renamed", "template.deleted", "project.from_template")
+         "template.saved", "template.renamed", "template.deleted", "project.from_template",
+         # D2: what a learned-style pass suggested, and what the user did with it.
+         "learned.suggested", "learned.accepted", "learned.dismissed", "learned.removed")
 MAX_PAGE = 200
 
 
