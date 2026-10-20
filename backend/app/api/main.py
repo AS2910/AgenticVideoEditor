@@ -1,5 +1,6 @@
 import asyncio
 import json
+import re
 import queue
 import time
 import threading
@@ -60,7 +61,8 @@ from app.usage import (
     Ledger, SpendCeilingReached, WHISPER_USD_PER_MINUTE, claude_usd, current_turn, money, month_name, month_start,
 )
 from app import auth
-from app.store import briefs, events as activity_log, rules, stages
+from app.store import briefs, checks as checks_store, events as activity_log, rules, stages
+from app.agent import project_check as pcheck
 from app.adapters import pronounce
 from app.store.actors import VOLTAGE, Actor, user as user_actor
 from app.store.repository import Project, ProjectRecord, ProjectRepository, LOCAL_OWNER
@@ -2110,11 +2112,14 @@ def update_folder(project_id: str, req: ProjectUpdate, owner: str = Depends(curr
     name = _project_name_or_422(req.name) if req.name is not None else None
     if req.ceiling_usd is not None and req.ceiling_usd <= 0:
         raise HTTPException(status_code=422, detail="The ceiling is a positive amount, or null for none.")
+    before = repo.get_project(project_id).brief_version
     project = repo.update_project(
         project_id, name=name, brief=req.brief.strip() if req.brief is not None else None, by=owner,
         settings=_clean_defaults(req.settings) if req.settings is not None else None,
         ceiling_usd=req.ceiling_usd, clear_ceiling="ceiling_usd" in req.model_fields_set and req.ceiling_usd is None,
     )
+    if project.brief_version != before:
+        _auto_check(project_id, owner)   # A2: the free checks again after a brief change
     return _folder_dict(project)
 
 
@@ -2426,6 +2431,422 @@ def start_brief_update(project_id: str, owner: str = Depends(current_owner)) -> 
     return {"run": _brief_run(project_id)}
 
 
+# ── A2: the project check ────────────────────────────────────────────────────
+#
+# Across every live video in a project, from transcripts and shipped edits
+# only (no new audio): facts that disagree, one role in different voices, a
+# glossary term said otherwise, a banned word said or a required line
+# missing, loudness more than 2 LU apart (app/agent/project_check.py, free),
+# plus one cheap Claude text pass for offer names that disagree. One
+# Activity job (kind "check") per run, keyed by the project's id. Free after
+# a brief change (rules only); `project_check_warnings` is what B3's batch
+# export reads before it starts (a warning, never a block).
+
+CHECK_FIX_KEY = "check_fix:{}"
+_checks_lock = threading.Lock()
+# Tests swap in a fake text pass here; None means the real one when a key is set.
+_check_reader = None
+_check_reader_built: tuple | None = None
+
+
+def _check_reader_for():
+    """The Claude text pass, or None when there is no Claude key (rules only)."""
+    global _check_reader_built
+    if _check_reader is not None:
+        return _check_reader
+    if not settings.anthropic_api_key:
+        return None
+    key = (settings.anthropic_api_key, settings.anthropic_workspace_id, settings.check_model)
+    if _check_reader_built is None or _check_reader_built[0] != key:
+        from app.adapters.claude_check import ClaudeChecker
+        _check_reader_built = (key, ClaudeChecker(settings.anthropic_api_key, settings.anthropic_workspace_id, model=settings.check_model))
+    return _check_reader_built[1]
+
+
+_DEFAULT_SPEAKER = re.compile(r"^Speaker [A-Za-z0-9_]+$")
+
+
+def _role_name(name: str | None) -> str | None:
+    """A speaker's role name, or None for the default "Speaker A" (not a role anyone named)."""
+    return None if not name or _DEFAULT_SPEAKER.match(name.strip()) else name.strip()
+
+
+def _check_texts(project: Project) -> list[pcheck.VideoText]:
+    """What each live video in the project says now: its lines as shot that no
+    shipped edit replaced, then its shipped edits (with whose role, which voice
+    and the take's own words), and its latest render's measured loudness."""
+    out = []
+    # Oldest first, the order the videos were made: issues read in that order.
+    for record in reversed(repo.list(project.owner, folder=project.project_id)):
+        vid = record.source.project_id
+        edits = [e for e in repo.list_edits(vid) if not e.reverted]
+        covered = [e.plan.selection for e in edits if e.plan.mix in ("replace", "remove")]
+        names = {s.label: s.name for s in repo.speakers(vid)}
+        by_take = _speakers_by_take(vid)
+        passages = []
+        for st in statements_of(record.transcript):
+            mid = (st.start + st.end) / 2
+            if any(sel.start - 1e-3 <= mid <= sel.end + 1e-3 for sel in covered):
+                continue
+            passages.append(pcheck.Passage(st.text, st.start, "transcript", _role_name(names.get(st.speaker) if st.speaker else None)))
+        for e in edits:
+            if e.plan.mix == "remove" or not e.plan.new_text.strip():
+                continue
+            label = by_take.get(e.edit_id, by_take.get(e.candidate_id))
+            candidate = repo.get_candidate(vid, e.candidate_id)
+            passages.append(pcheck.Passage(e.plan.new_text, e.plan.selection.start, "edit",
+                                           _role_name(names.get(label, label) if label else None), _voice_of(e.plan),
+                                           tuple(w.text for w in candidate.words) if candidate else ()))
+        loud = (repo.settings(vid).get("mix_report") or {}).get("loudness_lufs")
+        out.append(pcheck.VideoText(vid, record.source.filename, tuple(sorted(passages, key=lambda p: p.t)),
+                                    float(loud) if isinstance(loud, (int, float)) else None))
+    return out
+
+
+def _check_voice_names(project: Project):
+    """A voice id's name: the project's and the owner's voices first, the
+    vendor's catalogue only when asked (only a role in two voices asks)."""
+    names = {v["voice_id"]: v["name"] for v in [*_project_voices(project.project_id), *_my_voices(project.owner)]
+             if v.get("voice_id") and v.get("name")}
+    return lambda voice_id: names.get(voice_id) or _voice_name(voice_id)
+
+
+def _check_estimate(project: Project, texts: list[pcheck.VideoText] | None = None) -> dict:
+    """What the text pass would cost now, from the transcripts' size and the
+    model's price; and whether it can run at all (a Claude key)."""
+    est = pcheck.estimate(texts if texts is not None else _check_texts(project), settings.check_model)
+    can = _check_reader_for() is not None
+    return {**est, "available": can,
+            "why": None if can else "No Claude key is set, so only the rule checks can run. They are free."}
+
+
+def _check_spend_refusal(project: Project, usd: float) -> str | None:
+    """The text pass is refused when it would take the project or the month past its ceiling."""
+    if project.ceiling_usd is not None and ledger.spent_usd_by_folder(project.project_id) + usd > float(project.ceiling_usd) + 1e-9:
+        return (f"{project.name} has reached its {money(float(project.ceiling_usd))} project ceiling. "
+                "Raise it, or run the rule checks only; they are free.")
+    if settings.user_budget_usd is not None:
+        mine = ledger.spent_usd_by_owner(project.owner, iso(month_start()))
+        if mine + usd > settings.user_budget_usd + 1e-9:
+            return (f"You have reached your {money(settings.user_budget_usd)} ceiling for {month_name()}. "
+                    "Run the rule checks only; they are free.")
+    return None
+
+
+def _project_meter(project_id: str, what: str, spent: list[float]):
+    """A Claude call charged to the project as a whole (no single video), as `what`."""
+    def meter(model: str, input_tokens: int, output_tokens: int, cache_read: int = 0, cache_write: int = 0) -> None:
+        usd = claude_usd(model, input_tokens, output_tokens, cache_read, cache_write)
+        spent.append(usd)
+        ledger.record_project_level(project_id, "anthropic", what, input_tokens + output_tokens + cache_read + cache_write, "tokens", usd)
+    return meter
+
+
+def _issues_word(n: int) -> str:
+    return "No issues found" if n == 0 else f"{n} {'issue' if n == 1 else 'issues'} found"
+
+
+def _start_check(project: Project, mode: str, trigger: str, by: str) -> tuple[int, str]:
+    check_id = checks_store.start(database, project.project_id, mode, trigger, by)
+    job = activity.create(project.project_id, "check", step_label="Queued",
+                          detail={"project_id": project.project_id, "check_id": check_id, "mode": mode, "trigger": trigger})
+    checks_store.set_job(database, check_id, job.job_id)
+    with database.tx() as c:
+        activity_log.record(c, "check.started", user_actor(by), project_id=project.project_id, target=str(check_id),
+                            payload={"mode": mode, "trigger": trigger})
+    return check_id, job.job_id
+
+
+def _run_check(project_id: str, check_id: int, job_id: str, mode: str, owner: str) -> None:
+    """One run: the free checks, then (mode "full") the text pass; the
+    issues are stored with the run and the job ends saying how many."""
+    activity.start(job_id, "Reading the videos")
+    try:
+        project = repo.get_project(project_id)
+        if project is None:
+            raise RuntimeError("This project was deleted.")
+        texts = _check_texts(project)
+        rules_now = [r.to_dict() for r in rules.list_rules(database, project_id)]
+        result = pcheck.deterministic(texts, rules_now, _check_voice_names(project))
+        spent: list[float] = []
+        if mode == "full":
+            reader = _check_reader_for()
+            if reader is None:
+                result.notes.append("The text pass did not run: no Claude key is set.")
+            elif len(texts) < 2:
+                result.notes.append("The text pass compares videos; it did not run for one video, and nothing was spent.")
+            else:
+                activity.update(job_id, step_label="Reading what the videos say", progress=0.5)
+                raw = reader.read(pcheck.request_text(texts), meter=_project_meter(project_id, "project check", spent))
+                result.issues += pcheck.from_model(raw, texts)
+        cost = round(sum(spent), 6)
+        checks_store.finish(database, check_id, result.issues, cost, result.notes)
+        gone = checks_store.ignored(database, project_id)
+        live = [i for i in result.issues if i["fingerprint"] not in gone]
+        with database.tx() as c:
+            activity_log.record(c, "check.finished", user_actor(owner), project_id=project_id, target=str(check_id),
+                                payload={"mode": mode, "issues": len(live), "ignored": len(result.issues) - len(live), "cost_usd": cost})
+        activity.finish(job_id, step_label=_issues_word(len(live)), cost_usd=cost or None,
+                        detail={"issues": len(live), "ignored": len(result.issues) - len(live)})
+    except Exception as exc:  # noqa: BLE001 - a failed check says why; it never takes the server down
+        log.exception("project check %s failed", check_id)
+        text = str(exc)[:200] or type(exc).__name__
+        checks_store.fail(database, check_id, text)
+        activity.fail(job_id, "check_failed", f"The check stopped: {text}")
+
+
+def _auto_check(project_id: str, owner: str) -> None:
+    """A2: after a brief change, the free checks run again (rules only, never
+    the text pass). Quietly skipped with the flag off, with no videos, or
+    while a check runs; never fails the save it follows."""
+    try:
+        if not flags.enabled("projects.consistency", owner):
+            return
+        project = repo.get_project(project_id)
+        if project is None or not repo.list(project.owner, folder=project_id):
+            return
+        with _checks_lock:
+            now = checks_store.latest(database, project_id)
+            if now is not None and now["status"] == "running":
+                return
+            check_id, job_id = _start_check(project, "rules", "brief", owner)
+        _run_check(project_id, check_id, job_id, "rules", owner)
+    except Exception:  # noqa: BLE001
+        log.exception("the check after a brief change failed")
+
+
+def project_check_warnings(project_id: str) -> list[dict]:
+    """For B3's batch export: the free checks run now (nothing stored,
+    nothing spent), as warnings, ignored issues left out. A warning, never a
+    block: the caller shows them and lets the export go on."""
+    project = repo.get_project(project_id)
+    if project is None:
+        return []
+    texts = _check_texts(project)
+    result = pcheck.deterministic(texts, [r.to_dict() for r in rules.list_rules(database, project_id)],
+                                  _check_voice_names(project))
+    gone = checks_store.ignored(database, project_id)
+    return [i for i in result.issues if i["fingerprint"] not in gone]
+
+
+def _fix_run(project_id: str) -> dict | None:
+    raw = repo.get_meta(CHECK_FIX_KEY.format(project_id))
+    if not raw:
+        return None
+    run = json.loads(raw)
+    for v in run["videos"]:
+        job = activity.get(v["job_id"]) if v.get("job_id") else None
+        if job is not None:
+            v["status"] = job.status
+            v["step"] = job.step_label
+            v["outcome"] = job.detail.get("outcome", v.get("outcome"))
+            v["why"] = job.error_text if job.status == "failed" else job.detail.get("why", v.get("why"))
+    if run["status"] == "running" and all(v["status"] in ("done", "failed", "cancelled") for v in run["videos"]):
+        run["status"] = "finished"
+    return run
+
+
+def _check_page(project: Project) -> dict:
+    """The project page's Issues panel: the newest run with its job, its
+    issues (each saying whether it is ignored), the price of a full check now,
+    and the latest Fix in all."""
+    check = checks_store.latest(database, project.project_id)
+    if check is not None and check["job_id"]:
+        job = activity.get(check["job_id"])
+        check["job"] = job.to_dict() if job else None
+    issues = checks_store.issues(database, check["check_id"]) if check else []
+    if check is not None and check["status"] == "running":
+        # While a run works, the last finished run's issues stay on screen.
+        done = checks_store.latest(database, project.project_id, finished=True)
+        issues = checks_store.issues(database, done["check_id"]) if done else []
+        check["previous_finished_at"] = done["finished_at"] if done else None
+    return {"check": check, "issues": issues, "estimate": _check_estimate(project), "fix_run": _fix_run(project.project_id),
+            "videos": len(repo.list(project.owner, folder=project.project_id))}
+
+
+class CheckRequest(BaseModel):
+    mode: Literal["full", "rules"] = "full"
+
+
+@app.get("/projects/{project_id}/check")
+def get_project_check(project_id: str, owner: str = Depends(current_owner)) -> dict:
+    """A2: the latest project check (null before the first) and its issues."""
+    _consistency_on(owner)
+    return _check_page(_owned_project(project_id, owner))
+
+
+@app.post("/projects/{project_id}/check", status_code=202)
+def start_project_check(project_id: str, req: CheckRequest, owner: str = Depends(current_owner)) -> dict:
+    """A2: check the project. `full` adds the Claude text pass (its cost is
+    shown before; refused past a ceiling or with no key); `rules` is free."""
+    _consistency_on(owner)
+    project = _owned_project(project_id, owner)
+    if req.mode == "full":
+        if _check_reader_for() is None:
+            raise HTTPException(status_code=409, detail="No Claude key is set, so only the rule checks can run. Choose Rules only.")
+        refusal = _check_spend_refusal(project, _check_estimate(project)["usd"])
+        if refusal:
+            raise HTTPException(status_code=409, detail=refusal)
+    with _checks_lock:
+        now = checks_store.latest(database, project_id)
+        if now is not None and now["status"] == "running":
+            raise HTTPException(status_code=409, detail="A check is already running.")
+        check_id, job_id = _start_check(project, req.mode, "user", owner)
+    threading.Thread(target=_run_check, args=(project_id, check_id, job_id, req.mode, owner), daemon=True,
+                     name=f"check-{project_id}").start()
+    return _check_page(project)
+
+
+def _issue_or_404(project_id: str, issue_id: int) -> dict:
+    found = checks_store.issue(database, project_id, issue_id)
+    if found is None:
+        raise HTTPException(status_code=404, detail="issue not found")
+    return found
+
+
+@app.post("/projects/{project_id}/check/issues/{issue_id}/ignore")
+def ignore_check_issue(project_id: str, issue_id: int, owner: str = Depends(current_owner)) -> dict:
+    """A2: ignore an issue until the text it was found in changes."""
+    _consistency_on(owner)
+    project = _owned_project(project_id, owner)
+    found = _issue_or_404(project_id, issue_id)
+    checks_store.ignore(database, project_id, found["fingerprint"], owner)
+    with database.tx() as c:
+        activity_log.record(c, "check.issue_ignored", user_actor(owner), project_id=project_id, target=str(issue_id),
+                            payload={"kind": found["kind"], "fingerprint": found["fingerprint"]})
+    return _check_page(project)
+
+
+def _fix_goal(issue: dict, video_id: str) -> str:
+    here = [p for p in issue["places"] if p["video_id"] == video_id]
+    where = "; ".join(f"at {pcheck.clock(p['t'])}: “{p['text']}”" for p in here if p["t"] is not None and p["text"])
+    return (f"Fix this from the project check: {issue['message']}"
+            + (f" In this video it is {where}." if where else "")
+            + " Change only what the issue is about and keep everything else as it is; if this video is right as it is, say so.")
+
+
+class FixRequest(BaseModel):
+    video_id: str
+
+
+@app.post("/projects/{project_id}/check/issues/{issue_id}/fix", status_code=202)
+def fix_check_issue(project_id: str, issue_id: int, req: FixRequest, owner: str = Depends(current_owner)) -> dict:
+    """A2: Fix in this video: a normal turn in that video with the issue as its goal."""
+    _consistency_on(owner)
+    _owned_project(project_id, owner)
+    found = _issue_or_404(project_id, issue_id)
+    if req.video_id not in {p["video_id"] for p in found["places"]}:
+        raise HTTPException(status_code=422, detail="That video is not part of this issue.")
+    record = _owned(req.video_id, owner)
+    if not _agent_on():
+        raise HTTPException(status_code=409, detail="Voltage needs Claude to change a video (set AVE_AGENT=1 and an Anthropic key).")
+    started = _start_turn(req.video_id, record, _fix_goal(found, req.video_id), owner)
+    with database.tx() as c:
+        activity_log.record(c, "check.fix_started", user_actor(owner), video_id=req.video_id, project_id=project_id,
+                            target=str(issue_id), payload={"kind": found["kind"]})
+    t = next((p["t"] for p in found["places"] if p["video_id"] == req.video_id and p["t"] is not None), None)
+    return {"video_id": req.video_id, "job_id": started["job_id"], "t": t}
+
+
+# TODO(F4): "Fix in all" is the same sequential loop of ordinary per-video
+# turns A1's Bring up to date uses, one Activity job (kind "check") per video,
+# because the batch turn engine does not exist yet. F4 replaces the loop with
+# one batch turn: one plan, one gate, a child turn per video.
+
+def _fix_one(video_id: str, job_id: str, goal: str, owner: str) -> None:
+    activity.start(job_id, "Voltage is on it")
+    record = repo.get(video_id)
+    if record is None:
+        activity.fail(job_id, "gone", "This video was deleted.")
+        return
+    if not _agent_on():
+        activity.fail(job_id, "no_agent", "Voltage needs Claude to change this video (set AVE_AGENT=1 and an Anthropic key).")
+        return
+    shipped = len([e for e in repo.list_edits(video_id) if not e.reverted])
+    try:
+        started = _start_turn(video_id, record, goal, owner)
+    except HTTPException as exc:
+        activity.fail(job_id, "turn_refused", str(exc.detail))
+        return
+    deadline = time.time() + BRIEF_TURN_WAIT_S
+    turn_job = jobs.get(started["job_id"])
+    while turn_job is not None and not turn_job.done and time.time() < deadline:
+        time.sleep(0.05)
+        turn_job = jobs.get(started["job_id"])
+    if turn_job is None or not turn_job.done:
+        activity.fail(job_id, "timeout", "Voltage's turn on this video took too long; it is still in the video's chat.")
+        return
+    out = turn_job.result or {}
+    spent = round(float(out.get("turn_usd") or out.get("spent_usd") or 0.0), 4)
+    if turn_job.status == "failed" or out.get("stopped") == "error":
+        activity.fail(job_id, "turn_failed", (out.get("error") or turn_job.error or "Voltage's turn failed.")[:200], cost_usd=spent or None)
+        return
+    plan = repo.latest_plan(video_id)
+    ready = sum(1 for i in (plan.items if plan else ()) if i.kind == "planned" and i.status == "ready")
+    if len([e for e in repo.list_edits(video_id) if not e.reverted]) > shipped:
+        why, outcome = "Voltage fixed it and added the change.", "updated"
+    elif out.get("question"):
+        why, outcome = "Voltage has a question in this video. Answer it there.", "waiting"
+    elif ready:
+        why, outcome = f"{ready} {'line is' if ready == 1 else 'lines are'} ready to hear. Add them in the video.", "proposed"
+    else:
+        why, outcome = "Voltage found nothing to change here.", "current"
+    activity.finish(job_id, step_label={"updated": "Fixed", "waiting": "Waiting on you", "proposed": "Ready to review",
+                                        "current": "Nothing to change"}[outcome],
+                    cost_usd=spent or None, detail={"outcome": outcome, "why": why, "spent_usd": spent})
+
+
+def _fix_all_loop(project_id: str, owner: str) -> None:
+    run = json.loads(repo.get_meta(CHECK_FIX_KEY.format(project_id)) or "{}")
+    try:
+        for v in run.get("videos", []):
+            try:
+                _fix_one(v["video_id"], v["job_id"], v["goal"], owner)
+            except Exception as exc:  # noqa: BLE001 - one video failing never stops the rest
+                log.exception("fixing %s failed", v["video_id"])
+                activity.fail(v["job_id"], "unknown", str(exc)[:200] or type(exc).__name__)
+    finally:
+        with _checks_lock:
+            final = _fix_run(project_id) or run
+            final.update(status="finished", finished_at=_now())
+            repo.set_meta(CHECK_FIX_KEY.format(project_id), json.dumps(final))
+            with database.tx() as c:
+                activity_log.record(c, "check.fix_all_finished", user_actor(owner), project_id=project_id, target=final["run_id"],
+                                    payload={"issue_id": final["issue_id"], "outcomes": {v["video_id"]: v.get("outcome") for v in final["videos"]}})
+
+
+@app.post("/projects/{project_id}/check/issues/{issue_id}/fix-all", status_code=202)
+def fix_check_issue_everywhere(project_id: str, issue_id: int, owner: str = Depends(current_owner)) -> dict:
+    """A2: Fix in all: every video the issue names, one after another, each an ordinary turn."""
+    _consistency_on(owner)
+    project = _owned_project(project_id, owner)
+    found = _issue_or_404(project_id, issue_id)
+    if not _agent_on():
+        raise HTTPException(status_code=409, detail="Voltage needs Claude to change a video (set AVE_AGENT=1 and an Anthropic key).")
+    with _checks_lock:
+        now = _fix_run(project_id)
+        if now is not None and now["status"] == "running":
+            raise HTTPException(status_code=409, detail="Already fixing an issue across the videos.")
+        n = 1 + int((now or {}).get("run_id", "x0")[1:] or 0)
+        run = {"run_id": f"x{n}", "issue_id": issue_id, "message": found["message"], "status": "running", "started_at": _now(),
+               "finished_at": None, "videos": []}
+        for vid in dict.fromkeys(p["video_id"] for p in found["places"]):
+            record = repo.get(vid)
+            if record is None or record.folder_id != project_id:
+                continue
+            job = activity.create(vid, "check", step_label="Queued", detail={"project_id": project_id, "issue_id": issue_id, "fix": True})
+            run["videos"].append({"video_id": vid, "filename": record.source.filename, "job_id": job.job_id, "goal": _fix_goal(found, vid),
+                                  "status": "queued", "step": "Queued", "outcome": None, "why": None})
+        if not run["videos"]:
+            raise HTTPException(status_code=409, detail="None of the videos this issue names are in the project now.")
+        repo.set_meta(CHECK_FIX_KEY.format(project_id), json.dumps(run))
+        with database.tx() as c:
+            activity_log.record(c, "check.fix_all_started", user_actor(owner), project_id=project_id, target=run["run_id"],
+                                payload={"issue_id": issue_id, "videos": [v["video_id"] for v in run["videos"]]})
+    threading.Thread(target=_fix_all_loop, args=(project_id, owner), daemon=True, name=f"check-fix-{project_id}").start()
+    return _check_page(project)
+
+
 @app.delete("/projects/{project_id}", status_code=204)
 def delete_folder(project_id: str, videos: Literal["delete", "keep"], owner: str = Depends(current_owner)) -> Response:
     """Delete a project (F8): it goes to the Bin with its videos (`delete`),
@@ -2606,6 +3027,7 @@ def accept_suggestion(project_id: str, sid: str, owner: str = Depends(current_ow
     brief = project.brief.rstrip()
     repo.update_project(project_id, brief=(brief + "\n" + text) if brief else text, by=owner)
     _set_suggestions(project_id, [i for i in items if i["id"] != sid])
+    _auto_check(project_id, owner)   # A2: a new brief version, so the free checks run again
     return _project_page(repo.get_project(project_id))
 
 

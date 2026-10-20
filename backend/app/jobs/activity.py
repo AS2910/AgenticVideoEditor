@@ -23,7 +23,9 @@ from app.store.workspaces import stamp_last
 from app.timefmt import now_iso
 
 # brief_update (A1): one video brought up to date with its project's brief, its turn included.
-KINDS = ("voice_line", "design_voice", "clone", "mix", "render_preview", "export", "brief_update")
+# check (A2): a project check, keyed by the project's id in the video slot (it belongs to no one video);
+# also each video's turn in a "Fix in all" from the check.
+KINDS = ("voice_line", "design_voice", "clone", "mix", "render_preview", "export", "brief_update", "check")
 TERMINAL = frozenset({"done", "failed", "cancelled"})
 ACTIVE = frozenset({"queued", "running"})
 ALLOWED = {
@@ -35,7 +37,7 @@ ALLOWED = {
 # nothing shows a time for it (no number that was not measured).
 # A running job silent for longer than this has hung: it is failed, never left running.
 TIMEOUT_SECONDS = {"voice_line": 300.0, "design_voice": 300.0, "clone": 300.0, "mix": 120.0,
-                   "render_preview": 900.0, "export": 1800.0, "brief_update": 1800.0}
+                   "render_preview": 900.0, "export": 1800.0, "brief_update": 1800.0, "check": 1800.0}
 HISTORY = 20
 
 ERROR_TEXT = {
@@ -175,7 +177,8 @@ class ActivityJobs:
         with self.db.tx() as c:
             cur = c.execute("INSERT INTO jobs (job_id, project_id, turn_id, kind, status, touched, body) "
                             "VALUES ('', ?, ?, ?, 'queued', ?, '{}')", (video_id, turn_id, kind, self.clock()))
-            stamp_last(c, "jobs", video_id)
+            # A project-level job (A2's check) has the project's id here: its workspace is the project's.
+            stamp_last(c, "jobs", video_id, video_id)
             job = Job(job_id=f"J{cur.lastrowid}", video_id=video_id, kind=kind, turn_id=turn_id, step_label=step_label,
                       line_ids=tuple(line_ids), created_at=now_iso(), detail=detail, estimate_s=est, params=params)
             c.execute("UPDATE jobs SET job_id = ?, body = ? WHERE seq = ?", (job.job_id, _dump(job), cur.lastrowid))

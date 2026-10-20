@@ -6,7 +6,7 @@ import type {
   Project, ExportManifest, Job, ProjectSummary, ProjectDetail, Usage, Voice, Speaker,
   ProjectSettings, Autonomy, Effort, Plan, Mix, Selection, Candidate, Reading, Sight, ChatMessage,
   ProjectFolder, ProjectDetailFolder, ProjectFile, HelpArticle, Onboarding, ProjectVoice,
-  ActivityJob, TurnView, RenderState, BriefVersion, BriefChange, BriefUpdateRun, ProjectRule, RuleKind, RuleData,
+  ActivityJob, TurnView, RenderState, BriefVersion, BriefChange, BriefUpdateRun, ProjectRule, RuleKind, RuleData, CheckPage,
 } from './types'
 
 const BASE = '/api'
@@ -151,6 +151,13 @@ export async function uploadRuleAudio(id: string, ruleId: number, file: File): P
 export const deleteRuleAudio = (id: string, ruleId: number) => request<ProjectRule>(`/projects/${id}/rules/${ruleId}/audio`, { method: 'DELETE' })
 /** The clip's address; `v` (the clip's hash) makes a new clip a new address. */
 export const ruleAudioUrl = (id: string, ruleId: number, v = '') => `${BASE}/projects/${id}/rules/${ruleId}/audio${v ? `?v=${v.slice(0, 12)}` : ''}`
+
+/** A2: the project check: the latest run and its issues, running one (full adds the priced text pass), and an issue's verbs. */
+export const getProjectCheck = (id: string) => get<CheckPage>(`/projects/${id}/check`)
+export const startProjectCheck = (id: string, mode: 'full' | 'rules') => post<CheckPage>(`/projects/${id}/check`, { mode })
+export const ignoreCheckIssue = (id: string, issueId: number) => post<CheckPage>(`/projects/${id}/check/issues/${issueId}/ignore`, {})
+export const fixCheckIssue = (id: string, issueId: number, videoId: string) => post<{ video_id: string; job_id: string; t: number | null }>(`/projects/${id}/check/issues/${issueId}/fix`, { video_id: videoId })
+export const fixCheckIssueEverywhere = (id: string, issueId: number) => post<CheckPage>(`/projects/${id}/check/issues/${issueId}/fix-all`, {})
 
 /** Help and onboarding (2026-10-19). */
 export const listHelp = async () => (await get<{ articles: HelpArticle[] }>('/help')).articles

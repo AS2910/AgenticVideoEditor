@@ -7,7 +7,8 @@ import { useEffect, useState } from 'react'
  *  are `#voices`, `#usage`, `#settings`, `#billing` and `#help` (with an
  *  article: `#help/<slug>`). Usage takes a scope: `#usage/v/p12` (one
  *  video), `#usage/p/f3` (one project), `#usage/none` (standalone videos).
- *  An old `#p12` link still opens the video. */
+ *  An old `#p12` link still opens the video. A2: `#v/p12@3.5` opens the
+ *  editor at 3.5 s of the source (a link from the project check). */
 export type UsageScope = { kind: 'video'; id: string } | { kind: 'project'; id: string } | { kind: 'none' }
 
 export type Route =
@@ -18,13 +19,13 @@ export type Route =
   | { page: 'billing' }
   | { page: 'help'; slug?: string | null }
   | { page: 'folder'; projectId: string }
-  | { page: 'editor'; projectId: string }
+  | { page: 'editor'; projectId: string; t?: number | null }
   | { page: 'export'; projectId: string }
 
 export function parseRoute(hash: string): Route {
   const h = hash.replace(/^#\/?/, '').trim()
-  const v = /^v\/([A-Za-z0-9_-]+)(?:\/(export))?$/.exec(h)
-  if (v) return v[2] === 'export' ? { page: 'export', projectId: v[1] } : { page: 'editor', projectId: v[1] }
+  const v = /^v\/([A-Za-z0-9_-]+)(?:@(\d+(?:\.\d+)?))?(?:\/(export))?$/.exec(h)
+  if (v) return v[3] === 'export' ? { page: 'export', projectId: v[1] } : v[2] ? { page: 'editor', projectId: v[1], t: Number(v[2]) } : { page: 'editor', projectId: v[1] }
   const f = /^p\/([A-Za-z0-9_-]+)$/.exec(h)
   if (f) return { page: 'folder', projectId: f[1] }
   // The links of the first release: `#p12` and `#p12/export` named a video.
@@ -43,7 +44,7 @@ export function parseRoute(hash: string): Route {
 }
 
 export const hrefFor = (r: Route): string =>
-  r.page === 'editor' ? `#v/${r.projectId}`
+  r.page === 'editor' ? `#v/${r.projectId}${r.t != null ? `@${Math.max(0, Math.round(r.t * 100) / 100)}` : ''}`
     : r.page === 'export' ? `#v/${r.projectId}/export`
     : r.page === 'folder' ? `#p/${r.projectId}`
     : r.page === 'help' ? (r.slug ? `#help/${r.slug}` : '#help')

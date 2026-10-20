@@ -913,6 +913,19 @@ function Studio() {
     setCurrentTime(time)
   }
 
+  // A2: a link from the project check opens the editor at a time (#v/p12@3.5), once the video is open.
+  const seekedFor = useRef<string | null>(null)
+  const routeT = route.page === 'editor' ? route.t ?? null : null
+  useEffect(() => {
+    if (routeT === null || loading || !project || route.page !== 'editor' || project.video_id !== route.projectId) return
+    const key = `${route.projectId}@${routeT}`
+    if (seekedFor.current === key) return
+    seekedFor.current = key
+    const time = view === 'final' && rendered !== null ? renderTimeFrom(routeT, pieces) : routeT
+    setSeekRequest((r) => ({ time, id: (r?.id ?? 0) + 1 }))
+    setCurrentTime(time)
+  }, [routeT, loading, project, route, view, rendered, pieces])
+
   /** Undo an approved edit: the transcript shows the line as shot, and the
    *  render no longer includes it. */
   const revert = async (editId: string) => {

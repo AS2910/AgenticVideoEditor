@@ -15,6 +15,7 @@ import { useFlags } from '../flags/useFlags'
 import { BriefHistory, BriefMeta, StaleLine } from './BriefVersions'
 import { Tip } from '../guides/Tip'
 import { ProjectWords } from './ProjectWords'
+import { ProjectCheck } from './ProjectCheck'
 
 interface ProjectPageProps {
   me: Me | null
@@ -282,6 +283,7 @@ export function ProjectPage({ me, projectId, onUpload, uploading, error, onDelet
             <span className="tag text-volt">Later</span>
             <span className="flex-1 text-sm">One goal across every video here, like “make all three 25% off”, is planned as a batch turn.</span>
           </div>
+          {consistency && <ProjectCheck projectId={projectId} briefVersion={project.brief_version} />}
           {consistency && <ProjectWords projectId={projectId} />}
         </section>
 

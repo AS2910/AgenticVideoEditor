@@ -23,7 +23,9 @@ from app.store.workspaces import stamp_last
 
 # List prices used for the estimates.
 WHISPER_USD_PER_MINUTE = 0.006
-CLAUDE_USD_PER_MTOK = {"claude-opus-5": (5.00, 25.00)}   # (input, output)
+CLAUDE_USD_PER_MTOK = {"claude-opus-5": (5.00, 25.00),       # (input, output)
+                       # A2: the project check's text pass, the smallest model that reads well.
+                       "claude-haiku-4-5": (1.00, 5.00)}
 
 
 # Prompt caching: a cached read is a tenth of the input rate, writing the

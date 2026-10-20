@@ -14,3 +14,13 @@ describe('the Usage route takes a scope', () => {
     expect(parseRoute('#usage/x/1')).toEqual({ page: 'projects' })
   })
 })
+
+describe('A2: the editor route takes a time', () => {
+  it('opens a video at a time and writes it back', () => {
+    expect(parseRoute('#v/p12@3.5')).toEqual({ page: 'editor', projectId: 'p12', t: 3.5 })
+    expect(parseRoute('#v/p12')).toEqual({ page: 'editor', projectId: 'p12' })
+    expect(parseRoute('#v/p12/export')).toEqual({ page: 'export', projectId: 'p12' })
+    expect(hrefFor({ page: 'editor', projectId: 'p12', t: 12.345 })).toBe('#v/p12@12.35')
+    expect(hrefFor({ page: 'editor', projectId: 'p12', t: null })).toBe('#v/p12')
+  })
+})

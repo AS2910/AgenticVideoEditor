@@ -547,6 +547,36 @@ export type RuleKind = 'pronounce' | 'banned' | 'required_line' | 'style'
 export interface RuleData { term?: string; say?: string; respell?: string; audio?: string; word?: string; text?: string }
 export interface ProjectRule { rule_id: number; project_id: string; kind: RuleKind; data: RuleData; version: number; created_by: string; updated_at: string }
 export interface BriefUpdateRun { run_id: string; to: number; status: 'running' | 'finished'; started_at: string; finished_at: string | null; videos: BriefUpdateVideo[] }
+/** A2: one place an issue was found: a video, the time in it (null: the whole video) and the words there. */
+export interface CheckPlace { video_id: string; filename: string; t: number | null; text: string }
+export type CheckIssueKind = 'fact' | 'offer' | 'voice' | 'pronounce' | 'banned' | 'required_line' | 'loudness'
+/** A2: one issue the project check found; `ignored` until the text it was found in changes. */
+export interface CheckIssue { issue_id: number; kind: CheckIssueKind; message: string; places: CheckPlace[]; fingerprint: string; ignored: boolean }
+/** A2: one run of the project check, with its Activity job. */
+export interface ProjectCheck {
+  check_id: number
+  project_id: string
+  mode: 'full' | 'rules'
+  status: 'running' | 'done' | 'failed'
+  job_id: string | null
+  trigger: 'user' | 'brief' | 'preflight'
+  cost_usd: number
+  /** Sentences about what was not checked ("Loudness not checked for …"). */
+  notes: string[]
+  error: string | null
+  started_at: string
+  finished_at: string | null
+  job?: ActivityJob | null
+  /** While a run works: when the run whose issues still show ended. */
+  previous_finished_at?: string | null
+}
+/** A2: the text pass's price now, from the transcripts' size and the model's list price. */
+export interface CheckEstimate { usd: number; label: string; input_tokens: number; output_tokens: number; model: string; available: boolean; why: string | null }
+/** A2: one video in a "Fix in all" run. */
+export interface CheckFixVideo { video_id: string; filename: string; job_id: string; status: ActivityStatus; step: string; outcome: 'updated' | 'proposed' | 'waiting' | 'current' | null; why: string | null }
+export interface CheckFixRun { run_id: string; issue_id: number; message: string; status: 'running' | 'finished'; started_at: string; finished_at: string | null; videos: CheckFixVideo[] }
+/** A2: `GET /projects/{id}/check`. */
+export interface CheckPage { check: ProjectCheck | null; issues: CheckIssue[]; estimate: CheckEstimate; fix_run: CheckFixRun | null; videos: number }
 export interface ProjectFile { name: string; sha256: string; size: number; kind: string; at: string }
 export interface BriefSuggestion { id: string; text: string; why?: string | null; video_id?: string | null; filename?: string | null; at: string }
 export interface ProjectVoice extends MyVoice { project_id?: string; project_name?: string; used_in?: number; /** Bug 2: the moment consent was given (ISO) or null; approximate when backfilled; not needed for a designed voice. */ consent_granted_at?: string | null; consent_approximate?: boolean; consent_needed?: boolean }
@@ -575,7 +605,7 @@ export interface HelpRef { slug: string; title: string; section: string; tour?: 
 // Every surface (the status strip, Activity, the row chips, the player's badge,
 // the chat's step list, toasts, the tab title) reads from these records.
 
-export type ActivityKind = 'voice_line' | 'design_voice' | 'clone' | 'mix' | 'render_preview' | 'export' | 'brief_update'
+export type ActivityKind = 'voice_line' | 'design_voice' | 'clone' | 'mix' | 'render_preview' | 'export' | 'brief_update' | 'check'
 export type ActivityStatus = 'queued' | 'running' | 'done' | 'failed' | 'cancelled'
 /** The takes a render carries: kept edits, proposals (items), and their candidates. */
 export interface RenderIncludes { candidate_ids: string[]; edit_ids: string[]; item_ids: string[] }

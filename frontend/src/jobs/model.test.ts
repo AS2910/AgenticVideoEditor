@@ -138,3 +138,11 @@ describe('A1: a bring-up-to-date job on the strip', () => {
     expect(stripState({ jobs: [update], turn: null, playing: null, stale: false }).text).toBe('Checking what the change touches')
   })
 })
+
+describe('A2: a check job (Fix in all) on the strip', () => {
+  it('gives way to the turn it wraps, and speaks for itself when nothing else runs', () => {
+    const fix = job({ kind: 'check', status: 'running', step_label: 'Voltage is on it', turn_id: null, eta_s: null })
+    expect(stripState({ jobs: [fix], turn: turn({ step: 'Reading the lines' }), playing: null, stale: false }).text).toBe('Reading the lines')
+    expect(stripState({ jobs: [fix], turn: null, playing: null, stale: false }).text).toBe('Voltage is on it')
+  })
+})

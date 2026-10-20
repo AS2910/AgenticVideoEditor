@@ -15,6 +15,7 @@ export const TIPS: TipDef[] = [
   { id: 'first-failed-take', title: 'A take failed', text: 'Nothing was charged. Try it again, or ask Voltage what happened.', link: 'A take failed', slug: 'a-take-failed' },
   { id: 'first-word-rule', title: 'Word rule', text: 'This take did not say a project word the project\'s way, so Voltage will not add it. Voice it again, or add it yourself if it sounds right.', link: 'Project words', slug: 'project-words' },
   { id: 'first-brief-changed', title: 'Brief changed', text: 'Some videos here were made with an older brief. Bring up to date changes only the lines the change touches; a video it does not touch is marked current for free.', link: 'Brief versions', slug: 'brief-versions-and-brief-changed' },
+  { id: 'first-project-check', title: 'Project check', text: 'These are the places your videos disagree. Select a time to open that video there, fix it in one video or in all, or ignore it until the words change.', link: 'The project check', slug: 'the-project-check' },
 ]
 
 export const tipById = (id: string): TipDef | undefined => TIPS.find((t) => t.id === id)

@@ -8,3 +8,4 @@ Each matched to the nearest existing screen.
 - A3 Words section on the project page (word table, banned word chips, required lines): matched to the project page's side cards and the Usage table's header style (mono tags).
 - A3 "Breaks a word rule" and "Banned word" marks on a proposal and in the line editor: `.stamp.need` plus a plain sentence, like the take's facts line.
 - A3 Learn a word popover in the editor (selection offer and its small form): matched to the crumb menu card (ink border, volt offset shadow); the confirmation matches the toasts.
+- A2 Project check panel on the project page (price line, Rules only and Check project buttons, issue list with `.stamp.need` kinds, places as sunk rows with time links and Fix in this video, Ignore and Fix in all, the Fix in all run rows): matched to the project page's ink-bordered side cards (Words) and A1's run list.

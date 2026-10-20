@@ -115,7 +115,8 @@ def purge(db: Database, artifacts_root: str | Path, older_than_days: float = 30,
                 continue
             _tombstone(c, "project", pid, p["name"], p["owner"], None, p["workspace_id"], p["deleted_at"])
             c.execute("DELETE FROM projects WHERE id = ?", (pid,))
-            for table in ("project_briefs", "project_rules", "project_events"):
+            for table in ("project_briefs", "project_rules", "project_events", "project_checks", "project_issues",
+                          "project_issue_ignores"):
                 c.execute(f"DELETE FROM {table} WHERE project_id = ?", (pid,))
             for prefix in ("project_voices", "project_files", "brief_suggestions"):
                 c.execute("DELETE FROM meta WHERE key = ?", (f"{prefix}:{pid}",))
