@@ -110,6 +110,9 @@ class Settings:
     google_client_id: str | None = None
     google_client_secret: str | None = None
     session_secret: str | None = None
+    # F6: the key share links are signed with; when unset, one is generated
+    # once and kept in the data dir (`share_secret`).
+    share_secret: str | None = None
     # Step 0 (FLAGS): the owners every phase flag is on for by default.
     flag_owners: tuple[str, ...] = ("local",)
     # The origin the browser uses, for the OAuth redirect: https://voltage.example.com
@@ -194,6 +197,7 @@ def load_settings() -> Settings:
         google_client_id=os.environ.get("GOOGLE_CLIENT_ID") or None,
         google_client_secret=os.environ.get("GOOGLE_CLIENT_SECRET") or None,
         session_secret=os.environ.get("AVE_SESSION_SECRET") or None,
+        share_secret=os.environ.get("AVE_SHARE_SECRET") or None,
         public_url=(os.environ.get("AVE_PUBLIC_URL") or "http://localhost:5173").rstrip("/"),
         allowed_emails=tuple(e.strip() for e in os.environ.get("AVE_ALLOWED_EMAILS", "").split(",") if e.strip()),
         chaos=os.environ.get("AVE_CHAOS") or None,

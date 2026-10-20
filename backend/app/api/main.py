@@ -63,6 +63,7 @@ from app.usage import (
 )
 from app import auth
 from app.store import briefs, checks as checks_store, events as activity_log, rules, stages
+from app.store import shares as shares_store
 from app.agent import project_check as pcheck
 from app.adapters import pronounce
 from app.store.actors import VOLTAGE, Actor, user as user_actor
@@ -5994,6 +5995,157 @@ async def video_events(project_id: str, request: Request, limit: int | None = No
 
     return StreamingResponse(stream(), media_type="text/event-stream",
                              headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
+# ── F6: share tokens ─────────────────────────────────────────────────────────
+#
+# Signed, revocable, expiring links (app/store/shares.py). The owner makes and
+# turns off links on a project; anyone holding a live link reads what it
+# shares at /share/<token> with no account: a video's latest render, every
+# video's in a project, or an export's files (B3). A dead link answers with
+# a sentence (410 expired or turned off, 404 not valid), never a bare error.
+# Making links ships with the first item that uses them (B3 under
+# `projects.batch`, C2 under `projects.review`); opening one needs no flag.
+
+share_key = shares_store.secret(settings.data_dir, settings.share_secret)
+# What each scope shows: scope -> (share) -> {"title", "files": [{file_id, name, kind, size, duration, path}]}.
+# B3 registers "export"; C2 may widen "video" with versions and comments.
+SHARE_CONTENTS: dict = {}
+
+
+def _shares_on(owner: str) -> None:
+    if not (flags.enabled("projects.batch", owner) or flags.enabled("projects.review", owner)):
+        raise HTTPException(status_code=404, detail="Not found")
+
+
+def _share_url(token: str) -> str:
+    return f"{settings.public_url}/#s/{token}"
+
+
+def _share_dict(share: shares_store.Share) -> dict:
+    return {**share.to_dict(), "state": share.state(), "url": _share_url(shares_store.token_for(share_key, share))}
+
+
+def _render_file(video_id: str) -> dict | None:
+    """A video's latest finished final render as a shared file, or None."""
+    record = repo.get(video_id)
+    done = repo.settings(video_id).get("render") if record else None
+    if not done or not done.get("sha256"):
+        return None
+    path = artifacts.find(video_id, done["sha256"])
+    if path is None:
+        return None
+    return {"file_id": f"{video_id}-{done['sha256'][:12]}", "name": done.get("filename") or f"{video_id}.mp4",
+            "kind": "video", "size": path.stat().st_size, "duration": done.get("duration"), "video_id": video_id,
+            "path": path}
+
+
+def _video_share(share: shares_store.Share) -> dict:
+    record = repo.get(share.target)
+    if record is None:
+        raise shares_store.ShareRefused("gone")
+    found = _render_file(share.target)
+    return {"title": record.source.filename, "files": [found] if found else []}
+
+
+def _project_share(share: shares_store.Share) -> dict:
+    project = repo.get_project(share.target)
+    if project is None:
+        raise shares_store.ShareRefused("gone")
+    files = [f for f in (_render_file(r.source.project_id) for r in reversed(repo.list(project.owner, folder=project.project_id))) if f]
+    return {"title": project.name, "files": files}
+
+
+SHARE_CONTENTS.update({"video": _video_share, "project": _project_share})
+
+
+def _shared(token: str) -> tuple[shares_store.Share, dict]:
+    """The live share and what it shows, or the refusal as an HTTP error with its sentence."""
+    try:
+        share = shares_store.resolve(database, share_key, token)
+        if share.project_id and repo.get_project(share.project_id) is None:
+            raise shares_store.ShareRefused("gone")
+        return share, SHARE_CONTENTS[share.scope](share)
+    except shares_store.ShareRefused as refused:
+        status = 410 if refused.code in ("expired", "revoked") else 404
+        raise HTTPException(status_code=status, detail=refused.message, headers={"X-Share-Refused": refused.code})
+
+
+class ShareRequest(BaseModel):
+    scope: Literal["project", "video", "export"]
+    target: str | None = None
+    role: Literal["viewer", "reviewer"] = "viewer"
+    days: float = shares_store.DEFAULT_DAYS
+    name: str | None = None
+
+
+def _check_share_target(project: Project, scope: str, target: str) -> None:
+    if scope == "project" and target != project.project_id:
+        raise HTTPException(status_code=422, detail="A project link shares this project.")
+    if scope == "video":
+        record = repo.get(target)
+        if record is None or record.owner != project.owner or record.folder_id != project.project_id:
+            raise HTTPException(status_code=404, detail="That video is not in this project.")
+    if scope not in SHARE_CONTENTS:
+        raise HTTPException(status_code=422, detail="There is nothing of that kind to share yet.")
+
+
+@app.post("/projects/{project_id}/shares", status_code=201)
+def create_share(project_id: str, req: ShareRequest, owner: str = Depends(current_owner)) -> dict:
+    """F6: a link to this project, one of its videos or one of its exports; 30 days unless asked."""
+    _shares_on(owner)
+    project = _owned_project(project_id, owner)
+    target = req.target or project_id
+    _check_share_target(project, req.scope, target)
+    try:
+        share, _ = shares_store.create(database, share_key, owner=owner, project_id=project_id, scope=req.scope,
+                                       target=target, role=req.role, days=req.days, name=req.name, by=owner)
+    except shares_store.ShareError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    return _share_dict(share)
+
+
+@app.get("/projects/{project_id}/shares")
+def list_shares(project_id: str, scope: str | None = None, target: str | None = None, owner: str = Depends(current_owner)) -> dict:
+    _shares_on(owner)
+    _owned_project(project_id, owner)
+    return {"shares": [_share_dict(s) for s in shares_store.list_for(database, owner, project_id, scope, target)]}
+
+
+@app.delete("/projects/{project_id}/shares/{share_id}")
+def revoke_share(project_id: str, share_id: str, owner: str = Depends(current_owner)) -> dict:
+    """Turn a link off for good: whoever opens it is told it was turned off."""
+    _shares_on(owner)
+    _owned_project(project_id, owner)
+    share = shares_store.get(database, share_id)
+    if share is None or share.owner != owner or share.project_id != project_id:
+        raise HTTPException(status_code=404, detail="That link is not in this project.")
+    return _share_dict(shares_store.revoke(database, share_id, owner))  # type: ignore[arg-type]
+
+
+def _public_file(f: dict) -> dict:
+    return {k: f.get(k) for k in ("file_id", "name", "kind", "size", "duration", "label", "video_id")}
+
+
+@app.get("/share/{token}")
+def open_share(token: str) -> dict:
+    """No account: what a live link shares, each file with its name and size."""
+    share, contents = _shared(token)
+    return {"scope": share.scope, "role": share.role, "name": share.name, "expires_at": share.expires_at,
+            "title": contents["title"], "files": [_public_file(f) for f in contents["files"]],
+            **{k: v for k, v in contents.items() if k not in ("title", "files")}}
+
+
+@app.get("/share/{token}/files/{file_id}")
+def shared_file(token: str, file_id: str, download: bool = False) -> FileResponse:
+    """One shared file, played in place (range requests) or downloaded."""
+    _, contents = _shared(token)
+    found = next((f for f in contents["files"] if f["file_id"] == file_id), None)
+    if found is None or not Path(found["path"]).exists():
+        raise HTTPException(status_code=404, detail="That file is not in this link.")
+    path = Path(found["path"])
+    return FileResponse(path, media_type=_MEDIA_TYPES.get(path.suffix.lstrip("."), "application/octet-stream"),
+                        filename=found["name"], content_disposition_type="attachment" if download else "inline")
 
 
 # ── Help, the tutorial, onboarding: the coordinator's routers ────────────────

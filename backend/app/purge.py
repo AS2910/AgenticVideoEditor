@@ -104,6 +104,7 @@ def purge(db: Database, artifacts_root: str | Path, older_than_days: float = 30,
                 if table != "usage":
                     c.execute(f"DELETE FROM {table} WHERE project_id = ?", (vid,))
             c.execute("DELETE FROM project_events WHERE video_id = ?", (vid,))
+            c.execute("DELETE FROM share_tokens WHERE scope = 'video' AND target = ?", (vid,))
 
         for p in projects:
             pid = p["id"]
@@ -116,7 +117,7 @@ def purge(db: Database, artifacts_root: str | Path, older_than_days: float = 30,
             _tombstone(c, "project", pid, p["name"], p["owner"], None, p["workspace_id"], p["deleted_at"])
             c.execute("DELETE FROM projects WHERE id = ?", (pid,))
             for table in ("project_briefs", "project_rules", "project_events", "project_checks", "project_issues",
-                          "project_issue_ignores"):
+                          "project_issue_ignores", "share_tokens"):
                 c.execute(f"DELETE FROM {table} WHERE project_id = ?", (pid,))
             for prefix in ("project_voices", "project_files", "brief_suggestions"):
                 c.execute("DELETE FROM meta WHERE key = ?", (f"{prefix}:{pid}",))
