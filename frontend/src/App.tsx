@@ -177,6 +177,11 @@ function Studio() {
   const composerRef = useRef<HTMLTextAreaElement>(null)
   // Volt: the tracks panel under the scrubber, and the word-precise timeline inside it.
   const [tracksOpen, setTracksOpen] = useState(false)
+  // 2026-10-20: while the editor is on screen, html and body never scroll (its panes do); elsewhere the page scrolls.
+  useEffect(() => {
+    document.documentElement.classList.toggle('app-locked', !!document.querySelector('[data-testid=editor-shell]'))
+  })
+  useEffect(() => () => document.documentElement.classList.remove('app-locked'), [])
   const [precise, setPrecise] = useState(false)
   const [placing, setPlacing] = useState<{ id: string; start: number; duration: number } | null>(null)
   const [placeDraft, setPlaceDraft] = useState<string | null>(null)
@@ -1201,10 +1206,10 @@ function Studio() {
     const place = sight ? (sight.place_confirmed ?? sight.place_guess) : null
   
     return (
-      <div className="flex h-dvh flex-col bg-background text-foreground max-[960px]:h-auto max-[960px]:min-h-dvh">
+      <div className="grid h-dvh grid-rows-[auto_minmax(0,1fr)] overflow-hidden bg-background text-foreground max-[960px]:block max-[960px]:h-auto max-[960px]:min-h-dvh max-[960px]:overflow-visible" data-testid="editor-shell">
         <a className="skip" href="#main" onClick={(e) => { e.preventDefault(); document.getElementById('main')?.focus() }}>Skip to the transcript</a>
         {/* Volt: the editor's header — the wordmark, the file, the play switch, the autonomy, the spend, Export, the account. */}
-        <header className="flex min-h-[62px] flex-wrap items-center gap-x-4 gap-y-2 border-b-[1.5px] border-foreground bg-card px-4 py-2 sm:px-6 lg:flex-nowrap lg:[&>*:not(h1)]:shrink-0" data-testid="editor-header">
+        <header className="z-30 flex min-h-[62px] flex-wrap max-[960px]:sticky max-[960px]:top-0 items-center gap-x-4 gap-y-2 border-b-[1.5px] border-foreground bg-card px-4 py-2 sm:px-6 lg:flex-nowrap lg:[&>*:not(h1)]:shrink-0" data-testid="editor-header">
           <Wordmark />
           <span className="text-faint max-sm:hidden" aria-hidden="true">/</span>
           {/* Folders: the project the video is in, with its menu; or a dashed "No project" that opens the move dialog. */}
@@ -1263,7 +1268,7 @@ function Studio() {
   
         <div className="flex min-h-0 flex-1 max-[960px]:flex-col">
           {/* The picture, the transport, the transcript. */}
-          <main id="main" tabIndex={-1} className="min-w-0 flex-1 overflow-y-auto outline-none max-[960px]:overflow-visible" aria-busy={turnBusy || undefined}>
+          <main id="main" tabIndex={-1} className="slimbar min-h-0 min-w-0 flex-1 overflow-y-auto outline-none max-[960px]:overflow-visible" aria-busy={turnBusy || undefined}>
             <div className="mx-auto flex w-full max-w-[820px] flex-col gap-4 px-4 py-5 sm:px-6">
               <Player
                 src={shown ? shown.url : artifactUrl(project.video_id, project.media.sha256)}
@@ -1369,7 +1374,7 @@ function Studio() {
           </main>
   
           {/* Voltage: black in both themes. */}
-          <aside className="pane flex min-h-0 w-[400px] min-w-0 max-w-full shrink-0 flex-col overflow-x-hidden max-[960px]:h-[85dvh] max-[960px]:min-h-[60dvh] max-[960px]:w-auto" aria-label="Voltage" aria-busy={turnBusy || undefined}>
+          <aside className="pane flex min-h-0 w-[400px] min-w-0 max-w-full shrink-0 flex-col overflow-clip max-[960px]:h-[85dvh] max-[960px]:min-h-[60dvh] max-[960px]:w-auto" aria-label="Voltage" aria-busy={turnBusy || undefined}>
             <VoltagePane
               messages={messages}
               projectId={project.video_id}
@@ -1380,7 +1385,7 @@ function Studio() {
               chips={contextChips}
               cap={`Turn cap $${mayDo.turn_usd.toFixed(2)}`}
               spend={spend}
-              question={clarifying ? plan?.question ?? null : null}
+              question={clarifying ? plan?.question ?? null : plan?.question?.resolved?.by === 'editor' ? plan.question : null}
               onAnswer={(o, allowMore) => void clarify(o, allowMore)}
               turnCap={mayDo.turn_usd}
               onSubmit={submitComposer}

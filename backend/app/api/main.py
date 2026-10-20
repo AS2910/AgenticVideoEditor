@@ -2946,6 +2946,29 @@ def approve_plan(
     return _ship(project_id, record, plan_id, req.items, req.override)
 
 
+NUMBER_WORDS = {2: "two", 3: "three", 4: "four", 5: "five", 6: "six", 7: "seven", 8: "eight", 9: "nine", 10: "ten"}
+
+
+def _count_lines(n: int, every: bool) -> str:
+    """"the line", "all four lines", "3 lines"."""
+    if n == 1:
+        return "the line"
+    word = NUMBER_WORDS.get(n, str(n))
+    return f"all {word} lines" if every else f"{word} lines"
+
+
+def _resolve_question(project_id: str, plan_id: str, why: str, by: str = "editor") -> None:
+    """A waiting question whose subject changed outside the chat (2026-10-20):
+    it is kept, marked resolved with why, and stops waiting; the card turns
+    quiet and the next turn starts from the new state, not a stale gate."""
+    plan = repo.get_plan(project_id, plan_id)
+    if plan is None or plan.status != "clarifying" or not plan.question or plan.question.get("resolved"):
+        return
+    resolved = {**plan.question, "resolved": {"why": why, "by": by, "at": _now()}}
+    repo.update_plan(project_id, plan_id, status="proposed", question=resolved)
+    repo.append_log(project_id, plan_id, f"The question resolved itself: {why}")
+
+
 def _ship(project_id: str, record: ProjectRecord, plan_id: str, item_ids: list[str] | None,
           override: bool = False) -> dict:
     """Approve the ready items (or the ones named) and render."""
@@ -2968,6 +2991,8 @@ def _ship(project_id: str, record: ProjectRecord, plan_id: str, item_ids: list[s
     if approved:
         repo.append_log(project_id, plan_id,
                         f"Approved {len(approved)} {'change' if len(approved) == 1 else 'changes'}")
+        ready = [i for i in plan.items if i.status == "ready"]
+        _resolve_question(project_id, plan_id, f"you added {_count_lines(len(approved), len(approved) == len(ready) and len(ready) > 1)}")
     export = _export(record) if approved else None
     if export:
         repo.append_log(project_id, plan_id, "Rendered the edited video",
@@ -3056,6 +3081,7 @@ def dismiss_item(project_id: str, plan_id: str, item_id: str, owner: str = Depen
         raise HTTPException(status_code=409, detail="That line is in the video; undo it instead.")
     plan = repo.update_item(project_id, plan_id, item_id, status="dismissed", enabled=False)
     repo.append_log(project_id, plan_id, f"You discarded the line at {_clock(item.selection.start)}")
+    _resolve_question(project_id, plan_id, f"you discarded the line at {_clock(item.selection.start)}")
     return _plan_dict(repo.get_plan(project_id, plan_id))
 
 
@@ -3792,7 +3818,8 @@ def _start_turn(project_id: str, record: ProjectRecord, text: str, owner: str, a
     prefs = _settings(project_id, owner)
     autonomy = prefs["autonomy"]
     plan = _turn_plan(project_id, text)
-    asked = plan.question
+    # A question already resolved in the editor is no gate for this turn (2026-10-20).
+    asked = plan.question if plan.question and not plan.question.get("resolved") else None
     # A yes to a gate question (a paid or committing step that waited): a go word, or its first option.
     gate = asked if asked and asked.get("gate") else None
     approve = approve or bool(gate and (is_go(text) or text.strip().lower() == str(gate["options"][0]).lower()))
@@ -3801,7 +3828,17 @@ def _start_turn(project_id: str, record: ProjectRecord, text: str, owner: str, a
     if record.consent is None and (autonomy == "draft" or approve or carry):
         raise HTTPException(status_code=403, detail=CONSENT_REQUIRED)
     repo.add_message(project_id, "user", text)
+    # The open question is answered by this turn, or superseded by it; either way it is kept, resolved.
+    if asked and plan.status == "clarifying":
+        answered = text.strip().lower() in {str(o.get("label") if isinstance(o, dict) else o).strip().lower() for o in asked.get("options") or []}
+        resolved = {**asked, "resolved": {"why": "you answered" if answered or approve else "a newer turn started",
+                                          "by": "chat", "answer": text[:200], "at": _now()}}
+        repo.append_log(project_id, plan.plan_id, f"The question was {'answered' if answered or approve else 'left for a newer turn'}")
+    else:
+        resolved = None
     repo.update_plan(project_id, plan.plan_id, status="running", question=None)
+    if resolved:
+        repo.set_settings(project_id, last_question=resolved)
     job = jobs.create("turn", project_id)
     started_at = _now()
     # Spend scopes: the turn's id is the job's; every charge it causes carries it.

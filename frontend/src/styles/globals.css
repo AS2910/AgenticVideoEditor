@@ -294,6 +294,22 @@
   .pill.on, .pill[aria-pressed="true"] { border-color: var(--ink); background: var(--volt); color: var(--ink); }
   /* The black Voltage pane */
   .pane { background: var(--pane); color: var(--ptext); }
+  /* 2026-10-20: the editor is exactly the window; html and body never scroll it on a desktop. */
+  @media (min-width: 961px) { html.app-locked, html.app-locked body { height: 100%; overflow: hidden; } }
+  /* Slim scrollbars in the theme, wider under the pointer so they are easy to grab. */
+  .slimbar { scrollbar-width: thin; scrollbar-color: var(--line2) transparent; }
+  .slimbar:hover { scrollbar-width: auto; }
+  .slimbar::-webkit-scrollbar { width: 8px; height: 8px; }
+  .slimbar:hover::-webkit-scrollbar { width: 12px; height: 12px; }
+  .slimbar::-webkit-scrollbar-track { background: transparent; }
+  .slimbar::-webkit-scrollbar-thumb { background: var(--line2); border-radius: 999px; border: 2px solid transparent; background-clip: padding-box; }
+  /* A row brought into view from a link: a short highlight. */
+  @keyframes flashrow { from { background: color-mix(in oklch, var(--volt) 35%, transparent); } to { background: transparent; } }
+  [data-flash] { animation: flashrow 1.4s ease-out 1; }
+  @media (prefers-reduced-motion: reduce) { [data-flash] { animation: none; outline: 2px solid var(--volt); } }
+  /* "line 3" in Voltage's words: a link to the row. */
+  .lineref { font: inherit; color: inherit; background: none; border: 0; padding: 0; text-decoration: underline; text-decoration-style: dotted; text-underline-offset: 3px; cursor: pointer; }
+  .lineref:focus-visible { outline: 3px solid color-mix(in oklch, var(--ring) 50%, transparent); outline-offset: 2px; border-radius: 2px; }
   .pane .pm { color: var(--pmuted); }
   .trace { font-family: var(--font-mono); font-size: 12.5px; line-height: 1.5; display: flex; flex-direction: column; gap: 5px; }
   .trace .ln { display: grid; grid-template-columns: 44px 14px minmax(0, 1fr) auto; gap: 8px; align-items: baseline; animation: rise .45s cubic-bezier(.2, .8, .2, 1) both; }
@@ -309,7 +325,9 @@
   /* Pane-render (2026-10-20): the pane never scrolls sideways at any width. Every
      flex or grid child may shrink (min-width 0, low specificity so a utility
      still wins), and long words, file names, URLs and quoted lines wrap. */
-  .pane-root { overflow-x: hidden; overflow-wrap: anywhere; container-type: inline-size; }
+  /* clip, not hidden: overflow-x: hidden turns the other axis into a scroll box, and the
+     pane root then scrolled its own header away by the composer's overhang (2026-10-20). */
+  .pane-root { overflow: clip; overflow-wrap: anywhere; container-type: inline-size; }
   .pane-root :where(*) { min-width: 0; }
   .pane-root :where(pre, code) { white-space: pre-wrap; }
   .pane-root :where(img, video, audio, table) { max-width: 100%; }

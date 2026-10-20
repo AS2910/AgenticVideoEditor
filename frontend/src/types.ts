@@ -85,6 +85,8 @@ export interface PlanQuestion {
   details?: (string | null)[] | null
   /** The turn's cap caused this question: the first option allows exactly `needed_usd` more (`POST /turns/allow-more`). */
   turn_cap?: { needed_usd: number; cap_usd: number } | null
+  /** 2026-10-20: settled outside the chat (an item it was about was added, discarded or redone): why, and where. */
+  resolved?: { why: string; by: 'editor' | 'chat'; at: string; answer?: string } | null
 }
 
 export interface PlanLogEntry { at: string; text: string; detail: string }

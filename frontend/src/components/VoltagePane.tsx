@@ -133,11 +133,12 @@ function EngineInfo({ engine }: { engine: string }) {
 function QuestionCard({ question, onAnswer, turnCap }: { question: PlanQuestion; onAnswer?: (option: string, allowMore?: boolean) => void; turnCap?: number }) {
   const options = optionsOf(question)
   const cap = question.cap_usd ?? question.turn_cap?.cap_usd ?? turnCap ?? null
+  const done = question.resolved ?? null
   return (
-    <div className={cn('min-w-0', question.gate ? 'gate' : 'flex flex-col gap-3.5 rounded-xl border border-pline p-4')} data-testid="clarify" data-tour={question.gate ? 'gate' : 'question'} role="group" aria-label={question.gate ? 'Your go is needed' : 'One question'}>
-      <span className={cn('tag', question.gate ? 'text-volt' : 'pm')}>{question.gate ? '⚡ Your go is needed' : 'One question'}</span>
+    <div className={cn('min-w-0', done ? 'flex flex-col gap-3.5 rounded-xl border border-dashed border-pline p-4 opacity-80' : question.gate ? 'gate' : 'flex flex-col gap-3.5 rounded-xl border border-pline p-4')} data-testid="clarify" data-resolved={done ? true : undefined} data-tour={question.gate ? 'gate' : 'question'} role="group" aria-label={question.gate ? 'Your go is needed' : 'One question'}>
+      <span className={cn('tag', question.gate && !done ? 'text-volt' : 'pm')}>{done ? 'Settled' : question.gate ? '⚡ Your go is needed' : 'One question'}</span>
       <p className="m-0 text-[15px] leading-relaxed" data-money-scope="step"><strong className="font-medium">{question.text}</strong></p>
-      {(question.cost_usd != null || question.left_usd != null) && (
+      {!done && (question.cost_usd != null || question.left_usd != null) && (
         <p className="tnum m-0 text-[13px] leading-snug pm" data-testid="clarify-money">
           {question.cost_usd != null && <span data-money-scope="step">This step costs about {money(question.cost_usd)}. </span>}
           {question.left_usd != null && (
@@ -147,25 +148,28 @@ function QuestionCard({ question, onAnswer, turnCap }: { question: PlanQuestion;
       )}
       <div className="flex w-full min-w-0 flex-col items-start gap-2" data-testid="clarify-options">
         {options.map((o, k) => {
-          const volt = question.gate ? k === 0 : o.way || (o.pick && !question.turn_cap)
+          const volt = !done && (question.gate ? k === 0 : o.way || (o.pick && !question.turn_cap))
           return (
             <button
               key={o.value}
               type="button"
               className={cn('btn sm opt', volt ? 'volt' : 'ghost', volt && question.gate && 'shine', !volt && /^not yet$/i.test(o.value) && 'border-transparent pm')}
+              disabled={!!done}
               onClick={() => (o.way ? onAnswer?.(o.value, true) : onAnswer?.(o.value))}
               data-tour-action={k === 0 && question.gate ? 'gate' : undefined}
               data-option={o.way ? 'allow-more' : o.pick ? 'pick' : undefined}
               data-money-scope={o.way ? 'turn' : undefined}
             >
-              {o.pick && <span className="pick" data-testid="pick-tag">Voltage's pick</span>}
+              {o.pick && !done && <span className="pick" data-testid="pick-tag">Voltage's pick</span>}
               <span className="max-w-full" data-testid="option-label">{o.label}</span>
               {o.detail && <span className="detail" data-testid="option-detail">{o.detail}</span>}
             </button>
           )
         })}
       </div>
-      <span className="pm text-xs" role="status">{question.gate ? 'Say go, or pick one.' : 'Pick one, or answer in your own words.'}</span>
+      <span className="pm text-xs" role="status" data-testid="clarify-status">
+        {done ? `Answered in the editor: ${done.why}.` : question.gate ? 'Say go, or pick one.' : 'Pick one, or answer in your own words.'}
+      </span>
     </div>
   )
 }
@@ -270,18 +274,22 @@ export function VoltagePane({
       if (!counted.current.has(key)) { counted.current.add(key); onChipEvent?.('shown', c) }
     }
   })
-  const useChip = (c: Suggestion) => {
+  const takeChip = (c: Suggestion) => {
     fromChip.current = c
     setPrompt(c.prompt)
     onChipEvent?.('clicked', c)
     // In the box, editable, the cursor at the end: nothing is sent from a single click.
-    requestAnimationFrame(() => {
-      const el = box.current
-      if (!el) return
-      el.focus()
-      el.setSelectionRange(c.prompt.length, c.prompt.length)
-    })
+    cursorToEnd.current = true
   }
+  // Placed as soon as the prompt is in the box, before anything else can be typed.
+  const cursorToEnd = useRef(false)
+  useLayoutEffect(() => {
+    const el = box.current
+    if (!cursorToEnd.current || !el) return
+    cursorToEnd.current = false
+    el.focus()
+    el.setSelectionRange(el.value.length, el.value.length)
+  })
   const submit = () => {
     const text = prompt.trim()
     if (!text) return
@@ -312,7 +320,11 @@ export function VoltagePane({
       )}
 
       <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
-        <div ref={list} onScroll={onScroll} className="pane-thread flex min-h-0 min-w-0 flex-1 flex-col gap-4.5 overflow-y-auto px-5.5 py-6 @max-[380px]:px-4" role="log" aria-live="polite" aria-relevant="additions" aria-label="The conversation">
+        <div ref={list} onScroll={onScroll} onClick={(e) => {
+          // "line 3" in Voltage's words shows that row of the transcript (2026-10-20).
+          const ref = (e.target as HTMLElement).closest<HTMLElement>('[data-goto-line]')
+          if (ref) window.dispatchEvent(new CustomEvent('voltage:goto-line', { detail: { line: Number(ref.dataset.gotoLine) } }))
+        }} className="pane-thread slimbar flex min-h-0 min-w-0 flex-1 flex-col gap-4.5 overflow-y-auto px-5.5 py-6 @max-[380px]:px-4" role="log" aria-live="polite" aria-relevant="additions" aria-label="The conversation">
           {seeing}
           {before}
           {turns.length === 0 && !before && empty}
@@ -375,7 +387,7 @@ export function VoltagePane({
         {chipsShown.length > 0 && (
           <div className="flex min-w-0 flex-wrap gap-1.5" role="group" aria-label="Suggestions for this video" data-testid="chips">
             {chipsShown.map((c) => (
-              <button key={`${c.kind}-${c.label}`} type="button" className="sugg max-w-full truncate" title={c.prompt} data-kind={c.kind} onClick={() => useChip(c)}>{c.label}</button>
+              <button key={`${c.kind}-${c.label}`} type="button" className="sugg max-w-full truncate" title={c.prompt} data-kind={c.kind} onClick={() => takeChip(c)}>{c.label}</button>
             ))}
           </div>
         )}

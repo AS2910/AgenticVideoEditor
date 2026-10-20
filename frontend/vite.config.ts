@@ -33,6 +33,8 @@ export default defineConfig({
     environment: 'jsdom',
     globals: true,
     setupFiles: './vitest.setup.ts',
+    // The layout tests run in a real browser with Playwright (npm run test:layout).
+    exclude: ['**/node_modules/**', 'e2e/**'],
     css: true,
   },
 })

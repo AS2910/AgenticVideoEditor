@@ -76,6 +76,26 @@ describe('VoltagePane: the composer and the gate', () => {
     expect(onChipEvent).toHaveBeenLastCalledWith('sent', chips[0], true)
   })
 
+  it('shows a question settled in the editor as quiet: its options off, and why (2026-10-20)', () => {
+    const onAnswer = vi.fn()
+    render(<VoltagePane messages={[]} state="ready" onSubmit={() => {}} onAnswer={onAnswer}
+      question={{ text: 'How should I handle the middle line?', options: ['Voice it next turn', 'Add four now', 'Let me listen first'], guess: 'Voice it next turn',
+        resolved: { why: 'you added all four lines', by: 'editor', at: '2026-10-20T10:00:00Z' } }} />)
+    const card = screen.getByTestId('clarify')
+    expect(card).toHaveAttribute('data-resolved', 'true')
+    expect(within(card).getByTestId('clarify-status')).toHaveTextContent('Answered in the editor: you added all four lines.')
+    expect(within(card).getAllByRole('button').every((b) => (b as HTMLButtonElement).disabled)).toBe(true)
+    expect(within(card).queryByTestId('pick-tag')).toBeNull()
+  })
+
+  it('turns "line 3" in Voltage\'s words into a link that asks the transcript for the row', async () => {
+    const heard = vi.fn()
+    window.addEventListener('voltage:goto-line', (e) => heard((e as CustomEvent).detail))
+    render(<VoltagePane messages={[{ role: 'user', text: 'Tighten it', kind: 'say', seq: 1 }, { role: 'assistant', text: 'Line 3 runs long; **line 4** is fine.', kind: 'say', seq: 2 }]} state="ready" onSubmit={() => {}} />)
+    await userEvent.click(screen.getByRole('button', { name: 'Line 3' }))
+    expect(heard).toHaveBeenCalledWith({ line: 3 })
+  })
+
   it('hides the chips while a turn runs', () => {
     render(<VoltagePane messages={[]} state="working" working="Voicing line 2" onSubmit={() => {}}
       suggestions={[{ label: 'Export', prompt: 'Export the video.', kind: 'finish', grounded_in: 'time' }]} />)

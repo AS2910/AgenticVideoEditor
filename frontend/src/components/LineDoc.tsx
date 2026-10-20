@@ -277,23 +277,85 @@ export function LineDoc({
     }
     tops.current = seen
   })
+  // 2026-10-20: the rows scroll in their own list, the height left in the column
+  // below the transcript's header (at least 320 px), measured by a ResizeObserver
+  // as the window, the tracks or the player change. On a phone the page scrolls.
+  const headRef = useRef<HTMLDivElement>(null)
+  const [listH, setListH] = useState<number | null>(null)
+  const hasRows = statements.length > 0
+  useLayoutEffect(() => {
+    const el = list.current
+    const column = el?.closest('main')
+    if (!el || !column || typeof ResizeObserver === 'undefined') return
+    const measure = () => {
+      if (window.matchMedia?.('(max-width: 960px)').matches) { setListH(null); return }
+      const wrap = column.firstElementChild as HTMLElement | null
+      const pads = wrap ? parseFloat(getComputedStyle(wrap).paddingTop) + parseFloat(getComputedStyle(wrap).paddingBottom) : 0
+      const head = headRef.current?.getBoundingClientRect().height ?? 0
+      const gap = parseFloat(getComputedStyle(el.parentElement ?? el).rowGap) || 0
+      const next = Math.max(320, Math.floor(column.clientHeight - head - gap - pads))
+      setListH((h) => (h === next ? h : next))
+    }
+    measure()
+    const ro = new ResizeObserver(measure)
+    ro.observe(column)
+    if (headRef.current) ro.observe(headRef.current)
+    if (column.firstElementChild) ro.observe(column.firstElementChild)
+    // Shift+wheel over the list moves the whole column instead.
+    const wheel = (e: WheelEvent) => {
+      if (!e.shiftKey) return
+      e.preventDefault()
+      column.scrollBy({ top: e.deltaY || e.deltaX })
+    }
+    el.addEventListener('wheel', wheel, { passive: false })
+    return () => { ro.disconnect(); el.removeEventListener('wheel', wheel) }
+  }, [hasRows])
+  /** Bring a row into view by scrolling the list only, never the column around it. */
+  const showRow = (row: HTMLElement | null, focus = true) => {
+    if (!row) return
+    if (focus) row.focus({ preventScroll: true })
+    const box = list.current
+    if (!box || listH === null) { row.scrollIntoView?.({ block: 'nearest' }); return }
+    const r = row.getBoundingClientRect(), b = box.getBoundingClientRect()
+    if (r.top < b.top) box.scrollTop -= b.top - r.top
+    else if (r.bottom > b.bottom) box.scrollTop += Math.min(r.bottom - b.bottom, r.top - b.top)
+  }
+  // "line 3" in Voltage's words: the list scrolls to the row and it flashes.
+  useEffect(() => {
+    const go = (e: Event) => {
+      const line = (e as CustomEvent<{ line: number }>).detail?.line
+      const row = list.current?.querySelector<HTMLElement>(`[data-line-key="L${line - 1}"]`)
+      if (!row) return
+      list.current?.scrollIntoView?.({ block: 'nearest' })
+      const box = list.current!
+      const r = row.getBoundingClientRect(), b = box.getBoundingClientRect()
+      if (listH !== null) box.scrollTop += r.top - b.top - (b.height - r.height) / 2
+      else row.scrollIntoView?.({ block: 'center' })
+      row.removeAttribute('data-flash')
+      void row.offsetWidth
+      row.setAttribute('data-flash', '')
+      window.setTimeout(() => row.removeAttribute('data-flash'), 1500)
+    }
+    window.addEventListener('voltage:goto-line', go)
+    return () => window.removeEventListener('voltage:goto-line', go)
+  })
   // After a move, focus stays on the line that moved.
   const refocus = useRef<string | null>(null)
   useEffect(() => {
     if (!refocus.current) return
     const el = list.current?.querySelector<HTMLElement>(`[data-line-key="${refocus.current}"]`)
     refocus.current = null
-    el?.focus()
-  }, [arranged])
+    showRow(el ?? null)
+  }, [arranged])   // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => { box.current?.focus() }, [editing])
   // The row to put focus back on when its editor closes, so the keys keep working.
   const returnTo = useRef<number | null>(null)
   useEffect(() => {
     if (editing || returnTo.current === null) return
-    document.getElementById(`line-${returnTo.current}`)?.focus()
+    showRow(document.getElementById(`line-${returnTo.current}`))
     returnTo.current = null
-  }, [editing])
+  }, [editing])   // eslint-disable-line react-hooks/exhaustive-deps
 
   // 20f: audio lines are rows of their own. An added line in the video (a
   // layered edit) and a proposed or working added line (a plan item) each
@@ -417,8 +479,7 @@ export function LineDoc({
     if (!row) return
     const move = (to: number) => {
       const el = document.getElementById(`line-${Math.max(0, Math.min(rows.length - 1, to))}`)
-      el?.focus()
-      el?.scrollIntoView?.({ block: 'nearest' })
+      showRow(el)
     }
     const s = rowStatement(row)
     const proposal = row.kind === 'item' ? row.item : row.kind === 'line' ? ownItem(row.s) : null
@@ -933,7 +994,7 @@ export function LineDoc({
         if (folds.hidden.has(to)) {
           e.preventDefault()
           reveal(to)
-          window.setTimeout(() => document.getElementById(`line-${to}`)?.focus(), 0)
+          window.setTimeout(() => showRow(document.getElementById(`line-${to}`)), 0)
           return
         }
       }
@@ -1244,7 +1305,7 @@ export function LineDoc({
 
   return (
     <section className="flex min-h-0 flex-col gap-2.5" aria-label="Transcript">
-      <div className="flex flex-col gap-1.5 px-1 pt-1">
+      <div className="flex flex-col gap-1.5 px-1 pt-1" ref={headRef} data-testid="transcript-head">
         <div className="flex flex-wrap items-end gap-3.5">
           <h2 className="disp m-0 text-[26px] leading-none font-bold">Transcript</h2>
           <span className="tag pb-0.5 text-faint">{rows.length} {rows.length === 1 ? 'line' : 'lines'}</span>
@@ -1314,7 +1375,7 @@ export function LineDoc({
         </div>
       )}
 
-      <div role="list" className="flex flex-col gap-1.5" ref={list} onFocusCapture={() => setFocusTick((t) => t + 1)} onBlurCapture={() => setFocusTick((t) => t + 1)} data-focus-tick={focusTick}>
+      <div role="list" className={cn('flex flex-col gap-1.5 [&>*]:shrink-0', listH !== null && 'slimbar overflow-y-auto overscroll-contain pr-1')} style={listH !== null ? { height: listH } : undefined} data-testid="transcript-list" ref={list} onFocusCapture={() => setFocusTick((t) => t + 1)} onBlurCapture={() => setFocusTick((t) => t + 1)} data-focus-tick={focusTick}>
         {shownRows.map(({ r: entry, order }) => (
           <Fragment key={`r-${order}`}>
             {entry.kind === 'layer' ? layerRow(entry, order)

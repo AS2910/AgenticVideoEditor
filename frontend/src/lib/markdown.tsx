@@ -52,9 +52,26 @@ export function parse(text: string): Block[] {
 // Inline marks, in the order they are tried at each position.
 const INLINE = /(\*\*(.+?)\*\*|__(.+?)__|`([^`]+)`|\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)|(?<![\w*])\*(?!\s)(.+?)(?<!\s)\*(?![\w*])|(?<![\w_])_(?!\s)(.+?)(?<!\s)_(?![\w_]))/
 
+const LINE_REF = /\b([Ll]ine) (\d{1,3})\b/g
+
+/** "line 3" as a link to that row of the transcript (2026-10-20); the editor listens for it. */
+function lineRefs(text: string, key: number): ReactNode {
+  const parts: ReactNode[] = []
+  let last = 0
+  for (const m of text.matchAll(LINE_REF)) {
+    const at = m.index ?? 0
+    if (at > last) parts.push(text.slice(last, at))
+    parts.push(<button key={`l${key}-${at}`} type="button" className="lineref" data-goto-line={m[2]} title={`Show line ${m[2]} in the transcript`}>{m[0]}</button>)
+    last = at + m[0].length
+  }
+  if (!parts.length) return text
+  if (last < text.length) parts.push(text.slice(last))
+  return parts
+}
+
 export function inline(text: string, key = 0): ReactNode {
   const m = INLINE.exec(text)
-  if (!m) return text
+  if (!m) return lineRefs(text, key)
   const before = text.slice(0, m.index)
   const after = text.slice(m.index + m[0].length)
   let node: ReactNode
@@ -63,7 +80,7 @@ export function inline(text: string, key = 0): ReactNode {
   else if (m[5] !== undefined) node = <a key={key} href={m[6]} target="_blank" rel="noopener noreferrer" className="underline underline-offset-4">{inline(m[5], key + 1)}</a>
   else node = <em key={key}>{inline(m[7] ?? m[8], key + 1)}</em>
   if (!before && !after) return node
-  return [before || null, node, after ? inline(after, key + 1000) : null]
+  return [before ? lineRefs(before, key + 500) : null, node, after ? inline(after, key + 1000) : null]
 }
 
 export const withBreaks = (lines: string[]): ReactNode =>
