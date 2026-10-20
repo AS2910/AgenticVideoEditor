@@ -833,6 +833,8 @@ export interface ReviewVideo {
   versions: ReviewVersion[]
   comments: PublicComment[]
   answer: ReviewAnswer | null
+  /** D4: the project is archived; the sentence says comments and answers are closed (watching works). */
+  read_only?: string | null
 }
 export interface PublicReview { reviewer: string | null; allow_download: boolean; videos: ReviewVideo[] }
 /** A review comment as the owner sees it in the editor. */

@@ -84,6 +84,18 @@ describe('C2: the review page', () => {
     expect(posts[1]).toEqual({ url: '/api/share/sh1.sig/approve', body: { video_id: 'p1', version: 5, note: 'Lovely', name: 'Priya' } })
   })
 
+  it('D4: an archived project closes comments and answers with the sentence; the player still plays', async () => {
+    const body = REVIEW()
+    const closed = 'This project is archived, so comments and answers are closed for now. You can still watch every version.'
+    ;(body.review.videos[0] as Record<string, unknown>).read_only = closed
+    vi.stubGlobal('fetch', vi.fn(async () => ok(body)))
+    render(<SharePage token="sh1.sig" />)
+    expect(await screen.findByTestId('review-closed')).toHaveTextContent(closed)
+    expect(screen.getByLabelText('bhaji-cam.mp4, version 5')).toHaveAttribute('src', '/api/share/sh1.sig/files/p1-bbb')
+    expect(screen.queryByTestId('comment-form')).toBeNull()
+    expect(within(screen.getByTestId('review-answer')).queryAllByRole('button')).toEqual([])
+  })
+
   it('says when nothing is rendered yet', async () => {
     const body = REVIEW()
     body.review.videos[0].versions = []

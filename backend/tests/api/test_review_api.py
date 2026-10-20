@@ -59,7 +59,7 @@ def two_versions(client, sample_video, monkeypatch):
 ALLOWED_TOP = {"scope", "role", "name", "expires_at", "title", "files", "review"}
 ALLOWED_FILE = {"file_id", "name", "kind", "size", "duration", "label", "video_id"}
 ALLOWED_REVIEW = {"reviewer", "allow_download", "videos"}
-ALLOWED_VIDEO = {"video_id", "title", "duration", "current_version", "versions", "comments", "answer"}
+ALLOWED_VIDEO = {"video_id", "title", "duration", "current_version", "versions", "comments", "answer", "read_only"}
 ALLOWED_VERSION = {"version", "file_id", "duration", "created_at", "against", "changes"}
 ALLOWED_COMMENT = {"comment_id", "author", "at_s", "version", "text", "status", "created_at", "replies"}
 
@@ -156,6 +156,27 @@ def test_a_revoked_or_expired_review_link_is_refused(client, two_versions, monke
         refused = call()
         assert refused.status_code == 410 and refused.headers["x-share-refused"] == "revoked"
     assert stages.current(database, "p1") == "in_review"
+
+
+def test_an_archived_projects_review_link_is_watch_only(client, two_versions):
+    """D4: archiving the project closes comments and answers through its
+    review links with one sentence; watching every version still works."""
+    link = client.post("/videos/p1/review-links", json={"name": "Priya"}).json()
+    token = token_of(link)
+    assert client.get(f"/share/{token}").json()["review"]["videos"][0]["read_only"] is None
+    assert client.post("/projects/f1/archive").status_code == 200
+    [video] = client.get(f"/share/{token}").json()["review"]["videos"]
+    assert video["read_only"] == main.REVIEW_ARCHIVED
+    assert "archived" in video["read_only"] and "watch" in video["read_only"]
+    for path, body in (("comments", {"video_id": "p1", "at_s": 1, "text": "hi"}),
+                       ("approve", {"video_id": "p1"}), ("changes", {"video_id": "p1", "note": "x"})):
+        refused = client.post(f"/share/{token}/{path}", json=body)
+        assert refused.status_code == 423 and refused.json()["detail"] == main.REVIEW_ARCHIVED
+    assert client.get(f"/share/{token}/files/{video['versions'][0]['file_id']}").status_code == 200
+    assert stages.current(database, "p1") == "in_review" and client.get("/videos/p1/comments").json()["comments"] == []
+    # Unarchived: open again.
+    assert client.delete("/projects/f1/archive").status_code == 200
+    assert client.post(f"/share/{token}/comments", json={"video_id": "p1", "at_s": 1, "text": "hi"}).status_code == 201
 
 
 def test_a_viewer_link_cannot_comment_or_answer(client, two_versions):

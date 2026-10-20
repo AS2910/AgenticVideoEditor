@@ -104,7 +104,13 @@ function ReviewVideoPanel({ token, video, reviewer, allowDownload, name, onChang
         </>
       )}
 
-      {picked && (
+      {video.read_only && (
+        <p className="m-0 rounded-xl border-[1.5px] border-foreground bg-sunk p-4 text-[15px]" role="status" data-testid="review-closed">
+          <span className="stamp quiet mr-2">Archived</span>{video.read_only}
+        </p>
+      )}
+
+      {picked && !video.read_only && (
         <form className="flex flex-col gap-2" onSubmit={(e) => { e.preventDefault(); void comment() }} data-testid="comment-form">
           <label htmlFor={`c-${video.video_id}`} className="text-sm font-semibold">Comment at <span className="tnum">{clock(time)}</span> in v{picked.version}</label>
           <textarea id={`c-${video.video_id}`} rows={3} maxLength={2000} className="w-full resize-y rounded-lg border-[1.5px] border-line2 bg-background p-3 text-[15px] outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50" value={text} onChange={(e) => setText(e.target.value)} placeholder="Pause where something should change and say what." />
@@ -137,12 +143,14 @@ function ReviewVideoPanel({ token, video, reviewer, allowDownload, name, onChang
 
       <div className="flex flex-col gap-2.5 rounded-xl border-[1.5px] border-foreground bg-card p-4" data-testid="review-answer">
         <span className="disp text-lg font-bold">Your answer</span>
+        {video.read_only && !video.answer && <span className="text-sm text-muted-foreground">Answers are closed while the project is archived.</span>}
         {video.answer && (
           <p className="m-0 text-sm" role="status" data-testid="answer-said">
             <span className={video.answer.answer === 'approved' ? 'stamp' : 'stamp need'}>{video.answer.answer === 'approved' ? 'Approved' : 'Changes asked'}</span>{' '}
-            {video.answer.by} {video.answer.answer === 'approved' ? 'approved' : 'asked for changes on'}{video.answer.version ? ` v${video.answer.version}` : ''} {formatDate(video.answer.at)}. You can still change your answer.
+            {video.answer.by} {video.answer.answer === 'approved' ? 'approved' : 'asked for changes on'}{video.answer.version ? ` v${video.answer.version}` : ''} {formatDate(video.answer.at)}.{video.read_only ? '' : ' You can still change your answer.'}
           </p>
         )}
+        {video.read_only ? null : <>
         <label htmlFor={`n-${video.video_id}`} className="text-sm font-semibold">Note <span className="font-normal text-muted-foreground">Optional</span></label>
         <textarea id={`n-${video.video_id}`} rows={2} maxLength={2000} className="w-full resize-y rounded-lg border-[1.5px] border-line2 bg-background p-3 text-[15px] outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50" value={note} onChange={(e) => setNote(e.target.value)} />
         {answerError && <p className="m-0 text-sm text-destructive" role="alert">{answerError}</p>}
@@ -150,6 +158,7 @@ function ReviewVideoPanel({ token, video, reviewer, allowDownload, name, onChang
           <button type="button" className="btn sm" disabled={busy !== null} onClick={() => void answer('changes')} aria-busy={busy === 'changes' || undefined}>{busy === 'changes' ? 'Sending…' : 'Ask for changes'}</button>
           <button type="button" className="btn volt sm" disabled={busy !== null || !picked} onClick={() => void answer('approve')} aria-busy={busy === 'approve' || undefined}>{busy === 'approve' ? 'Approving…' : picked ? `Approve v${picked.version}` : 'Approve'}</button>
         </div>
+        </>}
       </div>
     </section>
   )

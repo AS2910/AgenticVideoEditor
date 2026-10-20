@@ -7,7 +7,7 @@ Home keeps what you use at the top, puts finished projects away, and finds any w
 
 **Pin.** Pin a project or a video and it sits under **Pinned** at the top of Home's sidebar. Pin a project with the pin beside its name in the sidebar, or from **•••** on its page; pin a video from **•••** on its card. Your pins are yours: no one else in the workspace sees them.
 
-**Archive a project.** On the project page, choose **•••** then **Archive project**. It leaves Home, and its videos leave Recent videos, but search still finds it. Choose **Archived** in the sidebar to see archived projects. An archived project is read-only: nothing can be voiced, added, uploaded into it or changed, and Voltage says "This project is archived. Unarchive it to make changes." Choose **Unarchive** on its page to work on it again.
+**Archive a project.** On the project page, choose **•••** then **Archive project**. It leaves Home, and its videos leave Recent videos, but search still finds it. Choose **Archived** in the sidebar to see archived projects. An archived project is read-only: nothing can be voiced, added, uploaded into it or changed, and Voltage says "This project is archived. Unarchive it to make changes." Its review links turn watch-only too: a reviewer can still play every version, but comments, approvals and change requests are closed until you unarchive. Choose **Unarchive** on its page to work on it again.
 
 **Search.** Type in the search box on Home, or press **/** to jump to it. It looks through project names, video names, what is said in every video and the briefs, and groups what it finds by project. A match in what is said shows its time: select it and the editor opens at that moment.
 

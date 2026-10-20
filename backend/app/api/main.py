@@ -6893,6 +6893,7 @@ def _review_contents(share: shares_store.Share, contents: dict) -> dict:
             "versions": [{k: v[k] for k in ("version", "file_id", "duration", "created_at", "against", "changes")} for v in versions],
             "comments": [_public_comment(c) for c in comments_store.for_share(database, share.share_id, video_id)],
             "answer": _review_answer(share.share_id, video_id),
+            "read_only": _review_closed(share, video_id),
         })
     return {**contents, "_all_files": every,
             "review": {"reviewer": share.name, "allow_download": bool(share.data.get("allow_download")), "videos": videos}}
@@ -7012,6 +7013,18 @@ app.router.lifespan_context = _lifespan_with_purge
 
 # The reviewer's side (no account; the link is the key).
 
+def _review_closed(share: shares_store.Share, video_id: str) -> str | None:
+    """D4: the sentence a reviewer sees when the video's project is archived
+    (comments and answers are refused; watching still works), else None."""
+    if flags.enabled("projects.reuse", share.owner) and home_store.archived_project_of(database, video_id=video_id):
+        return REVIEW_ARCHIVED
+    return None
+
+
+REVIEW_ARCHIVED = ("This project is archived, so comments and answers are closed for now. "
+                   "You can still watch every version.")
+
+
 def _reviewing(token: str, video_id: str) -> tuple[shares_store.Share, dict]:
     share, contents = _shared(token)
     if share.role != "reviewer":
@@ -7019,6 +7032,8 @@ def _reviewing(token: str, video_id: str) -> tuple[shares_store.Share, dict]:
     video = next((v for v in contents["review"]["videos"] if v["video_id"] == video_id), None)
     if video is None:
         raise HTTPException(status_code=404, detail="That video is not in this link.")
+    if video.get("read_only"):
+        raise HTTPException(status_code=423, detail=video["read_only"])
     return share, video
 
 
