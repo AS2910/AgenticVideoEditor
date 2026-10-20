@@ -40,7 +40,7 @@ export function ExportPage({ projectId, me, onBack }: ExportPageProps) {
         exported.current = true
         setRendering(true)
         const t0 = performance.now()
-        await exportProject(projectId)
+        await exportProject(projectId, false, undefined, 'export')
         const took = Math.max(1, Math.round((performance.now() - t0) / 1000))
         const again = await getReceipt(projectId)
         if (!live) return

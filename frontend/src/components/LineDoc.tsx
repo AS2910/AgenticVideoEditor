@@ -29,6 +29,9 @@ import { fitReason, ranLong } from '../transcript/fit'
 import { TaggedWords } from './TaggedWords'
 import { addKeyOf, keyOf } from '../transcript/keys'
 import type { LineKey } from '../transcript/keys'
+import type { ActivityJob, RenderIncludes } from '../types'
+import { CHIP_LABEL, aboutEta, isActive, rowChip } from '../jobs/model'
+import type { ChipState, RowChip } from '../jobs/model'
 
 /** What the editor asks for a line: the words and the choices. App says it
  *  to Voltage in one sentence; nothing is voiced outside a turn. */
@@ -46,6 +49,21 @@ export interface LineRequest {
   editId?: string
   /** The words the line has now, for the sentence to Voltage. */
   before?: string
+}
+
+/** One processing model (2026-10-20): what the rows read their one chip from. */
+export interface RowActivity {
+  jobs: ActivityJob[]
+  /** What the video playing carries (the edited render while As shot plays); null when unknown. */
+  video: RenderIncludes | null
+  /** No render record yet: a kept line counts as in the video. */
+  videoUnknown?: boolean
+  /** The render in progress, when there is one. */
+  rendering: RenderIncludes | null
+  /** Retry a failed job through the same flow (a failed line is voiced again with the same words and voice). */
+  onRetryJob?: (job: ActivityJob) => void | Promise<unknown>
+  /** Seconds a line of this many characters takes to voice, from the jobs measured; null when nothing is measured. */
+  etaFor?: (chars: number) => number | null
 }
 
 /** A line the agent's plan is working on: where it stands, and the new words. */
@@ -122,6 +140,8 @@ interface LineDocProps {
   /** As shot (2026-10-19): the version the player plays. In As shot the live edits are not in it:
    *  added and moved lines dim with "not in this version", removed and replaced lines read as shot. */
   version?: 'edited' | 'proposals' | 'as-shot'
+  /** 2026-10-20: the jobs and renders every row's chip is read from. */
+  activity?: RowActivity
 }
 
 /** The picture's flex for a take, as a factor ("0.94"), or null when it plays as shot. */
@@ -176,6 +196,18 @@ const actionsClass = [
 const StatusBadge = ({ status, children, role }: { status: string; children: ReactNode; role?: 'status' }) => (
   <span className={cn('stamp', TONE[status])} role={role} data-status={status}>{children}</span>
 )
+/** The row's one chip (2026-10-20): Original · Queued · Voicing · Ready to hear · Rendering · In the video · Failed. */
+const CHIP_TONE: Record<ChipState, string> = {
+  original: 'quiet', planned: 'in', waiting: 'need', queued: 'live', voicing: 'live', ready: '', rendering: 'live', 'in-video': 'in', removed: 'in', failed: 'need',
+}
+const RowStamp = ({ chip }: { chip: RowChip }) => (
+  <span className={cn('stamp', CHIP_TONE[chip.state])} role="status" data-status={chip.state} data-testid="row-chip" title={chip.reason ?? undefined}>
+    {(chip.state === 'voicing' || chip.state === 'rendering') && <Loader2 size={11} aria-hidden="true" className="animate-spin motion-reduce:animate-none" />}
+    {chip.state === 'in-video' && '✓ '}{chip.label}
+  </span>
+)
+const PENDING_CHIP: Partial<Record<string, ChipState>> = { planned: 'planned', working: 'voicing', 'needs-you': 'waiting', failed: 'failed', ready: 'ready' }
+const NO_ACTIVITY: RowActivity = { jobs: [], video: null, videoUnknown: true, rendering: null }
 const KBD = ({ k }: { k: string }) => <span className="kbd ml-0.5" aria-hidden="true">{k}</span>
 const PlayGlyph = () => <svg width="12" height="12" viewBox="0 0 16 16" aria-hidden="true"><path d="M4.5 2.5v11l9-5.5z" fill="currentColor" /></svg>
 const BoltGlyph = () => <svg width="13" height="13" viewBox="0 0 16 16" aria-hidden="true"><path d="M9 1.5 3.5 9H8l-1 5.5L12.5 7H8z" fill="currentColor" /></svg>
@@ -195,8 +227,9 @@ export function LineDoc({
   onSeek, onHear, onAdd, onDiscard, onAddAll, onUndo, onRemove, onHearTake, onRole, mixLines = [], bedUnderDb = 15, onDelivery, onRetry,
   onShorten, onShortenAll, onEase,
   onEditingChange, onMove, onMoveKept, placing, onPlacing, duration, version = 'edited',
-  arranged, onArrange, onArrangeUndo, onPreview,
+  arranged, onArrange, onArrangeUndo, onPreview, activity = NO_ACTIVITY,
 }: LineDocProps) {
+  const chipOf = (facts: { item?: PlanItem | null; editId?: string | null; removed?: boolean }) => rowChip({ ...facts, ...activity })
   const asShot = version === 'as-shot'
   const [at, setAt] = useState<string>('')          // the add editor's "starts at", as typed
   const [placeText, setPlaceText] = useState('')     // the placing control's time, as typed
@@ -401,7 +434,7 @@ export function LineDoc({
             <span className={hint}>No one speaks in this clip. Place a line where you want it, and say what it should say.</span>
           </div>
           <PlaceEditor
-            duration={duration} voices={voices} usdPerChar={usdPerChar} disabled={disabled}
+            duration={duration} voices={voices} usdPerChar={usdPerChar} disabled={disabled} etaFor={activity.etaFor}
             placing={placing} onPlacing={onPlacing}
             onHear={(span, request) => onHear(keyOf(span), request)}
           />
@@ -571,6 +604,11 @@ export function LineDoc({
   const editor = (s: Statement, mode: 'edit' | 'add' | 'layer') => {
     const chars = draft.trim().length
     const cost = usdPerChar ? ` · about ${Math.max(1, Math.round(chars * usdPerChar * 100))}¢` : ''
+    const eta = chars > 0 ? aboutEta(activity.etaFor?.(chars)) : null
+    // One driver at a time (2026-10-20): a line Voltage is voicing is not voiced from here as well.
+    const row = editing ? rows[editing.order] : null
+    const ids = [row?.kind === 'item' ? row.item.item_id : ownItem(s)?.item_id, row?.kind === 'layer' ? row.rev.edit_id : undefined].filter(Boolean) as string[]
+    const driven = ids.length > 0 && activity.jobs.some((j) => isActive(j) && j.line_ids.some((id) => ids.includes(id)))
     const base = mode === 'edit' ? standing(s) : mode === 'layer' ? s.text : ''
     const badAt = mode === 'add' && at.trim() !== '' && parseTime(at) === null
     const preview = mode !== 'add' && draft.trim() && draft.trim() !== base
@@ -631,14 +669,15 @@ export function LineDoc({
             <span>{mix === 'over' ? 'The picture keeps moving under the line.' : 'The picture waits while the line plays.'}</span>
           </ControlRow>
         )}
+        {driven && <p className="m-0 text-sm text-needs" role="status" data-testid="driven-note">Voltage is voicing these lines. Wait or Stop.</p>}
         <div className="flex flex-wrap items-center gap-2 border-t pt-3">
-          <span className={cn(faint, 'tnum')}>≈ {chars} characters{cost} · Voltage voices it; the take comes back proposed</span>
+          {chars > 0 && <span className={cn(faint, 'tnum')} data-testid="voice-estimate">≈ {chars} {chars === 1 ? 'character' : 'characters'}{cost}{eta ? ` · ready in ${eta}` : ''} · Voltage voices it; the take comes back proposed</span>}
           <span className="flex-1" />
           <Button type="button" variant="outline" onClick={close}>Cancel</Button>
           <Button
             type="button"
             aria-label="Voice it"
-            disabled={disabled || !draft.trim() || badAt || (mode === 'edit' && draft.trim() === base)}
+            disabled={disabled || driven || !draft.trim() || badAt || (mode === 'edit' && draft.trim() === base)}
             onClick={() => hear(s)}
           >
             Voice it
@@ -806,13 +845,20 @@ export function LineDoc({
   }
 
   /** What stands under a line while Voltage is on it. */
-  const lineBlock = (item: PlanItem | null, speaker: string | null | undefined) => {
+  const lineBlock = (item: PlanItem | null, speaker: string | null | undefined, chip?: RowChip) => {
     if (!item) return null
-    if (item.status === 'working') {
+    if (chip?.state === 'queued') {
+      return <div className="text-sm text-muted-foreground" data-testid="line-queued">Waiting its turn{chip.eta ? `, ${chip.eta} once it starts` : ''}.</div>
+    }
+    if (item.status === 'working' || chip?.state === 'voicing') {
+      // A slim bar on the row: the job's own progress when it reports one, else a quiet pulse.
+      const share = chip?.progress && chip.progress > 0 ? Math.min(1, chip.progress) : null
       return (
         <div className={cn('flex flex-col gap-1.5', riseClass)}>
-          <div className="flex items-center gap-2 text-sm text-muted-foreground" data-testid="line-working" role="status"><Spinner /><span>{item.progress ?? 'Voicing the line…'}</span></div>
-          <div className="h-1 w-full overflow-hidden rounded-full bg-muted" aria-hidden="true"><div className="h-full w-2/3 animate-pulse rounded-full bg-primary" /></div>
+          <div className="flex items-center gap-2 text-sm text-muted-foreground" data-testid="line-working" role="status"><Spinner /><span>{chip?.step || item.progress || 'Voicing the line…'}{chip?.eta ? ` · ${chip.eta}` : ''}</span></div>
+          <div className="h-1 w-full overflow-hidden rounded-full bg-muted" role="progressbar" aria-label="Voicing" aria-valuemin={0} aria-valuemax={100} aria-valuenow={share !== null ? Math.round(share * 100) : undefined} data-testid="line-progress">
+            <div className={cn('h-full rounded-full bg-primary transition-[width] duration-300', share === null && 'w-2/3 animate-pulse motion-reduce:animate-none')} style={share !== null ? { width: `${Math.max(4, share * 100)}%` } : undefined} />
+          </div>
         </div>
       )
     }
@@ -837,10 +883,15 @@ export function LineDoc({
       )
     }
     if (item.status === 'failed') {
+      // Failed (reason) with Retry inline: the same words and voice through the same job flow; Voltage only when there is no job to retry.
+      const reason = chip?.reason ?? item.error
+      const job = chip?.job?.retryable ? chip.job : null
       return (
         <div className="flex flex-col gap-1.5" data-testid="failed">
-          {item.error && <div className={cn(metaClass, 'text-needs')}>{item.error}</div>}
-          {onRetry && <span className="-ml-2 flex"><button type="button" className="act" onClick={() => onRetry(item)} disabled={disabled}>Ask Voltage to try again</button></span>}
+          {reason && <div className={cn(metaClass, 'text-needs')} data-testid="failed-reason">{reason}</div>}
+          {job && activity.onRetryJob ? (
+            <span className="-ml-2 flex"><button type="button" className="act" onClick={() => void run(`retry-${item.item_id}`, () => activity.onRetryJob!(job))} disabled={disabled || pending !== null} aria-busy={pending === `retry-${item.item_id}` || undefined}>{pending === `retry-${item.item_id}` ? 'Retrying…' : 'Retry'}</button></span>
+          ) : onRetry && <span className="-ml-2 flex"><button type="button" className="act" onClick={() => onRetry(item)} disabled={disabled}>Retry</button></span>}
         </div>
       )
     }
@@ -1085,7 +1136,7 @@ export function LineDoc({
           </span>
           <button className={timeClass} onClick={() => onSeek(s)} aria-label={`Go to ${clock(rev.start)}`}>{clock(rev.start)}</button>
           <div className="flex min-w-0 flex-col gap-1.5">
-            {whoLine(<>+ New line{rev.speaker && name(rev.speaker) ? ` · ${name(rev.speaker)}` : ''}</>, <>{<StatusBadge status="kept" role="status">{STATUS.kept}</StatusBadge>}{asShot && NOT_IN_VERSION}</>)}
+            {whoLine(<>+ New line{rev.speaker && name(rev.speaker) ? ` · ${name(rev.speaker)}` : ''}</>, <><RowStamp chip={chipOf({ editId: rev.edit_id })} />{asShot && NOT_IN_VERSION}</>)}
             {isEditing ? <div className={unfold}>{editor(s, 'layer')}</div> : (
               <>
                 <TaggedWords text={rev.text} className="say" />
@@ -1114,6 +1165,7 @@ export function LineDoc({
     const status = STATUS[item.status] ? item.status : null
     const after = statements.filter((st) => st.end <= entry.start + 0.001).at(-1)
     const inDepth = expanded === item.item_id && item.status === 'ready' && !!c
+    const chip = chipOf({ item })
     return (
       <Fragment key={key}>
         {drag && dropIndexFor(drag.to) === order && dropMarker()}
@@ -1123,7 +1175,7 @@ export function LineDoc({
           </span>
           <button className={timeClass} onClick={() => onSeek(s)} aria-label={`Go to ${clock(entry.start)}`}>{clock(entry.start)}</button>
           <div className={cn('flex min-w-0 flex-col', item.status === 'ready' ? 'gap-2.5' : 'gap-1.5')}>
-            {whoLine(<>+ New line{item.speaker && name(item.speaker) ? ` · ${name(item.speaker)}` : ''}</>, status && <StatusBadge status={status} role="status">{STATUS[status]}</StatusBadge>)}
+            {whoLine(<>+ New line{item.speaker && name(item.speaker) ? ` · ${name(item.speaker)}` : ''}</>, <RowStamp chip={chip} />)}
             {isEditing ? <div className={unfold}>{editor(s, 'layer')}</div> : inDepth ? depth(item, c!, s, order, 'layer') : (
               <>
                 <TaggedWords text={item.new_text} className={cn('say', item.status === 'ready' && 'text-lg')} wrap={(w) => <ins>{w}</ins>} />
@@ -1133,7 +1185,7 @@ export function LineDoc({
                   </div>
                 )}
                 {item.note && !(item.status === 'ready' && c) && <div className={cn(metaClass, 'text-needs')}>{item.note}</div>}
-                <div className={unfold}>{lineBlock(item, item.speaker)}</div>
+                <div className={unfold}>{lineBlock(item, item.speaker, chip)}</div>
                 {item.status === 'ready' && c && verbs(item, c, order, 'layer')}
                 {(item.status === 'needs-you' || (item.status === 'failed' && !ranLong(item)) || item.status === 'planned') && (
                   <span className="-ml-2 flex"><button type="button" className="act" onClick={() => void run(`discard-${item.item_id}`, () => onDiscard(item))} disabled={disabled || pending !== null}>Discard</button></span>
@@ -1250,8 +1302,13 @@ export function LineDoc({
     const movable = !!lineKey && !!onArrange && !removed
     const position = lineKey ? playingOrder(committed).indexOf(lineKey) : -1
     const plain = !isEditing && !isAdding && !proposed && !(revision && !removed)
-    const stamp = status && STATUS[status] && status !== 'removed' ? <StatusBadge status={status} role="status">{STATUS[status]}</StatusBadge>
-      : status === 'removed' ? <StatusBadge status="removed" role="status">Removed</StatusBadge> : null
+    // One chip per line (2026-10-20), read from the jobs; Reading stands in while Voltage reads the line.
+    const liveItem = own && own.status !== 'approved' && own.status !== 'dismissed' ? own : null
+    // A line the plan names only by its span (no item in hand): its plan state stands for the chip.
+    const chip = !liveItem && pending && pending.status !== 'reading' && PENDING_CHIP[pending.status]
+      ? { state: PENDING_CHIP[pending.status]!, label: CHIP_LABEL[PENDING_CHIP[pending.status]!] }
+      : chipOf({ item: liveItem, editId: revision?.edit_id ?? null, removed })
+    const stamp = pending?.status === 'reading' ? <StatusBadge status="reading" role="status">{STATUS.reading}</StatusBadge> : <RowStamp chip={chip} />
     const wordsButton = (
       <button className={cn(lineClass, proposed && 'text-lg')} onClick={() => open(order, 'edit')} title="Change the words" data-testid={shown ? 'revision' : undefined}>
         {(removed && !asShot) || (own?.mix === 'remove' && own.status === 'ready') ? <del>{s.text}</del>
@@ -1296,7 +1353,7 @@ export function LineDoc({
                 {own?.mix === 'remove' && own.status === 'ready' && (
                   <div className={cn(metaClass, 'text-needs')}>Proposed: these words go, and the room's own sound stays in their place.</div>
                 )}
-                <div className={unfold}>{lineBlock(own, s.speaker)}</div>
+                <div className={unfold}>{lineBlock(own, s.speaker, chip)}</div>
                 {proposed && !isAdding && verbs(own!, own!.candidate!, order, 'edit')}
                 {revision && !removed && revision.edit_id && !isAdding && keptActs(s, revision.edit_id, order, 'edit', s.start)}
                 {removed && revision?.edit_id && !isAdding && (
@@ -1454,7 +1511,7 @@ export function LineDoc({
             <span />
             <div className="min-w-0">
               <PlaceEditor
-                duration={duration} voices={voices} usdPerChar={usdPerChar} disabled={disabled}
+                duration={duration} voices={voices} usdPerChar={usdPerChar} disabled={disabled} etaFor={activity.etaFor}
                 placing={placing} onPlacing={onPlacing} initialStart={Math.min(duration - 1, (rows.at(-1)?.end ?? 0) + 0.3)}
                 onHear={(span, request) => { setPlacingAnother(false); onHear(keyOf(span), request) }}
                 onCancel={() => setPlacingAnother(false)}

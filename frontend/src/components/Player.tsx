@@ -23,8 +23,10 @@ interface PlayerProps {
   caption?: ReactNode
   /** The original's sound off while a replacement take plays over it. */
   muted?: boolean
-  /** Volt: what the player plays, as a tag on the picture ("With proposals"). */
+  /** Volt: what the player plays, as a tag on the picture ("Playing v4 · Edited"). */
   badge?: string
+  /** 2026-10-20: one line under the picture: a render on its way ("v5 rendering… about 8 s"), or changes not in it yet. */
+  notice?: ReactNode
   /** Volt: a 2 px line sweeps the picture while Voltage reads or looks; the words beside it say what it is doing. */
   scanning?: string | null
   /** Volt: marks on the scrubber. */
@@ -58,7 +60,7 @@ export const timecode = (t: number) => {
  *  scrubber with its markers and playhead, and whatever the caller puts on
  *  the right (Tracks, the word timeline). */
 export function Player({
-  src, duration, currentTime, onSeek, onTimeUpdate, seekRequest, caption, children, muted, onPlayingChange, badge, scanning, markers = [], bigPlay, carry,
+  src, duration, currentTime, onSeek, onTimeUpdate, seekRequest, caption, children, muted, onPlayingChange, badge, notice, scanning, markers = [], bigPlay, carry,
 }: PlayerProps) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const [playing, setPlaying] = useState(false)
@@ -196,6 +198,7 @@ export function Player({
           aria-hidden="true"
         ><span className="inline-block max-w-full truncate rounded-md bg-ink/70 px-3 py-1.5 text-base text-ptext">{caption}</span></div>}
       </div>
+      {notice && <div className="-mt-1 flex min-h-8 flex-wrap items-center gap-2.5" data-testid="player-notice">{notice}</div>}
       <div className="flex items-center gap-3.5">
         <button type="button" className="btn ink sm w-9 shrink-0 p-0" onClick={toggle} aria-label={playing ? 'Pause' : 'Play'}>
           {playing ? <Pause size={14} fill="currentColor" aria-hidden="true" /> : <Play size={14} fill="currentColor" aria-hidden="true" />}

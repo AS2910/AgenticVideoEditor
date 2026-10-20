@@ -4,7 +4,8 @@ import type { ChatMessage, HelpRef, PlanQuestion, SpendSummary, Suggestion } fro
 import { spendLine } from '../lib/money'
 import { optionsOf } from '../lib/options'
 import { artifactUrl } from '../api'
-import { ArrowUp, Info } from 'lucide-react'
+import { ArrowUp, Check, Info, Loader2 } from 'lucide-react'
+import type { Step } from '../jobs/model'
 import { cn } from '@/lib/utils'
 import { Markdown } from './Markdown'
 import { Wave } from './Wordmark'
@@ -130,13 +131,15 @@ function EngineInfo({ engine }: { engine: string }) {
  *  each wrapping its words; Voltage's pick first and tagged; a long option a
  *  short label with its sentence beneath; the money as one sentence. When the
  *  turn's cap caused it, the first option allows exactly what the step needs. */
-function QuestionCard({ question, onAnswer, turnCap }: { question: PlanQuestion; onAnswer?: (option: string, allowMore?: boolean) => void; turnCap?: number }) {
+function QuestionCard({ question, onAnswer, turnCap, picked }: { question: PlanQuestion; onAnswer?: (option: string, allowMore?: boolean) => void; turnCap?: number; picked?: string | null }) {
   const options = optionsOf(question)
   const cap = question.cap_usd ?? question.turn_cap?.cap_usd ?? turnCap ?? null
-  const done = question.resolved ?? null
+  // 2026-10-20: once an option is picked the card stays where it was, its options off and the pick marked.
+  const done = question.resolved ?? (picked != null ? { why: '', by: 'chat' as const, at: '' } : null)
+  const isPicked = (value: string) => picked != null && value.trim().toLowerCase() === picked.trim().toLowerCase()
   return (
-    <div className={cn('min-w-0', done ? 'flex flex-col gap-3.5 rounded-xl border border-dashed border-pline p-4 opacity-80' : question.gate ? 'gate' : 'flex flex-col gap-3.5 rounded-xl border border-pline p-4')} data-testid="clarify" data-resolved={done ? true : undefined} data-tour={question.gate ? 'gate' : 'question'} role="group" aria-label={question.gate ? 'Your go is needed' : 'One question'}>
-      <span className={cn('tag', question.gate && !done ? 'text-volt' : 'pm')}>{done ? 'Settled' : question.gate ? '⚡ Your go is needed' : 'One question'}</span>
+    <div className={cn('min-w-0', done ? 'flex flex-col gap-3.5 rounded-xl border border-dashed border-pline p-4' : question.gate ? 'gate' : 'flex flex-col gap-3.5 rounded-xl border border-pline p-4', done && picked == null && 'opacity-80')} data-testid="clarify" data-resolved={done ? true : undefined} data-picked={picked ?? undefined} data-tour={question.gate ? 'gate' : 'question'} role="group" aria-label={question.gate ? 'Your go is needed' : 'One question'}>
+      <span className={cn('tag', question.gate && !done ? 'text-volt' : 'pm')}>{picked != null ? 'Answered' : done ? 'Settled' : question.gate ? '⚡ Your go is needed' : 'One question'}</span>
       <p className="m-0 text-[15px] leading-relaxed" data-money-scope="step"><strong className="font-medium">{question.text}</strong></p>
       {!done && (question.cost_usd != null || question.left_usd != null) && (
         <p className="tnum m-0 text-[13px] leading-snug pm" data-testid="clarify-money">
@@ -149,18 +152,21 @@ function QuestionCard({ question, onAnswer, turnCap }: { question: PlanQuestion;
       <div className="flex w-full min-w-0 flex-col items-start gap-2" data-testid="clarify-options">
         {options.map((o, k) => {
           const volt = !done && (question.gate ? k === 0 : o.way || (o.pick && !question.turn_cap))
+          const mine = isPicked(o.value)
           return (
             <button
               key={o.value}
               type="button"
-              className={cn('btn sm opt', volt ? 'volt' : 'ghost', volt && question.gate && 'shine', !volt && /^not yet$/i.test(o.value) && 'border-transparent pm')}
+              className={cn('btn sm opt', volt ? 'volt' : 'ghost', volt && question.gate && 'shine', !volt && /^not yet$/i.test(o.value) && 'border-transparent pm', mine && 'opacity-100! border-volt text-volt', picked != null && !mine && 'opacity-50')}
               disabled={!!done}
+              aria-pressed={picked != null ? mine : undefined}
               onClick={() => (o.way ? onAnswer?.(o.value, true) : onAnswer?.(o.value))}
               data-tour-action={k === 0 && question.gate ? 'gate' : undefined}
               data-option={o.way ? 'allow-more' : o.pick ? 'pick' : undefined}
               data-money-scope={o.way ? 'turn' : undefined}
             >
               {o.pick && !done && <span className="pick" data-testid="pick-tag">Voltage's pick</span>}
+              {mine && <span className="pick" data-testid="your-pick"><Check size={11} aria-hidden="true" className="mr-1 inline" />Your pick</span>}
               <span className="max-w-full" data-testid="option-label">{o.label}</span>
               {o.detail && <span className="detail" data-testid="option-detail">{o.detail}</span>}
             </button>
@@ -168,8 +174,58 @@ function QuestionCard({ question, onAnswer, turnCap }: { question: PlanQuestion;
         })}
       </div>
       <span className="pm text-xs" role="status" data-testid="clarify-status">
-        {done ? `Answered in the editor: ${done.why}.` : question.gate ? 'Say go, or pick one.' : 'Pick one, or answer in your own words.'}
+        {picked != null ? `You picked “${picked}”.` : done ? `Answered in the editor: ${done.why}.` : question.gate ? 'Say go, or pick one.' : 'Pick one, or answer in your own words.'}
       </span>
+    </div>
+  )
+}
+
+/** The turn's steps (2026-10-20), one list updated in place from its jobs:
+ *  [check] Plan ready · [spinner] Voicing line 2 of 5 · [ ] Fit check · [ ] Render preview. */
+function StepList({ steps }: { steps: Step[] }) {
+  return (
+    <ol className="m-0 flex list-none flex-col gap-2 rounded-[10px] border border-pline px-3.5 py-3" aria-label="What Voltage is doing" data-testid="turn-steps">
+      {steps.map((s) => (
+        <li key={s.key} className="flex min-w-0 items-center gap-2.5 text-sm" data-state={s.state} data-testid="turn-step">
+          <span className="inline-flex size-4 shrink-0 items-center justify-center" aria-hidden="true">
+            {s.state === 'done' ? <Check size={15} className="text-volt" />
+              : s.state === 'running' ? <Loader2 size={15} className="animate-spin text-volt motion-reduce:animate-none" />
+              : s.state === 'failed' ? <span className="tag text-warn">!</span>
+              : <span className="size-3 rounded-full border border-pline" />}
+          </span>
+          <span className={cn('min-w-0 truncate', s.state === 'todo' || s.state === 'skipped' ? 'pm' : s.state === 'failed' ? 'text-warn' : '')} title={s.label}>
+            <span className="sr-only">{s.state === 'done' ? 'Done: ' : s.state === 'running' ? 'Now: ' : s.state === 'failed' ? 'Failed: ' : 'Next: '}</span>{s.label}
+          </span>
+        </li>
+      ))}
+    </ol>
+  )
+}
+
+/** What a turn closes with: one short sentence, then Hear changes and Undo all (it asks once before undoing). */
+export interface TurnSummary { text: string; lines: number; onHear?: () => void; onUndo?: () => void | Promise<unknown> }
+function Summary({ summary }: { summary: TurnSummary }) {
+  const [asking, setAsking] = useState(false)
+  const [undoing, setUndoing] = useState(false)
+  const undo = async () => {
+    setUndoing(true)
+    try { await summary.onUndo?.() } finally { setUndoing(false); setAsking(false) }
+  }
+  return (
+    <div className="flex flex-col gap-2.5 rounded-[10px] bg-psunk px-3.5 py-3" data-testid="turn-summary">
+      <p className="m-0 text-[15px]">{summary.text}</p>
+      {asking ? (
+        <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Undo all">
+          <span className="text-sm pm">Undo all {summary.lines} {summary.lines === 1 ? 'line' : 'lines'} from this turn?</span>
+          <button type="button" className="btn ghost sm" onClick={() => setAsking(false)} disabled={undoing}>Keep them</button>
+          <button type="button" className="btn volt sm" onClick={() => void undo()} disabled={undoing} aria-busy={undoing || undefined}>{undoing ? 'Undoing…' : 'Yes, undo'}</button>
+        </div>
+      ) : (summary.onHear || summary.onUndo) && (
+        <div className="flex flex-wrap items-center gap-2">
+          {summary.onUndo && summary.lines > 0 && <button type="button" className="btn ghost sm" onClick={() => setAsking(true)}>Undo all</button>}
+          {summary.onHear && <button type="button" className="btn volt sm" onClick={summary.onHear}>Hear changes</button>}
+        </div>
+      )}
     </div>
   )
 }
@@ -215,6 +271,12 @@ interface VoltagePaneProps {
   empty?: ReactNode
   /** Help (2026-10-19): "Show me" on an answer from Help starts that article's feature tour. */
   onShowMe?: (tour: string) => void
+  /** 2026-10-20: the option just picked on a question: the card stays above your words, its options off, the pick marked. */
+  picked?: { question: PlanQuestion; option: string } | null
+  /** The latest turn's steps, bound to its jobs, under your words. */
+  steps?: Step[]
+  /** The latest turn's closing line, with Hear changes and Undo all. */
+  summary?: TurnSummary | null
 }
 
 /** Voltage's pane (Volt, 2026-10-18): black in both themes. The avatar and the
@@ -222,7 +284,7 @@ interface VoltagePaneProps {
  *  a question as a gate card — then the chips and the composer. */
 export function VoltagePane({
   messages, projectId, state, busy, need, engine, chips = [], cap, spend, question, onAnswer, turnCap, onSubmit, placeholder = 'Say what to change…', sendLabel = 'Send',
-  inputRef, seed, suggestions = [], onChipEvent, seeing, before, children, working, empty, onShowMe,
+  inputRef, seed, suggestions = [], onChipEvent, seeing, before, children, working, empty, onShowMe, picked, steps = [], summary,
 }: VoltagePaneProps) {
   const [prompt, setPrompt] = useState('')
   const [openTrace, setOpenTrace] = useState<number | null>(null)
@@ -237,7 +299,7 @@ export function VoltagePane({
   // otherwise a "New from Voltage" pill waits until you come down to it.
   const nearBottom = useRef(true)
   const [unseen, setUnseen] = useState(false)
-  const fresh = `${messages.length}|${question?.text ?? ''}|${working ?? ''}|${before ? 1 : 0}|${children ? 1 : 0}`
+  const fresh = `${messages.length}|${question?.text ?? ''}|${working ?? ''}|${before ? 1 : 0}|${children ? 1 : 0}|${steps.map((s) => s.label + s.state).join()}|${summary?.text ?? ''}`
   useLayoutEffect(() => {
     const el = list.current
     if (!el) return
@@ -347,14 +409,21 @@ export function VoltagePane({
             }
             return (
               <div key={index} className="flex flex-col gap-4.5" data-testid="turn">
+                {isLatest && picked && <QuestionCard question={picked.question} picked={picked.option} turnCap={turnCap} />}
                 {t.user && <div className="bubble text-sm"><span className="sr-only">You: </span>{t.user.text}</div>}
-                {t.steps.length > 0 && <Trace steps={t.steps} open={openTrace === index} onToggle={() => setOpenTrace((o) => (o === index ? null : index))} spend={isLatest && t.user ? spend : null} />}
+                {isLatest && steps.length > 0 && <StepList steps={steps} />}
+                {t.steps.length > 0 && (isLatest && steps.length > 0 && openTrace !== index ? (
+                  <button type="button" className="tag pm self-start bg-transparent p-0 text-left hover:text-ptext" onClick={() => setOpenTrace(index)} data-testid="trace-details">
+                    Details · {t.steps.length} {t.steps.length === 1 ? 'step' : 'steps'} →
+                  </button>
+                ) : <Trace steps={t.steps} open={openTrace === index} onToggle={() => setOpenTrace((o) => (o === index ? null : index))} spend={isLatest && t.user ? spend : null} />)}
                 {t.cards.map((c) => <Previews key={c.seq} projectId={projectId} m={c} />)}
                 {t.said.length > 0 && (
                   <div className="flex flex-col gap-2.5 text-[15px] leading-relaxed [&_strong]:font-medium [&_strong]:text-volt">
                     {t.said.map((m, k) => <div key={m.seq ?? k}><span className="sr-only">Voltage: </span><Markdown text={m.text} /></div>)}
                   </div>
                 )}
+                {isLatest && summary && <Summary summary={summary} />}
                 {helpOf(t).map((h) => (
                   <div key={h.slug} className="rise flex flex-col gap-2.5 rounded-xl border-[1.5px] border-volt p-3.5" data-testid="from-help">
                     <span className="tag pm">From Help · {h.section}</span>
@@ -368,7 +437,7 @@ export function VoltagePane({
               </div>
             )
           })}
-          {working && (
+          {working && steps.length === 0 && (
             <div className="trace" role="status" data-testid="turn-working">
               <div className="ln"><span className="ts" /><span className="g" aria-hidden="true">└</span><span className="c inline-flex items-center gap-2">{working}<span className="blinkdot inline-block h-3.5 w-[7px] bg-volt" aria-hidden="true" /></span><span /></div>
             </div>

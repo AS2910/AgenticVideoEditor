@@ -371,7 +371,7 @@ export interface Insert { at: number; duration: number; artifact: MediaArtifact;
 export interface Piece { start: number; end: number; out_start: number; out_end: number; kind: 'copy' | 'flex' | 'living' | 'hold'; factor: number | null }
 
 /** `render` is the finished MP4, stored like any other artifact. */
-export interface ExportManifest { segments: Segment[]; render: MediaArtifact; inserts?: Insert[]; pieces?: Piece[]; /** 20e: the proposals this render carries. */ proposals?: string[]; /** Bug 1: what it was built from (video, mode, edit set), the mode, whether it was reused, the caller's request id. */ edit_hash?: string; mode?: 'final' | 'proposals'; cached?: boolean; request_id?: number | null; /** 2026-10-20: what the mix did with each line, and the loudness it landed on. */ mix?: MixReport | null }
+export interface ExportManifest { segments: Segment[]; render: MediaArtifact; inserts?: Insert[]; pieces?: Piece[]; /** 20e: the proposals this render carries. */ proposals?: string[]; /** Bug 1: what it was built from (video, mode, edit set), the mode, whether it was reused, the caller's request id. */ edit_hash?: string; mode?: 'final' | 'proposals'; cached?: boolean; request_id?: number | null; /** 2026-10-20: what the mix did with each line, and the loudness it landed on. */ mix?: MixReport | null; /** 2026-10-20: the render's version (v1, v2...), its id, when it was made, and the takes it carries. */ version?: number; render_id?: string; created_at?: string; includes?: RenderIncludes }
 
 /** A message in the thread. `step` is one thing Voltage did (Phase 20), with what it cost. */
 /** One preview of a voice Voltage designed (20b): playable from its artifact. */
@@ -533,3 +533,68 @@ export interface Onboarding {
 
 /** An article a search_help step used, as the pane links it. */
 export interface HelpRef { slug: string; title: string; section: string; tour?: string | null }
+
+// ── One processing model (2026-10-20) ─────────────────────────────────────────
+// Every surface (the status strip, Activity, the row chips, the player's badge,
+// the chat's step list, toasts, the tab title) reads from these records.
+
+export type ActivityKind = 'voice_line' | 'design_voice' | 'clone' | 'mix' | 'render_preview' | 'export'
+export type ActivityStatus = 'queued' | 'running' | 'done' | 'failed' | 'cancelled'
+/** The takes a render carries: kept edits, proposals (items), and their candidates. */
+export interface RenderIncludes { candidate_ids: string[]; edit_ids: string[]; item_ids: string[] }
+export interface ActivityJob {
+  job_id: string
+  video_id: string
+  turn_id: string | null
+  kind: ActivityKind
+  status: ActivityStatus
+  step_label: string
+  progress: number
+  /** Plan item ids ("i3") and edit ids ("e2") the job is about. */
+  line_ids: string[]
+  created_at: string
+  started_at: string | null
+  finished_at: string | null
+  /** Whole seconds, at least 1, while queued or running; null when finished or unknown. */
+  eta_s: number | null
+  error_code: string | null
+  error_text: string | null
+  cost_usd: number | null
+  retryable?: boolean
+  detail?: {
+    text?: string; voice_name?: string; chars?: number
+    version?: number; mode?: 'final' | 'proposals'; render_id?: string; includes?: RenderIncludes
+    manual?: boolean
+  }
+}
+export interface TurnView {
+  turn_id: string
+  status: 'running' | 'stopping' | 'done' | 'failed'
+  step: string
+  started_at: string
+  finished_at: string | null
+  spent_usd?: number
+  lines_voiced?: number
+  render?: { version: number; mode: 'final' | 'proposals'; render_id?: string } | null
+}
+export interface RenderRecord {
+  render_id: string
+  version: number
+  edit_set_hash: string
+  created_at: string
+  mode: 'final' | 'proposals'
+  render: MediaArtifact
+  manifest?: ExportManifest
+  includes?: RenderIncludes
+}
+export interface RenderInProgress {
+  render_id: string; version: number; edit_set_hash: string; started_at: string; eta_s: number | null; job_id: string
+  includes?: RenderIncludes
+}
+export interface RenderState {
+  mode: 'final' | 'proposals'
+  current_hash: string
+  latest: RenderRecord | null
+  in_progress: RenderInProgress | null
+  stale: boolean
+}

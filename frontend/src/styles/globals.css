@@ -280,6 +280,9 @@
   .stamp.need { background: var(--warn); }
   .stamp.in { background: transparent; color: var(--muted-foreground); border: 1px solid var(--line2); }
   .stamp.inkd { background: var(--ink); color: var(--volt); }
+  /* 2026-10-20: a row's one chip. Original is quiet; work in progress (Queued, Voicing, Rendering) is outlined in ink. */
+  .stamp.quiet { background: transparent; color: var(--faint); font-weight: 500; padding-left: 0; padding-right: 0; }
+  .stamp.live { display: inline-flex; align-items: center; gap: 5px; background: transparent; color: var(--foreground); border: 1px solid var(--foreground); }
   /* Transcript rows */
   .row { display: grid; grid-template-columns: 76px minmax(0, 1fr); gap: 12px; padding: 12px 14px; border-radius: 10px; }
   .row .t { font-size: 12px; color: var(--faint); padding-top: 3px; }

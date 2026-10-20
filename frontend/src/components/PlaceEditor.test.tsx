@@ -67,7 +67,7 @@ describe('placing a voice-over', () => {
       items={[voicing]} pendingLines={[{ selection: { start: 0.5, end: 3.5 }, status: 'working' }]} />)
     const row = screen.getByRole('listitem', { name: 'Proposed line at 0:00' })
     expect(row).toHaveTextContent('Welcome to Goa')
-    expect(screen.getAllByRole('status').some((el) => el.textContent?.includes('Voicing…'))).toBe(true)
+    expect(screen.getAllByRole('status').some((el) => el.textContent?.includes('Voicing'))).toBe(true)
     expect(screen.getByRole('button', { name: /add another voice-over/i })).toBeInTheDocument()
   })
 })

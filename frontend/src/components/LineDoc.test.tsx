@@ -3,7 +3,7 @@ import { act, fireEvent, render, screen, within, waitFor } from '@testing-librar
 import userEvent from '@testing-library/user-event'
 import { LineDoc } from './LineDoc'
 import { keyOf, addKeyOf } from '../transcript/keys'
-import type { Candidate, PlanItem } from '../types'
+import type { ActivityJob, Candidate, PlanItem } from '../types'
 import type { ArrangementView } from '../api'
 import { EMPTY, overrun, place, specs } from '../transcript/arrange'
 import type { Arrangement } from '../transcript/arrange'
@@ -74,7 +74,7 @@ describe('LineDoc: the line is the unit', () => {
     const h = doc({ items: [item(), second], onAddAll })
     const verbs = screen.getByRole('group', { name: 'Proposal at 0:07' })
     expect(within(verbs).getAllByRole('button').map((b) => b.getAttribute('aria-label') ?? b.textContent?.replace(/[␣K]$/, ''))).toEqual(['Hear it', 'Add it', 'Edit it', 'Discard'])
-    expect(screen.getAllByText('Proposed')).toHaveLength(2)
+    expect(screen.getAllByText('Ready to hear')).toHaveLength(2)
     expect(screen.getByText(/one transcript|2 lines are proposed/i)).toHaveTextContent('2 lines are proposed')
     await userEvent.click(within(verbs).getByRole('button', { name: 'Hear it' }))
     expect(h.onHearTake).toHaveBeenCalledWith(expect.objectContaining({ item_id: 'i1' }), expect.objectContaining({ candidate_id: 'c1' }))
@@ -221,7 +221,7 @@ describe('LineDoc: the line is the unit', () => {
     doc({ items: [item()] })
     const facts = screen.getByTestId('take')
     expect(facts).toHaveTextContent("Brian's voice · Sounds like the Customer, and sits in the room. Trimmed 120 ms of pauses.")
-    expect(screen.getByText('Proposed')).toBeInTheDocument()
+    expect(screen.getByText('Ready to hear')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /another take|^keep$/i })).toBeNull()
   })
 
@@ -239,9 +239,9 @@ describe('LineDoc: the line is the unit', () => {
       ],
     })
     expect(screen.getByTestId('line-working')).toHaveTextContent('Trying again')
-    expect(screen.getByText('Voicing…')).toBeInTheDocument()
+    expect(screen.getByText('Voicing')).toBeInTheDocument()
     expect(screen.getByText('Waiting on you')).toBeInTheDocument()
-    expect(screen.getByText("Couldn't voice it")).toBeInTheDocument()
+    expect(screen.getByText('Failed')).toBeInTheDocument()
     // What a line needs is said to Voltage in the box; the row has no answers or retries of its own.
     expect(screen.queryByTestId('line-needs-you')).toBeNull()
     expect(screen.queryByRole('button', { name: /try again|dismiss|shorter line/i })).toBeNull()
@@ -316,7 +316,7 @@ describe('LineDoc: editing starts from where the line stands', () => {
     const row = screen.getByRole('listitem', { name: 'Proposed line at 0:09' })
     expect(row).toHaveTextContent('Everything is 30% off.')
     expect(row).toHaveTextContent('The voice service was busy.')
-    expect(within(row).getByText("Couldn't voice it")).toBeInTheDocument()
+    expect(within(row).getByText('Failed')).toBeInTheDocument()
     within(row).getByRole('button', { name: 'Discard' }).click()
     expect(h.onDiscard).toHaveBeenCalledWith(expect.objectContaining({ item_id: 'i2' }))
   })
@@ -338,7 +338,7 @@ describe('LineDoc: editing starts from where the line stands', () => {
     expect(rows[1]).toHaveTextContent('Woohoo!')
     expect(rows[2]).toHaveTextContent('Yeahhh!')
     expect(screen.getAllByText('✓ In the video')).toHaveLength(2)
-    expect(screen.getByText('Proposed')).toBeInTheDocument()
+    expect(screen.getByText('Ready to hear')).toBeInTheDocument()
     // The spoken lines keep their own words: a layer over them is not a change to them.
     expect(screen.getByText('Hi, I want to buy groceries.')).toBeInTheDocument()
     // Take it out on the second layer; Edit it on the first asks for a redo that swaps the edit.
@@ -586,23 +586,23 @@ describe('LineDoc: the transcript agrees with the record (p60)', () => {
     expect(screen.getByTestId('counts')).toHaveTextContent(/^1 proposed/)
   })
 
-  it('shows Couldn’t voice it only when the latest attempt failed, with Ask Voltage to try again', async () => {
+  it('shows Failed only when the latest attempt failed, with its reason and Retry', async () => {
     const onRetry = vi.fn()
     const failed = item({ status: 'failed', candidate: null, error: ERR })
     doc({ items: [failed], onRetry })
     const row = screen.getByRole('listitem', { name: /Line at 0:07/ })
-    expect(row).toHaveTextContent("Couldn't voice it")
+    expect(row).toHaveTextContent('Failed')
     expect(row).toHaveTextContent(ERR)
     expect(row.textContent).not.toMatch(/—|widen the selection/)
-    await userEvent.click(within(row).getByRole('button', { name: 'Ask Voltage to try again' }))
+    await userEvent.click(within(row).getByRole('button', { name: 'Retry' }))
     expect(onRetry).toHaveBeenCalledWith(expect.objectContaining({ item_id: 'i1' }))
   })
 
   it('keeps a line with a good take proposed when a later try failed, and says so', () => {
     doc({ items: [item({ note: 'The last try could not be made; the take before it stands.' })] })
     const row = screen.getByRole('listitem', { name: /Line at 0:07/ })
-    expect(row).toHaveTextContent('Proposed')
-    expect(row).not.toHaveTextContent("Couldn't voice it")
+    expect(row).toHaveTextContent('Ready to hear')
+    expect(row).not.toHaveTextContent('Failed')
     expect(screen.getByTestId('item-note')).toHaveTextContent('the take before it stands')
   })
 
@@ -612,5 +612,75 @@ describe('LineDoc: the transcript agrees with the record (p60)', () => {
     expect(meta).toHaveTextContent('Picture eased to 0.94× for this line.')
     expect(meta.textContent!.match(/0\.94/g)).toHaveLength(1)
     expect(meta).not.toHaveTextContent(/flexed/)
+  })
+})
+
+describe('LineDoc: one chip per line, read from the jobs (2026-10-20)', () => {
+  const job = (over: Partial<ActivityJob> = {}): ActivityJob => ({
+    job_id: 'J1', video_id: 'p1', turn_id: 't1', kind: 'voice_line', status: 'queued', step_label: 'Queued', progress: 0,
+    line_ids: ['i1'], created_at: '2026-10-20T10:00:00Z', started_at: null, finished_at: null, eta_s: 9,
+    error_code: null, error_text: null, cost_usd: null, ...over,
+  })
+  const none = { candidate_ids: [], edit_ids: [], item_ids: [] }
+  const chips = () => screen.getAllByTestId('row-chip').map((c) => c.textContent)
+
+  it('every line carries exactly one chip: Original for a line nobody touched', () => {
+    doc({ activity: { jobs: [], video: null, rendering: null } })
+    expect(chips()).toEqual(['Original', 'Original', 'Original'])
+  })
+
+  it('goes Queued, Voicing with a slim bar, Ready to hear, Rendering, In the video', () => {
+    const planned = item({ status: 'planned', candidate: null })
+    const { rerender } = render(<LineDoc statements={STATEMENTS} currentTime={0} {...handlers()} items={[planned]} activity={{ jobs: [job()], video: null, rendering: null }} />)
+    expect(screen.getAllByTestId('row-chip')[1]).toHaveTextContent('Queued')
+    rerender(<LineDoc statements={STATEMENTS} currentTime={0} {...handlers()} items={[{ ...planned, status: 'working' }]}
+      activity={{ jobs: [job({ status: 'running', progress: 0.5, step_label: 'Checking fit' })], video: null, rendering: null }} />)
+    expect(screen.getAllByTestId('row-chip')[1]).toHaveTextContent('Voicing')
+    expect(screen.getByTestId('line-working')).toHaveTextContent('Checking fit · about 9 s')
+    expect(screen.getByTestId('line-progress')).toHaveAttribute('aria-valuenow', '50')
+    const done = [job({ status: 'done' })]
+    rerender(<LineDoc statements={STATEMENTS} currentTime={0} {...handlers()} items={[item()]} activity={{ jobs: done, video: none, rendering: null }} />)
+    expect(screen.getAllByTestId('row-chip')[1]).toHaveTextContent('Ready to hear')
+    rerender(<LineDoc statements={STATEMENTS} currentTime={0} {...handlers()} items={[item()]} activity={{ jobs: done, video: none, rendering: { ...none, candidate_ids: ['c1'] } }} />)
+    expect(screen.getAllByTestId('row-chip')[1]).toHaveTextContent('Rendering')
+    rerender(<LineDoc statements={STATEMENTS} currentTime={0} {...handlers()} items={[item()]} activity={{ jobs: done, video: { ...none, item_ids: ['i1'] }, rendering: null }} />)
+    expect(screen.getAllByTestId('row-chip')[1]).toHaveTextContent('In the video')
+  })
+
+  it('a failed line says why and retries the same job inline', async () => {
+    const onRetryJob = vi.fn()
+    const failed = job({ status: 'failed', error_code: 'vendor_failed', error_text: 'The voice service did not answer.', retryable: true })
+    doc({ items: [item({ status: 'failed', candidate: null, error: 'older' })], activity: { jobs: [failed], video: null, rendering: null, onRetryJob } })
+    const row = screen.getByRole('listitem', { name: /Line at 0:07/ })
+    expect(within(row).getByTestId('row-chip')).toHaveTextContent('Failed')
+    expect(within(row).getByTestId('failed-reason')).toHaveTextContent('The voice service did not answer.')
+    await userEvent.click(within(row).getByRole('button', { name: 'Retry' }))
+    expect(onRetryJob).toHaveBeenCalledWith(expect.objectContaining({ job_id: 'J1' }))
+  })
+
+  it('a kept line is In the video only when the playing render carries it', () => {
+    const rev = { edit_id: 'e1', start: 7.54, end: 9.02, text: 'Start a live Bhaji Cam session.', mix: 'replace' as const }
+    const { rerender } = render(<LineDoc statements={STATEMENTS} currentTime={0} {...handlers()} revisions={[rev]} activity={{ jobs: [], video: { ...none, edit_ids: ['e1'] }, rendering: null }} />)
+    expect(screen.getAllByTestId('row-chip')[1]).toHaveTextContent('In the video')
+    rerender(<LineDoc statements={STATEMENTS} currentTime={0} {...handlers()} revisions={[rev]} activity={{ jobs: [], video: none, rendering: null }} />)
+    expect(screen.getAllByTestId('row-chip')[1]).toHaveTextContent('Ready to hear')
+  })
+
+  it('one driver at a time: a line Voltage is voicing cannot be voiced from its form', async () => {
+    const running = job({ status: 'running', line_ids: ['i1'] })
+    doc({ items: [item({ status: 'planned', candidate: null })], activity: { jobs: [running], video: null, rendering: null } })
+    await userEvent.click(screen.getByText('Start a live Bajicam session.'))
+    expect(screen.getByTestId('driven-note')).toHaveTextContent('Voltage is voicing these lines. Wait or Stop.')
+    expect(screen.getByRole('button', { name: 'Voice it' })).toBeDisabled()
+  })
+
+  it('counts the words live and hides the estimate until there are any; the time only when one was measured', async () => {
+    doc({ activity: { jobs: [], video: null, rendering: null, etaFor: (chars) => chars * 0.2 } })
+    await userEvent.click(screen.getByText('Sure, sir.'))
+    const box = screen.getByRole('textbox', { name: 'New wording' })
+    await userEvent.clear(box)
+    expect(screen.queryByTestId('voice-estimate')).toBeNull()
+    await userEvent.type(box, 'Of course')
+    expect(screen.getByTestId('voice-estimate')).toHaveTextContent('≈ 9 characters · ready in about 2 s')
   })
 })

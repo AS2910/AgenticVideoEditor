@@ -29,6 +29,14 @@ import { LoginPage } from './pages/LoginPage'
 import { ExportPage } from './pages/ExportPage'
 import { HelpPage } from './pages/HelpPage'
 import { KeyboardSheet } from './components/KeyboardSheet'
+import { StatusStrip } from './components/StatusStrip'
+import { ActivityDrawer } from './components/ActivityDrawer'
+import { Toaster } from './components/Toaster'
+import type { TurnSummary } from './components/VoltagePane'
+import { useActivity } from './jobs/useActivity'
+import type { JobListener } from './jobs/useActivity'
+import { aboutEta, coalesce, isActive, isRender, isVoice, stripState, turnJobs, turnSteps, turnSummary } from './jobs/model'
+import type { Toast } from './jobs/model'
 import { TourProvider, TourLayer, useTour } from './tour/engine'
 import { guidedRun, tourById } from './tour/tours'
 import type { Tour } from './tour/types'
@@ -40,6 +48,7 @@ import { cn } from '@/lib/utils'
 import { clock } from './transcript/format'
 import {
   createProject, confirmPlace, exportProject, artifactUrl, pollJob, PollCancelled, ApiError, listVideos, listFolders, createFolder, startTutorial, getProject, deleteProject, getUsage, getSpend, listVoices, updateSpeaker, detectSpeakers, revertEdit, updateSettings, removeLine, dismissItem, easeItem, setEditRole, setCandidateRole, roleQuestion, moveCandidate, moveEdit, getArrangement, putArrangement, undoArrangement, getPlan, approvePlan, readProject, grantConsent, getMe, postTurn, postAllowMore, getMessages, chipEvent, getUnderstanding, correctUnderstanding, setStyle,
+  retryJob, stopJobs, getLatestRender, startRender, getJobs,
 } from './api'
 import type { ArrangementView, Me, PlanApproval, RoleChange, RoleQuestion } from './api'
 import type { Arrangement, Placed } from './transcript/arrange'
@@ -47,8 +56,15 @@ import type {
   Word, Selection, Candidate, Segment, Project, ChatMessage,
   Insert, ProjectSummary, Usage, SpendSummary, Statement, Voice, Revision,
   Plan, PlanItem, Autonomy, Reading, Piece, ProjectDetail, ApprovedEditSummary, MyVoice, ProjectFolder, ExportManifest, MixReport, Suggestion, Understanding,
+  ActivityJob, PlanQuestion, RenderIncludes, RenderRecord,
 } from './types'
 import { piecesFromInserts, renderTimeFrom, sourceTimeFrom } from './timeline/selection'
+
+/** What a render is (2026-10-20): its version, when it was made, and the takes it carries. */
+interface RenderFacts { version?: number; at?: string; includes?: RenderIncludes; hash?: string }
+const factsOf = (m: ExportManifest | RenderRecord): RenderFacts => ('edit_set_hash' in m
+  ? { version: m.version, at: m.created_at, includes: m.includes, hash: m.edit_set_hash }
+  : { version: m.version, at: m.created_at, includes: m.includes, hash: m.edit_hash })
 
 /** Bundled demo clip, uploaded through the same path as any other file. */
 const SAMPLE_URL = '/sample-ad.mp4'
@@ -114,10 +130,11 @@ function Studio() {
   const [renderPending, setRenderPending] = useState<{ final: number | null; proposals: number | null }>({ final: null, proposals: null })
   const exporting = renderPending.final !== null
   const [uploadShare, setUploadShare] = useState<number | null>(null)
-  const [rendered, setRendered] = useState<{ url: string; duration: number } | null>(null)
+  // 2026-10-20: a render knows its version, when it was made and the takes it carries (the player's badge and the rows read them).
+  const [rendered, setRendered] = useState<{ url: string; duration: number } & RenderFacts | null>(null)
   // 20e: which render plays — the final, the original, or the preview with the proposals mixed in.
   const [view, setView] = useState<'original' | 'final' | 'proposals'>('original')
-  const [preview, setPreview] = useState<{ url: string; duration: number; pieces: Piece[]; key: string; mix?: MixReport | null } | null>(null)
+  const [preview, setPreview] = useState<{ url: string; duration: number; pieces: Piece[]; key: string; mix?: MixReport | null } & RenderFacts | null>(null)
   // 2026-10-20: what the last final render's mix did with each line.
   const [finalMix, setFinalMix] = useState<MixReport | null>(null)
   const previewing = renderPending.proposals !== null
@@ -183,6 +200,21 @@ function Studio() {
     document.documentElement.classList.toggle('app-locked', !!document.querySelector('[data-testid=editor-shell]'))
   })
   useEffect(() => () => document.documentElement.classList.remove('app-locked'), [])
+  // One processing model (2026-10-20): the jobs, the turn and the renders every surface reads; the
+  // toast (one at a time), Activity, Stop, the option just picked, and whether the picture is playing.
+  const jobHandler = useRef<JobListener | null>(null)
+  const activity = useActivity(project?.video_id ?? null, (job, before) => jobHandler.current?.(job, before))
+  const [toast, setToast] = useState<Toast | null>(null)
+  const pushToast = (t: Toast) => setToast((prev) => coalesce(prev, t))
+  const [activityOpen, setActivityOpen] = useState(false)
+  const [allJobs, setAllJobs] = useState<ActivityJob[] | null>(null)
+  const [stopping, setStopping] = useState(false)
+  const [picked, setPicked] = useState<{ question: PlanQuestion; option: string } | null>(null)
+  const [playerPlaying, setPlayerPlaying] = useState(false)
+  const swapWaiting = useRef<RenderRecord | null>(null)
+  const [justReady, setJustReady] = useState(false)
+  // The turn this editor started last ('pending' until the server names it), so a finished turn's steps never stand under newer words.
+  const [turnIdNow, setTurnIdNow] = useState<string | null>(null)
   const [precise, setPrecise] = useState(false)
   const [placing, setPlacing] = useState<{ id: string; start: number; duration: number } | null>(null)
   const [placeDraft, setPlaceDraft] = useState<string | null>(null)
@@ -608,12 +640,15 @@ function Studio() {
    *  to the plan: every one is a turn (20c; the form planner is gone). */
   const clarify = (answer?: string, allowMore = false) => {
     if (!plan?.question) return
-    return takeTurn(answer ?? plan.question.guess ?? plan.question.options[0], false, allowMore && !!plan.question.turn_cap)
+    const option = answer ?? plan.question.guess ?? plan.question.options[0]
+    // The card stays where it was, its options off and the pick marked; your words echo at once below it.
+    setPicked({ question: plan.question, option })
+    return takeTurn(option, false, allowMore && !!plan.question.turn_cap)
   }
 
   /** The box is for the whole video: a goal, a change to the plan, an answer.
    *  With words selected on the Precise timeline, the sentence names the time. */
-  const submitComposer = (text: string) => void takeTurn(selection && precise ? `At ${clock(selection.start)}: ${text}` : text)
+  const submitComposer = (text: string) => { setPicked(null); void takeTurn(selection && precise ? `At ${clock(selection.start)}: ${text}` : text) }
 
   /** Phase 20: one turn of Voltage with tools. The steps arrive as messages
    *  while it works; the result is the plan and Voltage's closing line. A
@@ -630,7 +665,9 @@ function Studio() {
     setTurnStep('Thinking…')
     try {
       // "Go ahead, allow $0.04 more": this turn's cap rises by exactly that and the same turn carries on.
+      if (!allowMore) setTurnIdNow('pending')
       const job = allowMore ? await postAllowMore(projectId) : await postTurn(projectId, text)
+      if (!allowMore) setTurnIdNow(job.job_id)
       tour.notify('turn-started')
       await followTurn(job.job_id)
     } catch (e) {
@@ -783,7 +820,7 @@ function Studio() {
     const url = artifactUrl(projectId, result.export.render.sha256)
     const download = { url, filename: `${stem}-edited.mp4` }
     setDownload(download)
-    setRendered({ url, duration: result.export.render.duration })
+    setRendered({ url, duration: result.export.render.duration, ...factsOf(result.export) })
     setView('final')
     return download
   }
@@ -908,7 +945,7 @@ function Studio() {
       if (!isLatest('proposals', seq)) return
       const url = artifactUrl(projectId, manifest.render.sha256)
       setPreview({ url, duration: manifest.render.duration, key, mix: manifest.mix ?? null,
-        pieces: manifest.pieces ?? piecesFromInserts(manifest.inserts ?? [], project?.duration ?? 0) })
+        pieces: manifest.pieces ?? piecesFromInserts(manifest.inserts ?? [], project?.duration ?? 0), ...factsOf(manifest) })
     } catch {
       if (isLatest('proposals', seq)) {
         setError('Could not render the preview with the proposals.')
@@ -932,6 +969,8 @@ function Studio() {
     const latest = isLatest(mode, seq)
     console.debug(latest ? '[render] take' : '[render] drop (stale)', { mode, seq, hash: manifest?.edit_hash, sha: manifest?.render.sha256.slice(0, 12), cached: manifest?.cached })
     if (latest) setRenderPending((p) => ({ ...p, [mode]: null }))
+    // Where the renders stand now (the version, nothing stale): read once the editor's own render is back.
+    if (latest) void activity.refresh()
     return latest
   }
 
@@ -955,7 +994,7 @@ function Studio() {
       const url = artifactUrl(id, manifest.render.sha256)
       const download = { url, filename: `${stem}-edited.mp4` }
       setDownload(download)
-      setRendered({ url, duration: manifest.render.duration })
+      setRendered({ url, duration: manifest.render.duration, ...factsOf(manifest) })
       return { download, duration: manifest.render.duration }
     } catch {
       if (isLatest('final', seq)) setError('Export failed.')
@@ -964,6 +1003,190 @@ function Studio() {
       endRender('final', seq, manifest)
     }
   }
+
+  // ── One processing model (2026-10-20) ──────────────────────────────────────
+
+  /** The key a proposals render is for: the ready takes, in order. */
+  const readyKey = (p: Plan | null) => (p?.items ?? []).filter((i) => i.kind === 'planned' && i.status === 'ready').map((i) => i.candidate?.candidate_id ?? i.item_id).join(',')
+  /** The pieces of what the player plays now, to carry the playhead into another file. */
+  const piecesNow = () => (view === 'final' && rendered ? pieces : view === 'proposals' && preview ? preview.pieces : [])
+  const versionNow = view === 'final' ? rendered?.version ?? null : view === 'proposals' ? preview?.version ?? null : null
+
+  /** A finished render into the player: its file, its pieces, its version. With `switchTo` (or when its mode is
+   *  playing) the player moves to it at the same moment of the source, mapped through the pieces. */
+  const adopt = (rec: RenderRecord, switchTo: boolean) => {
+    if (!projectId || !rec.manifest) return
+    const m = rec.manifest
+    const url = artifactUrl(projectId, rec.render.sha256)
+    const pcs = m.pieces ?? piecesFromInserts(m.inserts ?? [], project?.duration ?? 0)
+    const now = piecesNow()
+    const source = now.length ? sourceTimeFrom(currentTime, now) : currentTime
+    if (rec.mode === 'final') {
+      setSegments(m.segments)
+      setInserts(m.inserts ?? [])
+      setPieces(pcs)
+      setFinalMix(m.mix ?? null)
+      setDownload({ url, filename: `${(project?.filename ?? 'video').replace(/\.[^.]+$/, '')}-edited.mp4` })
+      setRendered({ url, duration: rec.render.duration, ...factsOf(rec) })
+    } else {
+      setPreview({ url, duration: rec.render.duration, key: readyKey(plan), mix: m.mix ?? null, pieces: pcs, ...factsOf(rec) })
+    }
+    if (switchTo || view === rec.mode) {
+      setCarry((c) => ({ time: pcs.length ? renderTimeFrom(source, pcs) : source, id: (c?.id ?? 0) + 1 }))
+      setView(rec.mode)
+      setJustReady(true)
+    }
+  }
+
+  /** A render finished on the server: swapped in at the playhead when the picture is paused; while it plays,
+   *  a toast asks first ("v5 ready. Switch now?"), so nothing changes under a word. A render of another mode
+   *  is kept for when that mode is played, unless a turn made it (then it is what the turn asks you to hear). */
+  const offerRender = async (job: ActivityJob) => {
+    const mode = job.detail?.mode
+    if (!projectId || !mode) return
+    const state = await getLatestRender(projectId, mode).catch(() => null)
+    const rec = state?.latest
+    if (!rec?.manifest) return
+    const have = mode === 'final' ? rendered?.version : preview?.version
+    if (have != null && rec.version <= have) return
+    if (view !== mode && !job.turn_id) { adopt(rec, false); return }
+    if (playerPlaying) {
+      swapWaiting.current = rec
+      pushToast({ id: `swap-${rec.render_id}`, tone: 'ok', text: `v${rec.version} ready. Switch now?`, action: { label: 'Switch now', key: 'swap' } })
+    } else {
+      adopt(rec, true)
+    }
+  }
+
+  // What a job's change means for the toasts, the rows and the player. A job read on open is not news.
+  jobHandler.current = (job, before) => {
+    if (isVoice(job) && !isActive(job) && projectId && plan) getPlan(projectId, plan.plan_id).then(setPlan).catch(() => {})
+    if (!before) return
+    if (job.status === 'failed' && before.status !== 'failed') {
+      const what = isVoice(job) ? 'A line failed' : isRender(job) ? 'A render failed' : 'A job failed'
+      pushToast({ id: job.job_id, tone: 'fail', text: `${what}: ${job.error_text ?? 'no reason was given'}`, action: { label: 'Activity', key: 'activity' } })
+    }
+    if (isVoice(job) && job.status === 'done' && before.status !== 'done') pushToast({ id: job.job_id, tone: 'ok', text: '1 line ready' })
+    if (isRender(job) && job.status === 'done' && before.status !== 'done') void offerRender(job)
+  }
+
+  const onToastAction = (t: Toast) => {
+    setToast(null)
+    if (t.action?.key === 'swap' && swapWaiting.current) { adopt(swapWaiting.current, true); swapWaiting.current = null }
+    if (t.action?.key === 'activity') openActivity()
+  }
+
+  const openActivity = () => {
+    setActivityOpen(true)
+    if (projectId) getJobs(projectId).then((r) => setAllJobs(r.jobs)).catch(() => setAllJobs(null))
+  }
+
+  /** Stop: queued jobs are cancelled, the running one finishes, the turn ends after its step. */
+  const stopAll = async () => {
+    if (!projectId) return
+    setStopping(true)
+    try {
+      const r = await stopJobs(projectId)
+      await activity.refresh()
+      pushToast({ id: 'stop', tone: 'ok', text: r.cancelled ? `Stopping. ${r.cancelled} queued ${r.cancelled === 1 ? 'job' : 'jobs'} cancelled; the one running finishes.` : 'Stopping after the step that is running.' })
+    } catch (e) {
+      setStopping(false)
+      setError(e instanceof ApiError ? e.message : 'Could not stop that.')
+    }
+  }
+
+  /** Retry a failed job through the same flow: the same words and voice, or the same render. */
+  const retry = async (job: ActivityJob) => {
+    if (!projectId) return
+    try {
+      const next = await retryJob(projectId, job.job_id)
+      activity.take(next)
+      setAllJobs((all) => (all ? [next, ...all.filter((j) => j.job_id !== next.job_id)] : all))
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : 'Could not retry that.')
+    }
+  }
+
+  /** Render now: the edits as they are, in the background; the player takes it when it is ready. */
+  const renderNow = async (mode: 'final' | 'proposals') => {
+    if (!projectId) return
+    try {
+      activity.take(await startRender(projectId, mode))
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : 'Could not start the render.')
+    }
+  }
+
+  /** The lines a turn voiced (item ids), from its finished voice jobs. */
+  const turnLines = (turnId: string) => [...new Set(turnJobs(activity.jobs, turnId).filter((j) => isVoice(j) && j.status === 'done').flatMap((j) => j.line_ids))]
+
+  /** Hear changes: from just before the first line the turn changed, in the version that has it. */
+  const hearTurn = (turnId: string, mode: 'final' | 'proposals' | null) => {
+    const ids = new Set(turnLines(turnId))
+    const starts = (plan?.items ?? []).filter((i) => ids.has(i.item_id)).map((i) => i.candidate?.plan.selection.start ?? i.selection.start)
+    if (!starts.length) return
+    const at = Math.max(0, Math.min(...starts) - 0.5)
+    const target = mode && (mode === 'final' ? rendered : preview) ? mode : view
+    const pcs = target === 'final' && rendered ? pieces : target === 'proposals' && preview ? preview.pieces : []
+    const time = pcs.length ? renderTimeFrom(at, pcs) : at
+    if (target !== view) {
+      setCarry((c) => ({ time, id: (c?.id ?? 0) + 1 }))
+      setView(target)
+      window.setTimeout(() => setSeekRequest((r) => ({ time, id: (r?.id ?? 0) + 1, play: true })), 250)
+    } else {
+      setSeekRequest((r) => ({ time, id: (r?.id ?? 0) + 1, play: true }))
+    }
+    setCurrentTime(time)
+  }
+
+  /** Undo all: every line the turn voiced leaves the video and the plan (asked once on the card first). */
+  const undoTurn = async (turnId: string) => {
+    if (!projectId || !plan) return
+    const ids = new Set(turnLines(turnId))
+    const fresh = await getPlan(projectId, plan.plan_id).catch(() => plan)
+    for (const it of fresh.items) {
+      if (!ids.has(it.item_id)) continue
+      if (it.status === 'approved' && it.edit_id) await revertEdit(projectId, it.edit_id).catch(() => {})
+      if (['approved', 'ready', 'failed', 'planned'].includes(it.status)) await dismissItem(projectId, fresh.plan_id, it.item_id).catch(() => {})
+    }
+    setPlan(await getPlan(projectId, plan.plan_id).catch(() => fresh))
+    await syncEdits()
+    pushToast({ id: `undo-${turnId}`, tone: 'ok', text: `Undid ${ids.size} ${ids.size === 1 ? 'line' : 'lines'}.` })
+  }
+
+  // The turn finished: one toast with its summary.
+  const lastTurn = useRef<{ id: string; status: string } | null>(null)
+  useEffect(() => {
+    const t = activity.turn
+    const prev = lastTurn.current
+    lastTurn.current = t ? { id: t.turn_id, status: t.status } : null
+    if (!t || !prev || prev.id !== t.turn_id) return
+    if ((prev.status === 'running' || prev.status === 'stopping') && (t.status === 'done' || t.status === 'failed')) {
+      pushToast({ id: `turn-${t.turn_id}`, tone: t.status === 'failed' ? 'fail' : 'ok', text: turnSummary(t, activity.jobs, versionNow) })
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activity.turn])
+
+  // The tab: a dot while anything runs, "Ready" for a moment when it is all done.
+  const anyBusy = activity.jobs.some(isActive) || activity.turn?.status === 'running' || activity.turn?.status === 'stopping' || turnBusy
+  const baseTitle = useRef(typeof document !== 'undefined' ? document.title : 'Voltage')
+  const wasBusy = useRef(false)
+  useEffect(() => {
+    const base = baseTitle.current
+    if (anyBusy) { document.title = `● ${base}`; wasBusy.current = true; return }
+    if (!wasBusy.current) return
+    wasBusy.current = false
+    setStopping(false)
+    document.title = `Ready · ${base}`
+    const t = window.setTimeout(() => { document.title = base }, 4000)
+    return () => window.clearTimeout(t)
+  }, [anyBusy])
+  useEffect(() => () => { document.title = baseTitle.current }, [])
+  useEffect(() => {
+    if (!justReady) return
+    const t = window.setTimeout(() => setJustReady(false), 6000)
+    return () => window.clearTimeout(t)
+  }, [justReady])
 
   const openProject = async (id: string) => {
     clearEditor()
@@ -1114,7 +1337,10 @@ function Studio() {
     const readyItems = plan?.items.filter((i) => i.kind === 'planned' && i.status === 'ready') ?? []
     // 20e: which render plays. "With proposals" is a preview render keyed by the takes it carries.
     const previewKey = readyItems.map((i) => i.candidate?.candidate_id ?? i.item_id).join(',')
-    const previewReady = preview !== null && preview.key === previewKey
+    // A preview made on the server (a turn's render) is ready when it carries exactly the takes waiting.
+    const carriesReady = (inc?: RenderIncludes) => !!inc && inc.item_ids.length === readyItems.length
+      && readyItems.every((i) => !!i.candidate && inc.candidate_ids.includes(i.candidate.candidate_id))
+    const previewReady = preview !== null && (preview.key === previewKey || carriesReady(preview.includes))
     const shown = view === 'final' && rendered ? { url: rendered.url, duration: rendered.duration, pieces }
       : view === 'proposals' && previewReady ? { url: preview!.url, duration: preview!.duration, pieces: preview!.pieces }
       : null
@@ -1169,17 +1395,71 @@ function Studio() {
     // As shot (2026-10-19): Edited has the live edits, As shot is the source as shot, With proposals adds
     // what is waiting. With no live edits Edited is As shot, so it is not offered.
     const changes = approved.filter((r) => !(r.mix === 'remove' && r.partner)).length
+    // 2026-10-20: the three modes are always there; one with nothing in it yet is off and says why.
     const views = [
-      ...(changes > 0 ? [['final', 'Edited'] as const] : []),
-      ...(readyItems.length > 0 ? [['proposals', 'With proposals'] as const] : []),
-      ['original', 'As shot'] as const,
+      ['final', 'Edited', changes > 0, 'Nothing is added yet'] as const,
+      ['proposals', 'With proposals', readyItems.length > 0, 'No proposals are waiting'] as const,
+      ['original', 'As shot', true, ''] as const,
     ]
-    const proposalsWord = `${readyItems.length} ${readyItems.length === 1 ? 'proposal' : 'proposals'}`
-    const badge = view === 'original'
-      ? (changes > 0 ? `As shot · ${changes} ${changes === 1 ? 'change' : 'changes'} hidden` : 'As shot')
-      : view === 'final'
-        ? (readyItems.length > 0 ? `Edited · ${proposalsWord} not included` : 'Edited')
-        : 'With proposals'
+    // Player truth: the badge names the mode and the version playing.
+    const playingRec = view === 'final' && rendered ? rendered : view === 'proposals' && previewReady ? preview : null
+    const MODE_WORD = { final: 'Edited', proposals: 'With proposals', original: 'As shot' } as const
+    const badge = view === 'original' ? 'Playing original'
+      : shown ? `Playing ${playingRec?.version ? `v${playingRec.version} · ` : ''}${MODE_WORD[view]}`
+      : `Playing original · ${MODE_WORD[view]} not ready`
+    // What is rendering for the mode playing, or what is not in it yet.
+    const modeNow = view === 'original' ? null : view
+    const renderJob = modeNow ? activity.jobs.find((j) => isRender(j) && isActive(j) && (j.detail?.mode ?? 'final') === modeNow) ?? null : null
+    const inProgress = modeNow ? activity.renders[modeNow]?.in_progress ?? null : null
+    const renderingVersion = renderJob?.detail?.version ?? inProgress?.version ?? null
+    const renderingEta = aboutEta(renderJob?.eta_s ?? inProgress?.eta_s ?? null)
+    const localRender = modeNow ? renderPending[modeNow] !== null : false
+    const modeState = modeNow ? activity.renders[modeNow] : null
+    const stale = !!modeState?.stale && !renderJob && !inProgress && !localRender
+      && (modeNow === 'final' ? changes > 0 : readyItems.length > 0)
+      && !(playingRec?.hash && playingRec.hash === modeState.current_hash)
+    const renderNote = renderJob || inProgress || localRender ? (
+      <span className="tag" role="status" data-testid="render-note">{renderingVersion ? `v${renderingVersion} rendering…` : 'Rendering…'}{renderingEta ? ` ${renderingEta}` : ''}</span>
+    ) : stale && modeNow ? (
+      <>
+        <span className="tag text-needs" role="status" data-testid="render-note">Changes not in preview yet</span>
+        <button type="button" className="btn sm" onClick={() => void renderNow(modeNow)}>Render now</button>
+      </>
+    ) : null
+    // The rows' one chip reads what the video playing carries (the edited render while As shot plays) and what is rendering.
+    const videoRender = view === 'proposals' ? (previewReady ? preview : null) : rendered
+    const perChar = (() => {
+      const xs = activity.jobs.filter((j) => isVoice(j) && j.status === 'done' && j.started_at && j.finished_at && j.detail?.chars)
+        .map((j) => (Date.parse(j.finished_at!) - Date.parse(j.started_at!)) / 1000 / j.detail!.chars!).filter((x) => x > 0).sort((a, b) => a - b)
+      return xs.length ? xs[Math.floor(xs.length / 2)] : null
+    })()
+    const rowActivity = {
+      jobs: activity.jobs,
+      video: videoRender?.includes ?? null,
+      videoUnknown: !videoRender?.includes,
+      rendering: renderJob?.detail?.includes ?? inProgress?.includes ?? null,
+      onRetryJob: retry,
+      etaFor: (chars: number) => (perChar ? perChar * chars : null),
+    }
+    // The status strip, the chat's step list and the turn's summary, all from the same jobs.
+    const localTurn = turnBusy ? { turn_id: 'local', status: 'running' as const, step: turnStep ?? 'Thinking', started_at: '', finished_at: null } : null
+    const ourTurn = activity.turn && (turnIdNow === null || turnIdNow === activity.turn.turn_id) ? activity.turn : null
+    const strip = stripState({
+      jobs: activity.jobs, turn: ourTurn ?? localTurn,
+      playing: playingRec?.version ? { version: playingRec.version, created_at: playingRec.at ?? '' } : null,
+      stale, justReady,
+    })
+    const canStop = activity.jobs.some(isActive) || ourTurn?.status === 'running' || turnBusy
+    const steps = ourTurn ? turnSteps(ourTurn, activity.jobs) : []
+    const turnDone = ourTurn && (ourTurn.status === 'done' || ourTurn.status === 'failed')
+    const summary: TurnSummary | null = turnDone && !clarifying && steps.some((st) => st.key === 'voice' || st.key === 'render') ? {
+      text: turnSummary(ourTurn, activity.jobs, versionNow),
+      lines: turnLines(ourTurn.turn_id).length,
+      onHear: () => hearTurn(ourTurn.turn_id, ourTurn.render?.mode ?? null),
+      onUndo: () => undoTurn(ourTurn.turn_id),
+    } : null
+    const liveQuestion = clarifying ? plan?.question ?? null : plan?.question?.resolved?.by === 'editor' ? plan.question : null
+    const question = picked && liveQuestion && liveQuestion.text === picked.question.text ? null : liveQuestion
     const version = view === 'original' ? 'as-shot' as const : view === 'proposals' ? 'proposals' as const : 'edited' as const
     /** Switch modes at the same moment, playing or paused: the time is carried across, mapped through the pieces when the clocks differ. */
     const switchView = (v: typeof view) => {
@@ -1218,7 +1498,7 @@ function Studio() {
     const place = sight ? (sight.place_confirmed ?? sight.place_guess) : null
   
     return (
-      <div className="grid h-dvh grid-rows-[auto_minmax(0,1fr)] overflow-hidden bg-background text-foreground max-[960px]:block max-[960px]:h-auto max-[960px]:min-h-dvh max-[960px]:overflow-visible" data-testid="editor-shell">
+      <div className="grid h-dvh grid-rows-[auto_auto_minmax(0,1fr)] overflow-hidden bg-background text-foreground max-[960px]:block max-[960px]:h-auto max-[960px]:min-h-dvh max-[960px]:overflow-visible" data-testid="editor-shell">
         <a className="skip" href="#main" onClick={(e) => { e.preventDefault(); document.getElementById('main')?.focus() }}>Skip to the transcript</a>
         {/* Volt: the editor's header — the wordmark, the file, the play switch, the autonomy, the spend, Export, the account. */}
         <header className="z-30 flex min-h-[62px] flex-wrap max-[960px]:sticky max-[960px]:top-0 items-center gap-x-4 gap-y-2 border-b-[1.5px] border-foreground bg-card px-4 py-2 sm:px-6 lg:flex-nowrap lg:[&>*:not(h1)]:shrink-0" data-testid="editor-header">
@@ -1253,18 +1533,14 @@ function Studio() {
           <span className="text-faint max-sm:hidden" aria-hidden="true">/</span>
           <h1 className="disp m-0 min-w-0 max-w-[28ch] truncate text-[15px] font-semibold lg:max-w-none lg:flex-[1_1_0]" title={project.filename}>{project.filename}</h1>
           <span className="tag text-faint">{timecode(project.duration)}{speakers.length > 0 ? ` · ${speakers.length} ${speakers.length === 1 ? 'voice' : 'voices'}` : ''}</span>
-          {views.length > 1 ? (
-            <div className="segs" role="group" aria-label="Play" data-tour="playback-switch">
-              {views.map(([v, label]) => (
-                <button key={v} type="button" className="seg" aria-pressed={view === v} onClick={() => switchView(v)}
-                  title={v === 'final' ? 'The video with the lines you added (O)' : v === 'original' ? 'The video as shot, without your changes (O)' : 'Edited, plus the proposals waiting for you'}>
-                  {v === 'proposals' && !previewReady && previewing ? `${label}…` : label}
-                </button>
-              ))}
-            </div>
-          ) : (
-            <span className="tag rounded-md border-[1.5px] border-line2 px-2.5 py-1.5 text-muted-foreground" data-testid="as-shot-label" title="Nothing is changed yet: the video plays as shot.">As shot</span>
-          )}
+          <div className="segs" role="group" aria-label="Play" data-tour="playback-switch">
+            {views.map(([v, label, on, why]) => (
+              <button key={v} type="button" className="seg disabled:cursor-not-allowed disabled:opacity-45" aria-pressed={view === v} onClick={() => switchView(v)} disabled={!on}
+                title={!on ? why : v === 'final' ? 'The video with the lines you added (O)' : v === 'original' ? 'The video as shot, without your changes (O)' : 'Edited, plus the proposals waiting for you'}>
+                {v === 'proposals' && !previewReady && previewing ? `${label}…` : label}
+              </button>
+            ))}
+          </div>
           <span className="flex-1" />
           <button type="button" className="act" onClick={() => { setMayDoOpen(true); tour.notify('autonomy-opened') }} data-tour="autonomy" data-tour-action="autonomy" aria-haspopup="dialog" aria-label={`${autonomy === 'ask' ? 'Check with me' : 'Just do it'}. What Voltage may do`}>
             <span className="tag">{autonomy === 'ask' ? 'Check with me' : 'Just do it'}</span>
@@ -1277,6 +1553,7 @@ function Studio() {
           <AccountDot me={me} />
           <WhatVoltageMayDo open={mayDoOpen} value={mayDo} onChange={(c) => void changeMayDo(c)} onClose={() => setMayDoOpen(false)} />
         </header>
+        <StatusStrip state={strip} open={activityOpen} onOpen={openActivity} onStop={canStop ? () => void stopAll() : undefined} stopping={stopping} />
   
         <div className="flex min-h-0 flex-1 max-[960px]:flex-col">
           {/* The picture, the transport, the transcript. */}
@@ -1292,6 +1569,8 @@ function Studio() {
                 caption={caption}
                 muted={playingTake !== null && playingMix === 'replace'}
                 badge={badge}
+                notice={renderNote}
+                onPlayingChange={setPlayerPlaying}
                 carry={carry}
                 scanning={scanning}
                 markers={markers}
@@ -1384,6 +1663,7 @@ function Studio() {
                 onEditingChange={setEditingLine}
                 duration={project.duration}
                 version={version}
+                activity={rowActivity}
               />
             </div>
           </main>
@@ -1400,7 +1680,10 @@ function Studio() {
               chips={contextChips}
               cap={`Turn cap $${mayDo.turn_usd.toFixed(2)}`}
               spend={spend}
-              question={clarifying ? plan?.question ?? null : plan?.question?.resolved?.by === 'editor' ? plan.question : null}
+              question={question}
+              picked={picked}
+              steps={steps}
+              summary={summary}
               onAnswer={(o, allowMore) => void clarify(o, allowMore)}
               turnCap={mayDo.turn_usd}
               onSubmit={submitComposer}
@@ -1476,6 +1759,9 @@ function Studio() {
         )}
         {firstTip && <Tip key={firstTip.id} id={firstTip.id} target={firstTip.target} />}
         <KeyboardSheet open={keysOpen} onClose={() => setKeysOpen(false)} />
+        <ActivityDrawer open={activityOpen} onClose={() => { setActivityOpen(false); setAllJobs(null) }} onRetry={retry}
+          jobs={(allJobs ?? []).reduce((all, j) => (all.some((k) => k.job_id === j.job_id) ? all : [...all, j]), activity.jobs).sort((a, b) => (a.created_at < b.created_at ? 1 : -1))} />
+        <Toaster toast={toast} onAction={onToastAction} onDismiss={() => setToast(null)} />
         {moving && (
           <MoveDialog
             video={project}

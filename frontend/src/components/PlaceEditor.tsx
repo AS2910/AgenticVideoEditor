@@ -7,6 +7,7 @@ import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Chip, ControlRow, LinkButton } from './EditorControls'
 import { editorClass, selectClass } from './editorStyles'
+import { aboutEta } from '../jobs/model'
 
 interface PlaceEditorProps {
   duration: number
@@ -20,6 +21,8 @@ interface PlaceEditorProps {
   onCancel?: () => void
   /** Where the span starts when the editor opens. */
   initialStart?: number
+  /** Seconds a line of this many characters takes to voice, from the jobs measured; null when nothing is measured. */
+  etaFor?: (chars: number) => number | null
 }
 
 const DELIVERIES = ['warmer', 'more excited', 'calmer', 'slower', 'firmer']
@@ -33,7 +36,7 @@ const round2 = (t: number) => Math.round(t * 100) / 100
  *  words, and the same choices a line's editor offers. Dragging is never the
  *  only way: the start and end can be typed and nudged. */
 export function PlaceEditor({
-  duration, voices = [], usdPerChar, disabled, placing, onPlacing, onHear, onCancel, initialStart = 0.5,
+  duration, voices = [], usdPerChar, disabled, placing, onPlacing, onHear, onCancel, initialStart = 0.5, etaFor,
 }: PlaceEditorProps) {
   const defaultStart = Math.min(initialStart, Math.max(0, duration - 1))
   const [startText, setStartText] = useState(timecode(defaultStart))
@@ -78,6 +81,8 @@ export function PlaceEditor({
   }
   const chars = draft.trim().length
   const cost = usdPerChar ? ` · about ${Math.max(1, Math.round(chars * usdPerChar * 100))}¢` : ''
+  // Counted live from the words box; nothing is estimated before there are words, and the time only when jobs measured one.
+  const eta = chars > 0 ? aboutEta(etaFor?.(chars)) : null
   const canHear = !disabled && !!draft.trim() && span !== null
   const hear = () => {
     if (!canHear || !span) return
@@ -138,7 +143,7 @@ export function PlaceEditor({
         <span>{mix === 'layer' ? 'The picture keeps moving under the line.' : 'The picture waits while the line plays.'}</span>
       </ControlRow>
       <div className="flex flex-wrap items-center gap-2 border-t pt-3">
-        <span className="tnum text-sm text-muted-foreground">≈ {chars} characters{cost} · ready in about 10 s</span>
+        {chars > 0 && <span className="tnum text-sm text-muted-foreground" data-testid="voice-estimate">≈ {chars} {chars === 1 ? 'character' : 'characters'}{cost}{eta ? ` · ready in ${eta}` : ''}</span>}
         <span className="flex-1" />
         {onCancel && <Button type="button" variant="outline" onClick={onCancel}>Cancel</Button>}
         <Button type="button" disabled={!canHear} onClick={hear}>Voice it</Button>

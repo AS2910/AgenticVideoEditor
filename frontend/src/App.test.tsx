@@ -256,7 +256,7 @@ describe('App full journey', () => {
     await waitFor(() => expect(screen.getByTestId('spend')).toHaveTextContent('Project $0.61 of $1'))
     // 20e: the proposal is a row in the one transcript, with its verbs; nothing to ship in the panel.
     expect(screen.queryByRole('group', { name: 'Ready to ship' })).toBeNull()
-    expect(screen.getByText('Proposed')).toBeInTheDocument()
+    expect(screen.getByText('Ready to hear')).toBeInTheDocument()
     await user.click(within(screen.getByRole('group', { name: 'Proposal at 0:00' })).getByRole('button', { name: 'Add it' }))
     await waitFor(() => expect(calls.find((c) => c.url.endsWith('/plans/plan1/approve'))?.body).toEqual({ items: ['i1'] }))
     expect(screen.queryByTestId('ship-sheet')).toBeNull()
@@ -347,15 +347,17 @@ describe('App playback after shipping', () => {
     await reachGoal(user)
 
     await user.type(screen.getByRole('textbox', TEXTBOX), 'change "20% off" to "30% off"{Enter}')
-    // 20e: with a proposal waiting, the player offers "With proposals" beside Original.
-    expect(within(await screen.findByRole('group', { name: 'Play' })).getAllByRole('button').map((b) => b.textContent)).toEqual(['With proposals', 'As shot'])
+    // 20e, 2026-10-20: the three modes are always offered; with a proposal waiting, With proposals is on and Edited is off until a line is added.
+    const modes = within(await screen.findByRole('group', { name: 'Play' })).getAllByRole('button')
+    expect(modes.map((b) => b.textContent)).toEqual(['Edited', 'With proposals', 'As shot'])
+    await waitFor(() => expect(modes.map((b) => (b as HTMLButtonElement).disabled)).toEqual([true, false, false]))
     await user.click(within(screen.getByRole('group', { name: 'Proposal at 0:00' })).getByRole('button', { name: 'Add it' }))
 
     const video = () => container.querySelector('video') as HTMLVideoElement
     const renderUrl = `/api/videos/p1/artifacts/${'r'.repeat(64)}`
     await waitFor(() => expect(video().getAttribute('src')).toBe(renderUrl))
     expect(screen.getByRole('button', { name: 'Edited' })).toHaveAttribute('aria-pressed', 'true')
-    expect(screen.queryByRole('button', { name: 'With proposals' })).toBeNull()   // nothing is proposed any more
+    expect(screen.getByRole('button', { name: 'With proposals' })).toBeDisabled()   // nothing is proposed any more
 
     await user.click(screen.getByRole('button', { name: 'As shot' }))
     expect(video().getAttribute('src')).toBe(`/api/videos/p1/artifacts/${'s'.repeat(64)}`)
@@ -616,7 +618,7 @@ describe('App the agent (Phase 13, 20c)', () => {
     await user.type(screen.getByRole('textbox', TEXTBOX), 'go{Enter}')
     await waitFor(() => expect(screen.getAllByTestId('take').some((t) => t.textContent?.includes("Brian's voice"))).toBe(true))
     expect(saidTo(calls)).toEqual(['make it 30% off', 'go'])
-    expect(screen.getByText('Proposed')).toBeInTheDocument()
+    expect(screen.getByText('Ready to hear')).toBeInTheDocument()
 
     // W5 (20e): hear it, then Add it, on the line itself.
     const verbs = screen.getByRole('group', { name: 'Proposal at 0:00' })
@@ -638,7 +640,7 @@ describe('App the agent (Phase 13, 20c)', () => {
     await user.type(screen.getByRole('textbox', TEXTBOX), 'make it 30% off{Enter}')
     await screen.findByText('I read 1 line. One change does it.')
     await user.type(screen.getByRole('textbox', TEXTBOX), 'go{Enter}')
-    await waitFor(() => expect(screen.getByText('Proposed')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText('Ready to hear')).toBeInTheDocument())
 
     // 20e: the proposal's verbs live on its row; the panel and the header hold no ship button.
     expect(screen.queryByRole('group', { name: 'Ready to ship' })).toBeNull()
@@ -676,20 +678,20 @@ describe('App the agent (Phase 13, 20c)', () => {
     await user.type(screen.getByRole('textbox', TEXTBOX), 'make it 30% off{Enter}')
     await screen.findByText('I read 1 line. One change does it.')
     await user.type(screen.getByRole('textbox', TEXTBOX), 'go{Enter}')
-    await waitFor(() => expect(screen.getAllByText('Proposed')).toHaveLength(2))
+    await waitFor(() => expect(screen.getAllByText('Ready to hear')).toHaveLength(2))
     expect(screen.getByRole('button', { name: 'Add all 2' })).toBeInTheDocument()
 
     // Add the first; the second stays proposed.
     await user.click(within(screen.getAllByRole('group', { name: 'Proposal at 0:00' })[0]).getByRole('button', { name: 'Add it' }))
     await waitFor(() => expect(calls.find((c) => c.url.endsWith('/approve'))?.body).toEqual({ items: ['i1'] }))
     await waitFor(() => expect(screen.getByText('✓ In the video')).toBeInTheDocument())
-    expect(screen.getAllByText('Proposed')).toHaveLength(1)
+    expect(screen.getAllByText('Ready to hear')).toHaveLength(1)
     expect(screen.queryByRole('button', { name: /add all/i })).toBeNull()
 
     // Take it out: the line is back to a proposal, and with nothing in the video the render and its download go.
     await user.click(screen.getByRole('button', { name: 'Take it out' }))
     await waitFor(() => expect(calls.some((c) => c.url.endsWith('/edits/e1/revert'))).toBe(true))
-    await waitFor(() => expect(screen.getAllByText('Proposed')).toHaveLength(2))
+    await waitFor(() => expect(screen.getAllByText('Ready to hear')).toHaveLength(2))
   })
 
   it('shows what a line needs you for, in the card and on the line; the answer is the next turn', async () => {
@@ -709,7 +711,7 @@ describe('App the agent (Phase 13, 20c)', () => {
     expect(screen.queryByRole('button', { name: /use a shorter line/i })).not.toBeInTheDocument()
 
     await user.type(screen.getByRole('textbox', TEXTBOX), 'Use the shorter line{Enter}')
-    await waitFor(() => expect(screen.getByText('Proposed')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText('Ready to hear')).toBeInTheDocument())
     expect(saidTo(calls)).toEqual(['make it 30% off', 'Use the shorter line'])
   })
 
@@ -1087,7 +1089,7 @@ describe('App with Voltage as an agent (Phase 20a)', () => {
     ])
     expect(screen.getByTestId('trace')).toHaveTextContent('Trace · 3 steps')
     expect(await screen.findByText("One line over the opening shot, in Varsha's voice. Hear it below.")).toBeInTheDocument()
-    await waitFor(() => expect(screen.getByText('Proposed')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText('Ready to hear')).toBeInTheDocument())
     // 20e: the verbs are on the proposal's row; the panel holds no ship card.
     expect(screen.queryByRole('group', { name: 'Ready to ship' })).toBeNull()
     expect(screen.getByRole('group', { name: 'Proposal at 0:00' })).toBeInTheDocument()
@@ -1173,7 +1175,7 @@ describe('App: the line is the unit (UX-1)', () => {
 
     await user.click(within(screen.getByRole('group', { name: 'Actions for 0:00' })).getByRole('button', { name: 'Discard' }))
 
-    await waitFor(() => expect(screen.getByText('Proposed')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText('Ready to hear')).toBeInTheDocument())
     expect(screen.getByText('Get 20% off today only.').tagName).toBe('DEL')
     expect(f.mock.calls.some(([url, init]) => String(url).endsWith('/lines/remove') && init?.method === 'POST')).toBe(true)
     expect(within(screen.getByRole('group', { name: 'Proposal at 0:00' })).getByRole('button', { name: 'Remove it' })).toBeInTheDocument()
@@ -1511,15 +1513,15 @@ describe('App: Edited, As shot, With proposals (2026-10-19)', () => {
   }
   const badge = () => screen.getByTestId('mode-badge')
 
-  it('names the modes Edited, With proposals and As shot, and the badge counts what each leaves out', async () => {
+  it('names the modes Edited, With proposals and As shot, and the badge names the mode playing', async () => {
     opened(EDITS, READY)
     const user = userEvent.setup()
     render(<App />)
     const play = await screen.findByRole('group', { name: 'Play' })
     await waitFor(() => expect(within(play).getAllByRole('button').map((b) => b.textContent)).toEqual(['Edited', 'With proposals', 'As shot']))
-    await waitFor(() => expect(badge()).toHaveTextContent('Edited · 1 proposal not included'))
+    await waitFor(() => expect(badge()).toHaveTextContent('Playing Edited'))
     await user.click(within(play).getByRole('button', { name: 'As shot' }))
-    expect(badge()).toHaveTextContent('As shot · 2 changes hidden')
+    expect(badge()).toHaveTextContent('Playing original')
   })
 
   it('makes the transcript and the A2 lane follow the mode, and O flips Edited ↔ As shot', async () => {
@@ -1561,14 +1563,18 @@ describe('App: Edited, As shot, With proposals (2026-10-19)', () => {
     const asShot = screen.getByRole('listitem', { name: /Line at 0:00/ })
     expect(asShot.querySelector('del')).toBeNull()
     expect(asShot).toHaveTextContent('Get 20% off today only.')
-    expect(badge()).toHaveTextContent('As shot · 1 change hidden')
+    expect(badge()).toHaveTextContent('Playing original')
   })
 
-  it('with no live edits shows a plain As shot label instead of the switch', async () => {
+  it('with no live edits still names all three modes; Edited and With proposals are off and say why', async () => {
     opened([])
     render(<App />)
-    expect(await screen.findByTestId('as-shot-label')).toHaveTextContent('As shot')
-    expect(screen.queryByRole('group', { name: 'Play' })).toBeNull()
+    const play = await screen.findByRole('group', { name: 'Play' })
+    const [edited, proposals, asShot] = within(play).getAllByRole('button') as HTMLButtonElement[]
+    expect([edited.disabled, proposals.disabled, asShot.disabled]).toEqual([true, true, false])
+    expect(edited).toHaveAttribute('title', 'Nothing is added yet')
+    expect(asShot).toHaveAttribute('aria-pressed', 'true')
+    expect(badge()).toHaveTextContent('Playing original')
   })
 
   it('keeps the moment when switching mid-playback', async () => {

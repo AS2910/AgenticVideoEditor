@@ -6,6 +6,7 @@ import type {
   Project, ExportManifest, Job, ProjectSummary, ProjectDetail, Usage, Voice, Speaker,
   ProjectSettings, Autonomy, Effort, Plan, Mix, Selection, Candidate, Reading, Sight, ChatMessage,
   ProjectFolder, ProjectDetailFolder, ProjectFile, HelpArticle, Onboarding, ProjectVoice,
+  ActivityJob, TurnView, RenderState,
 } from './types'
 
 const BASE = '/api'
@@ -221,8 +222,8 @@ export async function pollJob(
 /** Renders the video: the added lines only, or (20e) with the proposals mixed in for "With proposals" playback. */
 /** A render of the video as it is now (Final), or with the proposals mixed in. `requestId` comes back
  *  on the answer so the caller can keep only its latest request (bug 1, 2026-10-19). */
-export const exportProject = (id: string, withProposals = false, requestId?: number) =>
-  post<ExportManifest>(`/videos/${id}/export`, { ...(withProposals ? { with_proposals: true } : {}), ...(requestId !== undefined ? { request_id: requestId } : {}) })
+export const exportProject = (id: string, withProposals = false, requestId?: number, purpose: 'preview' | 'export' = 'preview') =>
+  post<ExportManifest>(`/videos/${id}/export`, { ...(withProposals ? { with_proposals: true } : {}), ...(requestId !== undefined ? { request_id: requestId } : {}), ...(purpose === 'export' ? { purpose } : {}) })
 
 /** 2026-10-20: a line's role in the mix and its fine-tune, nothing voiced again. The only
  *  speech in its span answers 409 with a question (RoleQuestion) unless `confirm`. */
@@ -436,3 +437,20 @@ export const getUnderstanding = (id: string) => get<Understanding>(`/videos/${id
 export const correctUnderstanding = (id: string, change: { text: string; beat_at?: number; label?: string; remove?: boolean }) =>
   post<Understanding>(`/videos/${id}/understanding/corrections`, change)
 export const setStyle = (id: string, line: string, accepted = true) => put<Understanding>(`/videos/${id}/style`, { line, accepted })
+
+// ── One processing model (2026-10-20) ─────────────────────────────────────────
+
+/** The video's jobs, newest first: `active` for what is queued or running (and the turn's own), else the last 50. */
+export const getJobs = (id: string, active = false) =>
+  get<{ jobs: ActivityJob[]; turn: TurnView | null }>(`/videos/${id}/jobs${active ? '?active=1' : ''}`)
+/** Try a failed job again through the same flow. */
+export const retryJob = (id: string, jobId: string) => post<ActivityJob>(`/videos/${id}/jobs/${jobId}/retry`)
+/** Stop: queued jobs are cancelled, running ones finish, the turn ends after its current step. */
+export const stopJobs = (id: string) => post<{ cancelled: number }>(`/videos/${id}/jobs/stop`)
+/** The latest ready render of a mode and any render in progress. */
+export const getLatestRender = (id: string, mode: 'final' | 'proposals') =>
+  get<RenderState>(`/videos/${id}/renders/latest?mode=${mode}`)
+/** Render now, in the background: a render_preview job. */
+export const startRender = (id: string, mode: 'final' | 'proposals') => post<ActivityJob>(`/videos/${id}/renders`, { mode })
+/** The live channel: job.updated, turn.updated, render.updated. */
+export const eventsUrl = (id: string) => `${BASE}/videos/${id}/events`
