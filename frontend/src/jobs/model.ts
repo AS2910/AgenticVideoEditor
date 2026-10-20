@@ -214,11 +214,14 @@ export function stripState({ jobs, turn, playing, stale, justReady, now }: Strip
     const eta = aboutEta(render.eta_s)
     return { busy: true, tone: 'busy', text: [`Rendering ${render.kind === 'export' ? 'export' : 'preview'}${v ? ` v${v}` : ''}`, eta].filter(Boolean).join(' · ') }
   }
-  const other = active[0]
+  // A1: a "bring up to date" job wraps a turn; while the turn runs, its step says more.
+  const other = active.find((j) => j.kind !== 'brief_update')
   if (other) return { busy: true, tone: 'busy', text: [other.step_label || 'Working', aboutEta(other.eta_s)].filter(Boolean).join(' · ') }
   if (turn && (turn.status === 'running' || turn.status === 'stopping')) {
     return { busy: true, tone: 'busy', text: turn.status === 'stopping' ? 'Stopping after this step' : turn.step || 'Thinking' }
   }
+  const update = active.find((j) => j.kind === 'brief_update')
+  if (update) return { busy: true, tone: 'busy', text: update.step_label || 'Bringing it up to date with the brief' }
   if (stale) return { busy: false, tone: 'idle', text: 'Changes not in preview yet' }
   if (justReady && playing) return { busy: false, tone: 'ready', text: `Ready. v${playing.version} is playing` }
   if (playing) return { busy: false, tone: 'idle', text: ['Up to date', `v${playing.version}`, ago(playing.created_at, now)].filter(Boolean).join(' · ') }

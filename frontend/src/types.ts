@@ -232,6 +232,10 @@ export interface Project {
   /** The folder it is in, or null. */
   project_id?: string | null
   project_name?: string | null
+  /** A1: the project's current brief version, the one this video was made with, and whether they differ. */
+  brief_version?: number | null
+  made_with_brief?: number | null
+  brief_changed?: boolean
   filename: string
   /** Measured server-side by ffprobe — the client never asserts this. */
   duration: number
@@ -324,6 +328,10 @@ export interface ProjectSummary {
   state?: 'new' | 'draft' | 'shipped'
   last_change?: string
   variant_of?: string | null
+  /** A1: the brief version its last shipped edit was made with (0: before this project's brief; null: nothing shipped). */
+  made_with_brief?: number | null
+  /** A1: its project's brief is newer than the one it was made with ("Brief changed"). */
+  brief_changed?: boolean
 }
 
 export interface ApprovedEditSummary {
@@ -509,7 +517,30 @@ export interface ProjectFolder {
   video_count?: number
   voices?: number
   files?: number
+  /** F2/A1: the current brief version, who saved it and when, and how many videos were made with an older one. */
+  brief_version?: number | null
+  brief_edited_by?: string | null
+  brief_edited_at?: string | null
+  stale_count?: number
 }
+/** F2: one saved version of a project's brief. */
+export interface BriefVersion { project_id: string; version: number; text: string; created_by: string; created_at: string }
+/** F2: a word-level run of a diff between two versions. */
+export interface BriefChange { op: 'same' | 'added' | 'removed'; text: string }
+/** A1: one video in a "Bring up to date" run. */
+export interface BriefUpdateVideo {
+  video_id: string
+  filename: string
+  /** The brief version it was made with. */
+  from: number
+  job_id: string
+  status: ActivityStatus
+  step: string
+  /** current: nothing to change · updated: changed and added · proposed: lines ready to review · waiting: a question */
+  outcome: 'current' | 'updated' | 'proposed' | 'waiting' | null
+  why: string | null
+}
+export interface BriefUpdateRun { run_id: string; to: number; status: 'running' | 'finished'; started_at: string; finished_at: string | null; videos: BriefUpdateVideo[] }
 export interface ProjectFile { name: string; sha256: string; size: number; kind: string; at: string }
 export interface BriefSuggestion { id: string; text: string; why?: string | null; video_id?: string | null; filename?: string | null; at: string }
 export interface ProjectVoice extends MyVoice { project_id?: string; project_name?: string; used_in?: number; /** Bug 2: the moment consent was given (ISO) or null; approximate when backfilled; not needed for a designed voice. */ consent_granted_at?: string | null; consent_approximate?: boolean; consent_needed?: boolean }
@@ -538,7 +569,7 @@ export interface HelpRef { slug: string; title: string; section: string; tour?: 
 // Every surface (the status strip, Activity, the row chips, the player's badge,
 // the chat's step list, toasts, the tab title) reads from these records.
 
-export type ActivityKind = 'voice_line' | 'design_voice' | 'clone' | 'mix' | 'render_preview' | 'export'
+export type ActivityKind = 'voice_line' | 'design_voice' | 'clone' | 'mix' | 'render_preview' | 'export' | 'brief_update'
 export type ActivityStatus = 'queued' | 'running' | 'done' | 'failed' | 'cancelled'
 /** The takes a render carries: kept edits, proposals (items), and their candidates. */
 export interface RenderIncludes { candidate_ids: string[]; edit_ids: string[]; item_ids: string[] }

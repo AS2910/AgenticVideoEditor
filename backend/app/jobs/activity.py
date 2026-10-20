@@ -22,7 +22,8 @@ from app.store.db import Database
 from app.store.workspaces import stamp_last
 from app.timefmt import now_iso
 
-KINDS = ("voice_line", "design_voice", "clone", "mix", "render_preview", "export")
+# brief_update (A1): one video brought up to date with its project's brief, its turn included.
+KINDS = ("voice_line", "design_voice", "clone", "mix", "render_preview", "export", "brief_update")
 TERMINAL = frozenset({"done", "failed", "cancelled"})
 ACTIVE = frozenset({"queued", "running"})
 ALLOWED = {
@@ -34,7 +35,7 @@ ALLOWED = {
 # nothing shows a time for it (no number that was not measured).
 # A running job silent for longer than this has hung: it is failed, never left running.
 TIMEOUT_SECONDS = {"voice_line": 300.0, "design_voice": 300.0, "clone": 300.0, "mix": 120.0,
-                   "render_preview": 900.0, "export": 1800.0}
+                   "render_preview": 900.0, "export": 1800.0, "brief_update": 1800.0}
 HISTORY = 20
 
 ERROR_TEXT = {

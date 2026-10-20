@@ -5,6 +5,16 @@
     history(db, project_id)        -> [BriefVersion], newest first
     diff(db, project_id, a, b)     -> [{"op": "same" | "added" | "removed", "text": ...}]
 
+A1 (stale videos): each video keeps `made_with_brief`, the version its last
+shipped edit was made with (0: before this project's brief; NULL: nothing
+shipped yet). A video is stale ("Brief changed") when its project's current
+version is newer than that.
+
+    made_with_in(c, video_id, version)  -> set it, inside the caller's transaction
+    stale(made, current)                -> bool
+    stale_videos(db, project_id)        -> [video ids], oldest version first
+    changed_words(runs) / touches(runs, texts) -> the word-overlap check
+
 `save_in(c, ...)` is the same save on a transaction the caller holds, so a
 change and its activity event (F7) land together. `projects.brief` is kept
 equal to the current text: the read-only alias for one release. Each new
@@ -123,3 +133,64 @@ def diff(db: Database, project_id: str, a: int, b: int) -> list[dict] | None:
     if old is None or new is None:
         return None
     return diff_text(old, new)
+
+
+# ── A1: which videos were made with an older brief ────────────────────────────
+
+def stale(made: int | None, current: int | None) -> bool:
+    """A video is stale when something shipped on it was made with a brief
+    older than the project's current one. Nothing shipped: never stale."""
+    return made is not None and current is not None and made < current
+
+
+def made_with_in(c: sqlite3.Connection, video_id: str, version: int | None) -> None:
+    c.execute("UPDATE videos SET made_with_brief = ? WHERE id = ?", (version, video_id))
+
+
+def made_with(db: Database, video_id: str, version: int | None) -> None:
+    with db.tx() as c:
+        made_with_in(c, video_id, version)
+
+
+def stale_videos(db: Database, project_id: str) -> list[str]:
+    """The live videos in the project made with an older brief, the oldest
+    version first (then the order they were made)."""
+    with db.tx() as c:
+        rows = c.execute(
+            "SELECT v.id FROM videos v JOIN projects p ON p.id = v.project_id "
+            "WHERE v.project_id = ? AND v.deleted_at IS NULL AND v.made_with_brief IS NOT NULL "
+            "AND p.brief_version IS NOT NULL AND v.made_with_brief < p.brief_version "
+            "ORDER BY v.made_with_brief, v.created_at, v.id", (project_id,)).fetchall()
+    return [r[0] for r in rows]
+
+
+# Words too common to say a brief change touches a video.
+_STOP = frozenset("""a an and are as at be but by do does for from has have if in into is it its of on or our so
+that the their them then there these they this to too up was we were what when which who will with you your
+always never every each all any more most less only just also should must can not no say says said use""".split())
+_WORD = re.compile(r"[a-z0-9][a-z0-9%'&.-]*")
+
+
+def _words(text: str) -> set[str]:
+    out = set()
+    for w in _WORD.findall(text.lower()):
+        w = w.strip(".'-")
+        if w and w not in _STOP and (len(w) > 2 or any(ch.isdigit() for ch in w)):
+            out.add(w)
+            if w.endswith("%"):
+                out.add(w[:-1])
+    return out
+
+
+def changed_words(runs: list[dict]) -> set[str]:
+    """The words a brief change added or removed, without the common ones."""
+    return set().union(*(_words(r["text"]) for r in runs if r["op"] != "same")) if runs else set()
+
+
+def touches(runs: list[dict], texts: list[str]) -> list[str]:
+    """The changed words that appear in a video's own words (its transcript,
+    its shipped lines, its proposals), sorted; empty when the change does not
+    touch the video. Free and deterministic: run before any model call."""
+    changed = changed_words(runs)
+    have = set().union(*(_words(t) for t in texts)) if texts else set()
+    return sorted(changed & have)

@@ -130,3 +130,11 @@ describe('toasts', () => {
     expect(coalesce(swap, { id: '8', text: 'Done. 5 lines voiced.', tone: 'ok' }).text).toBe('v5 ready. Switch now?')
   })
 })
+
+describe('A1: a bring-up-to-date job on the strip', () => {
+  it('gives way to the turn it wraps, and speaks for itself when nothing else runs', () => {
+    const update = job({ kind: 'brief_update', status: 'running', step_label: 'Checking what the change touches', turn_id: null, eta_s: null })
+    expect(stripState({ jobs: [update], turn: turn({ step: 'Reading the lines' }), playing: null, stale: false }).text).toBe('Reading the lines')
+    expect(stripState({ jobs: [update], turn: null, playing: null, stale: false }).text).toBe('Checking what the change touches')
+  })
+})

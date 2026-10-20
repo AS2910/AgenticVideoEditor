@@ -6,7 +6,7 @@ import type {
   Project, ExportManifest, Job, ProjectSummary, ProjectDetail, Usage, Voice, Speaker,
   ProjectSettings, Autonomy, Effort, Plan, Mix, Selection, Candidate, Reading, Sight, ChatMessage,
   ProjectFolder, ProjectDetailFolder, ProjectFile, HelpArticle, Onboarding, ProjectVoice,
-  ActivityJob, TurnView, RenderState,
+  ActivityJob, TurnView, RenderState, BriefVersion, BriefChange, BriefUpdateRun,
 } from './types'
 
 const BASE = '/api'
@@ -132,6 +132,12 @@ export const folderFileUrl = (id: string, sha: string) => `${BASE}/videos/${id}/
 export const shareVoice = (id: string, voiceId: string) => post<ProjectDetailFolder['voices']>(`/projects/${id}/voices`, { voice_id: voiceId })
 export const unshareVoice = (id: string, voiceId: string) => del(`/projects/${id}/voices/${voiceId}`)
 export const answerSuggestion = (id: string, sid: string, answer: 'accept' | 'dismiss') => post<ProjectDetailFolder>(`/projects/${id}/suggestions/${sid}/${answer}`, {})
+/** F2/A1: the brief's versions, newest first, and the word diff between two (0 = no brief). */
+export const listBriefVersions = (id: string) => get<{ current: number | null; versions: BriefVersion[] }>(`/projects/${id}/briefs`)
+export const diffBriefVersions = (id: string, a: number, b: number) => get<{ a: number; b: number; changes: BriefChange[] }>(`/projects/${id}/briefs/diff?a=${a}&b=${b}`)
+/** A1: the latest "Bring up to date" run (null before the first), and starting one. */
+export const getBriefUpdate = (id: string) => get<{ run: BriefUpdateRun | null }>(`/projects/${id}/brief-update`)
+export const startBriefUpdate = (id: string) => post<{ run: BriefUpdateRun }>(`/projects/${id}/brief-update`, {})
 
 /** Help and onboarding (2026-10-19). */
 export const listHelp = async () => (await get<{ articles: HelpArticle[] }>('/help')).articles

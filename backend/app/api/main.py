@@ -536,6 +536,10 @@ def _project_dict(record: ProjectRecord) -> dict:
         "video_id": source.project_id,
         "project_id": folder.project_id if folder else None,
         "project_name": folder.name if folder else None,
+        # A1: the brief it was made with against the project's current one ("Brief changed" in the header).
+        "brief_version": folder.brief_version if folder else None,
+        "made_with_brief": record.made_with_brief,
+        "brief_changed": briefs.stale(record.made_with_brief, folder.brief_version if folder else None),
         "filename": source.filename,
         "duration": source.duration,
         "media": _artifact_dict(source.media),
@@ -1161,6 +1165,9 @@ def _summary(r: ProjectRecord) -> dict:
         "last_change": last,
         "variant_of": settings_.get("variant_of"),
         "stage": r.stage,
+        # A1: the brief version its last shipped edit was made with, and whether the project's is newer.
+        "made_with_brief": r.made_with_brief,
+        "brief_changed": briefs.stale(r.made_with_brief, folder.brief_version if folder else None),
     }
 
 
@@ -1932,11 +1939,16 @@ def _suggestion_dict(entry: dict) -> dict:
 
 
 def _folder_dict(project: Project) -> dict:
+    now = briefs.current(database, project.project_id)
     return {
         "project_id": project.project_id,
         "name": project.name,
         "brief": project.brief,
         "brief_version": project.brief_version,
+        # A1: who saved the current version and when, and how many videos were made with an older one.
+        "brief_edited_by": now.created_by if now else None,
+        "brief_edited_at": now.created_at if now else None,
+        "stale_count": len(briefs.stale_videos(database, project.project_id)),
         "settings": {k: v for k, v in _defaults_for(project.owner, project).items() if k in SETTING_KEYS},
         "ceiling_usd": project.ceiling_usd,
         "spent_usd": round(ledger.spent_usd_by_folder(project.project_id), 4),
@@ -2163,6 +2175,192 @@ def delete_project_rule(project_id: str, rule_id: int, owner: str = Depends(curr
     if not rules.remove(database, project_id, rule_id, owner):
         raise HTTPException(status_code=404, detail="rule not found")
     return Response(status_code=204)
+
+
+# ── A1: bring videos up to date with the brief ───────────────────────────────
+#
+# TODO(F4): this is a sequential loop of ordinary per-video turns, one Activity
+# job ("brief_update") per video, because the batch turn engine (F4) does not
+# exist yet. F4 replaces the loop with one batch turn: one plan, one gate, a
+# child turn per video under the parent's budget. Keep the free word-overlap
+# check in front of it (a video the change does not touch costs nothing).
+
+def _consistency_on(owner: str) -> None:
+    """Phase A ships behind `projects.consistency`; off, its routes are not there."""
+    if not flags.enabled("projects.consistency", owner):
+        raise HTTPException(status_code=404, detail="Not found")
+
+
+BRIEF_RUN_KEY = "brief_update:{}"
+# How long one video's turn may run before the loop stops waiting on it.
+BRIEF_TURN_WAIT_S = 1800.0
+_brief_runs_lock = threading.Lock()
+
+
+def _brief_run(project_id: str) -> dict | None:
+    """The project's latest run, with each video's job read fresh. A run left
+    running by a restart (its jobs failed by the sweep) reads as finished."""
+    raw = repo.get_meta(BRIEF_RUN_KEY.format(project_id))
+    if not raw:
+        return None
+    run = json.loads(raw)
+    for v in run["videos"]:
+        job = activity.get(v["job_id"]) if v.get("job_id") else None
+        if job is not None:
+            v["status"] = job.status
+            v["step"] = job.step_label
+            v["outcome"] = job.detail.get("outcome", v.get("outcome"))
+            v["why"] = job.error_text if job.status == "failed" else job.detail.get("why", v.get("why"))
+    if run["status"] == "running" and all(v["status"] in ("done", "failed", "cancelled") for v in run["videos"]):
+        run["status"] = "finished"
+    return run
+
+
+def _save_brief_run(project_id: str, run: dict) -> None:
+    repo.set_meta(BRIEF_RUN_KEY.format(project_id), json.dumps(run))
+
+
+def _diff_words(runs: list[dict]) -> str:
+    """The change as a sentence for the goal: what went and what came in."""
+    gone = [r["text"].strip() for r in runs if r["op"] == "removed" and r["text"].strip()]
+    came = [r["text"].strip() for r in runs if r["op"] == "added" and r["text"].strip()]
+    bits = ([f"removed “{' … '.join(gone)}”"] if gone else []) + ([f"added “{' … '.join(came)}”"] if came else [])
+    return "; ".join(bits) or "no words changed"
+
+
+def _video_texts(video_id: str, record: ProjectRecord) -> list[str]:
+    """What a video says: its lines as shot, what it shipped and what waits as a proposal."""
+    texts = [st.text for st in statements_of(record.transcript)] or [" ".join(w.text for w in record.transcript.words)]
+    texts += [e.plan.new_text for e in repo.list_edits(video_id) if not e.reverted]
+    plan = repo.latest_plan(video_id)
+    texts += [i.new_text for i in (plan.items if plan else ()) if i.status not in ("dismissed",)]
+    return texts
+
+
+def _bring_one_up_to_date(project_id: str, video_id: str, job_id: str, made: int, to: int, owner: str) -> None:
+    """One video: the free word-overlap check first; a video the change does
+    not touch is marked current without spending, saying why. Otherwise an
+    ordinary turn with the goal "Apply brief changes vN to vM" and the diff."""
+    activity.start(job_id, "Checking what the change touches")
+    record = repo.get(video_id)
+    if record is None:
+        activity.fail(job_id, "gone", "This video was deleted.")
+        return
+    runs = briefs.diff(database, project_id, made, to) or []
+    hit = briefs.touches(runs, _video_texts(video_id, record))
+    changed = sorted(briefs.changed_words(runs))
+    if not hit:
+        why = (f"None of the words the brief changed ({', '.join(changed[:6])}) are in this video, so nothing was spent."
+               if changed else "The brief change has no words this video could use, so nothing was spent.")
+        with database.tx() as c:
+            briefs.made_with_in(c, video_id, to)
+            activity_log.record(c, "brief.video_current", VOLTAGE, video_id=video_id, project_id=project_id,
+                                target=video_id, payload={"from": made, "to": to, "why": why, "spent_usd": 0})
+        activity.finish(job_id, step_label="Up to date, nothing to change", detail={"outcome": "current", "why": why, "spent_usd": 0})
+        return
+    if not _agent_on():
+        activity.fail(job_id, "no_agent", "Voltage needs Claude to change this video (set AVE_AGENT=1 and an Anthropic key).")
+        return
+    goal = (f"Apply brief changes v{made} to v{to}. The brief {_diff_words(runs)}. This video mentions "
+            f"{', '.join(hit)}. Change only the lines the change touches and leave the rest as they are; "
+            "if nothing here needs to change, say so.") if made else (
+            f"Apply brief changes v0 to v{to}: this video was made before the project's brief, which {_diff_words(runs)}. "
+            f"This video mentions {', '.join(hit)}. Change only the lines the brief touches; if nothing needs to change, say so.")
+    activity.update(job_id, step_label="Voltage is on it", detail={"touches": hit})
+    try:
+        started = _start_turn(video_id, record, goal, owner)
+    except HTTPException as exc:
+        activity.fail(job_id, "turn_refused", str(exc.detail))
+        return
+    deadline = time.time() + BRIEF_TURN_WAIT_S
+    turn_job = jobs.get(started["job_id"])
+    while turn_job is not None and not turn_job.done and time.time() < deadline:
+        time.sleep(0.05)
+        turn_job = jobs.get(started["job_id"])
+    if turn_job is None or not turn_job.done:
+        activity.fail(job_id, "timeout", "Voltage's turn on this video took too long; it is still in the video's chat.")
+        return
+    out = turn_job.result or {}
+    spent = round(float(out.get("turn_usd") or out.get("spent_usd") or 0.0), 4)
+    if turn_job.status == "failed" or out.get("stopped") == "error":
+        activity.fail(job_id, "turn_failed", (out.get("error") or turn_job.error or "Voltage's turn failed.")[:200], cost_usd=spent or None)
+        return
+    plan = repo.latest_plan(video_id)
+    ready = sum(1 for i in (plan.items if plan else ()) if i.kind == "planned" and i.status == "ready")
+    now = repo.get(video_id)
+    if now is not None and now.made_with_brief == to:
+        why, outcome = "Voltage changed the lines the brief touches and added them.", "updated"
+    elif out.get("question"):
+        why, outcome = "Voltage has a question in this video. Answer it there.", "waiting"
+    elif ready:
+        why, outcome = f"{ready} {'line is' if ready == 1 else 'lines are'} ready to hear. Add them in the video.", "proposed"
+    else:
+        why, outcome = "Voltage read the change and found nothing to change here.", "current"
+        briefs.made_with(database, video_id, to)
+    activity.finish(job_id, step_label={"updated": "Updated", "waiting": "Waiting on you", "proposed": "Ready to review",
+                                        "current": "Up to date, nothing to change"}[outcome],
+                    cost_usd=spent or None, detail={"outcome": outcome, "why": why, "spent_usd": spent})
+
+
+def _bring_up_to_date_loop(project_id: str, owner: str) -> None:
+    """Every stale video, one after another (F4 runs them as one batch later)."""
+    run = json.loads(repo.get_meta(BRIEF_RUN_KEY.format(project_id)) or "{}")
+    try:
+        for v in run.get("videos", []):
+            try:
+                _bring_one_up_to_date(project_id, v["video_id"], v["job_id"], int(v["from"]), int(run["to"]), owner)
+            except Exception as exc:  # noqa: BLE001 - one video failing never stops the rest
+                log.exception("bringing %s up to date failed", v["video_id"])
+                activity.fail(v["job_id"], "unknown", str(exc)[:200] or type(exc).__name__)
+    finally:
+        with _brief_runs_lock:
+            final = _brief_run(project_id) or run
+            final.update(status="finished", finished_at=_now())
+            _save_brief_run(project_id, final)
+            with database.tx() as c:
+                activity_log.record(c, "brief.update_finished", user_actor(owner), project_id=project_id, target=final["run_id"],
+                                    payload={"to": final["to"], "outcomes": {v["video_id"]: v.get("outcome") for v in final["videos"]}})
+
+
+@app.get("/projects/{project_id}/brief-update")
+def get_brief_update(project_id: str, owner: str = Depends(current_owner)) -> dict:
+    """A1: the latest "Bring up to date" run (null before the first), each
+    video with its job's state and why it ended as it did."""
+    _consistency_on(owner)
+    _owned_project(project_id, owner)
+    return {"run": _brief_run(project_id)}
+
+
+@app.post("/projects/{project_id}/brief-update", status_code=202)
+def start_brief_update(project_id: str, owner: str = Depends(current_owner)) -> dict:
+    """A1: bring every video made with an older brief up to date, one video at
+    a time. A video the change does not touch is marked current for free."""
+    _consistency_on(owner)
+    project = _owned_project(project_id, owner)
+    with _brief_runs_lock:
+        now = _brief_run(project_id)
+        if now is not None and now["status"] == "running":
+            raise HTTPException(status_code=409, detail="Already bringing the videos up to date.")
+        stale = briefs.stale_videos(database, project_id)
+        if not stale or project.brief_version is None:
+            raise HTTPException(status_code=409, detail="Every video is made with the current brief.")
+        n = 1 + int((now or {}).get("run_id", "u0")[1:] or 0)
+        run = {"run_id": f"u{n}", "to": project.brief_version, "status": "running", "started_at": _now(), "finished_at": None,
+               "videos": []}
+        for vid in stale:
+            record = repo.get(vid)
+            made = int(record.made_with_brief or 0)
+            job = activity.create(vid, "brief_update", step_label="Queued",
+                                  detail={"project_id": project_id, "run_id": run["run_id"], "from": made, "to": project.brief_version})
+            run["videos"].append({"video_id": vid, "filename": record.source.filename, "from": made, "job_id": job.job_id,
+                                  "status": "queued", "step": "Queued", "outcome": None, "why": None})
+        _save_brief_run(project_id, run)
+        with database.tx() as c:
+            activity_log.record(c, "brief.update_started", user_actor(owner), project_id=project_id, target=run["run_id"],
+                                payload={"to": run["to"], "videos": stale})
+    threading.Thread(target=_bring_up_to_date_loop, args=(project_id, owner), daemon=True,
+                     name=f"brief-update-{project_id}").start()
+    return {"run": _brief_run(project_id)}
 
 
 @app.delete("/projects/{project_id}", status_code=204)
@@ -2820,6 +3018,20 @@ def _actor_now(project_id: str) -> Actor:
     return user_actor(record.owner if record else LOCAL_OWNER)
 
 
+def _brief_shipped_with(project_id: str) -> int | None:
+    """A1: the brief version an edit shipping now was made with: the one the
+    running turn read, or the project's current version for a hand Add it.
+    None for a standalone video, or a project with no brief yet."""
+    record = repo.get(project_id)
+    project = repo.get_project(record.folder_id) if record and record.folder_id else None
+    if project is None or project.brief_version is None:
+        return None
+    turn_id = current_turn.get()
+    last = repo.settings(project_id).get("last_turn") or {}
+    read = last.get("brief_version") if turn_id and last.get("id") == turn_id else None
+    return int(read) if isinstance(read, int) else project.brief_version
+
+
 def _approve_candidate(project_id: str, candidate: EditCandidate, overridden: bool, partner: str | None = None) -> str:
     """Commit a previewed candidate as an approved edit; a plan item that
     produced it is marked approved too."""
@@ -2832,7 +3044,7 @@ def _approve_candidate(project_id: str, candidate: EditCandidate, overridden: bo
         frames=candidate.frames,
         overridden=overridden,
         partner=partner,
-    ), actor=_actor_now(project_id))
+    ), actor=_actor_now(project_id), made_with_brief=_brief_shipped_with(project_id))
     plan = repo.latest_plan(project_id)
     if plan is not None:
         for item in plan.items:

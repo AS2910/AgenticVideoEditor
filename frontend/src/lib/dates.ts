@@ -56,3 +56,19 @@ const LONG_MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'Ju
 /** This month's short and long names, for "of $10 · Oct" and the Usage period. */
 export const monthShort = (now: Date = new Date(), opts: Opts = {}) => parts(now, opts.timeZone).month
 export const monthLong = (now: Date = new Date(), opts: Opts = {}) => LONG_MONTHS[MONTHS.indexOf(parts(now, opts.timeZone).month)]
+
+/** "just now", "5 minutes ago", "3 hours ago", "yesterday", "2 days ago"; past
+ *  a month the date itself (A1: who edited the brief, and when). */
+export function agoLabel(value: unknown, now: Date = new Date()): string {
+  const d = toDate(value)
+  if (!d) return NOT_RECORDED
+  const s = Math.max(0, (now.getTime() - d.getTime()) / 1000)
+  const n = (x: number, unit: string) => `${x} ${unit}${x === 1 ? '' : 's'} ago`
+  if (s < 60) return 'just now'
+  if (s < 3600) return n(Math.floor(s / 60), 'minute')
+  if (s < 86_400) return n(Math.floor(s / 3600), 'hour')
+  const days = Math.floor(s / 86_400)
+  if (days === 1) return 'yesterday'
+  if (days < 31) return n(days, 'day')
+  return formatDate(d)
+}

@@ -18,8 +18,8 @@ function routeFetch(tips: string[]) {
 describe('Tip', () => {
   afterEach(() => vi.unstubAllGlobals())
 
-  it('has ten tips, each with a sentence and a Help article', () => {
-    expect(TIPS.map((t) => t.id)).toEqual(['first-upload', 'first-silent', 'first-question', 'first-just-do-it', 'first-voice-design', 'first-project-voice', 'first-background', 'first-undo-after-export', 'first-ceiling', 'first-failed-take'])
+  it('has its tips, each with a sentence and a Help article', () => {
+    expect(TIPS.map((t) => t.id)).toEqual(['first-upload', 'first-silent', 'first-question', 'first-just-do-it', 'first-voice-design', 'first-project-voice', 'first-background', 'first-undo-after-export', 'first-ceiling', 'first-failed-take', 'first-brief-changed'])
     for (const t of TIPS) { expect(t.text.length).toBeGreaterThan(20); expect(t.slug).toMatch(/^[a-z-]+$/) }
   })
 

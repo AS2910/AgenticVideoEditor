@@ -22,7 +22,9 @@ from app.timefmt import now_iso
 # The verbs written so far (more join as features land).
 VERBS = ("brief.saved", "rule.added", "rule.changed", "rule.removed", "stage.moved",
          "video.moved_in", "video.moved_out", "edit.shipped", "edit.undone",
-         "video.deleted", "video.restored", "project.deleted", "project.restored")
+         "video.deleted", "video.restored", "project.deleted", "project.restored",
+         # A1: bringing videos up to date with a changed brief.
+         "brief.update_started", "brief.video_current", "brief.update_finished")
 MAX_PAGE = 200
 
 

@@ -12,6 +12,7 @@ import { Shell } from './Shell'
 import { FillBar } from './bits'
 import { whenLabel } from './fmt'
 import { MoveDialog } from '../components/MoveDialog'
+import { useFlags } from '../flags/useFlags'
 
 interface ProjectsPageProps {
   me: Me | null
@@ -81,6 +82,8 @@ type Tab = 'all' | 'in' | 'none'
  *  Undo before anything goes. */
 export function ProjectsPage({ me, projects, folders = [], onOpen, onUpload, onSample, onDelete, onNewFolder, onFolderMade, onMoved, banner, uploading, progress = null, error, undoMs = 5000 }: ProjectsPageProps) {
   const input = useRef<HTMLInputElement>(null)
+  // A1: "Brief changed" on a card whose project's brief moved on since it was made.
+  const briefChips = useFlags().enabled('projects.consistency')
   const [over, setOver] = useState(false)
   const [dest, setDest] = useState<string>('none')
   const [tab, setTab] = useState<Tab>('all')
@@ -307,6 +310,7 @@ export function ProjectsPage({ me, projects, folders = [], onOpen, onUpload, onS
                             <span className="relative block aspect-[16/10] overflow-hidden rounded-[10px] border-[1.5px] border-ink bg-pic">
                               <Frame id={id} />
                               <span className="tnum absolute right-2 bottom-2 rounded bg-ink/60 px-1.5 text-xs text-ptext">{clock(p.duration)}</span>
+                              {briefChips && p.brief_changed && <span className="stamp need absolute top-2 left-2" title={`${p.project_name ?? 'Its project'} has a newer brief than this video was made with`} data-testid="brief-changed">Brief changed</span>}
                             </span>
                             <span className="truncate px-0.5 font-semibold">{p.filename}</span>
                           </a>

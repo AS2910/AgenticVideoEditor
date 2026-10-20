@@ -43,6 +43,7 @@ import type { Tour } from './tour/types'
 import { OnboardingProvider, useOnboarding } from './guides/onboarding'
 import { Checklist } from './guides/Checklist'
 import { Tip } from './guides/Tip'
+import { useFlags } from './flags/useFlags'
 import { go, hrefFor, useRoute } from './lib/route'
 import { cn } from '@/lib/utils'
 import { clock } from './transcript/format'
@@ -159,6 +160,8 @@ function Studio() {
   const [folders, setFolders] = useState<ProjectFolder[]>([])
   const [moving, setMoving] = useState(false)
   const [crumbMenu, setCrumbMenu] = useState(false)
+  // Phase A (projects.consistency): brief versions and project words in the editor.
+  const consistency = useFlags().enabled('projects.consistency')
   const [usage, setUsage] = useState<Usage | null>(null)
   // Spend scopes: this turn, this video, its project, the month, and the one that stops paid work first.
   const [spend, setSpend] = useState<SpendSummary | null>(null)
@@ -1534,6 +1537,10 @@ function Studio() {
               </div>
             )}
           </div>
+          {/* A1: the project's brief moved on since this video's last shipped edit. */}
+          {consistency && project.project_id && project.brief_changed && (
+            <a className="stamp need no-underline" href={hrefFor({ page: 'folder', projectId: project.project_id })} title={`Made with brief v${project.made_with_brief ?? 0}; ${project.project_name ?? 'the project'} is on v${project.brief_version}. Open the project to bring it up to date.`} data-testid="brief-changed">Brief changed</a>
+          )}
           <span className="text-faint max-sm:hidden" aria-hidden="true">/</span>
           <h1 className="disp m-0 min-w-0 max-w-[28ch] truncate text-[15px] font-semibold lg:max-w-none lg:flex-[1_1_0]" title={project.filename}>{project.filename}</h1>
           <span className="tag text-faint">{timecode(project.duration)}{speakers.length > 0 ? ` · ${speakers.length} ${speakers.length === 1 ? 'voice' : 'voices'}` : ''}</span>

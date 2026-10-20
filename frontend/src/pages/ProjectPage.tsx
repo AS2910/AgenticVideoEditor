@@ -11,6 +11,9 @@ import { formatDate } from '../lib/dates'
 import { usd, usdShort } from './fmt'
 import { ceilingWord } from '../lib/money'
 import { FillBar } from './bits'
+import { useFlags } from '../flags/useFlags'
+import { BriefHistory, BriefMeta, StaleLine } from './BriefVersions'
+import { Tip } from '../guides/Tip'
 
 interface ProjectPageProps {
   me: Me | null
@@ -53,6 +56,10 @@ export function ProjectPage({ me, projectId, onUpload, uploading, error, onDelet
   const [busy, setBusy] = useState<string | null>(null)
   const [note, setNote] = useState<string | null>(null)
   const [over, setOver] = useState(false)
+  // A1 (projects.consistency): the brief's history, open under it.
+  const [history, setHistory] = useState(false)
+  const { enabled } = useFlags()
+  const consistency = enabled('projects.consistency')
   const fileInput = useRef<HTMLInputElement>(null)
   const refInput = useRef<HTMLInputElement>(null)
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -92,7 +99,7 @@ export function ProjectPage({ me, projectId, onUpload, uploading, error, onDelet
     if (saveTimer.current) clearTimeout(saveTimer.current)
     saveTimer.current = setTimeout(() => {
       saveTimer.current = null
-      updateFolder(projectId, { brief: text }).then((p) => { setDetail((d) => (d ? { ...d, project: p } : d)); setSavedAt(Date.now()) }).catch((e) => say(e, 'Could not save the brief.'))
+      updateFolder(projectId, { brief: text }).then((p) => { setDetail((d) => (d ? { ...d, project: p } : d)); setSavedAt(Date.now()); if (consistency) void getFolder(projectId).then((d) => setDetail((cur) => (cur ? { ...cur, videos: d.videos } : d))).catch(() => { /* the chips catch up on the next load */ }) }).catch((e) => say(e, 'Could not save the brief.'))
     }, 600)
   }
   const rename = async () => {
@@ -243,6 +250,8 @@ export function ProjectPage({ me, projectId, onUpload, uploading, error, onDelet
       <div className="flex flex-wrap items-start gap-7">
         <section aria-label="Videos" className="flex min-w-0 flex-[999_1_560px] flex-col gap-3.5">
           <h2 className="disp m-0 text-2xl font-bold">Videos</h2>
+          {consistency && <StaleLine projectId={projectId} count={project.stale_count ?? 0} version={project.brief_version} onChanged={() => void load()} />}
+          {consistency && (project.stale_count ?? 0) > 0 && <Tip id="first-brief-changed" target="stale-line" />}
           <div className="-mx-3 grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-2.5">
             {detail.videos.map((v, i) => {
               const state = v.state ?? 'new'
@@ -252,6 +261,7 @@ export function ProjectPage({ me, projectId, onUpload, uploading, error, onDelet
                     <Frame id={v.video_id} />
                     <span className={cn('stamp absolute top-2 left-2', state !== 'draft' && 'bg-ink/70 text-ptext')}>{v.last_change && /proposed/i.test(v.last_change) ? v.last_change : STATE_WORD[state]}</span>
                     <span className="tnum absolute right-2 bottom-2 rounded bg-ink/60 px-1.5 text-xs text-ptext">{clock(v.duration)}</span>
+                    {consistency && v.brief_changed && <span className="stamp need absolute top-2 right-2" title={`Made with brief v${v.made_with_brief ?? 0}; the project is on v${project.brief_version}`} data-testid="brief-changed">Brief changed</span>}
                   </span>
                   <span className="truncate font-semibold">{v.filename}</span>
                   <span className="truncate text-[13px] text-muted-foreground">{v.last_change ?? (v.edits > 0 ? `${v.edits} ${v.edits === 1 ? 'change' : 'changes'} in the file` : 'Nothing changed yet')}</span>
@@ -276,8 +286,10 @@ export function ProjectPage({ me, projectId, onUpload, uploading, error, onDelet
         <aside aria-label="Shared with every video" className="flex min-w-0 flex-[1_1_340px] flex-col gap-3.5">
           <div className="rise flex flex-col gap-3 rounded-xl border-[1.5px] border-foreground bg-card p-[18px] shadow-volt-lg" data-testid="brief">
             <div className="flex flex-wrap items-center gap-2"><span className="disp text-xl font-bold">Brief</span><span className="tag text-faint">Voltage reads this in every turn</span><span className="flex-1" />{savedAt && <span className="tag text-faint" role="status">Saved</span>}</div>
+            {consistency && <BriefMeta project={project} me={me} open={history} onHistory={() => setHistory((h) => !h)} />}
             <label htmlFor="brief" className="sr-only">Project brief</label>
             <textarea id="brief" rows={5} className="w-full resize-y rounded-lg border-[1.5px] border-line2 bg-background p-3 text-[14.5px] leading-[1.55] outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50" value={brief} placeholder="What every video here should know: the brand and how it is said, the offer, the tone." onChange={(e) => editBrief(e.target.value)} />
+            {consistency && history && <BriefHistory projectId={projectId} me={me} current={project.brief_version} onClose={() => setHistory(false)} />}
             {detail.suggestions.map((s) => (
               <div key={s.id} className="rise flex flex-col gap-2 rounded-lg bg-pane p-3 text-ptext" data-testid="suggestion">
                 <span className="tag text-volt">Voltage suggests adding</span>

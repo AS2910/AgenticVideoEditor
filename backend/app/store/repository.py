@@ -44,6 +44,9 @@ class ProjectRecord:
     folder_id: str | None = None
     # F5: draft | in_review | changes_asked | approved | exported (changed only through app.store.stages).
     stage: str = "draft"
+    # A1: the brief version its last shipped edit was made with (0: before
+    # this project's brief; None: nothing shipped). See app.store.briefs.stale.
+    made_with_brief: int | None = None
 
 
 @dataclass(frozen=True)
@@ -93,6 +96,7 @@ def _record(row) -> ProjectRecord:
         created_at=row["created_at"],
         folder_id=row["project_id"] if "project_id" in row.keys() else None,
         stage=row["stage"] if "stage" in row.keys() else "draft",
+        made_with_brief=row["made_with_brief"] if "made_with_brief" in row.keys() else None,
     )
 
 
@@ -185,6 +189,12 @@ class ProjectRepository:
             row = c.execute("SELECT project_id FROM videos WHERE id = ?", (project_id,)).fetchone()
             changed = c.execute("UPDATE videos SET project_id = ? WHERE id = ?", (folder_id, project_id)).rowcount
             left = row["project_id"] if row else None
+            if changed and left != folder_id:
+                # A1: brief versions are per project. A video that joins with edits in it
+                # was made before this project's brief (0); one with none was made with nothing yet.
+                live = any(not json.loads(r["body"]).get("reverted") for r in
+                           c.execute("SELECT body FROM edits WHERE project_id = ?", (project_id,)))
+                briefs.made_with_in(c, project_id, 0 if folder_id and live else None)
             if actor is not None and changed and left != folder_id:
                 if left:
                     events.record(c, "video.moved_out", actor, video_id=project_id, project_id=left, target=project_id,
@@ -353,9 +363,13 @@ class ProjectRepository:
 
     # ── approved edits ──
 
-    def append_edit(self, project_id: str, edit: ApprovedEdit, actor: Actor | None = None) -> None:
-        """Ship an edit; with an `actor` it is in the activity log (F7)."""
+    def append_edit(self, project_id: str, edit: ApprovedEdit, actor: Actor | None = None,
+                    made_with_brief: int | None = None) -> None:
+        """Ship an edit; with an `actor` it is in the activity log (F7); with
+        `made_with_brief` the video now counts as made with that brief version (A1)."""
         with self.db.tx() as c:
+            if made_with_brief is not None:
+                briefs.made_with_in(c, project_id, made_with_brief)
             c.execute(
                 "INSERT INTO edits (project_id, seq, body) VALUES (?, "
                 "(SELECT COALESCE(MAX(seq), 0) + 1 FROM edits WHERE project_id = ?), ?)",

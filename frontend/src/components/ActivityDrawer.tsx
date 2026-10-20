@@ -14,7 +14,7 @@ interface ActivityDrawerProps {
 }
 
 const KIND: Record<ActivityJob['kind'], string> = {
-  voice_line: 'Voice a line', design_voice: 'Design a voice', clone: 'Clone a voice', mix: 'Mix', render_preview: 'Render preview', export: 'Export',
+  voice_line: 'Voice a line', design_voice: 'Design a voice', clone: 'Clone a voice', mix: 'Mix', render_preview: 'Render preview', export: 'Export', brief_update: 'Bring up to date with the brief',
 }
 const STATUS: Record<ActivityJob['status'], { word: string; tone: string }> = {
   queued: { word: 'Queued', tone: 'live' }, running: { word: 'Running', tone: 'live' }, done: { word: 'Done', tone: 'in' },
