@@ -101,6 +101,9 @@ def test_deleting_the_project_deletes_the_clone_at_the_vendor(client, sample_vid
     assert upload(client, sample_video).status_code == 200
     warnings_of()
     assert client.delete("/videos/p1").status_code == 204
+    assert voice.deleted == []                                      # F8: in the Bin until the purge
+    from tests.api.test_endpoints import purge_now
+    purge_now(main, voice.delete_clone)
     assert voice.deleted == [CLONE]
 
 

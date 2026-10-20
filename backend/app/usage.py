@@ -101,6 +101,16 @@ class ProjectCeilingReached(SpendCeilingReached):
         )
 
 
+# The charges that are one owner's: their videos, their own voices, their
+# projects' project-level charges, and (F8) those of videos and projects the
+# purge removed, which it keeps by name in `purged_items`. Params: owner,
+# "user-<owner>", owner, owner, owner.
+_OWNED = ("u.project_id IN (SELECT id FROM videos WHERE owner = ?) OR u.project_id = ? "
+          "OR (u.project_id = '' AND u.folder_id IN (SELECT id FROM projects WHERE owner = ?)) "
+          "OR u.project_id IN (SELECT item_id FROM purged_items WHERE kind = 'video' AND owner = ?) "
+          "OR (u.project_id = '' AND u.folder_id IN (SELECT item_id FROM purged_items WHERE kind = 'project' AND owner = ?))")
+
+
 def folder_of(c, project_id: str) -> str | None:
     """The project (folder) a video is in now, read inside the caller's
     transaction, so a charge carries it."""
@@ -251,10 +261,8 @@ class Ledger:
         with self.db.tx() as c:
             row = c.execute(
                 "SELECT COALESCE(SUM(u.usd), 0) AS usd FROM usage u WHERE ("
-                "u.project_id IN (SELECT id FROM videos WHERE owner = ?) OR u.project_id = ? "
-                "OR (u.project_id = '' AND u.folder_id IN (SELECT id FROM projects WHERE owner = ?)))"
-                + (" AND u.at >= ?" if since else ""),
-                (owner, f"user-{owner}", owner) + ((since,) if since else ()),
+                + _OWNED + ")" + (" AND u.at >= ?" if since else ""),
+                (owner, f"user-{owner}", owner, owner, owner) + ((since,) if since else ()),
             ).fetchone()
         return float(row["usd"])
 
@@ -274,10 +282,9 @@ class Ledger:
         with self.db.tx() as c:
             rows = c.execute(
                 "SELECT u.project_id AS video_id, u.folder_id AS folder_id, u.vendor AS vendor, SUM(u.usd) AS usd "
-                "FROM usage u WHERE (u.project_id IN (SELECT id FROM videos WHERE owner = ?) OR u.project_id = ? "
-                "OR (u.project_id = '' AND u.folder_id IN (SELECT id FROM projects WHERE owner = ?)))"
+                "FROM usage u WHERE (" + _OWNED + ")"
                 + (" AND u.at >= ?" if since else "") + " GROUP BY u.project_id, u.folder_id, u.vendor",
-                (owner, f"user-{owner}", owner) + ((since,) if since else ()),
+                (owner, f"user-{owner}", owner, owner, owner) + ((since,) if since else ()),
             ).fetchall()
         return [{"video_id": r["video_id"], "folder_id": r["folder_id"], "vendor": r["vendor"], "usd": float(r["usd"])}
                 for r in rows]

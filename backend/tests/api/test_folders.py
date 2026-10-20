@@ -300,14 +300,13 @@ def test_voices_shared_in_a_project_are_listed_with_their_project(client, folder
     assert client.delete("/projects/f1/voices/SHARED1").status_code == 204
     assert client.delete("/projects/f1/voices/SHARED1").status_code == 404
     assert [v["voice_id"] for v in client.get("/voices").json()["project"]] == ["MADE1"]
-    # Deleting the project with its videos lets go of a made voice no one kept.
+    # Deleting the project with its videos lets go of a made voice no one kept (at the purge, F8).
+    from tests.api.test_endpoints import purge_now
     deleted = []
-    main.voice.delete_voice = deleted.append
-    try:
-        assert client.delete("/projects/f1", params={"videos": "delete"}).status_code == 204
-    finally:
-        del main.voice.delete_voice
-    assert deleted == ["MADE1"] and client.get("/voices").json()["project"] == []
+    assert client.delete("/projects/f1", params={"videos": "delete"}).status_code == 204
+    assert client.get("/voices").json()["project"] == [] and deleted == []
+    purge_now(main, deleted.append)
+    assert deleted == ["MADE1"]
 
 
 def test_brief_suggestions_are_accepted_or_dismissed(client, folder, sample_video):

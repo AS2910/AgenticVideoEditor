@@ -152,15 +152,20 @@ class ProjectRepository:
             return None
         return Consent(row["consent_at"])
 
-    def get(self, project_id: str) -> ProjectRecord | None:
+    def get(self, project_id: str, include_deleted: bool = False) -> ProjectRecord | None:
+        """The video; a deleted one (F8, in the Bin) only with `include_deleted`."""
         with self.db.tx() as c:
-            row = c.execute("SELECT * FROM videos WHERE id = ?", (project_id,)).fetchone()
+            row = c.execute("SELECT * FROM videos WHERE id = ?" + ("" if include_deleted else " AND deleted_at IS NULL"),
+                            (project_id,)).fetchone()
         return _record(row) if row else None
 
-    def list(self, owner: str, folder: str | None = ANY_FOLDER) -> list[ProjectRecord]:
+    def list(self, owner: str, folder: str | None = ANY_FOLDER, include_deleted: bool = False) -> list[ProjectRecord]:
         """The owner's videos, newest first; `folder` narrows to one project
-        (an id) or to the standalone ones (None)."""
+        (an id) or to the standalone ones (None). Deleted ones (F8) are left
+        out unless `include_deleted`."""
         where, args = "owner = ?", [owner]
+        if not include_deleted:
+            where += " AND deleted_at IS NULL"
         if folder is None:
             where += " AND project_id IS NULL"
         elif folder != ANY_FOLDER:
@@ -189,12 +194,52 @@ class ProjectRepository:
                                   payload={"from": left})
         return changed > 0
 
-    def delete(self, project_id: str) -> bool:
+    def delete(self, project_id: str, keep_usage: bool = False) -> bool:
+        """Remove the video and everything made on it for good. The purge
+        (F8) keeps its charges (`keep_usage`); deleting an account does not."""
         with self.db.tx() as c:
             gone = c.execute("DELETE FROM videos WHERE id = ?", (project_id,)).rowcount
             for table in PROJECT_TABLES:
+                if keep_usage and table == "usage":
+                    continue
                 c.execute(f"DELETE FROM {table} WHERE project_id = ?", (project_id,))
         return gone > 0
+
+    # ── F8: soft delete (the Bin) ──
+
+    def soft_delete(self, project_id: str, by: str, at: str | None = None) -> bool:
+        """Move a video to the Bin: hidden everywhere, kept until the purge.
+        False when there is no such video or it is deleted already."""
+        at = at or _now()
+        with self.db.tx() as c:
+            gone = c.execute("UPDATE videos SET deleted_at = ?, deleted_by = ? WHERE id = ? AND deleted_at IS NULL",
+                             (at, by, project_id)).rowcount
+            if gone:
+                events.record(c, "video.deleted", Actor("user", by), video_id=project_id, target=project_id)
+        return gone > 0
+
+    def soft_delete_project(self, project_id: str, by: str, keep_videos: bool) -> bool:
+        """Move a project to the Bin. Its videos become standalone
+        (`keep_videos`) or go to the Bin with it, at the same moment."""
+        at = _now()
+        with self.db.tx() as c:
+            gone = c.execute("UPDATE projects SET deleted_at = ?, deleted_by = ? WHERE id = ? AND deleted_at IS NULL",
+                             (at, by, project_id)).rowcount
+            if not gone:
+                return False
+            actor = Actor("user", by)
+            videos = [r[0] for r in c.execute("SELECT id FROM videos WHERE project_id = ? AND deleted_at IS NULL", (project_id,))]
+            for vid in videos:
+                if keep_videos:
+                    c.execute("UPDATE videos SET project_id = NULL WHERE id = ?", (vid,))
+                    events.record(c, "video.moved_out", actor, video_id=vid, project_id=project_id, target=vid,
+                                  payload={"to": None})
+                else:
+                    c.execute("UPDATE videos SET deleted_at = ?, deleted_by = ? WHERE id = ?", (at, by, vid))
+                    events.record(c, "video.deleted", actor, video_id=vid, project_id=project_id, target=vid)
+            events.record(c, "project.deleted", actor, project_id=project_id, target=project_id,
+                          payload={"videos": "keep" if keep_videos else "delete", "count": len(videos)})
+        return True
 
     def update_transcript(self, project_id: str, transcript: Transcript) -> None:
         """Replace the transcript — only ever to add labels (speakers) to the
@@ -416,15 +461,18 @@ class ProjectRepository:
             briefs.save_in(c, project_id, brief, owner)   # F2: the first brief is version 1
         return self.get_project(project_id)
 
-    def get_project(self, project_id: str) -> Project | None:
+    def get_project(self, project_id: str, include_deleted: bool = False) -> Project | None:
         with self.db.tx() as c:
-            row = c.execute("SELECT * FROM projects WHERE id = ?", (project_id,)).fetchone()
+            row = c.execute("SELECT * FROM projects WHERE id = ?" + ("" if include_deleted else " AND deleted_at IS NULL"),
+                            (project_id,)).fetchone()
         return _project(row) if row else None
 
-    def list_projects(self, owner: str) -> list[Project]:
-        """The owner's projects, oldest first (the sidebar keeps their order)."""
+    def list_projects(self, owner: str, include_deleted: bool = False) -> list[Project]:
+        """The owner's projects, oldest first (the sidebar keeps their order);
+        deleted ones (F8) only with `include_deleted`."""
         with self.db.tx() as c:
-            rows = c.execute("SELECT * FROM projects WHERE owner = ? ORDER BY created_at, id", (owner,)).fetchall()
+            rows = c.execute("SELECT * FROM projects WHERE owner = ?" + ("" if include_deleted else " AND deleted_at IS NULL")
+                             + " ORDER BY created_at, id", (owner,)).fetchall()
         return [_project(r) for r in rows]
 
     def update_project(self, project_id: str, *, name: str | None = None, brief: str | None = None,

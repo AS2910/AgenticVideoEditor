@@ -12,6 +12,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import shutil
+from types import SimpleNamespace
 
 from fastapi import Depends, FastAPI, HTTPException, File, Form, Request, Response, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, StreamingResponse
@@ -756,12 +757,21 @@ async def create_project(
 MIN_MY_VOICE_SECONDS = 10.0
 
 
-def _my_voices(owner: str) -> list[dict]:
+def _all_my_voices(owner: str) -> list[dict]:
+    """The owner's voices, those in the Bin (F8, `deleted_at`) included."""
     return json.loads(repo.get_meta(f"my_voices:{owner}") or "[]")
 
 
+def _my_voices(owner: str) -> list[dict]:
+    """The owner's voices; one in the Bin cannot be picked or listed."""
+    return [v for v in _all_my_voices(owner) if not v.get("deleted_at")]
+
+
 def _set_my_voices(owner: str, voices: list[dict]) -> None:
-    repo.set_meta(f"my_voices:{owner}", json.dumps(voices))
+    """Write the owner's live voices; those in the Bin are kept as they are."""
+    live = {v["voice_id"] for v in voices}
+    binned = [v for v in _all_my_voices(owner) if v.get("deleted_at") and v["voice_id"] not in live]
+    repo.set_meta(f"my_voices:{owner}", json.dumps([*voices, *binned]))
 
 
 def _user_store(owner: str) -> str:
@@ -1090,15 +1100,15 @@ def add_my_voice_from_preview(req: FromPreviewRequest, owner: str = Depends(curr
 
 @app.delete("/voices/mine/{voice_id}", status_code=204)
 def delete_my_voice(voice_id: str, owner: str = Depends(current_owner)) -> Response:
-    """Remove one of your own voices: forgotten here, and deleted at the vendor."""
-    mine = _my_voices(owner)
-    if not any(v["voice_id"] == voice_id for v in mine):
+    """Remove one of your own voices (F8): it goes to the Bin, hidden and
+    not pickable; the purge deletes it at the vendor after 30 days."""
+    every = _all_my_voices(owner)
+    if not any(v["voice_id"] == voice_id and not v.get("deleted_at") for v in every):
         raise HTTPException(status_code=404, detail="No such voice of yours.")
-    _set_my_voices(owner, [v for v in mine if v["voice_id"] != voice_id])
-    try:
-        getattr(voice, "delete_voice", lambda v: None)(voice_id)
-    except Exception as exc:  # noqa: BLE001
-        logging.getLogger("ave").warning("voice %s forgotten, but still at ElevenLabs: %s", voice_id, exc)
+    at = _now()
+    repo.set_meta(f"my_voices:{owner}", json.dumps(
+        [{**v, "deleted_at": at, "deleted_by": owner} if v["voice_id"] == voice_id and not v.get("deleted_at") else v
+         for v in every]))
     return Response(status_code=204)
 
 
@@ -1274,8 +1284,16 @@ def _usage_groups(owner: str, since: str | None) -> tuple[list[dict], dict]:
     projects shows under each, with what it spent there. Also each
     (group, video) pair's spend by vendor, for the chosen scope's totals."""
     rows = ledger.breakdown(owner, since)
-    videos = {r.source.project_id: r for r in repo.list(owner)}
-    folders = repo.list_projects(owner)
+    # F8: a video or project in the Bin, or purged, keeps its charges under its name.
+    videos = {r.source.project_id: r for r in repo.list(owner, include_deleted=True)}
+    gone = _purged_names(owner)
+    for vid, (name, folder_id) in gone["video"].items():
+        videos.setdefault(vid, SimpleNamespace(source=SimpleNamespace(filename=name), folder_id=folder_id, deleted=True))
+    spent_in = {row["folder_id"] for row in rows}
+    folders = [p for p in repo.list_projects(owner, include_deleted=True)
+               if repo.get_project(p.project_id) is not None or p.project_id in spent_in]
+    folders += [SimpleNamespace(project_id=pid, name=name, ceiling_usd=None)
+                for pid, (name, _) in gone["project"].items() if pid in spent_in]
     cells: dict[tuple[str | None, str], dict[str, float]] = {}
     for row in rows:
         if row["video_id"].startswith("user-"):
@@ -1306,6 +1324,15 @@ def _usage_groups(owner: str, since: str | None) -> tuple[list[dict], dict]:
     groups.append({"project_id": None, "name": "No project", "ceiling_usd": None, "project_level_usd": None,
                    "videos": alone, "spent_usd": round(sum(v["spent_usd"] for v in alone), 4)})
     return groups, {"cells": cells, "rows": rows}
+
+
+def _purged_names(owner: str) -> dict[str, dict[str, tuple[str, str | None]]]:
+    """What the purge removed (F8), by kind: id -> (name, project)."""
+    out: dict[str, dict] = {"video": {}, "project": {}, "voice": {}}
+    with database.tx() as c:
+        for r in c.execute("SELECT kind, item_id, name, project_id FROM purged_items WHERE owner = ?", (owner,)):
+            out.setdefault(r["kind"], {})[r["item_id"]] = (r["name"], r["project_id"])
+    return out
 
 
 def _usage_totals(owner: str, period: str, scope: str, groups: list[dict], raw: dict) -> dict:
@@ -1349,7 +1376,11 @@ def get_my_usage(period: Literal["week", "month", "all"] = "month", scope: str =
     by_video: list[dict] = []
     turns = takes = 0
     voices_made = len(_my_voices(owner))
-    projects = repo.list(owner)
+    # F8: a video in the Bin, or purged, still counts, under its name.
+    projects = [SimpleNamespace(source=SimpleNamespace(project_id=r.source.project_id, filename=r.source.filename),
+                                folder_id=r.folder_id) for r in repo.list(owner, include_deleted=True)]
+    projects += [SimpleNamespace(source=SimpleNamespace(project_id=vid, filename=name), folder_id=folder)
+                 for vid, (name, folder) in _purged_names(owner)["video"].items()]
     turns_by_folder: dict[str, int] = {}
     for r in projects:
         pid = r.source.project_id
@@ -1805,10 +1836,11 @@ def read_project(project_id: str, req: ReadRequest, owner: str = Depends(current
 
 @app.delete("/videos/{project_id}", status_code=204)
 def delete_project(project_id: str, owner: str = Depends(current_owner)) -> None:
-    """Delete the project and all of its media. This is also how consent is
-    withdrawn (design spec §2): nothing of the speaker is kept."""
+    """Delete a video (F8): it goes to the Bin, hidden everywhere; the purge
+    removes it, its media and its voices at the vendor after 30 days.
+    Deleting the account still removes everything at once."""
     _owned(project_id, owner)
-    _delete_project(project_id)
+    repo.soft_delete(project_id, owner)
 
 
 def _delete_project(project_id: str) -> None:
@@ -1840,9 +1872,9 @@ def delete_account(owner: str = Depends(current_owner)) -> Response:
     """Everything of the caller's goes: every project with its media and the
     voices made for it, every voice of their own (deleted at the vendor; a
     failure is logged by name), their samples and their defaults."""
-    for r in repo.list(owner):
+    for r in repo.list(owner, include_deleted=True):
         _delete_project(r.source.project_id)
-    for v in _my_voices(owner):
+    for v in _all_my_voices(owner):
         try:
             getattr(voice, "delete_voice", lambda vid: None)(v["voice_id"])
         except Exception as exc:  # noqa: BLE001
@@ -2135,28 +2167,11 @@ def delete_project_rule(project_id: str, rule_id: int, owner: str = Depends(curr
 
 @app.delete("/projects/{project_id}", status_code=204)
 def delete_folder(project_id: str, videos: Literal["delete", "keep"], owner: str = Depends(current_owner)) -> Response:
-    """Delete a project: its videos go with it (`delete`) or become
-    standalone (`keep`). A voice shared only here goes at the vendor
-    unless someone kept it as their own or a video still carries it."""
-    project = _owned_project(project_id, owner)
-    shared = _project_voices(project_id)
-    if videos == "delete":
-        for r in repo.list(owner, folder=project_id):
-            _delete_project(r.source.project_id)
-    repo.delete_project(project_id, keep_videos=videos == "keep")
-    kept = _kept_voice_ids()
-    for r in repo.list(owner):
-        kept.update(m["voice_id"] for m in repo.settings(r.source.project_id).get("made_voices") or [])
-        kept.update(repo.clones(r.source.project_id).values())
-    for v in shared:
-        if v["voice_id"] in kept:
-            continue
-        try:
-            getattr(voice, "delete_voice", lambda vid: None)(v["voice_id"])
-        except Exception as exc:  # noqa: BLE001
-            logging.getLogger("ave").warning("project %s deleted, but voice %s (%s) is still at ElevenLabs: %s",
-                                             project.project_id, v.get("name"), v["voice_id"], exc)
-    shutil.rmtree(artifacts.root / "projects" / project_id, ignore_errors=True)
+    """Delete a project (F8): it goes to the Bin with its videos (`delete`),
+    or its videos become standalone (`keep`). The purge removes it after 30
+    days, with its files and any voice shared only here at the vendor."""
+    _owned_project(project_id, owner)
+    repo.soft_delete_project(project_id, owner, keep_videos=videos == "keep")
     return Response(status_code=204)
 
 

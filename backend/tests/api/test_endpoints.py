@@ -673,6 +673,14 @@ def test_a_project_reopens_with_its_approved_edits(client, project):
     assert [e["new_text"] for e in reopened["edits"]] == ["30% off"]
 
 
+def purge_now(main, delete_voice=None):
+    """The purge (F8) as if 30 days had passed since everything in the Bin was deleted."""
+    from datetime import datetime, timedelta, timezone
+    from app.purge import purge
+    return purge(main.database, main.artifacts.root, 30, delete_voice=delete_voice,
+                 now=datetime.now(timezone.utc) + timedelta(days=31))
+
+
 def test_deleting_a_project_removes_it_and_its_media(client, project):
     import app.api.main as main
     media_dir = main.artifacts.root / "p1"
@@ -680,9 +688,13 @@ def test_deleting_a_project_removes_it_and_its_media(client, project):
 
     assert client.delete("/videos/p1").status_code == 204
 
+    # F8: it is in the Bin, hidden; its media stays until the purge.
     assert client.get("/videos/p1").status_code == 404
-    assert not media_dir.exists()
     assert client.get("/videos").json()["videos"] == []
+    assert media_dir.exists()
+    assert client.delete("/videos/p1").status_code == 404
+    purge_now(main)
+    assert not media_dir.exists()
 
 
 def test_someone_elses_project_is_not_found(client, project, monkeypatch):
@@ -2096,8 +2108,10 @@ def test_a_voice_made_for_a_clip_can_be_kept_as_mine_and_then_outlives_the_proje
     assert [m["voice_id"] for m in main.repo.settings("p1")["made_voices"]] == ["LIB1"]
     assert [(v["voice_id"], v["kept"]) for v in client.get("/voices/made").json()["voices"]] == [("LIB1", False), ("CLONEA", True)]
     assert [v["name"] for v in client.get("/voices").json()["mine"]] == ["Dusk", "My presenter"]
-    # Deleting the project takes the voice it still owns with it; the kept ones stay at the vendor.
+    # Deleting the project takes the voice it still owns with it (at the purge, F8); the kept ones stay at the vendor.
     assert client.delete("/videos/p1").status_code == 204
+    assert voice.deleted == []
+    purge_now(main, voice.delete_voice)
     assert voice.deleted == ["LIB1"]
     assert [v["name"] for v in client.get("/voices").json()["mine"]] == ["Dusk", "My presenter"]
 
