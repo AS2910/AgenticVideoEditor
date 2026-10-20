@@ -139,7 +139,7 @@ def test_the_events_stream_opens_with_the_state_as_it_is_now(client, project):
     assert [blk.splitlines()[0] for blk in blocks] == ["event: job.updated", "event: job.updated"]
     sent = [json.loads(blk.splitlines()[1].removeprefix("data: ")) for blk in blocks]
     assert [s["job_id"] for s in sent] == [a.job_id, b.job_id]                    # oldest first, as they happened
-    assert sent[1]["step_label"] == "Rendering preview v1" and sent[0]["eta_s"] >= 1
+    assert sent[1]["step_label"] == "Rendering preview v1" and sent[0]["eta_s"] is None   # no history yet: no time shown
 
 
 def test_a_render_in_the_background_is_a_job_from_the_start(client, project, monkeypatch):

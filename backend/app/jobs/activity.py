@@ -29,11 +29,8 @@ ALLOWED = {
     "running": {"done", "failed", "cancelled"},
 }
 
-# Starting guesses, in seconds, until a kind has history of its own; replaced
-# by the median of recent finished jobs as soon as there is one. voice_line's
-# is the plan estimate's time per line (SECONDS_PER_ITEM in the API).
-DEFAULT_SECONDS = {"voice_line": 12.0, "design_voice": 20.0, "clone": 30.0, "mix": 2.0,
-                   "render_preview": 15.0, "export": 30.0}
+# No starting guesses: a kind with no finished job yet has no estimate, and
+# nothing shows a time for it (no number that was not measured).
 # A running job silent for longer than this has hung: it is failed, never left running.
 TIMEOUT_SECONDS = {"voice_line": 300.0, "design_voice": 300.0, "clone": 300.0, "mix": 120.0,
                    "render_preview": 900.0, "export": 1800.0}
@@ -66,7 +63,7 @@ class Job:
     error_text: str | None = None
     cost_usd: float | None = None
     detail: dict = field(default_factory=dict)
-    estimate_s: float = 0.0          # whole-job estimate at creation
+    estimate_s: float | None = None  # whole-job estimate at creation; None until the kind has history
     started_epoch: float | None = None
     params: dict | None = None       # what a retry needs; never sent to the client
 
@@ -76,7 +73,7 @@ class Job:
 
     def eta_s(self, now: float | None = None) -> int | None:
         """Whole seconds left, never 0 or negative; None once it is over."""
-        if self.done:
+        if self.done or self.estimate_s is None:
             return None
         left = self.estimate_s
         if self.status == "running" and self.started_epoch is not None:
@@ -145,10 +142,10 @@ class ActivityJobs:
         return None
 
     # ── the ETA ──────────────────────────────────────────────────────────
-    def estimate(self, kind: str, chars: int | None = None) -> float:
+    def estimate(self, kind: str, chars: int | None = None) -> float | None:
         """The median of recent finished jobs of the same kind (per character
-        for a voice line, times this one's characters); the starting guess
-        while there is no history. Always at least a second."""
+        for a voice line, times this one's characters); None while there is no
+        history. Always at least a second."""
         with self.db.tx() as c:
             rows = c.execute("SELECT body FROM jobs WHERE kind = ? AND status = 'done' ORDER BY seq DESC LIMIT ?",
                              (kind, HISTORY)).fetchall()
@@ -164,7 +161,7 @@ class ActivityJobs:
                 return max(1.0, statistics.median(rates) * chars)
         if took:
             return max(1.0, statistics.median(s for s, _ in took))
-        return DEFAULT_SECONDS.get(kind, 10.0)
+        return None
 
     # ── writing ──────────────────────────────────────────────────────────
     def create(self, video_id: str, kind: str, *, turn_id: str | None = None, line_ids: Iterable[str] = (),

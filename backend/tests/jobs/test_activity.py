@@ -49,13 +49,19 @@ def test_moves_the_machine_does_not_allow_are_refused(jobs):
 
 
 def test_the_eta_is_never_zero_or_negative(jobs, clock):
+    # No history: no estimate at all, rather than a guess.
+    first = jobs.create("p1", "voice_line", detail={"chars": 30})
+    assert first.eta_s() is None and first.to_dict()["eta_s"] is None
+    jobs.start(first.job_id)
+    clock.t += 3
+    jobs.finish(first.job_id)
     job = jobs.create("p1", "voice_line", detail={"chars": 30})
     assert job.eta_s() >= 1
     jobs.start(job.job_id)
     clock.t += 10_000                                      # far past the estimate
     assert jobs.get(job.job_id).eta_s() == 1
     assert jobs.get(job.job_id).to_dict()["eta_s"] == 1
-    tiny = jobs.create("p1", "mix")
+    tiny = jobs.create("p1", "voice_line", detail={"chars": 1})
     assert tiny.eta_s() >= 1
     assert jobs.finish(job.job_id).to_dict()["eta_s"] is None
 
@@ -68,8 +74,8 @@ def test_the_eta_learns_from_recent_jobs_of_the_same_kind(jobs, clock):
         jobs.finish(j.job_id)
     assert jobs.estimate("voice_line", 60) == pytest.approx(30.0)
     assert jobs.create("p1", "voice_line", detail={"chars": 60}).eta_s() == 30
-    # Another kind has its own history (none yet): the starting guess, at least a second.
-    assert jobs.estimate("render_preview") >= 1
+    # Another kind has its own history (none yet): no estimate.
+    assert jobs.estimate("render_preview") is None
 
 
 def test_a_running_job_silent_past_its_timeout_fails(jobs, clock):

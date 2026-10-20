@@ -39,8 +39,8 @@ timeout becomes failed (error_code "timeout"); jobs left running by a restarted
 server become failed ("interrupted"). Nothing stays running forever.
 
 ETA: median seconds of recent finished jobs of the same kind (per character
-for voice_line), times this job's characters; defaults when there is no
-history; always >= 1, rounded up.
+for voice_line), times this job's characters; null when the kind has no
+finished job yet (no guessed numbers); always >= 1, rounded up.
 
 ## Turn view
 
@@ -121,8 +121,7 @@ proposals render. A render job's `line_ids` are `item_ids + edit_ids`.
 - Kinds in use: voice_line (agent and retry), clone (first clone of a speaker), design_voice,
   mix (role/level change: "Mix changed"; Undo: "Took the line out", line_ids = the edit ids),
   render_preview (editor renders, Add it, the turn's closing render), export (`purpose: "export"`).
-- ETA starting guesses before any history: voice_line 12 s (the plan estimate's time per
-  line), design_voice 20, clone 30, mix 2, render_preview 15, export 30. Timeouts (no update):
+- No ETA before a kind has history (eta_s null; the UI shows no time). Timeouts (no update):
   voice_line/clone/design_voice 300 s, mix 120, render_preview 900, export 1800.
 - `job.updated` events carry the same Job dict as GET jobs. The stream opens with the active
   view (oldest first) and the turn, then live events; `?limit=N` ends it after N events.
