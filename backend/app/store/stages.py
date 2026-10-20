@@ -1,6 +1,6 @@
 """A video's stage (F5): Draft, In review, Changes asked, Approved, Exported.
 The stage changes only through `move`, which validates it and logs who,
-when and why.
+when and why in the activity log (F7, verb `stage.moved`).
 
     current(db, video_id)                     -> stage | None (no such video)
     move(db, video_id, to, actor, why="")     -> StageMove | None (already there)
@@ -13,9 +13,11 @@ transaction the caller holds.
 """
 from __future__ import annotations
 
+import json
 import sqlite3
 from dataclasses import asdict, dataclass
 
+from app.store import events
 from app.store.actors import Actor
 from app.store.db import Database
 from app.timefmt import now_iso
@@ -65,15 +67,9 @@ def move_in(c: sqlite3.Connection, video_id: str, to: str, actor: Actor, why: st
         return None
     move = StageMove(video_id, now, to, actor.kind, actor.name, " ".join(why.split())[:300], now_iso())
     c.execute("UPDATE videos SET stage = ? WHERE id = ?", (to, video_id))
-    _log(c, move)
+    events.record(c, "stage.moved", actor, video_id=video_id, target=video_id,
+                  payload={"from": move.from_stage, "to": to, "why": move.why})
     return move
-
-
-def _log(c: sqlite3.Connection, move: StageMove) -> None:
-    c.execute("INSERT INTO stage_log (video_id, from_stage, to_stage, actor_kind, actor_name, why, at, workspace_id) "
-              "VALUES (?, ?, ?, ?, ?, ?, ?, (SELECT workspace_id FROM videos WHERE id = ?))",
-              (move.video_id, move.from_stage, move.to_stage, move.actor_kind, move.actor_name, move.why, move.at,
-               move.video_id))
 
 
 def move(db: Database, video_id: str, to: str, actor: Actor, why: str = "") -> StageMove | None:
@@ -96,6 +92,11 @@ def after_new_edit(db: Database, video_id: str, actor: Actor) -> StageMove | Non
 def history(db: Database, video_id: str) -> list[StageMove]:
     """Every move of the video, newest first."""
     with db.tx() as c:
-        rows = c.execute("SELECT * FROM stage_log WHERE video_id = ? ORDER BY id DESC", (video_id,)).fetchall()
-    return [StageMove(r["video_id"], r["from_stage"], r["to_stage"], r["actor_kind"], r["actor_name"], r["why"], r["at"])
-            for r in rows]
+        rows = c.execute("SELECT * FROM project_events WHERE video_id = ? AND verb = 'stage.moved' ORDER BY id DESC",
+                         (video_id,)).fetchall()
+    moves = []
+    for r in rows:
+        p = json.loads(r["payload"] or "{}")
+        moves.append(StageMove(r["video_id"], p.get("from", ""), p.get("to", ""), r["actor_kind"], r["actor_name"],
+                               p.get("why", ""), r["at"]))
+    return moves

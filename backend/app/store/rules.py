@@ -3,12 +3,12 @@ every video carries, style rules. Read into every turn's opening view.
 
     add(db, project_id, kind, data, by)         -> Rule
     update(db, project_id, rule_id, data, by)   -> Rule | None (version + 1)
-    remove(db, project_id, rule_id)             -> bool
+    remove(db, project_id, rule_id, by)         -> bool
     get(db, project_id, rule_id) / list_rules(db, project_id, kind=None)
     rules_version(db, project_id)               -> int (+1 on every change)
 
 Each write has an `_in(c, ...)` form on a transaction the caller holds, so
-the change and its activity event (F7) land together. A bad `data` raises
+every change writes its activity event (F7) in the same transaction. A bad `data` raises
 RuleError with a sentence fit to show.
 """
 from __future__ import annotations
@@ -17,6 +17,8 @@ import json
 import sqlite3
 from dataclasses import asdict, dataclass
 
+from app.store import events
+from app.store.actors import user
 from app.store.db import Database
 from app.timefmt import now_iso
 
@@ -90,7 +92,9 @@ def add_in(c: sqlite3.Connection, project_id: str, kind: str, data: dict, by: st
               "VALUES (?, ?, ?, 1, ?, ?, ?)", (project_id, kind, json.dumps(data), by, now_iso(), project["workspace_id"]))
     rule_id = c.execute("SELECT last_insert_rowid()").fetchone()[0]
     _bump(c, project_id)
-    return get_in(c, project_id, rule_id)
+    rule = get_in(c, project_id, rule_id)
+    _event(c, "rule.added", rule, by)
+    return rule
 
 
 def update_in(c: sqlite3.Connection, project_id: str, rule_id: int, data: dict, by: str) -> Rule | None:
@@ -105,14 +109,27 @@ def update_in(c: sqlite3.Connection, project_id: str, rule_id: int, data: dict, 
     c.execute("UPDATE project_rules SET data = ?, version = version + 1, updated_at = ? WHERE id = ? AND project_id = ?",
               (json.dumps(data), now_iso(), rule_id, project_id))
     _bump(c, project_id)
-    return get_in(c, project_id, rule_id)
+    rule = get_in(c, project_id, rule_id)
+    _event(c, "rule.changed", rule, by, before=now.data)
+    return rule
 
 
-def remove_in(c: sqlite3.Connection, project_id: str, rule_id: int) -> bool:
-    gone = c.execute("DELETE FROM project_rules WHERE id = ? AND project_id = ?", (rule_id, project_id)).rowcount
-    if gone:
-        _bump(c, project_id)
-    return gone > 0
+def remove_in(c: sqlite3.Connection, project_id: str, rule_id: int, by: str = "") -> bool:
+    rule = get_in(c, project_id, rule_id)
+    if rule is None:
+        return False
+    c.execute("DELETE FROM project_rules WHERE id = ? AND project_id = ?", (rule_id, project_id))
+    _bump(c, project_id)
+    _event(c, "rule.removed", rule, by)
+    return True
+
+
+def _event(c: sqlite3.Connection, verb: str, rule: Rule, by: str, before: dict | None = None) -> None:
+    """The activity log's line for a rule change (F7), in the same transaction."""
+    payload = {"rule_id": rule.rule_id, "kind": rule.kind, "data": rule.data, "version": rule.version}
+    if before is not None:
+        payload["before"] = before
+    events.record(c, verb, user(by), project_id=rule.project_id, target=f"rule{rule.rule_id}", payload=payload)
 
 
 def get_in(c: sqlite3.Connection, project_id: str, rule_id: int) -> Rule | None:
@@ -136,9 +153,9 @@ def update(db: Database, project_id: str, rule_id: int, data: dict, by: str) -> 
         return update_in(c, project_id, rule_id, data, by)
 
 
-def remove(db: Database, project_id: str, rule_id: int) -> bool:
+def remove(db: Database, project_id: str, rule_id: int, by: str = "") -> bool:
     with db.tx() as c:
-        return remove_in(c, project_id, rule_id)
+        return remove_in(c, project_id, rule_id, by)
 
 
 def get(db: Database, project_id: str, rule_id: int) -> Rule | None:

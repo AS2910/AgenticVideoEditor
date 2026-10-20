@@ -7,7 +7,8 @@
 
 `save_in(c, ...)` is the same save on a transaction the caller holds, so a
 change and its activity event (F7) land together. `projects.brief` is kept
-equal to the current text: the read-only alias for one release.
+equal to the current text: the read-only alias for one release. Each new
+version writes a `brief.saved` event (F7).
 """
 from __future__ import annotations
 
@@ -16,6 +17,8 @@ import re
 import sqlite3
 from dataclasses import asdict, dataclass
 
+from app.store import events
+from app.store.actors import user
 from app.store.db import Database
 from app.timefmt import now_iso
 
@@ -65,6 +68,7 @@ def save_in(c: sqlite3.Connection, project_id: str, text: str, by: str) -> Brief
     c.execute("INSERT INTO project_briefs (project_id, version, text, created_by, created_at, workspace_id) "
               "VALUES (?, ?, ?, ?, ?, ?)", (project_id, n, text, by, now_iso(), project["workspace_id"]))
     c.execute("UPDATE projects SET brief = ?, brief_version = ? WHERE id = ?", (text, n, project_id))
+    events.record(c, "brief.saved", user(by), project_id=project_id, target=f"v{n}", payload={"version": n})
     return current_in(c, project_id)
 
 

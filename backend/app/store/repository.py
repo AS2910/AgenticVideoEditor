@@ -17,7 +17,8 @@ from datetime import datetime, timezone
 
 from app.domain.models import ApprovedEdit, Consent, EditCandidate, Source, Transcript
 from app.domain.plan import Plan, plan_from_dict
-from app.store import briefs, codec
+from app.store import briefs, codec, events
+from app.store.actors import Actor
 from app.store.db import PROJECT_TABLES, Database
 from app.store.workspaces import personal, stamp_last
 
@@ -171,11 +172,21 @@ class ProjectRepository:
             ).fetchall()
         return [_record(r) for r in rows]
 
-    def set_folder(self, project_id: str, folder_id: str | None) -> bool:
+    def set_folder(self, project_id: str, folder_id: str | None, actor: Actor | None = None) -> bool:
         """Move a video into a project (or out, with None). Everything made on
-        the video stays with it."""
+        the video stays with it. With an `actor`, the move is in the activity
+        log (F7): out of the project it left, into the one it joined."""
         with self.db.tx() as c:
+            row = c.execute("SELECT project_id FROM videos WHERE id = ?", (project_id,)).fetchone()
             changed = c.execute("UPDATE videos SET project_id = ? WHERE id = ?", (folder_id, project_id)).rowcount
+            left = row["project_id"] if row else None
+            if actor is not None and changed and left != folder_id:
+                if left:
+                    events.record(c, "video.moved_out", actor, video_id=project_id, project_id=left, target=project_id,
+                                  payload={"to": folder_id})
+                if folder_id:
+                    events.record(c, "video.moved_in", actor, video_id=project_id, project_id=folder_id, target=project_id,
+                                  payload={"from": left})
         return changed > 0
 
     def delete(self, project_id: str) -> bool:
@@ -297,7 +308,8 @@ class ProjectRepository:
 
     # ── approved edits ──
 
-    def append_edit(self, project_id: str, edit: ApprovedEdit) -> None:
+    def append_edit(self, project_id: str, edit: ApprovedEdit, actor: Actor | None = None) -> None:
+        """Ship an edit; with an `actor` it is in the activity log (F7)."""
         with self.db.tx() as c:
             c.execute(
                 "INSERT INTO edits (project_id, seq, body) VALUES (?, "
@@ -305,6 +317,10 @@ class ProjectRepository:
                 (project_id, project_id, json.dumps(codec.dump(edit))),
             )
             stamp_last(c, "edits", project_id)
+            if actor is not None:
+                events.record(c, "edit.shipped", actor, video_id=project_id, target=edit.edit_id,
+                              payload={"text": edit.plan.new_text, "candidate_id": edit.candidate_id,
+                                       "overridden": edit.overridden})
 
     def list_edits(self, project_id: str) -> list[ApprovedEdit]:
         """Every approved edit in approval order, reverted ones included —
@@ -330,10 +346,11 @@ class ProjectRepository:
                     return True
         return False
 
-    def revert_edit(self, project_id: str, edit_id: str) -> bool:
+    def revert_edit(self, project_id: str, edit_id: str, actor: Actor | None = None) -> bool:
         """Mark an approved edit undone (Phase 12). The record stays — edits
         only ever append — but the render skips it. False if there is no such
-        edit; reverting twice is harmless."""
+        edit; reverting twice is harmless. With an `actor`, the undo is in the
+        activity log (F7), once."""
         with self.db.tx() as c:
             rows = c.execute(
                 "SELECT seq, body FROM edits WHERE project_id = ? ORDER BY seq", (project_id,),
@@ -341,11 +358,15 @@ class ProjectRepository:
             for row in rows:
                 body = json.loads(row["body"])
                 if body["edit_id"] == edit_id:
+                    was = bool(body.get("reverted"))
                     body["reverted"] = True
                     c.execute(
                         "UPDATE edits SET body = ? WHERE project_id = ? AND seq = ?",
                         (json.dumps(body), project_id, row["seq"]),
                     )
+                    if actor is not None and not was:
+                        events.record(c, "edit.undone", actor, video_id=project_id, target=edit_id,
+                                      payload={"text": (body.get("plan") or {}).get("new_text")})
                     return True
         return False
 

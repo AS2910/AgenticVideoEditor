@@ -59,7 +59,8 @@ from app.usage import (
     Ledger, SpendCeilingReached, WHISPER_USD_PER_MINUTE, claude_usd, current_turn, money, month_name, month_start,
 )
 from app import auth
-from app.store import briefs, rules, stages
+from app.store import briefs, events as activity_log, rules, stages
+from app.store.actors import VOLTAGE, Actor, user as user_actor
 from app.store.repository import Project, ProjectRecord, ProjectRepository, LOCAL_OWNER
 from app.store.artifacts import ArtifactStore
 from app.render.renderer import render
@@ -1153,6 +1154,15 @@ def _summary(r: ProjectRecord) -> dict:
     }
 
 
+@app.get("/videos/{project_id}/events/log")
+def list_video_events(project_id: str, limit: int = 50, before: int | None = None,
+                      owner: str = Depends(current_owner)) -> dict:
+    """F7: what happened to one video, newest first (the live channel is
+    `/videos/{id}/events`; this is the record)."""
+    _owned(project_id, owner)
+    return activity_log.for_video(database, project_id, limit, before)
+
+
 @app.get("/videos/{project_id}/stage")
 def get_stage(project_id: str, owner: str = Depends(current_owner)) -> dict:
     """F5: the video's stage and every move it made, newest first. Moves
@@ -2118,7 +2128,7 @@ def change_project_rule(project_id: str, rule_id: int, req: RuleRequest, owner: 
 @app.delete("/projects/{project_id}/rules/{rule_id}", status_code=204)
 def delete_project_rule(project_id: str, rule_id: int, owner: str = Depends(current_owner)) -> Response:
     _owned_project(project_id, owner)
-    if not rules.remove(database, project_id, rule_id):
+    if not rules.remove(database, project_id, rule_id, owner):
         raise HTTPException(status_code=404, detail="rule not found")
     return Response(status_code=204)
 
@@ -2148,6 +2158,15 @@ def delete_folder(project_id: str, videos: Literal["delete", "keep"], owner: str
                                              project.project_id, v.get("name"), v["voice_id"], exc)
     shutil.rmtree(artifacts.root / "projects" / project_id, ignore_errors=True)
     return Response(status_code=204)
+
+
+@app.get("/projects/{project_id}/events")
+def list_project_events(project_id: str, limit: int = 50, before: int | None = None,
+                        owner: str = Depends(current_owner)) -> dict:
+    """F7: what happened in the project and its videos, newest first; pass
+    `next` back as `before` for the page after."""
+    _owned_project(project_id, owner)
+    return activity_log.for_project(database, project_id, limit, before)
 
 
 @app.get("/projects/{project_id}/videos")
@@ -2372,7 +2391,7 @@ def move_video(project_id: str, req: MoveVideoRequest, owner: str = Depends(curr
                              "source": {"project_id": leaving}})
                 taken.add(name.lower())
             _set_my_voices(owner, mine)
-    repo.set_folder(project_id, target_id)
+    repo.set_folder(project_id, target_id, actor=user_actor(owner))
     return _project_dict(repo.get(project_id))
 
 
@@ -2777,6 +2796,15 @@ def approve_edit(
     }
 
 
+def _actor_now(project_id: str) -> Actor:
+    """Who is acting on a video right now, for the activity log (F7): Voltage
+    inside a turn, else the video's owner."""
+    if current_turn.get():
+        return VOLTAGE
+    record = repo.get(project_id)
+    return user_actor(record.owner if record else LOCAL_OWNER)
+
+
 def _approve_candidate(project_id: str, candidate: EditCandidate, overridden: bool, partner: str | None = None) -> str:
     """Commit a previewed candidate as an approved edit; a plan item that
     produced it is marked approved too."""
@@ -2789,7 +2817,7 @@ def _approve_candidate(project_id: str, candidate: EditCandidate, overridden: bo
         frames=candidate.frames,
         overridden=overridden,
         partner=partner,
-    ))
+    ), actor=_actor_now(project_id))
     plan = repo.latest_plan(project_id)
     if plan is not None:
         for item in plan.items:
@@ -2818,7 +2846,8 @@ TAKEN_OUT = "Taken out of the video. Add it puts it back; Discard drops it for g
 def _revert(project_id: str, edit_id: str, by: str = "You") -> bool:
     """Undo an approved edit; False when there is no such edit."""
     edit = next((e for e in repo.list_edits(project_id) if e.edit_id == edit_id), None)
-    if edit is None or not repo.revert_edit(project_id, edit_id):
+    actor = VOLTAGE if by == "Voltage" else _actor_now(project_id)
+    if edit is None or not repo.revert_edit(project_id, edit_id, actor=actor):
         return False
     # A shifted line is two edits; undoing one undoes the other.
     if edit.partner:
