@@ -11,6 +11,7 @@ from app.timefmt import now_iso
 from datetime import datetime, timezone
 
 from app.errors import NonRetryableError
+from app.store.workspaces import stamp_last
 from app.usage import Ledger, folder_of
 
 
@@ -68,6 +69,7 @@ class VoiceBudget:
                 (project_id, self.VENDOR, self.WHAT, amount, self.UNIT,
                  amount * self.usd_per_1k / 1000, now_iso(), folder_of(c, project_id)),
             )
+            stamp_last(c, "usage", project_id)
 
     def refund(self, project_id: str, amount: int) -> None:
         """Give back a charge for a call that failed before anything was made

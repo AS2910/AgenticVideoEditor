@@ -55,5 +55,5 @@ class Database:
     def reset(self) -> None:
         """Empty every table. Intended for test isolation."""
         with self.tx() as c:
-            for table in ("meta", "videos", "projects", "feature_flags", *PROJECT_TABLES):
+            for table in ("meta", "videos", "projects", "feature_flags", "workspaces", *PROJECT_TABLES):
                 c.execute(f"DELETE FROM {table}")

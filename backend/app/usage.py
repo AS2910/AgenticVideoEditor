@@ -19,6 +19,7 @@ from datetime import datetime, timezone
 
 from app.errors import NonRetryableError
 from app.store.db import Database
+from app.store.workspaces import stamp_last
 
 # List prices used for the estimates.
 WHISPER_USD_PER_MINUTE = 0.006
@@ -134,6 +135,7 @@ class Ledger:
                 (project_id, vendor, what, units, unit, usd, now_iso(),
                  folder_of(c, project_id), current_turn.get()),
             )
+            stamp_last(c, "usage", project_id)
 
     def record_project_level(
         self, folder_id: str, vendor: str, what: str, units: float, unit: str, usd: float,
@@ -146,6 +148,7 @@ class Ledger:
                 "VALUES ('', ?, ?, ?, ?, ?, ?, ?, ?)",
                 (vendor, what, units, unit, usd, now_iso(), folder_id, current_turn.get()),
             )
+            stamp_last(c, "usage", "", folder_id)
 
     def spent_usd_by_turn(self, project_id: str, turn_id: str, since: str | None = None) -> float:
         """What one turn cost the video: the rows it caused, from the moment it

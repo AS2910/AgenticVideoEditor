@@ -19,6 +19,7 @@ from app.domain.models import ApprovedEdit, Consent, EditCandidate, Source, Tran
 from app.domain.plan import Plan, plan_from_dict
 from app.store import codec
 from app.store.db import PROJECT_TABLES, Database
+from app.store.workspaces import personal, stamp_last
 
 # Who owns a project until sign-in exists (Phase 9c): everyone is this owner.
 LOCAL_OWNER = "local"
@@ -124,10 +125,11 @@ class ProjectRepository:
     ) -> None:
         with self.db.tx() as c:
             c.execute(
-                "INSERT INTO videos (id, owner, created_at, source, transcript, consent_at, project_id) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO videos (id, owner, created_at, source, transcript, consent_at, project_id, workspace_id) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 (source.project_id, owner, _now(), json.dumps(codec.dump(source)),
-                 json.dumps(codec.dump(transcript)), consent.granted_at if consent else None, folder_id),
+                 json.dumps(codec.dump(transcript)), consent.granted_at if consent else None, folder_id,
+                 personal(c, owner)),
             )
 
     def grant_consent(self, project_id: str, consent: Consent) -> Consent | None:
@@ -268,6 +270,7 @@ class ProjectRepository:
                 "INSERT OR REPLACE INTO candidates (project_id, candidate_id, body) VALUES (?, ?, ?)",
                 (project_id, candidate.candidate_id, json.dumps(codec.dump(candidate))),
             )
+            stamp_last(c, "candidates", project_id)
 
     def get_candidate(self, project_id: str, candidate_id: str) -> EditCandidate | None:
         with self.db.tx() as c:
@@ -295,6 +298,7 @@ class ProjectRepository:
                 "(SELECT COALESCE(MAX(seq), 0) + 1 FROM edits WHERE project_id = ?), ?)",
                 (project_id, project_id, json.dumps(codec.dump(edit))),
             )
+            stamp_last(c, "edits", project_id)
 
     def list_edits(self, project_id: str) -> list[ApprovedEdit]:
         """Every approved edit in approval order, reverted ones included —
@@ -378,8 +382,9 @@ class ProjectRepository:
         project_id = self.next_project_id()
         with self.db.tx() as c:
             c.execute(
-                "INSERT INTO projects (id, owner, name, brief, settings, ceiling_usd, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (project_id, owner, name, brief, json.dumps(settings or {}), ceiling_usd, _now()),
+                "INSERT INTO projects (id, owner, name, brief, settings, ceiling_usd, created_at, workspace_id) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (project_id, owner, name, brief, json.dumps(settings or {}), ceiling_usd, _now(), personal(c, owner)),
             )
         return self.get_project(project_id)
 
@@ -458,6 +463,7 @@ class ProjectRepository:
                 "(SELECT COALESCE(MAX(seq), 0) + 1 FROM messages WHERE project_id = ?), ?, ?, ?, ?, ?, ?)",
                 (project_id, project_id, role, text, _now(), kind, cost, json.dumps(data) if data is not None else None),
             )
+            stamp_last(c, "messages", project_id)
             return int(c.execute("SELECT MAX(seq) FROM messages WHERE project_id = ?", (project_id,)).fetchone()[0])
 
     def count_steps(self, project_id: str, text: str, since: str | None = None) -> int:
@@ -490,6 +496,7 @@ class ProjectRepository:
                 "(SELECT COALESCE(MAX(seq), 0) + 1 FROM turns WHERE project_id = ?), ?, ?, ?)",
                 (project_id, project_id, role, json.dumps(content), _now()),
             )
+            stamp_last(c, "turns", project_id)
 
     def turns(self, project_id: str) -> list[dict]:
         with self.db.tx() as c:
@@ -522,6 +529,7 @@ class ProjectRepository:
                     "(SELECT COALESCE(MAX(seq), 0) + 1 FROM plans WHERE project_id = ?), ?)",
                     (plan.project_id, plan.plan_id, plan.project_id, body),
                 )
+                stamp_last(c, "plans", plan.project_id)
 
     def get_plan(self, project_id: str, plan_id: str) -> Plan | None:
         with self.db.tx() as c:

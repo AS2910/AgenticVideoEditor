@@ -105,6 +105,10 @@ CREATE INDEX IF NOT EXISTS jobs_by_status ON jobs (status);
 PRE_RUNNER_COLUMNS = (("messages", "kind", "TEXT NOT NULL DEFAULT 'say'"), ("messages", "cost", "REAL"), ("messages", "data", "TEXT"))
 
 
+# 0001 to 0006 describe the schema as it stood when the runner arrived.
+TODAY = 6
+
+
 def _conn(path=":memory:"):
     return migrate.connect(str(path))
 
@@ -152,9 +156,9 @@ def test_a_database_made_before_the_runner_is_recognised_and_left_as_it_was():
     conn.execute("INSERT INTO usage (project_id, vendor, what, units, unit, usd, at, turn_id) VALUES ('p1', 'openai', 'transcription', 1, 'minutes', 0.006, '2026-10-19T00:00:00.000Z', 't1')")
     before_shape, before_rows = _shape(conn), _rows(conn)
 
-    ran = migrate.up(conn)
+    ran = migrate.up(conn, TODAY)                                    # the steps that are today's schema
 
-    assert sorted(ran) == [m.version for m in all_migrations()]
+    assert sorted(ran) == list(range(1, TODAY + 1))
     assert ran[1] is False and ran[6] == 0                           # no rename, no time rewritten
     after_shape = _shape(conn)
     for table, cols in before_shape.items():
@@ -247,13 +251,17 @@ def test_a_copy_of_a_real_database_survives_up_down_up(tmp_path):
     path = tmp_path / "copy.db"
     shutil.copy(os.environ["AVE_LIVE_DB_COPY"], path)
     conn = _conn(path)
-    counts = {t: len(r) for t, r in _rows(conn).items()}
-    rows = _rows(conn)
+    before = _shape(conn)
+
+    def original_rows():
+        # Every original table's rows over its original columns (meta holds the runner's markers).
+        return {t: sorted(repr(tuple(r)) for r in conn.execute(f"SELECT {', '.join(c[0] for c in cols)} FROM {t}"))
+                for t, cols in before.items() if t not in ("_indexes", "meta")}
+    rows = original_rows()
     migrate.up(conn)
-    assert {t: len(r) for t, r in _rows(conn).items() if t in counts} == counts
+    assert original_rows() == rows
     full = _shape(conn)
-    rolled = migrate.down(conn, len(all_migrations()) - 6)            # every step after today's schema
+    migrate.down(conn, len(all_migrations()) - TODAY)                # every step after today's schema
+    assert _shape(conn) == before and original_rows() == rows
     migrate.up(conn)
-    assert _shape(conn) == full
-    after = _rows(conn)
-    assert all(after[t] == rows[t] for t in rows if t != "meta"), rolled
+    assert _shape(conn) == full and original_rows() == rows

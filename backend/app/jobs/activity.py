@@ -19,6 +19,7 @@ from dataclasses import asdict, dataclass, field, replace
 from typing import Callable, Iterable
 
 from app.store.db import Database
+from app.store.workspaces import stamp_last
 from app.timefmt import now_iso
 
 KINDS = ("voice_line", "design_voice", "clone", "mix", "render_preview", "export")
@@ -173,6 +174,7 @@ class ActivityJobs:
         with self.db.tx() as c:
             cur = c.execute("INSERT INTO jobs (job_id, project_id, turn_id, kind, status, touched, body) "
                             "VALUES ('', ?, ?, ?, 'queued', ?, '{}')", (video_id, turn_id, kind, self.clock()))
+            stamp_last(c, "jobs", video_id)
             job = Job(job_id=f"J{cur.lastrowid}", video_id=video_id, kind=kind, turn_id=turn_id, step_label=step_label,
                       line_ids=tuple(line_ids), created_at=now_iso(), detail=detail, estimate_s=est, params=params)
             c.execute("UPDATE jobs SET job_id = ?, body = ? WHERE seq = ?", (job.job_id, _dump(job), cur.lastrowid))
