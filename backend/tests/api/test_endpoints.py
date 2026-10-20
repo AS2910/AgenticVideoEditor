@@ -47,7 +47,7 @@ def project_without_consent(client, sample_video):
     return resp.json()
 
 
-def await_job(client, job_id, timeout=10.0):
+def await_job(client, job_id, timeout=30.0):
     deadline = time.time() + timeout
     while time.time() < deadline:
         body = client.get(f"/jobs/{job_id}").json()

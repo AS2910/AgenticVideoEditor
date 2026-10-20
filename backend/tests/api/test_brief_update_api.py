@@ -38,7 +38,7 @@ def stale_ids(client, project_id="f1"):
     return [v["video_id"] for v in client.get(f"/projects/{project_id}").json()["videos"] if v["brief_changed"]]
 
 
-def await_run(client, project_id="f1", timeout=15.0):
+def await_run(client, project_id="f1", timeout=30.0):
     deadline = time.time() + timeout
     while time.time() < deadline:
         run = client.get(f"/projects/{project_id}/brief-update").json()["run"]

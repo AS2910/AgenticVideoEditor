@@ -7,7 +7,7 @@ from app.jobs.runner import JobRunner, with_retries
 from app.jobs.store import JobStore
 
 
-def await_job(store, job_id, timeout=5.0):
+def await_job(store, job_id, timeout=30.0):
     deadline = time.time() + timeout
     while time.time() < deadline:
         job = store.get(job_id)

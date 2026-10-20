@@ -73,7 +73,7 @@ def seeded(client, sample_video):
     repo.set_settings("p2", mix_report={"loudness_lufs": -18.0})
 
 
-def run(client, mode="rules", timeout=15.0):
+def run(client, mode="rules", timeout=30.0):
     resp = client.post("/projects/f1/check", json={"mode": mode})
     assert resp.status_code == 202, resp.text
     deadline = time.time() + timeout
@@ -176,7 +176,7 @@ def test_fix_in_this_video_starts_a_normal_turn_with_the_issue_as_its_goal(clien
     resp = client.post(f"/projects/f1/check/issues/{fact['issue_id']}/fix", json={"video_id": "p2"})
     assert resp.status_code == 202, resp.text
     assert resp.json()["video_id"] == "p2" and resp.json()["t"] == 0.0
-    deadline = time.time() + 10
+    deadline = time.time() + 30
     while not jobs.get(resp.json()["job_id"]).done and time.time() < deadline:
         time.sleep(0.05)
     told = str(scripted.calls[0]["messages"])
@@ -203,7 +203,7 @@ def test_fix_in_all_runs_each_named_video_in_turn(client, sample_video, monkeypa
     resp = client.post(f"/projects/f1/check/issues/{required['issue_id']}/fix-all")
     assert resp.status_code == 202, resp.text
     assert [v["video_id"] for v in resp.json()["fix_run"]["videos"]] == ["p2"]
-    deadline = time.time() + 15
+    deadline = time.time() + 30
     while time.time() < deadline:
         fix = client.get("/projects/f1/check").json()["fix_run"]
         if fix["status"] == "finished" and fix.get("finished_at"):

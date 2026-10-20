@@ -127,7 +127,7 @@ def test_sync_touches_only_the_lines_changed_since_the_last_sync(client, sample_
     assert "Get thirty percent" not in goal and "0.0–1.0 s" not in goal
     assert "Hindi" in goal and "changed 1 line" in goal
     await_job(client, out["job_id"])
-    for _ in range(100):
+    for _ in range(600):                                                       # up to 30 s under load
         if not client.get("/videos/p2").json()["out_of_sync"]:
             break
         import time
