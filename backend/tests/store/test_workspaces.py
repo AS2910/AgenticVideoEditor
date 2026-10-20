@@ -48,7 +48,7 @@ def _ws(conn, table, where="1=1"):
 def test_the_backfill_gives_every_row_its_owners_own_workspace():
     conn = migrate.connect(":memory:")
     _seed_before_workspaces(conn)
-    ran = migrate.up(conn)
+    ran = migrate.up(conn, 1)
     assert list(ran) == [8] and ran[8] > 0
     spaces = {r["owner"]: r["id"] for r in conn.execute("SELECT * FROM workspaces")}
     assert set(spaces) == {"local", "b@example.com", "c@example.com"}  # one each, an empty project's owner too
@@ -58,20 +58,20 @@ def test_the_backfill_gives_every_row_its_owners_own_workspace():
     for table in ("candidates", "edits", "messages", "turns", "plans", "jobs"):
         assert _ws(conn, table) == [mine, theirs], table
     assert _ws(conn, "usage") == [mine, theirs, mine, None]        # the project-level charge takes its project's; the orphan none
-    assert migrate.up(conn) == {}
+    assert 8 not in migrate.up(conn)                                # never runs twice
 
 
 def test_down_drops_the_table_and_every_column_and_up_backfills_the_same_again():
     conn = migrate.connect(":memory:")
     _seed_before_workspaces(conn)
-    migrate.up(conn)
+    migrate.up(conn, 1)
     first = {t: _ws(conn, t) for t in TABLES}
     assert migrate.down(conn, 1) == [8]
     assert "workspaces" not in {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
     for table in TABLES:
         assert "workspace_id" not in {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}, table
     assert conn.execute("SELECT COUNT(*) FROM usage").fetchone()[0] == 4    # no row lost
-    migrate.up(conn)
+    migrate.up(conn, 1)
     assert {t: _ws(conn, t) for t in TABLES} == first
 
 

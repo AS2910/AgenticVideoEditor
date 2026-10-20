@@ -17,7 +17,7 @@ from datetime import datetime, timezone
 
 from app.domain.models import ApprovedEdit, Consent, EditCandidate, Source, Transcript
 from app.domain.plan import Plan, plan_from_dict
-from app.store import codec
+from app.store import briefs, codec
 from app.store.db import PROJECT_TABLES, Database
 from app.store.workspaces import personal, stamp_last
 
@@ -55,6 +55,8 @@ class Project:
     settings: dict = field(default_factory=dict)
     ceiling_usd: float | None = None
     created_at: str = ""
+    # F2: the brief version `brief` is the text of; None before the first save.
+    brief_version: int | None = None
 
 
 @dataclass(frozen=True)
@@ -92,7 +94,8 @@ def _record(row) -> ProjectRecord:
 
 def _project(row) -> Project:
     return Project(project_id=row["id"], owner=row["owner"], name=row["name"], brief=row["brief"] or "",
-                   settings=json.loads(row["settings"] or "{}"), ceiling_usd=row["ceiling_usd"], created_at=row["created_at"])
+                   settings=json.loads(row["settings"] or "{}"), ceiling_usd=row["ceiling_usd"], created_at=row["created_at"],
+                   brief_version=row["brief_version"] if "brief_version" in row.keys() else None)
 
 
 # `list(owner)` lists every video; `list(owner, folder=None)` the standalone ones.
@@ -384,8 +387,9 @@ class ProjectRepository:
             c.execute(
                 "INSERT INTO projects (id, owner, name, brief, settings, ceiling_usd, created_at, workspace_id) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                (project_id, owner, name, brief, json.dumps(settings or {}), ceiling_usd, _now(), personal(c, owner)),
+                (project_id, owner, name, "", json.dumps(settings or {}), ceiling_usd, _now(), personal(c, owner)),
             )
+            briefs.save_in(c, project_id, brief, owner)   # F2: the first brief is version 1
         return self.get_project(project_id)
 
     def get_project(self, project_id: str) -> Project | None:
@@ -401,8 +405,9 @@ class ProjectRepository:
 
     def update_project(self, project_id: str, *, name: str | None = None, brief: str | None = None,
                        settings: dict | None = None, ceiling_usd: float | None = None,
-                       clear_ceiling: bool = False) -> Project | None:
-        """Change a project's fields; `settings` merges into the defaults."""
+                       clear_ceiling: bool = False, by: str | None = None) -> Project | None:
+        """Change a project's fields; `settings` merges into the defaults. A
+        changed brief is a new version (F2), saved by `by` (the owner by default)."""
         with self.db.tx() as c:
             row = c.execute("SELECT * FROM projects WHERE id = ?", (project_id,)).fetchone()
             if row is None:
@@ -411,11 +416,13 @@ class ProjectRepository:
             if settings is not None:
                 merged.update({k: v for k, v in settings.items() if v is not None})
             c.execute(
-                "UPDATE projects SET name = ?, brief = ?, settings = ?, ceiling_usd = ? WHERE id = ?",
-                (name if name is not None else row["name"], brief if brief is not None else row["brief"],
+                "UPDATE projects SET name = ?, settings = ?, ceiling_usd = ? WHERE id = ?",
+                (name if name is not None else row["name"],
                  json.dumps(merged), None if clear_ceiling else (ceiling_usd if ceiling_usd is not None else row["ceiling_usd"]),
                  project_id),
             )
+            if brief is not None:
+                briefs.save_in(c, project_id, brief, by or row["owner"])
         return self.get_project(project_id)
 
     def delete_project(self, project_id: str, keep_videos: bool) -> bool:

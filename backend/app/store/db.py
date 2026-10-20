@@ -17,6 +17,8 @@ from app.store import migrate
 # The tables keyed by a video's id (their `project_id` column is the video id,
 # from before projects were folders).
 PROJECT_TABLES = ("candidates", "edits", "messages", "usage", "plans", "turns", "jobs")
+# The projects plan's own tables (F2 on), emptied by reset() too.
+EXTRA_TABLES = ("project_briefs",)
 
 
 class Database:
@@ -55,5 +57,5 @@ class Database:
     def reset(self) -> None:
         """Empty every table. Intended for test isolation."""
         with self.tx() as c:
-            for table in ("meta", "videos", "projects", "feature_flags", "workspaces", *PROJECT_TABLES):
+            for table in ("meta", "videos", "projects", "feature_flags", "workspaces", *EXTRA_TABLES, *PROJECT_TABLES):
                 c.execute(f"DELETE FROM {table}")

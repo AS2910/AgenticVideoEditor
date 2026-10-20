@@ -59,6 +59,7 @@ from app.usage import (
     Ledger, SpendCeilingReached, WHISPER_USD_PER_MINUTE, claude_usd, current_turn, money, month_name, month_start,
 )
 from app import auth
+from app.store import briefs
 from app.store.repository import Project, ProjectRecord, ProjectRepository, LOCAL_OWNER
 from app.store.artifacts import ArtifactStore
 from app.render.renderer import render
@@ -1883,6 +1884,7 @@ def _folder_dict(project: Project) -> dict:
         "project_id": project.project_id,
         "name": project.name,
         "brief": project.brief,
+        "brief_version": project.brief_version,
         "settings": {k: v for k, v in _defaults_for(project.owner, project).items() if k in SETTING_KEYS},
         "ceiling_usd": project.ceiling_usd,
         "spent_usd": round(ledger.spent_usd_by_folder(project.project_id), 4),
@@ -1958,6 +1960,7 @@ def _project_view(video_id: str) -> dict | None:
                    for e in repo.list_edits(pid) if not e.reverted and e.plan.mix != "remove"]
         sisters.append({**_summary(r), "shipped": shipped})
     return {"project_id": project.project_id, "name": project.name, "brief": project.brief,
+            "brief_version": project.brief_version,
             "voices": _project_voices(project.project_id), "videos": sisters, "files": _project_files(project.project_id)}
 
 
@@ -2041,11 +2044,28 @@ def update_folder(project_id: str, req: ProjectUpdate, owner: str = Depends(curr
     if req.ceiling_usd is not None and req.ceiling_usd <= 0:
         raise HTTPException(status_code=422, detail="The ceiling is a positive amount, or null for none.")
     project = repo.update_project(
-        project_id, name=name, brief=req.brief.strip() if req.brief is not None else None,
+        project_id, name=name, brief=req.brief.strip() if req.brief is not None else None, by=owner,
         settings=_clean_defaults(req.settings) if req.settings is not None else None,
         ceiling_usd=req.ceiling_usd, clear_ceiling="ceiling_usd" in req.model_fields_set and req.ceiling_usd is None,
     )
     return _folder_dict(project)
+
+
+@app.get("/projects/{project_id}/briefs")
+def list_brief_versions(project_id: str, owner: str = Depends(current_owner)) -> dict:
+    """F2: every version of the project's brief, newest first."""
+    project = _owned_project(project_id, owner)
+    return {"current": project.brief_version, "versions": [v.to_dict() for v in briefs.history(database, project_id)]}
+
+
+@app.get("/projects/{project_id}/briefs/diff")
+def diff_brief_versions(project_id: str, a: int, b: int, owner: str = Depends(current_owner)) -> dict:
+    """F2: word-level changes from version `a` to version `b` (0 = no brief)."""
+    _owned_project(project_id, owner)
+    runs = briefs.diff(database, project_id, a, b)
+    if runs is None:
+        raise HTTPException(status_code=404, detail="brief version not found")
+    return {"a": a, "b": b, "changes": runs}
 
 
 @app.delete("/projects/{project_id}", status_code=204)
@@ -2234,7 +2254,7 @@ def accept_suggestion(project_id: str, sid: str, owner: str = Depends(current_ow
     items = _suggestion_or_404(project_id, sid)
     text = next(i["text"] for i in items if i["id"] == sid)
     brief = project.brief.rstrip()
-    repo.update_project(project_id, brief=(brief + "\n" + text) if brief else text)
+    repo.update_project(project_id, brief=(brief + "\n" + text) if brief else text, by=owner)
     _set_suggestions(project_id, [i for i in items if i["id"] != sid])
     return _project_page(repo.get_project(project_id))
 
@@ -4284,11 +4304,17 @@ def _start_turn(project_id: str, record: ProjectRecord, text: str, owner: str, a
                              data={"tool": "style", "t": 0.0})
             repo.set_settings(project_id, understanding={**understood, "style": {**style, "shown": True}})
         from app.agent.context import opening
+        # F2: the turn records the brief version its opening view read.
+        view = _project_view(project_id)
+        if view is not None:
+            repo.set_settings(project_id, last_turn={**(repo.settings(project_id).get("last_turn") or {}),
+                                                     "brief_version": view.get("brief_version")})
+            _set_turn(project_id, brief_version=view.get("brief_version"))
         head = opening(repo.get_plan(project_id, plan.plan_id), duration=record.source.duration,
                        filename=record.source.filename, speakers=names, lines=len(lines), autonomy=autonomy,
                        spent_usd=ledger.spent_usd(project_id), ceiling_usd=ledger.ceiling_usd,
                        turn_usd=cap_usd, sight=_sight_text(project_id) if not lines else "",
-                       edits=[e for e in repo.list_edits(project_id) if not e.reverted], project=_project_view(project_id),
+                       edits=[e for e in repo.list_edits(project_id) if not e.reverted], project=view,
                        understanding=understanding_mod.context_lines(repo.settings(project_id).get("understanding")))
         allowed = (f" (They allowed ${carry['needed_usd']:.2f} more for this turn: its cap is now ${cap_usd:.2f}, "
                    "so the step that went over it may run now. Carry on with it.)") if carry else ""
