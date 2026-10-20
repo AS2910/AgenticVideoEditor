@@ -9,8 +9,8 @@ interface ToasterProps {
   onDismiss: () => void
 }
 
-/** One toast at a time (2026-10-20), bottom left, above the pane's composer
- *  line: render ready, a job failed, the turn finished. It leaves on its own
+/** One toast at a time (2026-10-20), bottom centre, clear of the rows' verbs
+ *  and the Get started pill: render ready, a job failed, the turn finished. It leaves on its own
  *  (longer when it has a button) and waits while hovered or focused. */
 export function Toaster({ toast, onAction, onDismiss }: ToasterProps) {
   const held = useRef(false)
@@ -27,7 +27,7 @@ export function Toaster({ toast, onAction, onDismiss }: ToasterProps) {
   if (!toast) return null
   return (
     <div
-      className={cn('rise fixed bottom-5 left-5 z-40 flex max-w-[min(440px,calc(100vw-2.5rem))] items-center gap-3 rounded-xl border-[1.5px] border-ink px-4 py-3 shadow-volt', toast.tone === 'fail' ? 'bg-warn text-ink' : 'bg-ink text-ptext')}
+      className={cn('rise fixed bottom-5 left-1/2 z-40 flex w-max max-w-[min(480px,calc(100vw-2rem))] -translate-x-1/2 items-center gap-3 rounded-xl border-[1.5px] border-ink px-4 py-3 shadow-volt', toast.tone === 'fail' ? 'bg-warn text-ink' : 'bg-ink text-ptext')}
       role={toast.tone === 'fail' ? 'alert' : 'status'}
       data-testid="toast"
       onMouseEnter={() => { held.current = true }} onMouseLeave={() => { held.current = false }}

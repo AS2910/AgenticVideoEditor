@@ -125,3 +125,17 @@ proposals render. A render job's `line_ids` are `item_ids + edit_ids`.
   voice_line/clone/design_voice 300 s, mix 120, render_preview 900, export 1800.
 - `job.updated` events carry the same Job dict as GET jobs. The stream opens with the active
   view (oldest first) and the turn, then live events; `?limit=N` ends it after N events.
+
+
+## UI notes (jobs-ui)
+
+- The editor reads `GET /jobs?active=1` on open and listens on `/events`; when the channel is down
+  (or before it delivers) it polls the same GET every 1.5 s while anything runs, including from the
+  moment it posts a turn.
+- Row chips add Planned (a line planned, not queued), Waiting on you, Removed and Reading to the
+  spec's seven, where those states exist. "In the video" means in the render playing (the edited
+  render while As shot plays), so the transcript header now counts "N added" for kept lines.
+- A render a turn made swaps in even when another mode is playing (it is what the turn asks you to
+  hear); a render of another mode the editor did not ask about is kept until that mode is played.
+- The end-to-end run is `frontend/e2e/go-run.spec.ts` (scripted server, nothing spent); `SHOTS=<dir>`
+  saves screenshots and frames.

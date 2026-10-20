@@ -22,7 +22,7 @@ const POLL_MS = 1500
  *  renders stand, restored from GET /jobs?active=1 on open (a reload mid-job
  *  comes back as it was) and kept live by the events channel. Without
  *  EventSource, or while it is down, the same GET is polled while anything runs. */
-export function useActivity(videoId: string | null, onJob?: JobListener): Activity {
+export function useActivity(videoId: string | null, onJob?: JobListener, busy = false): Activity {
   const [jobs, setJobs] = useState<ActivityJob[]>([])
   const [turn, setTurn] = useState<TurnView | null>(null)
   const [renders, setRenders] = useState<Activity['renders']>({ final: null, proposals: null })
@@ -88,11 +88,12 @@ export function useActivity(videoId: string | null, onJob?: JobListener): Activi
     return () => { live.current = false; source.close() }
   }, [videoId, refresh, take])
 
-  // No live channel: poll while something runs.
-  const running = jobs.some(isActive) || turn?.status === 'running' || turn?.status === 'stopping'
+  // No live channel: poll while something runs (or the editor knows it just started something).
+  const running = busy || jobs.some(isActive) || turn?.status === 'running' || turn?.status === 'stopping'
     || !!renders.final?.in_progress || !!renders.proposals?.in_progress
   useEffect(() => {
     if (!videoId || !running) return
+    if (!live.current) void refresh()
     const tick = window.setInterval(() => { if (!live.current) void refresh() }, POLL_MS)
     return () => window.clearInterval(tick)
   }, [videoId, running, refresh])

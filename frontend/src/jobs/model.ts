@@ -158,7 +158,7 @@ export function turnSteps(turn: TurnView | null, jobs: ActivityJob[]): Step[] {
 }
 
 /** "Done. 5 lines voiced, v5 is playing. $0.09 spent." */
-export function turnSummary(turn: TurnView, jobs: ActivityJob[], playingVersion: number | null): string {
+export function turnSummary(turn: TurnView, jobs: ActivityJob[], playingVersion: number | null, version = true): string {
   const mine = turnJobs(jobs, turn.turn_id)
   const voiced = mine.filter((j) => isVoice(j) && j.status === 'done').length
   const failed = mine.filter((j) => isVoice(j) && j.status === 'failed').length
@@ -167,7 +167,7 @@ export function turnSummary(turn: TurnView, jobs: ActivityJob[], playingVersion:
   const bits: string[] = []
   if (voiced) bits.push(`${voiced} ${voiced === 1 ? 'line' : 'lines'} voiced`)
   if (failed) bits.push(`${failed} failed`)
-  if (v) bits.push(playingVersion === v ? `v${v} is playing` : `v${v} is ready`)
+  if (v && version) bits.push(playingVersion === v ? `v${v} is playing` : `v${v} is ready`)
   const head = turn.status === 'failed' ? 'Stopped.' : 'Done.'
   const money = turn.spent_usd != null && turn.spent_usd > 0 ? ` $${turn.spent_usd.toFixed(2)} spent.` : ''
   return `${head}${bits.length ? ` ${bits.join(', ').replace(/^./, (c) => c.toUpperCase())}.` : ''}${money}`

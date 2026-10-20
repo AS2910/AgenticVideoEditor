@@ -185,7 +185,6 @@ function Studio() {
   const [readingBusy, setReadingBusy] = useState(false)
   const wantReading = useRef(true)
   const readFor = useRef<string | null>(null)
-  const [turnBusy, setTurnBusy] = useState(false)
   const [turnStep, setTurnStep] = useState<string | null>(null)
   const seenSeq = useRef(0)
   const [editingLine, setEditingLine] = useState<Statement | null>(null)
@@ -203,7 +202,8 @@ function Studio() {
   // One processing model (2026-10-20): the jobs, the turn and the renders every surface reads; the
   // toast (one at a time), Activity, Stop, the option just picked, and whether the picture is playing.
   const jobHandler = useRef<JobListener | null>(null)
-  const activity = useActivity(project?.video_id ?? null, (job, before) => jobHandler.current?.(job, before))
+  const [turnBusy, setTurnBusy] = useState(false)
+  const activity = useActivity(project?.video_id ?? null, (job, before) => jobHandler.current?.(job, before), turnBusy)
   const [toast, setToast] = useState<Toast | null>(null)
   const pushToast = (t: Toast) => setToast((prev) => coalesce(prev, t))
   const [activityOpen, setActivityOpen] = useState(false)
@@ -1162,7 +1162,8 @@ function Studio() {
     lastTurn.current = t ? { id: t.turn_id, status: t.status } : null
     if (!t || !prev || prev.id !== t.turn_id) return
     if ((prev.status === 'running' || prev.status === 'stopping') && (t.status === 'done' || t.status === 'failed')) {
-      pushToast({ id: `turn-${t.turn_id}`, tone: t.status === 'failed' ? 'fail' : 'ok', text: turnSummary(t, activity.jobs, versionNow) })
+      // The version is the summary's to name (it knows when the new one is playing); the toast says what finished.
+      pushToast({ id: `turn-${t.turn_id}`, tone: t.status === 'failed' ? 'fail' : 'ok', text: turnSummary(t, activity.jobs, null, false) })
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activity.turn])
@@ -1344,7 +1345,8 @@ function Studio() {
     const shown = view === 'final' && rendered ? { url: rendered.url, duration: rendered.duration, pieces }
       : view === 'proposals' && previewReady ? { url: preview!.url, duration: preview!.duration, pieces: preview!.pieces }
       : null
-    const clarifying = plan?.status === 'clarifying'
+    // A question picked from is answered: nothing waits on you while that turn runs.
+    const clarifying = plan?.status === 'clarifying' && !turnBusy
     const needsYou = planItems.filter((i) => i.status === 'needs-you')
     const stateWord = clarifying ? 'needs your go'
       : turnBusy ? 'working'
@@ -1409,7 +1411,9 @@ function Studio() {
       : `Playing original · ${MODE_WORD[view]} not ready`
     // What is rendering for the mode playing, or what is not in it yet.
     const modeNow = view === 'original' ? null : view
-    const renderJob = modeNow ? activity.jobs.find((j) => isRender(j) && isActive(j) && (j.detail?.mode ?? 'final') === modeNow) ?? null : null
+    // The render on its way: one for the mode playing, or the one a turn is making (it is what will swap in).
+    const renderJob = activity.jobs.find((j) => isRender(j) && isActive(j) && modeNow !== null && (j.detail?.mode ?? 'final') === modeNow)
+      ?? activity.jobs.find((j) => isRender(j) && isActive(j) && !!j.turn_id) ?? null
     const inProgress = modeNow ? activity.renders[modeNow]?.in_progress ?? null : null
     const renderingVersion = renderJob?.detail?.version ?? inProgress?.version ?? null
     const renderingEta = aboutEta(renderJob?.eta_s ?? inProgress?.eta_s ?? null)
@@ -1437,7 +1441,7 @@ function Studio() {
       jobs: activity.jobs,
       video: videoRender?.includes ?? null,
       videoUnknown: !videoRender?.includes,
-      rendering: renderJob?.detail?.includes ?? inProgress?.includes ?? null,
+      rendering: renderJob?.detail?.includes ?? inProgress?.includes ?? activity.jobs.find((j) => isRender(j) && isActive(j))?.detail?.includes ?? null,
       onRetryJob: retry,
       etaFor: (chars: number) => (perChar ? perChar * chars : null),
     }
@@ -1475,7 +1479,7 @@ function Studio() {
     }
     // O flips Edited ↔ As shot (from With proposals, to As shot).
     flipRef.current = route.page === 'editor' && changes > 0 ? () => switchView(view === 'original' ? 'final' : 'original') : null
-    const scanning = turnBusy ? (turnStep ?? 'Voltage is working') : readingBusy ? 'Voltage is reading the clip' : null
+    const scanning = turnBusy ? strip.text : readingBusy ? 'Voltage is reading the clip' : null
     const isTutorial = !!project.settings?.tutorial
     const tipCandidates: { id: string; target: string; when: boolean }[] = [
       { id: 'first-failed-take', target: 'transcript-row', when: planItems.some((i) => i.status === 'failed') },

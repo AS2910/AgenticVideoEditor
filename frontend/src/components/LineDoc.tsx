@@ -1417,7 +1417,7 @@ export function LineDoc({
           <span className="flex-1" />
           {(proposals.length > 0 || inVideo > 0) && (
             <span className="tag pb-1" role="status" aria-label="Where things stand" data-testid="counts">
-              <span className={cn('rounded-[3px] px-1.5 py-px', proposals.length > 0 ? 'bg-volt text-ink' : 'bg-sunk')}>{proposals.length}</span> proposed · {inVideo} in the video
+              <span className={cn('rounded-[3px] px-1.5 py-px', proposals.length > 0 ? 'bg-volt text-ink' : 'bg-sunk')}>{proposals.length}</span> proposed · {inVideo} added
             </span>
           )}
           {proposals.length > 1 && onAddAll && (
@@ -1431,7 +1431,7 @@ export function LineDoc({
             : pendingLines.some((p) => p.status === 'reading') ? "Voltage is reading. The line it's on is lit."
             : focusedRow !== null ? <span className="whitespace-nowrap max-[960px]:hidden" data-testid="keys"><kbd className={kbd}>↑</kbd><kbd className={kbd}>↓</kbd> move · <kbd className={kbd}>Enter</kbd> edit it · <kbd className={kbd}>␣</kbd> hear it · <kbd className={kbd}>K</kbd> add it · <kbd className={kbd}>⌫</kbd> discard · <kbd className={kbd}>A</kbd> add after · <kbd className={kbd}>Alt</kbd><kbd className={kbd}>↑</kbd><kbd className={kbd}>↓</kbd> reorder (or drag ⋮⋮) · <kbd className={kbd}>S</kbd> starts at · <kbd className={kbd}>U</kbd> take it out · <kbd className={kbd}>/</kbd> ask Voltage</span>
             : armedRow !== null && rows[armedRow] ? <span role="status">Press Backspace again to propose removing the line at {clock(rows[armedRow].start)}.</span>
-            : proposals.length > 0 ? `${proposals.length === 1 ? 'One line is proposed' : `${proposals.length} lines are proposed`}: hear it, then Add it, Edit it or Discard. Nothing is in the video until you add it.`
+            : proposals.length > 0 ? `${proposals.length === 1 ? 'One line is proposed' : `${proposals.length} lines are proposed`}: hear it, then Add it, Edit it or Discard. Nothing is kept until you add it.`
             : 'One transcript: what is in the video, and what is proposed. Lines at the same moment play together. Hover a line for Hear it, Edit it, Discard.'}
         </span>
       </div>

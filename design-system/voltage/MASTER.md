@@ -47,9 +47,9 @@ Three faces, self-hosted (`@fontsource-variable/*`, no network request):
 The hand-off's vocabulary is a small set of classes, used by name so a screen reads like the mock:
 
 - **Buttons:** `.btn` (38 px, ink border, display face) with `.volt` (volt fill, offset shadow on hover), `.ink` (ink fill, volt text; inverted in dark), `.ghost` (pane outline), `.sm` 32 px, `.lg` 46 px, `.shine` (one sweep on a primary CTA). `.act` is the quiet text verb (Edit it, Discard, Take it out). `.pill` is a choice (delivery), pressed = volt. `.sugg` is a suggestion chip on the pane. `.kbd` is the key hint beside a verb (␣, K, /).
-- **State:** `.stamp` (volt, mono uppercase), `.stamp.need` (amber), `.stamp.in` (outline: ✓ In the video), `.stamp.inkd`.
+- **State:** `.stamp` (volt, mono uppercase), `.stamp.need` (amber), `.stamp.in` (outline: ✓ In the video), `.stamp.inkd`, `.stamp.quiet` (Original: faint, no box), `.stamp.live` (ink outline with a spinner: Queued, Voicing, Rendering).
 - **Transcript:** `.row` (76 px time column + body; the app adds a 24 px grip column), `.row.prop` (a proposal: card, ink border, offset shadow, `pop` in), `.waiting` (dashed ink: a step waiting on you), `.who`, `.say`, `.meta`.
-- **Playback:** `.segs` / `.seg` (Edited · With proposals · As shot; the chosen one is ink with volt text; O flips Edited ↔ As shot; with no live edits a plain "As shot" label instead), `.meter` (a measured score), `.lane-n`, `.blk`.
+- **Playback:** `.segs` / `.seg` (Edited · With proposals · As shot, always all three; one with nothing in it is off with a title saying why; the chosen one is ink with volt text; O flips Edited ↔ As shot), `.meter` (a measured score), `.lane-n`, `.blk`.
 - **The pane:** `.pane`, `.pm` (muted on black), `.bubble` (your words, right), `.trace` with `.ln .ts .g .c .tool` (one step per line: time ├ sentence tool cost), `.gate` (Your go is needed), `.wave` (Voltage's presence: volt bars, `.busy` fast, `.need` amber).
 - **Motion:** `wv rise pop fill shine nudge scan grow blink stampin ringpulse` keyframes; `.rise(.d1-3)`, `.fillin`, `.scan` (the 2 px line that sweeps the picture while Voltage looks), `.grow`, `.blinkdot`, `.stampin`, `.rec`. `prefers-reduced-motion` zeroes them all.
 
@@ -60,6 +60,16 @@ The hand-off's vocabulary is a small set of classes, used by name so a screen re
 **The editor** (`App.tsx`): the same header carrying the file name, the length and voices tag, the play `.segs`, the autonomy word (Check with me ▾ → the What Voltage may do sheet), the spend (`$spent ▮ $ceiling`, a link to Usage), **Export** (`.btn.ink.sm`, to `#pN/export`), the account circle. Below, two panes: **the work** (left; `max-width: 820px` centred; the picture ≤ 720 px with its mode tag, clock, caption and scan line; the transport row — ink play, mono clock, the scrubber with markers (volt = proposed, ink = in the video, amber = waiting) and the playhead, **Tracks ▾**; then the transcript) and **Voltage** (right, 400 px, `.pane`). Under 960 px they stack. `dvh`, never `vh`.
 
 **Targets:** 32 px `.sm` buttons with a mouse and 44 px on coarse pointers (`pointer-coarse:`); 8 px between adjacent targets; every icon-only control has an `aria-label`.
+
+## One processing model (2026-10-20)
+
+Every surface reads the same jobs (`frontend/src/jobs/model.ts`, contract in `docs/superpowers/plans/2026-10-20-jobs-contract.md`):
+- **Status strip**: one line under the header, always there (`StatusStrip`): "Voicing line 2 of 5 · Jeevan · about 12 s" → "Checking fit" → "Rendering preview v4" → "Ready. v4 is playing"; idle a quiet "Up to date · v4 · 2 min ago". Click opens **Activity** (a right drawer, ink rule, jobs newest first: status stamp, duration, cost, Retry); **Stop** at its end while work runs.
+- **Row chip**: exactly one per line: Original · Queued · Voicing (slim bar) · Ready to hear · Rendering · In the video (in the render playing) · Failed (reason, Retry inline); Planned, Waiting on you, Removed and Reading where those apply. The header counts "N proposed · N added".
+- **Player**: the badge names the mode and version ("Playing v4 · Edited", "Playing original"); one line under the picture for a render on its way ("v5 rendering… about 8 s") or "Changes not in preview yet" + Render now. A finished render swaps in at the playhead when paused; while playing a toast asks "v5 ready. Switch now?".
+- **Chat**: a picked option stays on its card (off, "Your pick"), your words echo at once, a step list under them updates in place, one summary closes the turn with Undo all (asked once) and Hear changes last.
+- **Toasts**: one at a time, bottom centre, coalesced ("3 lines ready"); a failure is never replaced by good news. The tab title carries "● " while jobs run and "Ready · " for a moment after.
+- No time is shown that was not measured: an estimate appears only once jobs of that kind have finished.
 
 ## The transcript (one transcript, four verbs)
 
