@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from 'react'
 import type { ProjectFolder } from '../types'
 import { ApiError, createFolder, moveVideo } from '../api'
 import { cn } from '@/lib/utils'
+import { VoiceQuestion } from './VoiceQuestion'
+import { belongsTo } from '../lib/templates'
 
 interface MoveDialogProps {
   video: { video_id: string; filename: string; project_id?: string | null; project_name?: string | null }
@@ -123,16 +125,9 @@ export function MoveDialog({ video, folders, onMoved, onClose, onFolderMade }: M
           )}
         </div>
         {voices && leaving && (
-          <div className="grow flex flex-col gap-2.5 rounded-[10px] border-[1.5px] border-foreground bg-sunk p-3.5" role="group" aria-label="The project's voice" data-testid="voice-question">
-            <span className="font-semibold">This video uses {voices.map((v) => v.name).join(', ')}, {voices.length === 1 ? 'a voice that belongs' : 'voices that belong'} to {video.project_name ?? nameOf(current)}.</span>
-            <span className="text-[13px] text-muted-foreground">Lines already in the video keep their audio either way. This decides whether you can still voice new lines with it.</span>
-            {([['copy', 'Copy the voice into this video'], ['keep', 'Keep it in my voices, for any project']] as const).map(([k, text]) => (
-              <button key={k} type="button" role="radio" aria-checked={voice === k} className={cn('flex w-full items-center gap-3 rounded-[10px] border-[1.5px] px-3 py-2.5 text-left', voice === k ? 'border-ink bg-volt text-ink' : 'border-line2 bg-card hover:border-foreground')} onClick={() => setVoice(k)}>
-                <span aria-hidden="true" className="grid size-[18px] flex-none place-items-center rounded-full border-[1.5px] border-current">{voice === k && <span className="size-2 rounded-full bg-current" />}</span>
-                <span className="flex-1">{text}</span>
-              </button>
-            ))}
-          </div>
+          <VoiceQuestion lead={`This video uses ${belongsTo(voices, video.project_name ?? nameOf(current) ?? '')}.`}
+            copyLabel="Copy the voice into this video" value={voice} onChange={setVoice}
+            note="Lines already in the video keep their audio either way. This decides whether you can still voice new lines with it." />
         )}
         {error && <div className="text-sm text-destructive" role="alert">{error}</div>}
         <div className="flex flex-wrap justify-end gap-2.5">

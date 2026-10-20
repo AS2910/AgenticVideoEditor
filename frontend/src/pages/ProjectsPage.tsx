@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
 import type React from 'react'
 import type { DragEvent } from 'react'
-import type { Pin, ProjectFolder, ProjectSummary, SpendSummary } from '../types'
+import type { Pin, ProjectFolder, ProjectSummary, ProjectTemplate, SpendSummary } from '../types'
 import type { Me } from '../api'
-import { frameUrl, getPins, getSpend, listArchivedFolders, setPin } from '../api'
+import { frameUrl, getPins, getSpend, listArchivedFolders, listTemplates, setPin } from '../api'
+import { templateFacts } from '../lib/templates'
 import { ofCeiling } from '../lib/money'
 import { hrefFor } from '../lib/route'
 import { clock } from '../transcript/format'
@@ -36,7 +37,8 @@ interface ProjectsPageProps {
   onUpload: (file: File, projectId: string | null) => void
   onSample: () => void
   onDelete: (id: string) => void
-  onNewFolder?: (name: string) => Promise<ProjectFolder | void> | void
+  /** D1: `templateId` starts the project from a template (Blank when absent). */
+  onNewFolder?: (name: string, templateId?: string) => Promise<ProjectFolder | void> | void
   /** A project the Move dialog made itself: the caller only refreshes its lists. */
   onFolderMade?: (folder: ProjectFolder) => void
   /** A video moved (or made standalone): the caller refreshes its lists. */
@@ -136,6 +138,18 @@ export function ProjectsPage({ me, projects, folders = [], onOpen, onUpload, onS
   const [selected, setSelected] = useState<string | null>(null)
   const nameInput = useRef<HTMLInputElement>(null)
   useEffect(() => { if (adding) nameInput.current?.focus() }, [adding])
+  // D1 (projects.reuse): New project starts Blank or from a template.
+  const [templates, setTemplates] = useState<ProjectTemplate[] | null>(null)
+  const [templatesError, setTemplatesError] = useState(false)
+  const [startFrom, setStartFrom] = useState('')
+  useEffect(() => {
+    if (!adding || !reuseOn) return
+    let live = true
+    setTemplatesError(false)
+    listTemplates().then((t) => { if (live) setTemplates(t) }).catch(() => { if (live) setTemplatesError(true) })
+    return () => { live = false }
+  }, [adding, reuseOn])
+  const chosen = templates?.find((t) => t.template_id === startFrom) ?? null
   const [menu, setMenu] = useState<string | null>(null)
   const [moving, setMoving] = useState<ProjectSummary | null>(null)
   const [toast, setToast] = useState<string | null>(null)
@@ -175,14 +189,14 @@ export function ProjectsPage({ me, projects, folders = [], onOpen, onUpload, onS
     timer.current = null
     setDeleting(null)
   }
-  const cancelFolder = () => { setAdding(false); setNewName(''); setMakeError(null) }
+  const cancelFolder = () => { setAdding(false); setNewName(''); setMakeError(null); setStartFrom('') }
   const makeFolder = async () => {
     const n = newName.trim()
     if (!n || !onNewFolder || making) return
     setMaking(true)
     setMakeError(null)
     try {
-      const made = await onNewFolder(n)
+      const made = startFrom ? await onNewFolder(n, startFrom) : await onNewFolder(n)
       if (made) setSelected(made.project_id)
       cancelFolder()
     } catch (e) {
@@ -226,6 +240,22 @@ export function ProjectsPage({ me, projects, folders = [], onOpen, onUpload, onS
               disabled={making}
               onChange={(e) => setNewName(e.target.value)}
             />
+            {reuseOn && (
+              <div className="flex min-w-0 flex-col gap-1">
+                <label htmlFor="new-project-from" className="text-[13px] font-semibold">Start from</label>
+                <select id="new-project-from" className="box-border h-9 w-full min-w-0 rounded-md border-[1.5px] border-line2 bg-background px-2 text-sm text-foreground outline-none focus-visible:border-ink focus-visible:ring-[3px] focus-visible:ring-volt"
+                  value={startFrom} disabled={making || templates === null} onChange={(e) => setStartFrom(e.target.value)} data-testid="start-from">
+                  <option value="">{templates === null && !templatesError ? 'Blank (reading templates…)' : 'Blank'}</option>
+                  {templates && templates.some((t) => !t.starter) && (
+                    <optgroup label="Your templates">{templates.filter((t) => !t.starter).map((t) => <option key={t.template_id} value={t.template_id}>{t.name}</option>)}</optgroup>
+                  )}
+                  {templates && <optgroup label="Starters">{templates.filter((t) => t.starter).map((t) => <option key={t.template_id} value={t.template_id}>{t.name}</option>)}</optgroup>}
+                </select>
+                {templatesError && <span className="text-[13px] text-muted-foreground">Templates could not be read. Blank still works.</span>}
+                {chosen && <span className="text-[13px] text-muted-foreground" data-testid="start-from-facts">{chosen.description ? `${chosen.description} ` : ''}{templateFacts(chosen)}. No videos.</span>}
+                <a className="act self-start px-0 text-[13px]" href={hrefFor({ page: 'templates' })}>Manage templates</a>
+              </div>
+            )}
             {makeError && <span className="text-[13px] text-destructive" role="alert">{makeError}</span>}
             <div className="flex flex-wrap items-center gap-2">
               <button type="submit" className="btn volt sm" disabled={!newName.trim() || making} aria-busy={making || undefined}>{making ? 'Creating…' : 'Create'}</button>
@@ -289,6 +319,10 @@ export function ProjectsPage({ me, projects, folders = [], onOpen, onUpload, onS
                   <span className="stamp quiet">Archived</span>
                 </a>
               )))}
+            <a href={hrefFor({ page: 'templates' })} className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-muted-foreground no-underline hover:bg-sunk" data-testid="templates-link">
+              <span aria-hidden="true" className="w-[18px] text-center">▦</span>
+              <span className="flex-1 font-medium">Templates</span>
+            </a>
           </>
         )}
       </aside>

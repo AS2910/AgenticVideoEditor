@@ -26,6 +26,7 @@ import { ProjectBoard } from './ProjectBoard'
 import { SendForReview } from '../review/SendForReview'
 import { STAGE_LABEL } from './feedWords'
 import { ProjectFeed } from './ProjectFeed'
+import { SaveTemplateDialog } from './Templates'
 import type { Stage } from '../types'
 
 interface ProjectPageProps {
@@ -91,6 +92,8 @@ export function ProjectPage({ me, projectId, onUpload, uploading, error, onDelet
   // D4 (projects.reuse): archive (read-only until unarchived) and pin to Home.
   const reuseOn = enabled('projects.reuse')
   const [pinned, setPinned] = useState(false)
+  // D1 (projects.reuse): Save as template.
+  const [templating, setTemplating] = useState(false)
   useEffect(() => {
     if (!reuseOn) return
     let live = true
@@ -289,6 +292,7 @@ export function ProjectPage({ me, projectId, onUpload, uploading, error, onDelet
                 <button type="button" role="menuitem" className="act justify-start" onClick={() => { setMenu(false); setRenaming(true) }}>Rename…</button>
                 {reuseOn && <button type="button" role="menuitem" className="act justify-start" onClick={() => { setMenu(false); void togglePin() }}>{pinned ? 'Unpin from Home' : 'Pin to Home'}</button>}
                 {reuseOn && <button type="button" role="menuitem" className="act justify-start" onClick={() => { setMenu(false); void setArchivedTo(!project.archived_at) }}>{project.archived_at ? 'Unarchive project' : 'Archive project'}</button>}
+                {reuseOn && <button type="button" role="menuitem" className="act justify-start" onClick={() => { setMenu(false); setTemplating(true) }}>Save as template…</button>}
                 <button type="button" role="menuitem" className="act justify-start" onClick={() => { setMenu(false); setDeleting(true) }}>Delete project…</button>
               </div>
             )}
@@ -303,6 +307,7 @@ export function ProjectPage({ me, projectId, onUpload, uploading, error, onDelet
             <button type="button" className="btn sm" onClick={() => void setArchivedTo(false)} disabled={busy === 'archive'} aria-busy={busy === 'archive' || undefined}>{busy === 'archive' ? 'Unarchiving…' : 'Unarchive'}</button>
           </div>
         )}
+        {reuseOn && templating && <SaveTemplateDialog projectId={projectId} projectName={project.name} onClose={() => setTemplating(false)} />}
         {deleting && (
           <div className="flex flex-wrap items-center gap-3 rounded-xl border-[1.5px] border-destructive bg-card p-4" role="group" aria-label={`Delete ${project.name}?`} data-testid="delete-project">
             <span className="flex-1 text-sm">Delete <strong>{project.name}</strong>? Its {detail.videos.length} {detail.videos.length === 1 ? 'video' : 'videos'} can go with it, or stay as standalone videos. {enabled('projects.reuse') ? 'It goes to the Bin for 30 days and can be restored from there; after that, project voices go unless kept in your voices.' : 'It is kept for 30 days, then goes for good; project voices go with it unless kept in your voices.'}</span>

@@ -8,7 +8,7 @@ import type {
   ProjectSettings, Autonomy, Effort, Plan, Mix, Selection, Candidate, Reading, Sight, ChatMessage,
   ProjectFolder, ProjectDetailFolder, ProjectFile, HelpArticle, Onboarding, ProjectVoice,
   ActivityJob, TurnView, RenderState, BriefVersion, BriefChange, BriefUpdateRun, ProjectRule, RuleKind, RuleData, CheckPage, Batch, ExportPreset, ExportPresetPage, ExportPresetChange, Preflight, BatchExport, ShareLink, PublicShare,
-  PublicComment, ReviewAnswer, ReviewComment, ReviewLinkRequest, BinItem, BinKind, BinRestored, Pin, SearchResult,
+  PublicComment, ReviewAnswer, ReviewComment, ReviewLinkRequest, BinItem, BinKind, BinRestored, Pin, SearchResult, ProjectTemplate,
 } from './types'
 
 const BASE = '/api'
@@ -558,3 +558,10 @@ export const getLatestRender = (id: string, mode: 'final' | 'proposals') =>
 export const startRender = (id: string, mode: 'final' | 'proposals') => post<ActivityJob>(`/videos/${id}/renders`, { mode })
 /** The live channel: job.updated, turn.updated, render.updated. */
 export const eventsUrl = (id: string) => `${BASE}/videos/${id}/events`
+// D1: project templates.
+export const listTemplates = async () => (await get<{ templates?: ProjectTemplate[] }>('/templates')).templates ?? []
+export const saveTemplate = (projectId: string, name: string, voice?: 'copy' | 'keep') =>
+  post<ProjectTemplate>(`/projects/${projectId}/template`, voice ? { name, voice } : { name })
+export const renameTemplate = (id: string, name: string) => patch<ProjectTemplate>(`/templates/${id}`, { name })
+export const deleteTemplate = (id: string) => del(`/templates/${id}`)
+export const createFolderFrom = (name: string, templateId: string) => post<ProjectFolder>('/projects', { name, template_id: templateId })

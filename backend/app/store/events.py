@@ -29,7 +29,9 @@ VERBS = ("brief.saved", "rule.added", "rule.changed", "rule.removed", "stage.mov
          "language.versions_made", "language.sync_started", "language.synced",
          # C2: a review link's comments and answers (the reviewer as actor), the owner's replies.
          "review.commented", "review.approved", "review.changes_asked", "review.replied",
-         "review.resolved", "review.reopened")
+         "review.resolved", "review.reopened",
+         # D1: templates saved, renamed, deleted, and a project made from one.
+         "template.saved", "template.renamed", "template.deleted", "project.from_template")
 MAX_PAGE = 200
 
 

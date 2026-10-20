@@ -48,6 +48,7 @@ import { ReviewComments } from './review/Comments'
 import { useReviewComments } from './review/useReviewComments'
 import { useFlags } from './flags/useFlags'
 import { BinPage } from './pages/BinPage'
+import { TemplatesPage } from './pages/Templates'
 import { LanguageDialog, SyncChip } from './pages/LanguageVersions'
 import { StageWarning } from './pages/StageWarning'
 import { approvedWords } from './pages/feedWords'
@@ -56,7 +57,7 @@ import { go, hrefFor, useRoute } from './lib/route'
 import { cn } from '@/lib/utils'
 import { clock } from './transcript/format'
 import {
-  createProject, confirmPlace, exportProject, artifactUrl, stageHold, pollJob, PollCancelled, ApiError, listVideos, listFolders, createFolder, startTutorial, getProject, deleteProject, getUsage, getSpend, listVoices, updateSpeaker, detectSpeakers, revertEdit, updateSettings, removeLine, dismissItem, easeItem, setEditRole, setCandidateRole, roleQuestion, moveCandidate, moveEdit, getArrangement, putArrangement, undoArrangement, getPlan, approvePlan, readProject, grantConsent, getMe, postTurn, postAllowMore, getMessages, chipEvent, getUnderstanding, correctUnderstanding, setStyle,
+  createProject, confirmPlace, exportProject, artifactUrl, stageHold, pollJob, PollCancelled, ApiError, listVideos, listFolders, createFolder, createFolderFrom, startTutorial, getProject, deleteProject, getUsage, getSpend, listVoices, updateSpeaker, detectSpeakers, revertEdit, updateSettings, removeLine, dismissItem, easeItem, setEditRole, setCandidateRole, roleQuestion, moveCandidate, moveEdit, getArrangement, putArrangement, undoArrangement, getPlan, approvePlan, readProject, grantConsent, getMe, postTurn, postAllowMore, getMessages, chipEvent, getUnderstanding, correctUnderstanding, setStyle,
   retryJob, stopJobs, getLatestRender, startRender, getJobs, listRules,
 } from './api'
 import type { ArrangementView, Me, PlanApproval, RoleChange, RoleQuestion } from './api'
@@ -1349,7 +1350,7 @@ function Studio() {
           onUpload={(file, pid) => void load(file, pid)}
           onSample={() => void loadSample()}
           onDelete={(id) => void removeProject(id)}
-          onNewFolder={async (name) => { const made = await createFolder(name); await refreshProjects(); return made }}
+          onNewFolder={async (name, templateId) => { const made = templateId ? await createFolderFrom(name, templateId) : await createFolder(name); await refreshProjects(); return made }}
           onFolderMade={() => void refreshProjects()}
           onMoved={() => void refreshProjects()}
           banner={onboarding.loaded && !onboarding.onboarding.tour.finished && !onboarding.onboarding.tour.skipped ? (
@@ -1379,6 +1380,7 @@ function Studio() {
     if (route.page === 'settings') return <SettingsPage me={me} onSignedOut={signedOutNow} />
     if (route.page === 'billing') return <BillingPage me={me} />
     if (route.page === 'bin') return <BinPage me={me} onRestored={() => void refreshProjects()} />
+    if (route.page === 'templates') return <TemplatesPage me={me} onMade={() => void refreshProjects()} />
     if (route.page === 'export') {
       return <ExportPage projectId={route.projectId} me={me} onBack={() => go({ page: 'editor', projectId: route.projectId })} />
     }

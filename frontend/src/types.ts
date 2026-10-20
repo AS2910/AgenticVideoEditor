@@ -940,3 +940,26 @@ export interface SearchHit {
 }
 export interface SearchGroup { project_id: string | null; project_name: string; archived: boolean; hits: SearchHit[] }
 export interface SearchResult { query: string; groups: SearchGroup[]; total: number }
+
+/** D1: a project template (a starter, or one saved from a project). */
+export interface TemplateSummary {
+  brief: string
+  rules: number
+  words: number
+  presets: number
+  voices: number
+  ceiling_usd: number | null
+  settings: ProjectSettings | Record<string, unknown>
+}
+export interface ProjectTemplate {
+  template_id: string
+  name: string
+  starter: boolean
+  description?: string
+  source_project_id?: string | null
+  created_at?: string
+  updated_at?: string
+  summary: TemplateSummary
+}
+/** D1: a project's own voices need a yes before they go into a template. */
+export interface TemplateVoiceQuestion { detail: string; voices: { voice_id: string; name: string }[] }

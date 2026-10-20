@@ -19,7 +19,7 @@ describe('Tip', () => {
   afterEach(() => vi.unstubAllGlobals())
 
   it('has its tips, each with a sentence and a Help article', () => {
-    expect(TIPS.map((t) => t.id)).toEqual(['first-upload', 'first-silent', 'first-question', 'first-just-do-it', 'first-voice-design', 'first-project-voice', 'first-background', 'first-undo-after-export', 'first-ceiling', 'first-failed-take', 'first-word-rule', 'first-brief-changed', 'first-project-check', 'first-batch', 'first-language-sync', 'first-board', 'first-review-comment', 'first-bin', 'first-home-search', 'first-batch-export'])
+    expect(TIPS.map((t) => t.id)).toEqual(['first-upload', 'first-silent', 'first-question', 'first-just-do-it', 'first-voice-design', 'first-project-voice', 'first-background', 'first-undo-after-export', 'first-ceiling', 'first-failed-take', 'first-word-rule', 'first-brief-changed', 'first-project-check', 'first-batch', 'first-language-sync', 'first-board', 'first-review-comment', 'first-bin', 'first-template', 'first-home-search', 'first-batch-export'])
     for (const t of TIPS) { expect(t.text.length).toBeGreaterThan(20); expect(t.slug).toMatch(/^[a-z-]+$/) }
   })
 

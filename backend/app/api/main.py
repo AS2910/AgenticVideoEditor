@@ -71,6 +71,7 @@ from app.store import shares as shares_store, presets as presets_store, language
 from app.store import comments as comments_store
 from app.store import bin as bin_store
 from app.store import home as home_store
+from app.store import templates as templates_store
 from app.notify import digest as digest_mod, email as email_mod
 from app.render import captions as captions_mod, deliver as deliver_mod
 from app.jobs import exports as exports_mod
@@ -1985,6 +1986,7 @@ def delete_account(owner: str = Depends(current_owner)) -> Response:
         repo.delete_meta(f"{key}:{owner}")
     with database.tx() as c:          # D4: their pins
         c.execute("DELETE FROM pins WHERE owner = ?", (owner,))
+        templates_store.purge_owner_in(c, owner)   # D1: their templates
     repo.delete(_user_store(owner))   # the designs' spend, kept under the owner's own id
     shutil.rmtree(artifacts.root / _user_store(owner), ignore_errors=True)
     return Response(status_code=204)
@@ -2146,6 +2148,8 @@ def _suggest_brief(video_id: str, addition: str, why: str) -> str | None:
 class ProjectCreate(BaseModel):
     name: str
     brief: str = ""
+    # D1: start from a template (a starter's id or one of the owner's own).
+    template_id: str | None = None
 
 
 class ProjectUpdate(BaseModel):
@@ -2196,6 +2200,8 @@ def list_folders(archived: bool = False, owner: str = Depends(current_owner)) ->
 
 @app.post("/projects", status_code=201)
 def create_folder(req: ProjectCreate, owner: str = Depends(current_owner)) -> dict:
+    if req.template_id:
+        return _folder_from_template(req, owner)
     project = repo.create_project(owner, _project_name_or_422(req.name), req.brief.strip())
     return _folder_dict(project)
 
@@ -3847,6 +3853,120 @@ def restore_from_bin(kind: Literal["video", "project", "voice"], item_id: str, o
     return {"kind": kind, "id": item_id, **done}
 
 
+# ── D1: project templates ────────────────────────────────────────────────────
+#
+# Save as template keeps what a project shares (the brief's current text,
+# its words and rules, export presets, defaults for new videos, ceiling) as
+# a template; New project starts from one. Voices are referenced, never
+# copied at the vendor: a voice already in the owner's voices is kept by
+# reference (a project made later shares it while it is still theirs); a
+# voice that belongs to the project asks the move's question first: copy it
+# into the template, or keep it in my voices. Three starters (Festive ad,
+# Product explainer, Interview cleanup) are read-only. Behind
+# `projects.reuse` (404 when off).
+
+class TemplateSave(BaseModel):
+    name: str
+    # The project's own voices: copy into the template, or keep in my voices.
+    voice: Literal["copy", "keep"] | None = None
+
+
+class TemplateRename(BaseModel):
+    name: str
+
+
+def _template_or_404(template_id: str, owner: str) -> templates_store.Template:
+    found = templates_store.get(database, owner, template_id)
+    if found is None:
+        raise HTTPException(status_code=404, detail="That template is gone.")
+    return found
+
+
+@app.get("/templates")
+def list_templates(owner: str = Depends(current_owner)) -> dict:
+    """The starters, then the caller's own templates, newest first."""
+    _reuse_flag(owner)
+    return {"templates": [t.to_dict() for t in templates_store.list_for(database, owner)]}
+
+
+@app.post("/projects/{project_id}/template", status_code=201)
+def save_template(project_id: str, req: TemplateSave, owner: str = Depends(current_owner)):
+    """Save the project as a template. A voice that belongs to the project
+    (not in the owner's voices) needs `voice`: without it the answer is 409
+    naming the voices, as when a video moves out."""
+    _reuse_flag(owner)
+    project = _owned_project(project_id, owner)
+    try:
+        name = templates_store.clean_name(req.name)
+    except templates_store.TemplateError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    shared = _project_voices(project_id)
+    mine = {v["voice_id"] for v in _my_voices(owner)}
+    own = [v for v in shared if v["voice_id"] not in mine]
+    if own and req.voice is None:
+        names = ", ".join(v["name"] for v in own)
+        return JSONResponse(status_code=409, content={
+            "detail": f"{names} {'belongs' if len(own) == 1 else 'belong'} to {project.name}. "
+                      "Copy the voice into the template, or keep it in your voices.",
+            "voices": [{"voice_id": v["voice_id"], "name": v["name"]} for v in own]})
+    if own and req.voice == "keep":
+        _keep_in_my_voices(owner, own, project_id)
+        mine |= {v["voice_id"] for v in own}
+    with database.tx() as c:
+        data = templates_store.snapshot_in(c, project_id, owner)
+    data["voices"] = [{**{k: v for k, v in entry.items() if k not in ("used_in",)},
+                       "ref": "mine" if entry["voice_id"] in mine else "copy"} for entry in shared]
+    return templates_store.save(database, owner, name, data, source_project_id=project_id).to_dict()
+
+
+@app.patch("/templates/{template_id}")
+def rename_template(template_id: str, req: TemplateRename, owner: str = Depends(current_owner)) -> dict:
+    _reuse_flag(owner)
+    _template_or_404(template_id, owner)
+    try:
+        return templates_store.rename(database, owner, template_id, req.name).to_dict()  # type: ignore[union-attr]
+    except templates_store.TemplateError as exc:
+        raise HTTPException(status_code=403 if templates_store.starter(template_id) else 422, detail=str(exc))
+
+
+@app.delete("/templates/{template_id}", status_code=204)
+def delete_template(template_id: str, owner: str = Depends(current_owner)) -> Response:
+    """Delete one of the caller's templates; projects made from it keep everything."""
+    _reuse_flag(owner)
+    _template_or_404(template_id, owner)
+    try:
+        templates_store.remove(database, owner, template_id)
+    except templates_store.TemplateError as exc:
+        raise HTTPException(status_code=403, detail=str(exc))
+    return Response(status_code=204)
+
+
+def _folder_from_template(req: ProjectCreate, owner: str) -> dict:
+    """A new project from a template: its brief (version 1), words and rules,
+    presets, defaults and ceiling, and its voices shared in (a referenced
+    voice only while it is still in the owner's voices). No videos."""
+    _reuse_flag(owner)
+    template = _template_or_404(req.template_id or "", owner)
+    data = template.data
+    settings_ = data.get("settings") if isinstance(data.get("settings"), dict) else {}
+    ceiling = data.get("ceiling_usd")
+    project = repo.create_project(owner, _project_name_or_422(req.name), (req.brief.strip() or data.get("brief") or "").strip(),
+                                  settings=settings_, ceiling_usd=float(ceiling) if isinstance(ceiling, (int, float)) and ceiling > 0 else None)
+    mine = {v["voice_id"] for v in _my_voices(owner)}
+    voices_ = [{k: v for k, v in entry.items() if k != "ref"} | {"at": _now()}
+               for entry in data.get("voices") or [] if entry.get("voice_id") and (entry.get("ref") != "mine" or entry["voice_id"] in mine)]
+    if voices_:
+        _set_project_voices(project.project_id, voices_)
+        for entry in voices_:
+            getattr(voice, "register_clone", lambda vid: None)(entry["voice_id"])
+    with database.tx() as c:
+        templates_store.apply_in(c, project.project_id, data, owner)
+        activity_log.record(c, "project.from_template", user_actor(owner), project_id=project.project_id,
+                            target=template.template_id, payload={"template": template.name, "starter": template.starter,
+                                                                  **templates_store.summary(data)})
+    return _folder_dict(repo.get_project(project.project_id))
+
+
 # ── D4: pins, archive, search ────────────────────────────────────────────────
 
 def _last_edited(video_id: str, created_at: str) -> str:
@@ -3863,9 +3983,10 @@ def _not_archived(project_id: str, owner: str) -> None:
         raise HTTPException(status_code=423, detail=home_store.ARCHIVED)
 
 
-# Writes that stay open on an archived project: archiving itself, deleting
-# (to the Bin), and a render or single export of what is already there.
-_ARCHIVE_SELF = re.compile(r"^/projects/[^/]+/archive$")
+# Writes that stay open on an archived project: archiving itself, saving it
+# as a template (D1: it only reads the project), deleting (to the Bin), and a
+# render or single export of what is already there.
+_ARCHIVE_SELF = re.compile(r"^/projects/[^/]+/(archive|template)$")
 _BARE_ITEM = re.compile(r"^/(videos|projects)/[^/]+$")
 _RENDER_ONLY = re.compile(r"^/videos/[^/]+/(renders|export)$")
 _ARCHIVE_TARGET = re.compile(r"^/(videos|projects)/([A-Za-z0-9_-]+)(/|$)")
@@ -4141,6 +4262,25 @@ class MoveVideoRequest(BaseModel):
     voice: Literal["copy", "keep"] | None = None
 
 
+def _keep_in_my_voices(owner: str, going: list[dict], from_project: str) -> None:
+    """A project's voices kept in the owner's own voices, for any project
+    (a name already taken gets the project's name after it). Shared by a
+    video's move out and Save as template (D1)."""
+    mine = _my_voices(owner)
+    have = {m["voice_id"] for m in mine}
+    taken = {m["name"].lower() for m in mine}
+    for v in going:
+        if v["voice_id"] in have:
+            continue
+        name = v["name"] if v["name"].lower() not in taken else f"{v['name']} ({repo.get_project(from_project).name})"
+        mine.append({"voice_id": v["voice_id"], "name": name, "seconds": 0.0, "at": _now(), "kind": v.get("kind") or "designed",
+                     "consent_granted_at": v.get("consent_granted_at"), "consent_approximate": bool(v.get("consent_approximate")),
+                     "sample_sha": v.get("sample_sha"), "description": v.get("description"),
+                     "source": {"project_id": from_project}})
+        taken.add(name.lower())
+    _set_my_voices(owner, mine)
+
+
 @app.patch("/videos/{project_id}")
 def move_video(project_id: str, req: MoveVideoRequest, owner: str = Depends(current_owner)):
     """Move a video into a project, or out (`project_id` null). Its turns,
@@ -4171,19 +4311,7 @@ def move_video(project_id: str, req: MoveVideoRequest, owner: str = Depends(curr
                          "description": v.get("description")} for v in going if v["voice_id"] not in have)
             repo.set_settings(project_id, made_voices=made)
         elif going and req.voice == "keep":
-            mine = _my_voices(owner)
-            have = {m["voice_id"] for m in mine}
-            taken = {m["name"].lower() for m in mine}
-            for v in going:
-                if v["voice_id"] in have:
-                    continue
-                name = v["name"] if v["name"].lower() not in taken else f"{v['name']} ({repo.get_project(leaving).name})"
-                mine.append({"voice_id": v["voice_id"], "name": name, "seconds": 0.0, "at": _now(), "kind": v.get("kind") or "designed",
-                             "consent_granted_at": v.get("consent_granted_at"), "consent_approximate": bool(v.get("consent_approximate")),
-                             "sample_sha": v.get("sample_sha"), "description": v.get("description"),
-                             "source": {"project_id": leaving}})
-                taken.add(name.lower())
-            _set_my_voices(owner, mine)
+            _keep_in_my_voices(owner, going, leaving)
     repo.set_folder(project_id, target_id, actor=user_actor(owner))
     return _project_dict(repo.get(project_id))
 
