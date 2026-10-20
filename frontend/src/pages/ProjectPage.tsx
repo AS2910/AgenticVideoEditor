@@ -274,7 +274,7 @@ export function ProjectPage({ me, projectId, onUpload, uploading, error, onDelet
         </div>
         {deleting && (
           <div className="flex flex-wrap items-center gap-3 rounded-xl border-[1.5px] border-destructive bg-card p-4" role="group" aria-label={`Delete ${project.name}?`} data-testid="delete-project">
-            <span className="flex-1 text-sm">Delete <strong>{project.name}</strong>? Its {detail.videos.length} {detail.videos.length === 1 ? 'video' : 'videos'} can go with it, or stay as standalone videos. Project voices go unless kept in your voices.</span>
+            <span className="flex-1 text-sm">Delete <strong>{project.name}</strong>? Its {detail.videos.length} {detail.videos.length === 1 ? 'video' : 'videos'} can go with it, or stay as standalone videos. {enabled('projects.reuse') ? 'It goes to the Bin for 30 days and can be restored from there; after that, project voices go unless kept in your voices.' : 'It is kept for 30 days, then goes for good; project voices go with it unless kept in your voices.'}</span>
             <button type="button" className="btn sm" onClick={() => setDeleting(false)} disabled={busy === 'delete'}>Keep the project</button>
             <button type="button" className="btn sm" onClick={() => void remove('keep')} disabled={busy === 'delete'}>Delete, keep the videos</button>
             <button type="button" className="btn sm border-destructive text-destructive" onClick={() => void remove('delete')} disabled={busy === 'delete'}>Delete the videos too</button>

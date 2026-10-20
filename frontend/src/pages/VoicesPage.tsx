@@ -9,6 +9,7 @@ import {
 import { cn } from '@/lib/utils'
 import { useOnboarding } from '../guides/onboarding'
 import { useTour } from '../tour/engine'
+import { useFlags } from '../flags/useFlags'
 import { hrefFor } from '../lib/route'
 import { Bolt, PlayGlyph, Shell, StopGlyph } from './Shell'
 import { barsFor, firstName, said, whenLabel } from './fmt'
@@ -61,6 +62,8 @@ interface VoicesPageProps { me: Me | null }
  *  black pane, three ways to add one to keep. */
 export function VoicesPage({ me }: VoicesPageProps) {
   const onboarding = useOnboarding()
+  // D3: a removed voice goes to the Bin, said as such.
+  const binOn = useFlags().enabled('projects.reuse')
   const tour = useTour()
   /** A voice is now yours: the checklist's Save a voice is done, and a Show me tour waiting on it moves on. */
   const voiceIsYours = () => { onboarding.markChecklist('save-voice'); tour.notify('voice-kept') }
@@ -302,7 +305,7 @@ export function VoicesPage({ me }: VoicesPageProps) {
                             </div>
                             {removing === v.voice_id ? (
                               <div className="flex flex-col gap-2 text-[13px] text-muted-foreground" role="group" aria-label={`Remove ${v.name}?`}>
-                                <span>Remove <strong className="font-semibold text-foreground">{v.name}</strong>? Deleting the voice withdraws its consent; projects keep the takes already made.</span>
+                                <span>Remove <strong className="font-semibold text-foreground">{v.name}</strong>? {binOn ? 'It goes to the Bin for 30 days and cannot be picked; restore it from there until then.' : 'It cannot be picked, and after 30 days it is deleted for good.'} Then it is deleted at the voice service; its consent record is kept. Projects keep the takes already made.</span>
                                 <span className="flex gap-2">
                                   <button type="button" className="btn sm" onClick={() => setRemoving(null)} autoFocus>Keep</button>
                                   <button type="button" className="btn sm border-destructive text-destructive" onClick={() => void remove(v)} disabled={busyVoice === v.voice_id}>{busyVoice === v.voice_id ? 'Removing…' : 'Remove'}</button>

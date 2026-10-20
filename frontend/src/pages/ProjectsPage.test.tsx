@@ -147,7 +147,7 @@ describe('Home (projects as folders)', () => {
     await userEvent.click(screen.getByRole('menuitem', { name: 'Delete…' }))
     expect(onDelete).not.toHaveBeenCalled()
     expect(screen.getByRole('button', { name: 'Keep' })).toHaveFocus()
-    await userEvent.click(screen.getByRole('button', { name: 'Delete for good' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Delete' }))
     expect(screen.getByRole('status')).toHaveTextContent('Deleted goa-beach.mov')
     await waitFor(() => expect(onDelete).toHaveBeenCalledWith('p1'))
   })

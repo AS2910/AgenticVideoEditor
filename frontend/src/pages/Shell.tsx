@@ -3,8 +3,9 @@ import type { Me } from '../api'
 import { hrefFor } from '../lib/route'
 import { cn } from '@/lib/utils'
 import { initialOf } from './fmt'
+import { useFlags } from '../flags/useFlags'
 
-export type ShellPage = 'projects' | 'voices' | 'usage' | 'settings' | 'billing' | 'help'
+export type ShellPage = 'projects' | 'voices' | 'usage' | 'settings' | 'billing' | 'help' | 'bin'
 const NAV: { page: ShellPage; label: string }[] = [
   { page: 'projects', label: 'Home' }, { page: 'voices', label: 'Voices' }, { page: 'usage', label: 'Usage' }, { page: 'settings', label: 'Settings' }, { page: 'help', label: 'Help' },
 ]
@@ -58,6 +59,9 @@ interface ShellProps {
 
 /** The chrome of the account pages: the wordmark, the nav, a slot on the right, the account circle. */
 export function Shell({ active, right, me, children, mainClassName }: ShellProps) {
+  // D3: the Bin sits before Help while projects.reuse is on.
+  const binOn = useFlags().enabled('projects.reuse')
+  const nav = binOn ? [...NAV.slice(0, -1), { page: 'bin' as const, label: 'Bin' }, NAV[NAV.length - 1]] : NAV
   return (
     <div className="flex min-h-dvh flex-col bg-background text-foreground">
       {/* The skip link focuses main by hand: a "#main" href would change the route. */}
@@ -65,7 +69,7 @@ export function Shell({ active, right, me, children, mainClassName }: ShellProps
       <header className="flex min-h-[62px] flex-wrap items-center gap-x-[22px] gap-y-2 border-b-[1.5px] border-foreground bg-card px-4 py-2.5 sm:px-6">
         <Wordmark />
         <nav className="nav flex flex-wrap gap-1" aria-label="Main">
-          {NAV.map((n) => (
+          {nav.map((n) => (
             <a key={n.page} href={hrefFor({ page: n.page })} aria-current={n.page === active ? 'page' : undefined}>{n.label}</a>
           ))}
         </nav>

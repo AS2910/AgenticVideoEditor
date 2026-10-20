@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react'
  *  read on load and on every change. `#`, `#home` or `#projects` is the
  *  start; `#v/p12` opens a video in the editor and `#v/p12/export` its
  *  export page; `#p/f3` is a project (a folder of videos); the account pages
- *  are `#voices`, `#usage`, `#settings`, `#billing` and `#help` (with an
+ *  are `#voices`, `#usage`, `#settings`, `#billing`, `#bin` (D3) and `#help` (with an
  *  article: `#help/<slug>`). Usage takes a scope: `#usage/v/p12` (one
  *  video), `#usage/p/f3` (one project), `#usage/none` (standalone videos).
  *  An old `#p12` link still opens the video. A2: `#v/p12@3.5` opens the
@@ -17,6 +17,7 @@ export type Route =
   | { page: 'usage'; scope?: UsageScope | null }
   | { page: 'settings' }
   | { page: 'billing' }
+  | { page: 'bin' }
   | { page: 'help'; slug?: string | null }
   | { page: 'folder'; projectId: string }
   | { page: 'editor'; projectId: string; t?: number | null }
@@ -39,7 +40,7 @@ export function parseRoute(hash: string): Route {
   }
   const help = /^help(?:\/([A-Za-z0-9_-]+))?$/.exec(h)
   if (help) return { page: 'help', slug: help[1] ?? null }
-  if (h === 'voices' || h === 'settings' || h === 'billing') return { page: h }
+  if (h === 'voices' || h === 'settings' || h === 'billing' || h === 'bin') return { page: h }
   return { page: 'projects' }
 }
 

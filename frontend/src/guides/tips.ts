@@ -20,6 +20,7 @@ export const TIPS: TipDef[] = [
   { id: 'first-language-sync', title: 'Out of sync', text: 'The master shipped a change since this language version was made. Sync this change voices only the lines that changed, in this language.', link: 'Language versions', slug: 'language-versions' },
   { id: 'first-board', title: 'Board', text: 'Each column is a stage. Drag a card to move it, or use Move to on the card. Sending a review link, a reviewer\'s approval and a new edit on an Approved video move cards for you.', link: 'Stages and the board', slug: 'stages-and-the-board' },
   { id: 'first-review-comment', title: 'Client comments', text: 'Each mark on the scrubber is a reviewer\'s comment at its time. Reply, resolve it, or hand it to Voltage with Do what the client asked.', link: 'Client review links', slug: 'client-review' },
+  { id: 'first-bin', title: 'The Bin', text: 'Deleted things wait here for 30 days. Restore puts a video back in its project, or makes it standalone when the project is gone.', link: 'The Bin', slug: 'the-bin' },
   { id: 'first-batch-export', title: 'Exported', text: 'Each file is in its preset\'s frame and loudness. Download them one by one or all as a zip, or share one link that plays and downloads every file.', link: 'Export many videos at once', slug: 'batch-export' },
 ]
 

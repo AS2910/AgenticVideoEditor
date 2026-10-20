@@ -887,3 +887,33 @@ export interface ProjectEvent {
   you?: boolean
 }
 export interface EventPage { events: ProjectEvent[]; next: number | null }
+
+/** D3: one item in the Bin. */
+export type BinKind = 'video' | 'project' | 'voice'
+export interface BinItem {
+  kind: BinKind
+  id: string
+  name: string
+  deleted_at: string
+  deleted_by: string
+  deleted_by_you?: boolean
+  days_left: number
+  /** A video: the project it was in, and whether that project is in the Bin too. */
+  project_id: string | null
+  project_name: string | null
+  project_in_bin?: boolean
+  with_project?: boolean
+  /** A project: how many videos were deleted with it. */
+  videos?: number
+  /** A voice: it carries a consent record (kept after the purge). */
+  consent?: boolean
+}
+export interface BinRestored {
+  kind: BinKind
+  id: string
+  project_id?: string | null
+  project_name?: string | null
+  standalone_because?: string | null
+  videos?: string[]
+  name?: string | null
+}

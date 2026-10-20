@@ -87,6 +87,8 @@ export function ProjectsPage({ me, projects, folders = [], onOpen, onUpload, onS
   const briefChips = useFlags().enabled('projects.consistency')
   // B2: a language version says its language; a master shows its versions as chips.
   const languageChips = useFlags().enabled('projects.batch')
+  // D3: deleting moves to the Bin, said as such.
+  const binOn = useFlags().enabled('projects.reuse')
   const [over, setOver] = useState(false)
   const [dest, setDest] = useState<string>('none')
   const [tab, setTab] = useState<Tab>('all')
@@ -293,15 +295,16 @@ export function ProjectsPage({ me, projects, folders = [], onOpen, onUpload, onS
                     <li key={id} className="min-w-0" data-project={p.project_id ?? 'none'}>
                       {deleting === id ? (
                         <div className="flex min-h-[200px] flex-col justify-center gap-2 rounded-xl border-[1.5px] border-line2 bg-card p-4 text-[13px] text-muted-foreground" role="status">
-                          <span>Deleted <strong className="font-semibold text-foreground">{p.filename}</strong>.</span>
+                          <span>{binOn ? 'Moved ' : 'Deleted '}<strong className="font-semibold text-foreground">{p.filename}</strong>{binOn ? <> to the <a href={hrefFor({ page: 'bin' })} className="text-foreground">Bin</a>.</> : '.'}</span>
                           <button type="button" className="btn sm self-start" onClick={undo}>Undo</button>
                         </div>
                       ) : confirming === id ? (
                         <div className="flex min-h-[200px] flex-col justify-center gap-2 rounded-xl border-[1.5px] border-destructive bg-card p-4 text-[13px] text-muted-foreground" role="group" aria-label={`Delete ${p.filename}?`}>
-                          <span>Delete <strong className="font-semibold text-foreground">{p.filename}</strong> for good? Its media and every take go with it.{p.project_id ? ' The project and its shared voices stay.' : ''}</span>
+                          {/* D3: a deleted video waits 30 days (F8); with the Bin on, it can be restored from there. */}
+                          <span>Delete <strong className="font-semibold text-foreground">{p.filename}</strong>? {binOn ? 'It goes to the Bin for 30 days with its media and takes; restore it from there until then.' : 'It is kept for 30 days with its media and takes, then goes for good.'}{p.project_id ? ' The project and its shared voices stay.' : ''}</span>
                           <span className="flex flex-wrap gap-2">
                             <button ref={keep} type="button" className="btn sm" onClick={() => setConfirming(null)}>Keep</button>
-                            <button type="button" className="btn sm border-destructive text-destructive" onClick={() => begin(id)}>Delete for good</button>
+                            <button type="button" className="btn sm border-destructive text-destructive" onClick={() => begin(id)}>{binOn ? 'Move to the Bin' : 'Delete'}</button>
                           </span>
                         </div>
                       ) : (

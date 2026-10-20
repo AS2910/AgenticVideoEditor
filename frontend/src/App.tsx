@@ -47,6 +47,7 @@ import { SendForReview } from './review/SendForReview'
 import { ReviewComments } from './review/Comments'
 import { useReviewComments } from './review/useReviewComments'
 import { useFlags } from './flags/useFlags'
+import { BinPage } from './pages/BinPage'
 import { LanguageDialog, SyncChip } from './pages/LanguageVersions'
 import { StageWarning } from './pages/StageWarning'
 import { approvedWords } from './pages/feedWords'
@@ -1375,6 +1376,7 @@ function Studio() {
     if (route.page === 'usage') return <UsagePage me={me} scope={route.scope ?? null} />
     if (route.page === 'settings') return <SettingsPage me={me} onSignedOut={signedOutNow} />
     if (route.page === 'billing') return <BillingPage me={me} />
+    if (route.page === 'bin') return <BinPage me={me} onRestored={() => void refreshProjects()} />
     if (route.page === 'export') {
       return <ExportPage projectId={route.projectId} me={me} onBack={() => go({ page: 'editor', projectId: route.projectId })} />
     }

@@ -5,7 +5,12 @@ sample. A voice at the vendor goes too (through `delete_voice`) unless some
 live voice list still holds it. Charges are never deleted: each purged item
 leaves its name in `purged_items`, so Usage still shows what it was.
 
-Not scheduled: run it by hand.
+Consent records outlive the purge (D3): a purged video's speaker consent
+and a purged voice's consent stay in `purged_items.consent` for the legal
+retention period.
+
+Not scheduled by default: run it by hand, or set AVE_PURGE_DAILY=1 for the
+server to run it once a day (`PurgeScheduler`).
 
     python -m app.purge --days 30 --dry-run      # what would go
     python -m app.purge --days 30                # do it
@@ -17,6 +22,7 @@ import json
 import logging
 import shutil
 import sys
+import threading
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -38,6 +44,7 @@ class PurgeReport:
     storage: list[str] = field(default_factory=list)         # paths removed (or that would be)
     vendor_voices: list[str] = field(default_factory=list)   # deleted at the vendor (or would be)
     vendor_failed: list[str] = field(default_factory=list)   # still at the vendor: remove by hand
+    consent_kept: list[str] = field(default_factory=list)    # "<kind>:<id>" whose consent record stays
 
     def to_dict(self) -> dict:
         return dict(self.__dict__)
@@ -98,7 +105,10 @@ def purge(db: Database, artifacts_root: str | Path, older_than_days: float = 30,
             if dry_run:
                 continue
             name = json.loads(v["source"] or "{}").get("filename") or vid
-            _tombstone(c, "video", vid, name, v["owner"], v["project_id"], v["workspace_id"], v["deleted_at"])
+            consent = {"granted_at": v["consent_at"]} if v["consent_at"] else None
+            if consent:
+                report.consent_kept.append(f"video:{vid}")
+            _tombstone(c, "video", vid, name, v["owner"], v["project_id"], v["workspace_id"], v["deleted_at"], consent)
             c.execute("DELETE FROM videos WHERE id = ?", (vid,))
             for table in PROJECT_TABLES:
                 if table != "usage":
@@ -147,9 +157,13 @@ def purge(db: Database, artifacts_root: str | Path, older_than_days: float = 30,
                 sha = v.get("sample_sha")
                 if sha and sha not in in_use:
                     report.storage += [str(p) for p in sorted((root / f"user-{owner}").glob(f"{sha}.*"))]
+                consent = ({"granted_at": v["consent_granted_at"], "approximate": bool(v.get("consent_approximate"))}
+                           if v.get("consent_granted_at") else None)
+                if consent:
+                    report.consent_kept.append(f"voice:{owner}:{v['voice_id']}")
                 if not dry_run:
                     _tombstone(c, "voice", f"{owner}:{v['voice_id']}", v.get("name") or v["voice_id"], owner, None, None,
-                               v.get("deleted_at"))
+                               v.get("deleted_at"), consent)
             if not dry_run:
                 c.execute("UPDATE meta SET value = ? WHERE key = ?", (json.dumps(left), f"my_voices:{owner}"))
 
@@ -181,9 +195,47 @@ def purge(db: Database, artifacts_root: str | Path, older_than_days: float = 30,
 
 
 def _tombstone(c, kind: str, item_id: str, name: str, owner: str, project_id: str | None,
-               workspace_id: str | None, deleted_at: str | None) -> None:
-    c.execute("INSERT OR REPLACE INTO purged_items (kind, item_id, name, owner, project_id, workspace_id, deleted_at, purged_at) "
-              "VALUES (?, ?, ?, ?, ?, ?, ?, ?)", (kind, item_id, name, owner, project_id, workspace_id, deleted_at, now_iso()))
+               workspace_id: str | None, deleted_at: str | None, consent: dict | None = None) -> None:
+    c.execute("INSERT OR REPLACE INTO purged_items (kind, item_id, name, owner, project_id, workspace_id, deleted_at, purged_at, consent) "
+              "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", (kind, item_id, name, owner, project_id, workspace_id, deleted_at, now_iso(),
+                                                    json.dumps(consent) if consent else None))
+
+
+def consent_records(db: Database, owner: str) -> list[dict]:
+    """The consent records the purge kept for `owner` (D3): kind, id, name, consent."""
+    with db.tx() as c:
+        rows = c.execute("SELECT kind, item_id, name, consent, purged_at FROM purged_items "
+                         "WHERE owner = ? AND consent IS NOT NULL ORDER BY purged_at", (owner,)).fetchall()
+    return [{"kind": r["kind"], "item_id": r["item_id"], "name": r["name"], "consent": json.loads(r["consent"]),
+             "purged_at": r["purged_at"]} for r in rows]
+
+
+class PurgeScheduler:
+    """Runs the purge once a day on a daemon thread (D3). Off unless the
+    server is started with AVE_PURGE_DAILY=1; the first run is a day after
+    start, so a restart never purges at once."""
+
+    def __init__(self, run: Callable[[], object], every: float = 24 * 3600.0) -> None:
+        self.run, self.every = run, every
+        self._stop = threading.Event()
+        self._thread: threading.Thread | None = None
+
+    def start(self) -> None:
+        if self._thread is not None:
+            return
+        self._thread = threading.Thread(target=self._loop, daemon=True, name="daily-purge")
+        self._thread.start()
+
+    def _loop(self) -> None:
+        while not self._stop.wait(self.every):
+            try:
+                report = self.run()
+                log.info("daily purge: %s", getattr(report, "to_dict", lambda: report)())
+            except Exception:  # noqa: BLE001 - tomorrow tries again
+                log.exception("daily purge")
+
+    def stop(self) -> None:
+        self._stop.set()
 
 
 def main(argv: list[str] | None = None) -> int:

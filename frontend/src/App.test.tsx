@@ -423,7 +423,7 @@ describe('App projects (Phase 9a)', () => {
 
     await user.click(await screen.findByRole('button', { name: 'More for sample-ad.mp4' }))
     await user.click(screen.getByRole('menuitem', { name: 'Delete…' }))
-    await user.click(screen.getByRole('button', { name: /delete for good/i }))
+    await user.click(screen.getByRole('button', { name: /^delete$/i }))
 
     // The delete waits five seconds behind "Deleted · Undo" before it goes through (UX-6).
     await waitFor(() => expect(f.mock.calls.some(

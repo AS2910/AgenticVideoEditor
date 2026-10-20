@@ -8,7 +8,7 @@ import type {
   ProjectSettings, Autonomy, Effort, Plan, Mix, Selection, Candidate, Reading, Sight, ChatMessage,
   ProjectFolder, ProjectDetailFolder, ProjectFile, HelpArticle, Onboarding, ProjectVoice,
   ActivityJob, TurnView, RenderState, BriefVersion, BriefChange, BriefUpdateRun, ProjectRule, RuleKind, RuleData, CheckPage, Batch, ExportPreset, ExportPresetPage, ExportPresetChange, Preflight, BatchExport, ShareLink, PublicShare,
-  PublicComment, ReviewAnswer, ReviewComment, ReviewLinkRequest,
+  PublicComment, ReviewAnswer, ReviewComment, ReviewLinkRequest, BinItem, BinKind, BinRestored,
 } from './types'
 
 const BASE = '/api'
@@ -487,6 +487,9 @@ export const undoArrangement = (id: string) => post<ArrangementView>(`/videos/${
 export const getUserSettings = () => get<UserSettings>('/me/settings')
 export const updateUserSettings = (change: Partial<UserSettings>) => put<UserSettings>('/me/settings', change)
 /** Step 0 (FLAGS): the feature flags that are on for you (phase flags such as `projects.batch`). */
+// D3: the Bin.
+export const getBin = () => get<{ items: BinItem[]; days: number }>('/bin')
+export const restoreFromBin = (kind: BinKind, id: string) => post<BinRestored>(`/bin/${kind}/${id}/restore`)
 export const getMyFlags = async () => (await get<{ flags: string[] }>('/me/flags')).flags
 /** Everything of yours: every project, take and voice, and the consent records. */
 export async function deleteAccount(): Promise<void> {

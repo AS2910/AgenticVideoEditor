@@ -61,6 +61,7 @@ from app.orchestrator.clones import CloneService, VoiceChoice
 from app.orchestrator.pipeline import run_edit
 from app.store.db import Database
 from app.flags import FlagStore
+from app.purge import PurgeScheduler
 from app.usage import (
     Ledger, SpendCeilingReached, WHISPER_USD_PER_MINUTE, claude_usd, current_turn, money, month_name, month_start,
 )
@@ -68,6 +69,7 @@ from app import auth
 from app.store import briefs, checks as checks_store, events as activity_log, rules, stages
 from app.store import shares as shares_store, presets as presets_store, languages as langs
 from app.store import comments as comments_store
+from app.store import bin as bin_store
 from app.notify import digest as digest_mod, email as email_mod
 from app.render import captions as captions_mod, deliver as deliver_mod
 from app.jobs import exports as exports_mod
@@ -1469,6 +1471,7 @@ def get_my_usage(period: Literal["week", "month", "all"] = "month", scope: str =
                                 folder_id=r.folder_id) for r in repo.list(owner, include_deleted=True)]
     projects += [SimpleNamespace(source=SimpleNamespace(project_id=vid, filename=name), folder_id=folder)
                  for vid, (name, folder) in _purged_names(owner)["video"].items()]
+    live_ids = {r.source.project_id for r in repo.list(owner)}
     turns_by_folder: dict[str, int] = {}
     for r in projects:
         pid = r.source.project_id
@@ -1489,7 +1492,9 @@ def get_my_usage(period: Literal["week", "month", "all"] = "month", scope: str =
         })
     # Folders: each project's share, from the rows charged while its videos were in it.
     by_project = [{
-        "project_id": p.project_id, "name": p.name, "videos": sum(1 for r in projects if r.folder_id == p.project_id),
+        # D3: a video in the Bin (or purged) still counts its spend, not as one of the project's videos.
+        "project_id": p.project_id, "name": p.name, "videos": sum(1 for r in projects if r.folder_id == p.project_id
+                                                                  and r.source.project_id in live_ids),
         "turns": turns_by_folder.get(p.project_id, 0), "spent_usd": round(ledger.spent_usd_by_folder(p.project_id, since), 4),
         "ceiling_usd": p.ceiling_usd,
     } for p in repo.list_projects(owner)]
@@ -3787,6 +3792,43 @@ def delete_folder(project_id: str, videos: Literal["delete", "keep"], owner: str
     _owned_project(project_id, owner)
     repo.soft_delete_project(project_id, owner, keep_videos=videos == "keep")
     return Response(status_code=204)
+
+
+# ── D3: the Bin ──────────────────────────────────────────────────────────────
+# What was deleted (F8) waits here 30 days: who deleted it, when, the days it
+# has left, and Restore. The purge (app.purge) takes what is due.
+
+def _reuse_flag(owner: str) -> None:
+    if not flags.enabled("projects.reuse", owner):
+        raise HTTPException(status_code=404, detail="Not found")
+
+
+@app.get("/bin")
+def list_bin(owner: str = Depends(current_owner)) -> dict:
+    """Everything of the caller's in the Bin, most recently deleted first."""
+    _reuse_flag(owner)
+    found = bin_store.items(database, owner)
+    for item in found:
+        item["deleted_by_you"] = item["deleted_by"] == owner
+    return {"items": found, "days": bin_store.BIN_DAYS}
+
+
+@app.post("/bin/{kind}/{item_id}/restore")
+def restore_from_bin(kind: Literal["video", "project", "voice"], item_id: str, owner: str = Depends(current_owner)) -> dict:
+    """Put one item back. A video goes back to its project, or is standalone
+    when that project is in the Bin or gone; a project brings back the videos
+    deleted with it; a voice is pickable again."""
+    _reuse_flag(owner)
+    try:
+        if kind == "video":
+            done = bin_store.restore_video(database, owner, item_id, owner)
+        elif kind == "project":
+            done = bin_store.restore_project(database, owner, item_id, owner)
+        else:
+            done = bin_store.restore_voice(database, owner, item_id, owner)
+    except bin_store.NotInBin:
+        raise HTTPException(status_code=404, detail="That is not in the Bin any more.") from None
+    return {"kind": kind, "id": item_id, **done}
 
 
 @app.get("/projects/{project_id}/events")
@@ -6825,6 +6867,30 @@ async def _lifespan_with_digests(a):
 
 
 app.router.lifespan_context = _lifespan_with_digests
+
+
+# D3: the purge runs once a day only when the server is started with
+# AVE_PURGE_DAILY=1 (off by default; `python -m app.purge` by hand otherwise).
+def _purge_due():
+    from app.purge import purge, _vendor_delete
+    return purge(database, artifacts.root, BIN_PURGE_DAYS,
+                 delete_voice=_vendor_delete(settings, database, settings.data_dir))
+
+
+BIN_PURGE_DAYS = bin_store.BIN_DAYS
+daily_purge = PurgeScheduler(_purge_due)
+_lifespan_before_d3 = app.router.lifespan_context
+
+
+@contextlib.asynccontextmanager
+async def _lifespan_with_purge(a):
+    if settings.purge_daily:
+        daily_purge.start()
+    async with _lifespan_before_d3(a) as state:
+        yield state
+
+
+app.router.lifespan_context = _lifespan_with_purge
 
 
 # The reviewer's side (no account; the link is the key).

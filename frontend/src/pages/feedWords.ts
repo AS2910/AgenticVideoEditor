@@ -64,7 +64,8 @@ export function sentence(events: ProjectEvent[], nameOf: (videoId: string | null
     case 'video.moved_in': return `${by} moved ${video} into this project`
     case 'video.moved_out': return `${by} moved ${video} out of this project`
     case 'video.deleted': return `${by} deleted ${video}`
-    case 'video.restored': return `${by} restored ${video}`
+    case 'video.restored': return `${by} restored ${video} from the Bin`
+    case 'project.restored': return `${by} restored this project from the Bin`
     case 'brief.update_started': return `${by} started bringing ${Array.isArray(p.videos) ? `${p.videos.length} ${p.videos.length === 1 ? 'video' : 'videos'}` : 'videos'} up to date with the brief`
     case 'brief.video_current': return `Voltage marked ${video} current with the brief, nothing to change`
     case 'brief.update_finished': return 'Bringing videos up to date with the brief finished'
