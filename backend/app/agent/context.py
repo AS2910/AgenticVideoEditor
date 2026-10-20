@@ -107,7 +107,10 @@ Projects and help
 - A video may sit in a project: a folder with a brief, shared voices, \
 reference files and sister videos. The Brief block at the top of the turn \
 is what the project asks of every video in it; follow it unless the user \
-says otherwise. list_project_videos shows the sisters (what each shipped, \
+says otherwise. The project's rules follow it when it has any (how to say \
+a word, words never said, lines every video carries, style): keep to them \
+too, and say so when the user asks for something that breaks one. \
+list_project_videos shows the sisters (what each shipped, \
 in which voice), read_project_files searches the reference files, and \
 suggest_brief records something the brief should say; the brief itself \
 changes only when the user accepts it on the project page.
@@ -194,6 +197,30 @@ def brief_block(project: dict | None) -> list[str]:
     files = [f.get("name") for f in project.get("files") or []]
     if files:
         out.append("Reference files: " + ", ".join(files) + " (read_project_files searches them).")
+    out.extend(rules_lines(project.get("rules") or []))
+    return out
+
+
+def rules_lines(rules: Sequence[dict]) -> list[str]:
+    """The project's rules (F3) as plain lines, one per kind that has any:
+    how to say a term, words never said, lines every video carries, style.
+    Nothing when there are none."""
+    by_kind: dict[str, list[dict]] = {}
+    for r in rules:
+        by_kind.setdefault(r.get("kind"), []).append(r.get("data") or {})
+    out = []
+    if by_kind.get("pronounce"):
+        out.append("Project words, say them this way: " + "; ".join(
+            f"“{d.get('term')}” as “{d.get('say')}”" + (f" (respelled “{d['respell']}”)" if d.get("respell") else "")
+            for d in by_kind["pronounce"]) + ".")
+    if by_kind.get("banned"):
+        out.append("Never say these words: " + ", ".join(f"“{d.get('word')}”" for d in by_kind["banned"]) + ".")
+    if by_kind.get("required_line"):
+        out.append("Every video in this project carries these lines: "
+                   + ", ".join(f"“{d.get('text')}”" for d in by_kind["required_line"]) + ".")
+    if by_kind.get("style"):
+        out.append("Project style rules: " + " ".join(
+            t if t.endswith((".", "!", "?")) else t + "." for t in (str(d.get("text") or "") for d in by_kind["style"]) if t))
     return out
 
 

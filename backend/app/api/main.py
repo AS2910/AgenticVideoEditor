@@ -59,7 +59,7 @@ from app.usage import (
     Ledger, SpendCeilingReached, WHISPER_USD_PER_MINUTE, claude_usd, current_turn, money, month_name, month_start,
 )
 from app import auth
-from app.store import briefs
+from app.store import briefs, rules
 from app.store.repository import Project, ProjectRecord, ProjectRepository, LOCAL_OWNER
 from app.store.artifacts import ArtifactStore
 from app.render.renderer import render
@@ -1961,6 +1961,8 @@ def _project_view(video_id: str) -> dict | None:
         sisters.append({**_summary(r), "shipped": shipped})
     return {"project_id": project.project_id, "name": project.name, "brief": project.brief,
             "brief_version": project.brief_version,
+            "rules": [{"kind": r.kind, "data": r.data} for r in rules.list_rules(database, project.project_id)],
+            "rules_version": rules.rules_version(database, project.project_id),
             "voices": _project_voices(project.project_id), "videos": sisters, "files": _project_files(project.project_id)}
 
 
@@ -2066,6 +2068,49 @@ def diff_brief_versions(project_id: str, a: int, b: int, owner: str = Depends(cu
     if runs is None:
         raise HTTPException(status_code=404, detail="brief version not found")
     return {"a": a, "b": b, "changes": runs}
+
+
+class RuleRequest(BaseModel):
+    kind: str | None = None     # pronounce | banned | required_line | style (on create)
+    data: dict
+
+
+def _rule_or_422(work):
+    try:
+        return work()
+    except rules.RuleError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.get("/projects/{project_id}/rules")
+def list_project_rules(project_id: str, kind: str | None = None, owner: str = Depends(current_owner)) -> dict:
+    """F3: the project's rules, oldest first, with the rules version."""
+    _owned_project(project_id, owner)
+    return {"rules": [r.to_dict() for r in rules.list_rules(database, project_id, kind)],
+            "rules_version": rules.rules_version(database, project_id)}
+
+
+@app.post("/projects/{project_id}/rules", status_code=201)
+def add_project_rule(project_id: str, req: RuleRequest, owner: str = Depends(current_owner)) -> dict:
+    _owned_project(project_id, owner)
+    return _rule_or_422(lambda: rules.add(database, project_id, req.kind or "", req.data, owner)).to_dict()
+
+
+@app.patch("/projects/{project_id}/rules/{rule_id}")
+def change_project_rule(project_id: str, rule_id: int, req: RuleRequest, owner: str = Depends(current_owner)) -> dict:
+    _owned_project(project_id, owner)
+    rule = _rule_or_422(lambda: rules.update(database, project_id, rule_id, req.data, owner))
+    if rule is None:
+        raise HTTPException(status_code=404, detail="rule not found")
+    return rule.to_dict()
+
+
+@app.delete("/projects/{project_id}/rules/{rule_id}", status_code=204)
+def delete_project_rule(project_id: str, rule_id: int, owner: str = Depends(current_owner)) -> Response:
+    _owned_project(project_id, owner)
+    if not rules.remove(database, project_id, rule_id):
+        raise HTTPException(status_code=404, detail="rule not found")
+    return Response(status_code=204)
 
 
 @app.delete("/projects/{project_id}", status_code=204)
