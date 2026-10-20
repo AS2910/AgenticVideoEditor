@@ -294,7 +294,7 @@ export function ProjectPage({ me, projectId, onUpload, uploading, error, onDelet
                       {versions.map((c) => (
                         <li key={c.video_id} className="flex flex-wrap items-center gap-2">
                           <a className="stamp in whitespace-nowrap no-underline" href={hrefFor({ page: 'editor', projectId: c.video_id })} aria-label={`Open the ${c.language_label} version`}>{c.language_label}</a>
-                          {c.out_of_sync ? <SyncChip videoId={c.video_id} compact onStarted={() => void load()} /> : <span className="tag text-faint">In step</span>}
+                          {c.out_of_sync ? <SyncChip videoId={c.video_id} compact onStarted={() => void load()} onSettled={() => void load()} /> : <span className="tag text-faint">In step</span>}
                         </li>
                       ))}
                     </ul>

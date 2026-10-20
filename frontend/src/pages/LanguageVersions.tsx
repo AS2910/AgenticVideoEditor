@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import type { LanguageChip, LanguageGate, LanguageSet } from '../types'
-import { getLanguages, makeLanguages, syncLanguage } from '../api'
+import { getLanguages, makeLanguages, pollJob, PollCancelled, syncLanguage } from '../api'
 import { hrefFor } from '../lib/route'
 import { cn } from '@/lib/utils'
 import { usd } from './fmt'
@@ -15,6 +15,11 @@ import { usd } from './fmt'
  *    and Sync this change, which runs a turn for only the changed lines. */
 
 type VoiceHandling = 'same' | 'designed'
+
+/** How often a running sync turn is read; and a beat after it ends, so the
+ *  server has moved the version's sync marker before the page reads it again. */
+const SYNC_POLL_MS = 1500
+const SYNC_SETTLE_MS = 400
 
 const VOICE_WORDS: Record<VoiceHandling, [string, string]> = {
   same: ['Same voice in the new language', 'The speaker\'s own or cloned voice, speaking the new language.'],
@@ -165,21 +170,41 @@ export function LanguageChips({ languages, className }: { languages: LanguageChi
   )
 }
 
-/** A version whose master shipped a change since it last synced. */
-export function SyncChip({ videoId, onStarted, compact }: { videoId: string; onStarted?: () => void; compact?: boolean }) {
+/** A version whose master shipped a change since it last synced. "Syncing the
+ *  changed lines…" stays only while the sync turn runs (its job is polled);
+ *  when it ends `onSettled` reads the video again, and a failed sync says why. */
+export function SyncChip({ videoId, onStarted, onSettled, compact }: { videoId: string; onStarted?: () => void; onSettled?: (ok: boolean) => void; compact?: boolean }) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [started, setStarted] = useState(false)
+  const gone = useRef(false)
+  useEffect(() => { gone.current = false; return () => { gone.current = true } }, [])
   const sync = async () => {
     setBusy(true)
     setError(null)
+    let jobId: string
     try {
-      await syncLanguage(videoId)
+      jobId = (await syncLanguage(videoId)).job_id
       setStarted(true)
       onStarted?.()
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not start the sync.')
+      return
     } finally { setBusy(false) }
+    try {
+      const done = await pollJob(jobId, { intervalMs: SYNC_POLL_MS, timeoutMs: 60 * 60_000, shouldStop: () => gone.current })
+      if (gone.current) return
+      if (done.status === 'succeeded') await new Promise((resolve) => setTimeout(resolve, SYNC_SETTLE_MS))
+      if (gone.current) return
+      setStarted(false)
+      if (done.status === 'failed') setError(done.error ? `The sync did not finish. ${done.error}` : 'The sync did not finish. Try again.')
+      onSettled?.(done.status === 'succeeded')
+    } catch (e) {
+      if (e instanceof PollCancelled || gone.current) return
+      setStarted(false)
+      setError('Lost track of the sync. Reload to see where it stands.')
+      onSettled?.(false)
+    }
   }
   return (
     <span className="inline-flex flex-wrap items-center gap-2" data-testid="out-of-sync" data-tour="out-of-sync">

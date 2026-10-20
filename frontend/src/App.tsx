@@ -765,6 +765,14 @@ function Studio() {
     speaker: i.speaker ?? null, voice_profile_id: i.candidate?.plan.voice_profile_id ?? null,
   })
 
+  /** B2: the sync turn on this language version ended: its lines and whether it is in step, read again. */
+  const settleSync = async (id: string) => {
+    const latest = await getProject(id).catch(() => null)
+    if (!latest) return
+    setProject((p) => (p && p.video_id === id ? { ...p, out_of_sync: latest.out_of_sync } : p))
+    await syncEdits()
+  }
+
   /** 20g: after a turn, the edits as the server has them — Voltage may have undone or releveled a line — so the transcript never shows a stale row. */
   const syncEdits = async (): Promise<{ changed: boolean; render: { download: { url: string; filename: string }; duration: number } | null }> => {
     if (!projectId) return { changed: false, render: null }
@@ -1574,7 +1582,7 @@ function Studio() {
           {batchOn && project.master_id && (
             <a className="stamp in whitespace-nowrap no-underline" href={hrefFor({ page: 'editor', projectId: project.master_id })} title={`The ${project.language_label} version of ${project.master_filename ?? 'its master'}. Open the master.`} data-testid="language-of">{project.language_label} · of {project.master_filename ?? 'master'}</a>
           )}
-          {batchOn && project.master_id && project.out_of_sync && <SyncChip videoId={project.video_id} compact />}
+          {batchOn && project.master_id && project.out_of_sync && <SyncChip videoId={project.video_id} compact onSettled={() => void settleSync(project.video_id)} />}
           <span className="text-faint max-sm:hidden" aria-hidden="true">/</span>
           <h1 className="disp m-0 min-w-0 max-w-[28ch] truncate text-[15px] font-semibold lg:max-w-none lg:flex-[1_1_0]" title={project.filename}>{project.filename}</h1>
           <span className="tag text-faint">{timecode(project.duration)}{speakers.length > 0 ? ` · ${speakers.length} ${speakers.length === 1 ? 'voice' : 'voices'}` : ''}</span>

@@ -73,7 +73,28 @@ describe('B2: language versions', () => {
     expect(screen.getByText('Out of sync with master')).toBeInTheDocument()
     await userEvent.click(screen.getByRole('button', { name: 'Sync this change' }))
     expect(await screen.findByText('Syncing the changed lines…')).toBeInTheDocument()
-    expect(calls).toEqual([expect.stringMatching(/POST .*\/videos\/p2\/sync$/)])
+    expect(calls[0]).toMatch(/POST .*\/videos\/p2\/sync$/)
+  })
+
+  it('clears the syncing note when the sync turn ends, and says why when it failed', async () => {
+    let status = 'running'
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (init?.method === 'POST') return ok({ job_id: 'T1', lines: [], to: 9 }, 202)
+      if (String(url).endsWith('/jobs/T1')) return ok({ job_id: 'T1', kind: 'turn', project_id: 'p2', status, progress: 0, step: '', attempts: 1, result: null, error: status === 'failed' ? 'The voice service is down.' : null })
+      return ok({})
+    }))
+    const settled = vi.fn()
+    render(<SyncChip videoId="p2" onSettled={settled} />)
+    await userEvent.click(screen.getByRole('button', { name: 'Sync this change' }))
+    expect(await screen.findByText('Syncing the changed lines…')).toBeInTheDocument()
+    status = 'succeeded'
+    await waitFor(() => expect(settled).toHaveBeenCalledWith(true), { timeout: 4000 })
+    expect(screen.queryByText('Syncing the changed lines…')).not.toBeInTheDocument()
+    status = 'failed'
+    await userEvent.click(screen.getByRole('button', { name: 'Sync this change' }))
+    expect(await screen.findByRole('alert', {}, { timeout: 4000 })).toHaveTextContent('The sync did not finish. The voice service is down.')
+    expect(settled).toHaveBeenLastCalledWith(false)
+    expect(screen.getByRole('button', { name: 'Sync this change' })).toBeInTheDocument()
   })
 })
 
