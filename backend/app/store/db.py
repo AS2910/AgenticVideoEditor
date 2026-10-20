@@ -19,7 +19,8 @@ from app.store import migrate
 PROJECT_TABLES = ("candidates", "edits", "messages", "usage", "plans", "turns", "jobs")
 # The projects plan's own tables (F2 on), emptied by reset() too.
 EXTRA_TABLES = ("project_briefs", "project_rules", "project_events", "purged_items",
-                "project_checks", "project_issues", "project_issue_ignores", "share_tokens")
+                "project_checks", "project_issues", "project_issue_ignores", "share_tokens",
+                "export_presets")
 
 
 class Database:

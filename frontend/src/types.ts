@@ -689,3 +689,88 @@ export interface Batch {
   summary: { finished: string[]; waiting: string[]; failed: string[]; cancelled: string[]; spent_usd: number } | null
   rows: BatchRow[]; counts: Record<string, number>; spent_usd: number; can_add: boolean
 }
+
+// ── B3 (projects.batch): batch export; F6: share links ──────────────────────
+export type ExportPlatform = 'youtube' | 'reels' | 'feed'
+export type ExportCodec = 'h264' | 'hevc'
+export interface ExportPreset {
+  preset_id: number
+  project_id: string
+  name: string
+  platform: ExportPlatform
+  codec: ExportCodec
+  loudness: number
+  captions: boolean
+  pattern: string
+  position: number
+  created_by: string
+  created_at: string
+  updated_at: string
+}
+export interface ExportPresetPage {
+  presets: ExportPreset[]
+  platforms: { id: ExportPlatform; label: string; width: number; height: number }[]
+  codecs: { id: ExportCodec; label: string; available: boolean }[]
+  loudness: { lufs: number; label: string }[]
+  tokens: string[]
+  default_pattern: string
+  /** Whether this server can burn captions in. */
+  captions: boolean
+}
+export type ExportPresetChange = Partial<Pick<ExportPreset, 'name' | 'platform' | 'codec' | 'loudness' | 'captions' | 'pattern'>>
+export interface PreflightVideo { video_id: string; filename: string; duration: number; stage: string; stage_label: string; approved: boolean }
+/** A project check issue raised as a warning before an export (never a block). */
+export interface PreflightWarning { kind: string; message: string; places: { video_id: string; filename: string; t: number | null; text: string }[]; fingerprint: string }
+export interface Preflight { videos: PreflightVideo[]; warnings: PreflightWarning[] }
+export type ExportFileState = 'queued' | 'rendering' | 'retrying' | 'ready' | 'failed'
+export interface ExportFileReport { framing: string; width: number; height: number; loudness_lufs: number | null; loudness_target: number; captions: number }
+export interface ExportFile {
+  index: number
+  video_id: string
+  filename: string
+  stage: string
+  approved: boolean
+  preset: ExportPreset
+  attempts: number
+  job_id: string
+  state: ExportFileState
+  label: string
+  why: string | null
+  file: { name: string; size: number; version: number; duration: number; report: ExportFileReport } | null
+}
+export interface ShareLink {
+  share_id: string
+  scope: 'project' | 'video' | 'export'
+  target: string
+  role: 'viewer' | 'reviewer'
+  name: string | null
+  created_at: string
+  expires_at: string
+  revoked_at: string | null
+  state: 'live' | 'revoked' | 'expired'
+  url: string
+}
+export interface BatchExport {
+  export_id: string
+  project_id: string
+  created_at: string
+  finished_at: string | null
+  phase: 'running' | 'finished'
+  status: string | null
+  step: string | null
+  progress: number
+  warnings: PreflightWarning[]
+  files: ExportFile[]
+  counts: { total: number; ready: number; failed: number }
+  share: ShareLink | null
+}
+/** What a share link shows anyone holding it (no account). */
+export interface PublicShare {
+  scope: 'project' | 'video' | 'export'
+  role: 'viewer' | 'reviewer'
+  name: string | null
+  expires_at: string
+  title: string
+  exported_at?: string
+  files: { file_id: string; name: string; kind: string; size: number; duration: number | null; label?: string | null; video_id?: string }[]
+}

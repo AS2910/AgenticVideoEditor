@@ -1,5 +1,7 @@
 import asyncio
+import io
 import json
+import zipfile
 import re
 import queue
 import time
@@ -63,7 +65,9 @@ from app.usage import (
 )
 from app import auth
 from app.store import briefs, checks as checks_store, events as activity_log, rules, stages
-from app.store import shares as shares_store
+from app.store import shares as shares_store, presets as presets_store
+from app.render import captions as captions_mod, deliver as deliver_mod
+from app.jobs import exports as exports_mod
 from app.agent import project_check as pcheck
 from app.adapters import pronounce
 from app.store.actors import VOLTAGE, Actor, user as user_actor
@@ -6088,6 +6092,8 @@ def _check_share_target(project: Project, scope: str, target: str) -> None:
             raise HTTPException(status_code=404, detail="That video is not in this project.")
     if scope not in SHARE_CONTENTS:
         raise HTTPException(status_code=422, detail="There is nothing of that kind to share yet.")
+    if scope == "export" and export_engine.get(target, project.project_id) is None:
+        raise HTTPException(status_code=404, detail="That export is not in this project.")
 
 
 @app.post("/projects/{project_id}/shares", status_code=201)
@@ -6146,6 +6152,385 @@ def shared_file(token: str, file_id: str, download: bool = False) -> FileRespons
     path = Path(found["path"])
     return FileResponse(path, media_type=_MEDIA_TYPES.get(path.suffix.lstrip("."), "application/octet-stream"),
                         filename=found["name"], content_disposition_type="attachment" if download else "inline")
+
+
+# ── B3: batch export ─────────────────────────────────────────────────────────
+#
+# Presets on the project (app/store/presets.py: platform frame, codec,
+# loudness target, burned-in captions, file name pattern); the export itself
+# is a parent Activity job with one child per video x preset
+# (app/jobs/exports.py), each child the video's final render (the render
+# cache: an unchanged video is not rendered again) delivered at the preset
+# (app/render/deliver.py). A failed file is tried once more, then Failed
+# with its reason; the rest carry on. A video whose every file was made moves
+# to Exported (F5). The files are kept under the project
+# (artifacts/projects/<id>/exports/<export id>/, the purge takes them with the
+# project), downloaded one by one or as one zip built while it streams, and
+# shared with an F6 link (scope export). Pre-flight runs A2's free checks as
+# warnings, never a block. Behind `projects.batch`.
+
+def _exports_dir(project_id: str, export_id: str) -> Path:
+    return artifacts.root / "projects" / project_id / "exports" / export_id
+
+
+def _caption_passages(video_id: str, record: ProjectRecord) -> list[captions_mod.Passage]:
+    """What the video says now, in the source's time: the lines as shot no
+    shipped edit replaced or removed, then every shipped edit's words."""
+    edits = [e for e in repo.list_edits(video_id) if not e.reverted]
+    covered = [e.plan.selection for e in edits if e.plan.mix in ("replace", "remove")]
+    out = []
+    for st in statements_of(record.transcript):
+        mid = (st.start + st.end) / 2
+        if not any(sel.start - 1e-3 <= mid <= sel.end + 1e-3 for sel in covered):
+            out.append(captions_mod.Passage(st.text, st.start, st.end))
+    for e in edits:
+        if e.plan.mix == "remove" or not e.plan.new_text.strip():
+            continue
+        out.append(captions_mod.Passage(e.plan.new_text, e.plan.selection.start, e.plan.selection.end,
+                                        added=e.plan.mix == "concatenate", duration=e.audio.duration if e.audio else None))
+    return out
+
+
+_export_names = threading.Lock()
+
+
+def _deliver_one(record: dict, item: dict) -> dict:
+    """One file of a batch export: the video's final render (reused when the
+    edits have not changed), delivered at the preset, named by its pattern."""
+    video_id, preset = item["video_id"], item["preset"]
+    video = repo.get(video_id)
+    if video is None:
+        raise RuntimeError("This video was deleted.")
+    project = repo.get_project(record["project_id"])
+    out = _export(video, purpose="export")
+    src = artifacts.find(video_id, out["render"]["sha256"])
+    if src is None:
+        raise RuntimeError("The render could not be found.")
+    cues = captions_mod.cues(_caption_passages(video_id, video), out.get("pieces")) if preset["captions"] else None
+    lang = repo.settings(video_id).get("language") or "en"        # B2 gives videos a language
+    name = presets_store.file_name(preset["pattern"], project=project.name if project else "", video=video.source.filename,
+                                   lang=lang, preset=preset["name"], version=out["version"])
+    folder = _exports_dir(record["project_id"], record["export_id"])
+    with _export_names:
+        # Two presets with one pattern and name would collide: the second gets -2.
+        taken = {i["file"]["name"] for i in (export_engine.get(record["export_id"]) or {"items": []})["items"]
+                 if i.get("file") and i["index"] != item["index"]}
+        stem, n = name[:-4], 2
+        while name in taken:
+            name, n = f"{stem}-{n}.mp4", n + 1
+    with tempfile.TemporaryDirectory() as tmp:
+        report = deliver_mod.deliver(src, Path(tmp) / "out.mp4", platform=preset["platform"], codec=preset["codec"],
+                                     loudness_lufs=preset["loudness"], cues=cues)
+        folder.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(Path(tmp) / "out.mp4"), folder / name)
+    render_log.info("export file video=%s preset=%s name=%s framing=%s lufs=%s", video_id, preset["name"], name,
+                    report["framing"], report["loudness_lufs"])
+    return {"name": name, "size": report["size"], "version": out["version"], "duration": report["duration"], "report": report}
+
+
+def _export_video_done(record: dict, video_id: str) -> None:
+    """Every file of the video made: it moves to Exported (F5), logged with who and why."""
+    names = sorted({i["preset"]["name"] for i in record["items"] if i["video_id"] == video_id})
+    stages.move(database, video_id, "exported", user_actor(record["owner"]), why=f"Exported as {', '.join(names)}")
+
+
+def _export_closed(record: dict) -> None:
+    summary = record.get("summary") or {}
+    with database.tx() as c:
+        activity_log.record(c, "export.finished", user_actor(record["owner"]), project_id=record["project_id"],
+                            target=record["export_id"], payload={"ready": summary.get("ready"), "failed": summary.get("failed")})
+
+
+export_engine = exports_mod.ExportEngine(activity, repo.get_meta, repo.set_meta, _deliver_one,
+                                         on_video_done=_export_video_done, on_close=_export_closed)
+
+
+def _file_state(item: dict) -> tuple[str, str, str | None]:
+    """A file's row: state, its word, and why (a failure's reason)."""
+    job = item.get("job") or {}
+    status = job.get("status")
+    if item.get("file"):
+        return "ready", "Ready", None
+    if status == "failed" or item.get("error"):
+        return "failed", "Failed", item.get("error") or job.get("error_text") or "The render failed."
+    if status == "running":
+        return ("retrying", "Trying again", "The first try failed; trying once more.") if item.get("attempts", 0) > 1 else ("rendering", "Rendering", None)
+    if status == "cancelled":
+        return "failed", "Stopped", job.get("step_label")
+    return "queued", "Queued", None
+
+
+def _export_dict(record: dict, owner: str) -> dict:
+    files = []
+    for item in record["items"]:
+        state, label, why = _file_state(item)
+        files.append({k: item.get(k) for k in ("index", "video_id", "filename", "stage", "approved", "preset", "attempts", "job_id")}
+                     | {"state": state, "label": label, "why": why, "file": item.get("file")})
+    live = [s for s in shares_store.list_for(database, owner, record["project_id"], "export", record["export_id"]) if s.state() == "live"]
+    ready = sum(1 for f in files if f["state"] == "ready")
+    failed = sum(1 for f in files if f["state"] == "failed")
+    return {"export_id": record["export_id"], "project_id": record["project_id"], "created_at": record["created_at"],
+            "finished_at": record.get("finished_at"), "phase": record["phase"], "status": record.get("status"),
+            "step": record.get("step"), "progress": record.get("progress", 0.0), "warnings": record.get("warnings", []),
+            "files": files, "counts": {"total": len(files), "ready": ready, "failed": failed},
+            "share": _share_dict(live[0]) if live else None}
+
+
+def _export_or_404(project_id: str, export_id: str) -> dict:
+    record = export_engine.get(export_id, project_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="That export is not in this project.")
+    return record
+
+
+class PresetRequest(BaseModel):
+    name: str | None = None
+    platform: Literal["youtube", "reels", "feed"] | None = None
+    codec: Literal["h264", "hevc"] | None = None
+    loudness: float | None = None
+    captions: bool | None = None
+    pattern: str | None = None
+
+
+def _preset_or_422(work):
+    try:
+        return work()
+    except presets_store.PresetError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+
+@app.get("/projects/{project_id}/export-presets")
+def list_export_presets(project_id: str, owner: str = Depends(current_owner)) -> dict:
+    """B3: the project's presets (the three defaults on first use) and what a preset may be."""
+    _batch_flag(owner)
+    _owned_project(project_id, owner)
+    have = deliver_mod.codecs()
+    return {"presets": [p.to_dict() for p in presets_store.list_presets(database, project_id, owner)],
+            "platforms": [{"id": k, "label": v["label"], "width": v["size"][0], "height": v["size"][1]} for k, v in deliver_mod.PLATFORMS.items()],
+            "codecs": [{"id": k, "label": v["label"], "available": k in have} for k, v in deliver_mod.CODECS.items()],
+            "loudness": [{"lufs": k, "label": v["label"]} for k, v in deliver_mod.LOUDNESS.items()],
+            "tokens": list(presets_store.TOKENS), "default_pattern": presets_store.DEFAULT_PATTERN,
+            "captions": deliver_mod.caption_renderer() is not None}
+
+
+@app.post("/projects/{project_id}/export-presets", status_code=201)
+def add_export_preset(project_id: str, req: PresetRequest, owner: str = Depends(current_owner)) -> dict:
+    _batch_flag(owner)
+    _owned_project(project_id, owner)
+    preset = _preset_or_422(lambda: presets_store.add(database, project_id, req.model_dump(), owner, codecs=deliver_mod.codecs()))
+    return preset.to_dict()
+
+
+@app.patch("/projects/{project_id}/export-presets/{preset_id}")
+def change_export_preset(project_id: str, preset_id: int, req: PresetRequest, owner: str = Depends(current_owner)) -> dict:
+    _batch_flag(owner)
+    _owned_project(project_id, owner)
+    preset = _preset_or_422(lambda: presets_store.update(database, project_id, preset_id, req.model_dump(), owner, codecs=deliver_mod.codecs()))
+    if preset is None:
+        raise HTTPException(status_code=404, detail="That preset is not in this project.")
+    return preset.to_dict()
+
+
+@app.delete("/projects/{project_id}/export-presets/{preset_id}", status_code=204)
+def remove_export_preset(project_id: str, preset_id: int, owner: str = Depends(current_owner)) -> Response:
+    _batch_flag(owner)
+    _owned_project(project_id, owner)
+    if not presets_store.remove(database, project_id, preset_id, owner):
+        raise HTTPException(status_code=404, detail="That preset is not in this project.")
+    return Response(status_code=204)
+
+
+@app.get("/projects/{project_id}/exports/preflight")
+def export_preflight(project_id: str, owner: str = Depends(current_owner)) -> dict:
+    """Before an export: every video with its stage (Approved ticked by
+    default on the page) and the project check's free warnings. Never a block."""
+    _batch_flag(owner)
+    project = _owned_project(project_id, owner)
+    videos = [{"video_id": r.source.project_id, "filename": r.source.filename, "duration": r.source.duration,
+               "stage": stages.current(database, r.source.project_id) or "draft"}
+              for r in reversed(repo.list(owner, folder=project_id))]
+    for v in videos:
+        v["stage_label"] = stages.LABELS.get(v["stage"], v["stage"])
+        v["approved"] = v["stage"] == "approved"
+    try:
+        warnings = project_check_warnings(project.project_id)
+    except Exception:  # noqa: BLE001 - a check that fails never stops an export
+        log.exception("pre-flight check for %s", project_id)
+        warnings = []
+    return {"videos": videos, "warnings": warnings}
+
+
+class ExportBatchRequest(BaseModel):
+    video_ids: list[str]
+    preset_ids: list[int]
+
+
+@app.post("/projects/{project_id}/exports", status_code=201)
+def start_batch_export(project_id: str, req: ExportBatchRequest, owner: str = Depends(current_owner)) -> dict:
+    """One file per video x preset, under one parent job. Non-Approved videos
+    may be picked (the page flags them); the pre-flight's warnings travel with it."""
+    _batch_flag(owner)
+    _owned_project(project_id, owner)
+    videos = []
+    for vid in dict.fromkeys(req.video_ids):
+        record = repo.get(vid)
+        if record is None or record.owner != owner or record.folder_id != project_id:
+            raise HTTPException(status_code=404, detail="A video picked is not in this project.")
+        videos.append(record)
+    chosen = []
+    for pid in dict.fromkeys(req.preset_ids):
+        preset = presets_store.get(database, project_id, pid)
+        if preset is None:
+            raise HTTPException(status_code=404, detail="A preset picked is not in this project.")
+        chosen.append(preset)
+    if not videos or not chosen:
+        raise HTTPException(status_code=422, detail="Pick at least one video and one preset.")
+    try:
+        warnings = project_check_warnings(project_id)
+    except Exception:  # noqa: BLE001
+        warnings = []
+    items = []
+    for record in videos:
+        stage = stages.current(database, record.source.project_id) or "draft"
+        for preset in chosen:
+            items.append({"video_id": record.source.project_id, "filename": record.source.filename, "stage": stage,
+                          "approved": stage == "approved", "preset": preset.to_dict()})
+    made = export_engine.start(project_id, owner, items, warnings)
+    with database.tx() as c:
+        activity_log.record(c, "export.started", user_actor(owner), project_id=project_id, target=made["export_id"],
+                            payload={"videos": len(videos), "presets": [p.name for p in chosen], "files": len(items),
+                                     "not_approved": sum(1 for v in items if not v["approved"]) // len(chosen),
+                                     "warnings": len(warnings)})
+    return _export_dict(made, owner)
+
+
+@app.get("/projects/{project_id}/exports")
+def list_batch_exports(project_id: str, limit: int = 5, owner: str = Depends(current_owner)) -> dict:
+    _batch_flag(owner)
+    _owned_project(project_id, owner)
+    out = []
+    for eid in export_engine.of_project(project_id)[: max(1, min(limit, 20))]:
+        record = export_engine.get(eid, project_id)
+        if record is not None:
+            out.append(_export_dict(record, owner))
+    return {"exports": out}
+
+
+@app.get("/projects/{project_id}/exports/{export_id}")
+def get_batch_export(project_id: str, export_id: str, owner: str = Depends(current_owner)) -> dict:
+    _batch_flag(owner)
+    _owned_project(project_id, owner)
+    return _export_dict(_export_or_404(project_id, export_id), owner)
+
+
+def _export_files(record: dict) -> list[dict]:
+    """The export's made files, each with where it is on disk."""
+    folder = _exports_dir(record["project_id"], record["export_id"])
+    out = []
+    for item in record["items"]:
+        f = item.get("file")
+        if f and (folder / f["name"]).exists():
+            out.append({"file_id": str(item["index"]), "name": f["name"], "kind": "video", "size": f["size"],
+                        "duration": f.get("duration"), "video_id": item["video_id"],
+                        "label": f"{item['preset']['name']} · {item['filename']}", "path": folder / f["name"]})
+    return out
+
+
+@app.get("/projects/{project_id}/exports/{export_id}/files/{index}")
+def batch_export_file(project_id: str, export_id: str, index: str, download: bool = False,
+                      owner: str = Depends(current_owner)) -> FileResponse:
+    _batch_flag(owner)
+    _owned_project(project_id, owner)
+    found = next((f for f in _export_files(_export_or_404(project_id, export_id)) if f["file_id"] == index), None)
+    if found is None:
+        raise HTTPException(status_code=404, detail="That file is not ready.")
+    return FileResponse(found["path"], media_type="video/mp4", filename=found["name"],
+                        content_disposition_type="attachment" if download else "inline")
+
+
+class _ZipPipe(io.RawIOBase):
+    """Where zipfile writes as the zip streams: the bytes since the last take."""
+
+    def __init__(self) -> None:
+        self._chunks: list[bytes] = []
+
+    def writable(self) -> bool:
+        return True
+
+    def write(self, b) -> int:  # type: ignore[override]
+        self._chunks.append(bytes(b))
+        return len(b)
+
+    def take(self) -> bytes:
+        out = b"".join(self._chunks)
+        self._chunks.clear()
+        return out
+
+
+def _zip_stream(files: list[dict]):
+    """A zip of the files, built while it streams (stored, not squeezed: MP4 is compressed already)."""
+    pipe = _ZipPipe()
+    with zipfile.ZipFile(pipe, "w", zipfile.ZIP_STORED, allowZip64=True) as zf:
+        for f in files:
+            with zf.open(f["name"], "w", force_zip64=True) as dst, open(f["path"], "rb") as src:
+                while chunk := src.read(1 << 20):
+                    dst.write(chunk)
+                    yield pipe.take()
+            yield pipe.take()
+    yield pipe.take()
+
+
+def _zip_response(files: list[dict], title: str) -> StreamingResponse:
+    if not files:
+        raise HTTPException(status_code=404, detail="No files are ready to download yet.")
+    name = (re.sub(r"[^A-Za-z0-9_-]+", "-", title).strip("-") or "export") + ".zip"
+    return StreamingResponse(_zip_stream(files), media_type="application/zip",
+                             headers={"Content-Disposition": f'attachment; filename="{name}"'})
+
+
+@app.get("/projects/{project_id}/exports/{export_id}/zip")
+def batch_export_zip(project_id: str, export_id: str, owner: str = Depends(current_owner)) -> StreamingResponse:
+    """Every made file as one zip, built on demand while it downloads."""
+    _batch_flag(owner)
+    project = _owned_project(project_id, owner)
+    return _zip_response(_export_files(_export_or_404(project_id, export_id)), f"{project.name}-export")
+
+
+class ExportShareRequest(BaseModel):
+    days: float = shares_store.DEFAULT_DAYS
+
+
+@app.post("/projects/{project_id}/exports/{export_id}/share", status_code=201)
+def share_batch_export(project_id: str, export_id: str, req: ExportShareRequest | None = None,
+                       owner: str = Depends(current_owner)) -> dict:
+    """An F6 viewer link to the export's files: no account, 30 days unless asked."""
+    _batch_flag(owner)
+    _owned_project(project_id, owner)
+    _export_or_404(project_id, export_id)
+    try:
+        share, _ = shares_store.create(database, share_key, owner=owner, project_id=project_id, scope="export",
+                                       target=export_id, days=(req.days if req else shares_store.DEFAULT_DAYS), by=owner)
+    except shares_store.ShareError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    return _share_dict(share)
+
+
+def _export_share(share: shares_store.Share) -> dict:
+    record = export_engine.get(share.target, share.project_id)
+    project = repo.get_project(share.project_id or "")
+    if record is None or project is None:
+        raise shares_store.ShareRefused("gone")
+    return {"title": project.name, "files": _export_files(record), "exported_at": record.get("finished_at") or record["created_at"]}
+
+
+SHARE_CONTENTS["export"] = _export_share
+
+
+@app.get("/share/{token}/zip")
+def shared_zip(token: str) -> StreamingResponse:
+    """No account: every file a live link shares, as one zip."""
+    _, contents = _shared(token)
+    return _zip_response([f for f in contents["files"] if Path(f["path"]).exists()], contents["title"])
 
 
 # ── Help, the tutorial, onboarding: the coordinator's routers ────────────────

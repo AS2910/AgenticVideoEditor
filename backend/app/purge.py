@@ -117,9 +117,12 @@ def purge(db: Database, artifacts_root: str | Path, older_than_days: float = 30,
             _tombstone(c, "project", pid, p["name"], p["owner"], None, p["workspace_id"], p["deleted_at"])
             c.execute("DELETE FROM projects WHERE id = ?", (pid,))
             for table in ("project_briefs", "project_rules", "project_events", "project_checks", "project_issues",
-                          "project_issue_ignores", "share_tokens"):
+                          "project_issue_ignores", "share_tokens", "export_presets"):
                 c.execute(f"DELETE FROM {table} WHERE project_id = ?", (pid,))
-            for prefix in ("project_voices", "project_files", "brief_suggestions"):
+            # B3: the project's batch exports (their files go with the project's folder).
+            for export_id in _meta(c, f"exports:{pid}", []):
+                c.execute("DELETE FROM meta WHERE key = ?", (f"export:{export_id}",))
+            for prefix in ("project_voices", "project_files", "brief_suggestions", "exports", "export_presets_seeded"):
                 c.execute("DELETE FROM meta WHERE key = ?", (f"{prefix}:{pid}",))
             # A live video still filed here (it should not be) becomes standalone.
             c.execute("UPDATE videos SET project_id = NULL WHERE project_id = ?", (pid,))

@@ -6,7 +6,7 @@ import type {
   Project, ExportManifest, Job, ProjectSummary, ProjectDetail, Usage, Voice, Speaker,
   ProjectSettings, Autonomy, Effort, Plan, Mix, Selection, Candidate, Reading, Sight, ChatMessage,
   ProjectFolder, ProjectDetailFolder, ProjectFile, HelpArticle, Onboarding, ProjectVoice,
-  ActivityJob, TurnView, RenderState, BriefVersion, BriefChange, BriefUpdateRun, ProjectRule, RuleKind, RuleData, CheckPage, Batch,
+  ActivityJob, TurnView, RenderState, BriefVersion, BriefChange, BriefUpdateRun, ProjectRule, RuleKind, RuleData, CheckPage, Batch, ExportPreset, ExportPresetPage, ExportPresetChange, Preflight, BatchExport, ShareLink, PublicShare,
 } from './types'
 
 const BASE = '/api'
@@ -166,6 +166,22 @@ export const cancelBatch = (id: string, batchId: string) => post<Batch>(`/projec
 export const answerBatchVideo = (id: string, batchId: string, videoId: string, text: string) => post<Batch>(`/projects/${id}/batches/${batchId}/videos/${videoId}/answer`, { text })
 export const addAllBatch = (id: string, batchId: string) => post<Batch>(`/projects/${id}/batches/${batchId}/add-all`)
 export const undoBatchAdd = (id: string, batchId: string, videoId: string) => post<Batch>(`/projects/${id}/batches/${batchId}/videos/${videoId}/undo-add`)
+// B3 (projects.batch): export presets, batch export, its zip and share link (F6).
+export const listExportPresets = (id: string) => get<ExportPresetPage>(`/projects/${id}/export-presets`)
+export const addExportPreset = (id: string, body: ExportPresetChange) => post<ExportPreset>(`/projects/${id}/export-presets`, body)
+export const changeExportPreset = (id: string, presetId: number, body: ExportPresetChange) => patch<ExportPreset>(`/projects/${id}/export-presets/${presetId}`, body)
+export const removeExportPreset = (id: string, presetId: number) => del(`/projects/${id}/export-presets/${presetId}`)
+export const getExportPreflight = (id: string) => get<Preflight>(`/projects/${id}/exports/preflight`)
+export const startBatchExport = (id: string, body: { video_ids: string[]; preset_ids: number[] }) => post<BatchExport>(`/projects/${id}/exports`, body)
+export const listBatchExports = (id: string) => get<{ exports: BatchExport[] }>(`/projects/${id}/exports`)
+export const shareBatchExport = (id: string, exportId: string) => post<ShareLink>(`/projects/${id}/exports/${exportId}/share`, {})
+export const revokeShare = (id: string, shareId: string) => del(`/projects/${id}/shares/${shareId}`)
+export const exportZipUrl = (id: string, exportId: string) => `${BASE}/projects/${id}/exports/${exportId}/zip`
+export const exportFileUrl = (id: string, exportId: string, index: number, download = false) => `${BASE}/projects/${id}/exports/${exportId}/files/${index}${download ? '?download=true' : ''}`
+// F6: a share link opened with no account.
+export const openShare = (token: string) => get<PublicShare>(`/share/${encodeURIComponent(token)}`)
+export const sharedFileUrl = (token: string, fileId: string, download = false) => `${BASE}/share/${encodeURIComponent(token)}/files/${encodeURIComponent(fileId)}${download ? '?download=true' : ''}`
+export const sharedZipUrl = (token: string) => `${BASE}/share/${encodeURIComponent(token)}/zip`
 
 /** Help and onboarding (2026-10-19). */
 export const listHelp = async () => (await get<{ articles: HelpArticle[] }>('/help')).articles

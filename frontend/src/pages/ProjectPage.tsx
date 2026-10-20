@@ -18,6 +18,9 @@ import { ProjectWords } from './ProjectWords'
 import { ProjectCheck } from './ProjectCheck'
 import { BatchPanel } from './BatchPanel'
 import type { FixRequest } from './BatchPanel'
+import { BatchExport } from './BatchExport'
+import { ExportPresets } from './ExportPresets'
+import type { ExportPreset } from '../types'
 
 interface ProjectPageProps {
   me: Me | null
@@ -67,6 +70,8 @@ export function ProjectPage({ me, projectId, onUpload, uploading, error, onDelet
   // B1 (projects.batch): one goal across every video; a Fix in all from the check lands here.
   const batchOn = enabled('projects.batch')
   const [fixAll, setFixAll] = useState<FixRequest | null>(null)
+  // B3 (projects.batch): the presets the Presets section holds, for the export panel.
+  const [exportPresets, setExportPresets] = useState<ExportPreset[] | null>(null)
   const fileInput = useRef<HTMLInputElement>(null)
   const refInput = useRef<HTMLInputElement>(null)
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -290,6 +295,7 @@ export function ProjectPage({ me, projectId, onUpload, uploading, error, onDelet
               <span className="flex-1 text-sm">One goal across every video here, like “make all three 25% off”, is planned as a batch turn.</span>
             </div>
           )}
+          {batchOn && <BatchExport projectId={projectId} presets={exportPresets} />}
           {consistency && <ProjectCheck projectId={projectId} briefVersion={project.brief_version}
             onFixAll={batchOn ? (issue) => { setFixAll({ issueId: issue.issue_id, message: issue.message, videoIds: [...new Set(issue.places.map((p) => p.video_id))] }); document.querySelector('[data-testid="batch"]')?.scrollIntoView({ behavior: 'smooth', block: 'start' }) } : undefined} />}
           {consistency && <ProjectWords projectId={projectId} />}
@@ -354,6 +360,8 @@ export function ProjectPage({ me, projectId, onUpload, uploading, error, onDelet
               </div>
             ))}
           </div>
+
+          {batchOn && <ExportPresets projectId={projectId} onChanged={setExportPresets} />}
 
           <div className="rise d3 flex flex-col gap-2 rounded-xl border-[1.5px] border-foreground bg-card p-[18px]" data-testid="defaults">
             <span className="disp text-xl font-bold">Defaults for new videos</span>

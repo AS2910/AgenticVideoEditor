@@ -17,6 +17,7 @@ export const TIPS: TipDef[] = [
   { id: 'first-brief-changed', title: 'Brief changed', text: 'Some videos here were made with an older brief. Bring up to date changes only the lines the change touches; a video it does not touch is marked current for free.', link: 'Brief versions', slug: 'brief-versions-and-brief-changed' },
   { id: 'first-project-check', title: 'Project check', text: 'These are the places your videos disagree. Select a time to open that video there, fix it in one video or in all, or ignore it until the words change.', link: 'The project check', slug: 'the-project-check' },
   { id: 'first-batch', title: 'Batch', text: 'Each video gets its own turn, three at a time. Select a video to hear its lines; nothing is added until you choose Add all that passed.', link: 'One change across all videos', slug: 'batch-goals' },
+  { id: 'first-batch-export', title: 'Exported', text: 'Each file is in its preset\'s frame and loudness. Download them one by one or all as a zip, or share one link that plays and downloads every file.', link: 'Export many videos at once', slug: 'batch-export' },
 ]
 
 export const tipById = (id: string): TipDef | undefined => TIPS.find((t) => t.id === id)

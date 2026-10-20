@@ -27,6 +27,8 @@ from app.timefmt import now_iso
 # also each video's turn in a "Fix in all" from the check.
 # batch (F4): a batch turn's parent, keyed by the project's id like a check, and each video's child
 # (in that video's slot, `detail.parent_id` naming the parent).
+# export (B3) also names a batch export: its parent keyed by the project's id (`detail.batch_export`)
+# and one child per video x preset in that video's slot (`detail.parent_id`).
 KINDS = ("voice_line", "design_voice", "clone", "mix", "render_preview", "export", "brief_update", "check", "batch")
 TERMINAL = frozenset({"done", "failed", "cancelled"})
 ACTIVE = frozenset({"queued", "running"})
@@ -160,6 +162,8 @@ class ActivityJobs:
         took: list[tuple[float, int | None]] = []
         for r in rows:
             j = _load(r["body"])
+            if kind == "export" and (j.detail.get("batch_export") or j.detail.get("parent_id")):
+                continue                  # B3: a batch export's file or its whole run, not one export of the video
             secs = j.detail.get("seconds")
             if isinstance(secs, (int, float)) and secs > 0:
                 took.append((float(secs), j.detail.get("chars")))
