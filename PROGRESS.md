@@ -5,7 +5,8 @@ Branch `overnight/projects-plan` (from main `217db2d`). Spec: docs/overnight/PLA
 | Step | Item | Status | Commit | What to check |
 |---|---|---|---|---|
 | 0 | Migration runner, flags, workspace_id | in progress | | |
-| 0 | M0 · Numbered migration runner | done | (M0) | `python -m app.store.migrate status --db backend/var/ave.db` on your live DB lists 0001 to 0006 applied after the next server start (it records them, changes nothing). Live-copy proof below. |
+| 0 | M0 · Numbered migration runner | done | 68e9c22 | `python -m app.store.migrate status --db backend/var/ave.db` on your live DB lists 0001 to 0006 applied after the next server start (it records them, changes nothing). Live-copy proof below. |
+| 0 | FLAGS · Feature flags per owner | done | (FLAGS) | `GET /api/me/flags` returns the four phase flags and golive.g1 to g8 for `local`. Frontend: `useFlags()` in `frontend/src/flags/useFlags.ts` (`enabled('projects.batch')`). No UI yet. Live-copy proof: up 0007 adds `feature_flags` (0 rows), every other table's counts and rows identical; down drops it (shape identical to before); up again. |
 
 ### M0 live-DB copy proof (copy of `ave.db`, never the original)
 Row counts per table before, after `up`, after `down`, after `up` again (all equal):

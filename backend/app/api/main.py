@@ -54,6 +54,7 @@ from app.media.reference import extract_reference_audio, speech_seconds
 from app.orchestrator.clones import CloneService, VoiceChoice
 from app.orchestrator.pipeline import run_edit
 from app.store.db import Database
+from app.flags import FlagStore
 from app.usage import (
     Ledger, SpendCeilingReached, WHISPER_USD_PER_MINUTE, claude_usd, current_turn, money, month_name, month_start,
 )
@@ -93,6 +94,8 @@ settings = load_settings()
 # Wiring (module-level singletons for this in-memory slice).
 database = Database(settings.data_dir / "ave.db")
 repo = ProjectRepository(database)
+# Step 0 (FLAGS): every phase of the projects plan ships behind a flag, on per owner.
+flags = FlagStore(database, settings.flag_owners)
 # Every paid call is recorded here; it backs the voice budget and the
 # per-project spend ceiling (Phase 9b).
 ledger = Ledger(database, ceiling_usd=settings.project_budget_usd)
@@ -625,6 +628,12 @@ def get_my_settings(owner: str = Depends(current_owner)) -> dict:
     """The caller's defaults: what a new project starts with, and which steps
     still wait for a yes under Just do it."""
     return _prefs(owner)
+
+
+@app.get("/me/flags")
+def get_my_flags(owner: str = Depends(current_owner)) -> dict:
+    """The feature flags that are on for the caller (Step 0, FLAGS)."""
+    return {"flags": flags.enabled_for(owner)}
 
 
 @app.put("/me/settings")

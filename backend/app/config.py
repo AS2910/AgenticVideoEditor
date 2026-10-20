@@ -108,6 +108,8 @@ class Settings:
     google_client_id: str | None = None
     google_client_secret: str | None = None
     session_secret: str | None = None
+    # Step 0 (FLAGS): the owners every phase flag is on for by default.
+    flag_owners: tuple[str, ...] = ("local",)
     # The origin the browser uses, for the OAuth redirect: https://voltage.example.com
     public_url: str = "http://localhost:5173"
     # Who may sign in: emails or @domains, comma-separated. Empty = anyone with a Google account.
@@ -194,6 +196,7 @@ def load_settings() -> Settings:
         chaos=os.environ.get("AVE_CHAOS") or None,
         chaos_force=os.environ.get("AVE_CHAOS_FORCE", "").strip().lower() in _TRUTHY,
         user_budget_usd=_amount("AVE_USER_BUDGET_USD", DEFAULT_USER_BUDGET_USD),
+        flag_owners=tuple(o.strip() for o in os.environ.get("AVE_FLAG_OWNERS", "local").split(",") if o.strip()),
     )
 
 

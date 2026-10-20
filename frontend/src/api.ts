@@ -401,6 +401,8 @@ export const undoArrangement = (id: string) => post<ArrangementView>(`/videos/${
 /** Your defaults for new projects, and what still asks under Just do it. */
 export const getUserSettings = () => get<UserSettings>('/me/settings')
 export const updateUserSettings = (change: Partial<UserSettings>) => put<UserSettings>('/me/settings', change)
+/** Step 0 (FLAGS): the feature flags that are on for you (phase flags such as `projects.batch`). */
+export const getMyFlags = async () => (await get<{ flags: string[] }>('/me/flags')).flags
 /** Everything of yours: every project, take and voice, and the consent records. */
 export async function deleteAccount(): Promise<void> {
   const res = await fetch(`${BASE}/account`, { method: 'DELETE', headers: FROM_VOLTAGE })
