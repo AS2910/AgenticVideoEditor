@@ -174,6 +174,8 @@ function Studio() {
   const batchOn = useFlags().enabled('projects.batch')
   // C1 (projects.review): an add on an Approved video asks first ("Add anyway" runs it with the yes).
   const reviewOn = useFlags().enabled('projects.review')
+  // D4: an archived project's videos are read-only; the header says so.
+  const reuseOn = useFlags().enabled('projects.reuse')
   const [stageAsk, setStageAsk] = useState<{ message: string; run: () => void } | null>(null)
   const [languagesOpen, setLanguagesOpen] = useState(false)
   // A3: the project's words, for the typed-line warning and Learn a word.
@@ -1615,6 +1617,9 @@ function Studio() {
               </div>
             )}
           </div>
+          {reuseOn && project.project_id && project.project_archived && (
+            <a className="stamp quiet no-underline" href={hrefFor({ page: 'folder', projectId: project.project_id })} title="This project is archived. Unarchive it to make changes." data-testid="archived">Archived</a>
+          )}
           {/* A1: the project's brief moved on since this video's last shipped edit. */}
           {consistency && project.project_id && project.brief_changed && (
             <a className="stamp need no-underline" href={hrefFor({ page: 'folder', projectId: project.project_id })} title={`Made with brief v${project.made_with_brief ?? 0}; ${project.project_name ?? 'the project'} is on v${project.brief_version}. Open the project to bring it up to date.`} data-testid="brief-changed">Brief changed</a>

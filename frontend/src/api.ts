@@ -8,7 +8,7 @@ import type {
   ProjectSettings, Autonomy, Effort, Plan, Mix, Selection, Candidate, Reading, Sight, ChatMessage,
   ProjectFolder, ProjectDetailFolder, ProjectFile, HelpArticle, Onboarding, ProjectVoice,
   ActivityJob, TurnView, RenderState, BriefVersion, BriefChange, BriefUpdateRun, ProjectRule, RuleKind, RuleData, CheckPage, Batch, ExportPreset, ExportPresetPage, ExportPresetChange, Preflight, BatchExport, ShareLink, PublicShare,
-  PublicComment, ReviewAnswer, ReviewComment, ReviewLinkRequest, BinItem, BinKind, BinRestored,
+  PublicComment, ReviewAnswer, ReviewComment, ReviewLinkRequest, BinItem, BinKind, BinRestored, Pin, SearchResult,
 } from './types'
 
 const BASE = '/api'
@@ -490,6 +490,20 @@ export const updateUserSettings = (change: Partial<UserSettings>) => put<UserSet
 // D3: the Bin.
 export const getBin = () => get<{ items: BinItem[]; days: number }>('/bin')
 export const restoreFromBin = (kind: BinKind, id: string) => post<BinRestored>(`/bin/${kind}/${id}/restore`)
+// D4: pins, archive, search.
+export const getPins = async () => (await get<{ pins?: Pin[] }>('/pins')).pins ?? []
+export async function setPin(kind: Pin['kind'], id: string, pinned: boolean): Promise<void> {
+  const res = await fetch(`${BASE}/pins/${kind}/${id}`, { method: pinned ? 'PUT' : 'DELETE', headers: FROM_VOLTAGE })
+  if (!res.ok) return failure(res)
+}
+export const listArchivedFolders = async () => (await get<{ projects?: ProjectFolder[] }>('/projects?archived=true')).projects ?? []
+export const archiveFolder = (id: string) => post<ProjectFolder>(`/projects/${id}/archive`)
+export async function unarchiveFolder(id: string): Promise<ProjectFolder> {
+  const res = await fetch(`${BASE}/projects/${id}/archive`, { method: 'DELETE', headers: FROM_VOLTAGE })
+  if (!res.ok) return failure(res)
+  return (await res.json()) as ProjectFolder
+}
+export const searchEverything = (q: string) => get<SearchResult>(`/search?q=${encodeURIComponent(q)}`)
 export const getMyFlags = async () => (await get<{ flags: string[] }>('/me/flags')).flags
 /** Everything of yours: every project, take and voice, and the consent records. */
 export async function deleteAccount(): Promise<void> {

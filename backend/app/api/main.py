@@ -70,6 +70,7 @@ from app.store import briefs, checks as checks_store, events as activity_log, ru
 from app.store import shares as shares_store, presets as presets_store, languages as langs
 from app.store import comments as comments_store
 from app.store import bin as bin_store
+from app.store import home as home_store
 from app.notify import digest as digest_mod, email as email_mod
 from app.render import captions as captions_mod, deliver as deliver_mod
 from app.jobs import exports as exports_mod
@@ -567,6 +568,8 @@ def _project_dict(record: ProjectRecord) -> dict:
         "brief_changed": briefs.stale(record.made_with_brief, folder.brief_version if folder else None),
         # C1: its stage; an add on an Approved video warns first.
         "stage": record.stage,
+        # D4: an archived project's videos are read-only.
+        "project_archived": bool(folder and folder.archived_at),
         # B2: the language set it belongs to ("Out of sync with master" in the header).
         **_language_fields(record),
         "filename": source.filename,
@@ -738,6 +741,8 @@ async def create_project(
     """Upload a video (Folders: into a project when `project_id` names one
     of the caller's; it then starts with the project's defaults)."""
     folder = _owned_project(project_id, owner) if project_id else None
+    if folder is not None:
+        _not_archived(folder.project_id, owner)
     filename = Path(file.filename or "upload.mp4").name
     container = (Path(filename).suffix.lstrip(".") or "mp4").lower()
 
@@ -1194,6 +1199,9 @@ def _summary(r: ProjectRecord) -> dict:
         "last_change": last,
         "variant_of": settings_.get("variant_of"),
         "stage": r.stage,
+        # D4: Home hides a video whose project is archived, and sorts by when it last changed.
+        "project_archived": bool(folder and folder.archived_at),
+        "last_edited_at": _last_edited(pid, r.created_at),
         # C1/C2: the review comments on it still open.
         "open_comments": comments_store.open_counts(database, [pid]).get(pid, 0),
         # A1: the brief version its last shipped edit was made with, and whether the project's is newer.
@@ -1975,6 +1983,8 @@ def delete_account(owner: str = Depends(current_owner)) -> Response:
                                              owner, v.get("name"), v["voice_id"], exc)
     for key in ("my_voices", "prefs", "designs"):
         repo.delete_meta(f"{key}:{owner}")
+    with database.tx() as c:          # D4: their pins
+        c.execute("DELETE FROM pins WHERE owner = ?", (owner,))
     repo.delete(_user_store(owner))   # the designs' spend, kept under the owner's own id
     shutil.rmtree(artifacts.root / _user_store(owner), ignore_errors=True)
     return Response(status_code=204)
@@ -2039,6 +2049,8 @@ def _folder_dict(project: Project) -> dict:
         "ceiling_usd": project.ceiling_usd,
         "spent_usd": round(ledger.spent_usd_by_folder(project.project_id), 4),
         "created_at": project.created_at,
+        # D4: set while archived (hidden from Home, read-only).
+        "archived_at": project.archived_at,
     }
 
 
@@ -2173,9 +2185,13 @@ def _clean_defaults(saved: dict) -> dict:
 
 
 @app.get("/projects")
-def list_folders(owner: str = Depends(current_owner)) -> dict:
-    """The caller's projects (folders), with how much each holds and has spent."""
-    return {"projects": [_project_summary(p) for p in repo.list_projects(owner)]}
+def list_folders(archived: bool = False, owner: str = Depends(current_owner)) -> dict:
+    """The caller's projects (folders), with how much each holds and has spent.
+    D4: archived projects are left out, or are the list with `archived=true`."""
+    found = repo.list_projects(owner)
+    if flags.enabled("projects.reuse", owner):
+        found = [p for p in found if bool(p.archived_at) == archived]
+    return {"projects": [_project_summary(p) for p in found]}
 
 
 @app.post("/projects", status_code=201)
@@ -3831,6 +3847,105 @@ def restore_from_bin(kind: Literal["video", "project", "voice"], item_id: str, o
     return {"kind": kind, "id": item_id, **done}
 
 
+# ── D4: pins, archive, search ────────────────────────────────────────────────
+
+def _last_edited(video_id: str, created_at: str) -> str:
+    """When the video last changed: its newest event or chat message, else its upload."""
+    with database.tx() as c:
+        row = c.execute("SELECT MAX(at) FROM (SELECT MAX(at) AS at FROM project_events WHERE video_id = ? "
+                        "UNION ALL SELECT MAX(at) FROM messages WHERE project_id = ?)", (video_id, video_id)).fetchone()
+    return max(created_at or "", row[0] or "")
+
+
+def _not_archived(project_id: str, owner: str) -> None:
+    """423 with the sentence when the project is archived (D4, flag on)."""
+    if flags.enabled("projects.reuse", owner) and home_store.archived_project_of(database, project_id=project_id):
+        raise HTTPException(status_code=423, detail=home_store.ARCHIVED)
+
+
+# Writes that stay open on an archived project: archiving itself, deleting
+# (to the Bin), and a render or single export of what is already there.
+_ARCHIVE_SELF = re.compile(r"^/projects/[^/]+/archive$")
+_BARE_ITEM = re.compile(r"^/(videos|projects)/[^/]+$")
+_RENDER_ONLY = re.compile(r"^/videos/[^/]+/(renders|export)$")
+_ARCHIVE_TARGET = re.compile(r"^/(videos|projects)/([A-Za-z0-9_-]+)(/|$)")
+
+
+def _open_when_archived(method: str, path: str) -> bool:
+    return bool(_ARCHIVE_SELF.match(path) or (method == "DELETE" and _BARE_ITEM.match(path))
+                or (method == "POST" and _RENDER_ONLY.match(path)))
+
+
+@app.middleware("http")
+async def _archived_is_read_only(request: Request, call_next):
+    """D4: an archived project, and every video in it, is read-only until
+    unarchived: any change under /projects/<id> or /videos/<id> (a turn, an
+    edit, a brief, a move, a batch) answers 423 with one sentence. Reads,
+    and the writes `_open_when_archived` names, go through."""
+    method, path = request.method, request.url.path
+    hit = _ARCHIVE_TARGET.match(path) if method in ("POST", "PUT", "PATCH", "DELETE") else None
+    if hit and not _open_when_archived(method, path):
+        kind, item = hit.group(1), hit.group(2)
+        found = await asyncio.to_thread(home_store.archived_project_of, database,
+                                        **({"video_id": item} if kind == "videos" else {"project_id": item}))
+        if found and flags.enabled("projects.reuse", found["owner"]):
+            try:
+                caller = current_owner(request)
+            except HTTPException:
+                caller = None
+            if caller == found["owner"]:
+                return JSONResponse(status_code=423, content={"detail": home_store.ARCHIVED})
+    return await call_next(request)
+
+
+@app.post("/projects/{project_id}/archive")
+def archive_project(project_id: str, owner: str = Depends(current_owner)) -> dict:
+    """Archive a project: hidden from Home, still searchable, read-only."""
+    _reuse_flag(owner)
+    _owned_project(project_id, owner)
+    changed = home_store.set_archived(database, project_id, owner, True)
+    return {**_folder_dict(repo.get_project(project_id)), "changed": changed}
+
+
+@app.delete("/projects/{project_id}/archive")
+def unarchive_project(project_id: str, owner: str = Depends(current_owner)) -> dict:
+    _reuse_flag(owner)
+    _owned_project(project_id, owner)
+    changed = home_store.set_archived(database, project_id, owner, False)
+    return {**_folder_dict(repo.get_project(project_id)), "changed": changed}
+
+
+@app.get("/pins")
+def list_pins(owner: str = Depends(current_owner)) -> dict:
+    """What the caller pinned to the top of Home's sidebar, oldest first."""
+    _reuse_flag(owner)
+    return {"pins": home_store.pins(database, owner)}
+
+
+@app.put("/pins/{kind}/{item_id}")
+def add_pin(kind: Literal["project", "video"], item_id: str, owner: str = Depends(current_owner)) -> dict:
+    _reuse_flag(owner)
+    try:
+        added = home_store.pin(database, owner, kind, item_id)
+    except home_store.NotFound:
+        raise HTTPException(status_code=404, detail="Nothing of yours to pin there.") from None
+    return {"pinned": True, "changed": added}
+
+
+@app.delete("/pins/{kind}/{item_id}")
+def remove_pin(kind: Literal["project", "video"], item_id: str, owner: str = Depends(current_owner)) -> dict:
+    _reuse_flag(owner)
+    return {"pinned": False, "changed": home_store.unpin(database, owner, kind, item_id)}
+
+
+@app.get("/search")
+def search_home(q: str = "", owner: str = Depends(current_owner)) -> dict:
+    """Project names, video names, what is said (with the time) and briefs,
+    grouped by project; archived projects included, deleted ones never."""
+    _reuse_flag(owner)
+    return home_store.search(database, owner, q)
+
+
 @app.get("/projects/{project_id}/events")
 def list_project_events(project_id: str, limit: int = 50, before: int | None = None,
                         owner: str = Depends(current_owner)) -> dict:
@@ -4034,6 +4149,8 @@ def move_video(project_id: str, req: MoveVideoRequest, owner: str = Depends(curr
     answer is 409 naming the voices."""
     record = _owned(project_id, owner)
     target = _owned_project(req.project_id, owner) if req.project_id else None
+    if target is not None:
+        _not_archived(target.project_id, owner)
     target_id = target.project_id if target else None
     leaving = record.folder_id if record.folder_id and record.folder_id != target_id else None
     if leaving:

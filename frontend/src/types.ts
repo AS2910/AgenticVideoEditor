@@ -234,6 +234,8 @@ export interface Project {
   /** The folder it is in, or null. */
   project_id?: string | null
   project_name?: string | null
+  /** D4: its project is archived, so the video is read-only. */
+  project_archived?: boolean
   /** A1: the project's current brief version, the one this video was made with, and whether they differ. */
   brief_version?: number | null
   made_with_brief?: number | null
@@ -356,6 +358,9 @@ export interface ProjectSummary {
   master_filename?: string | null
   /** B2: a master's language versions, as chips. */
   languages?: LanguageChip[]
+  /** D4: its project is archived (hidden from Home); when it last changed. */
+  project_archived?: boolean
+  last_edited_at?: string
 }
 
 export interface ApprovedEditSummary {
@@ -546,6 +551,8 @@ export interface ProjectFolder {
   brief_edited_by?: string | null
   brief_edited_at?: string | null
   stale_count?: number
+  /** D4: set while archived (hidden from Home, read-only). */
+  archived_at?: string | null
 }
 /** F2: one saved version of a project's brief. */
 export interface BriefVersion { project_id: string; version: number; text: string; created_by: string; created_at: string }
@@ -917,3 +924,17 @@ export interface BinRestored {
   videos?: string[]
   name?: string | null
 }
+
+/** D4: a pin at the top of Home's sidebar. */
+export interface Pin { kind: 'project' | 'video'; id: string; name: string; pinned_at: string; archived?: boolean; project_id?: string | null }
+/** D4: one search match. A `transcript` hit is a moment the words are said (`at`, seconds of the source). */
+export interface SearchHit {
+  kind: 'project' | 'brief' | 'video' | 'transcript'
+  text: string
+  video_id?: string
+  filename?: string
+  at?: number
+  match?: string
+}
+export interface SearchGroup { project_id: string | null; project_name: string; archived: boolean; hits: SearchHit[] }
+export interface SearchResult { query: string; groups: SearchGroup[]; total: number }

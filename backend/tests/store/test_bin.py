@@ -63,6 +63,7 @@ def test_the_purge_keeps_the_consent_record(repo, tmp_path):
 def test_migration_0020_up_down_and_refuses_to_lose_a_consent_record(tmp_path):
     conn = migrate.connect(str(tmp_path / "m.db"))
     migrate.up(conn)
+    migrate.down(conn, max(migrate.applied(conn)) - 20)   # 0020 is the last step applied
     cols = lambda: {r[1] for r in conn.execute("PRAGMA table_info(purged_items)")}
     assert "consent" in cols()
     conn.execute("INSERT INTO purged_items (kind, item_id, name, owner, purged_at, consent) "

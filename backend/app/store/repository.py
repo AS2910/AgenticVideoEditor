@@ -68,6 +68,8 @@ class Project:
     created_at: str = ""
     # F2: the brief version `brief` is the text of; None before the first save.
     brief_version: int | None = None
+    # D4: when it was archived (hidden from Home, read-only), or None.
+    archived_at: str | None = None
 
 
 @dataclass(frozen=True)
@@ -111,7 +113,8 @@ def _record(row) -> ProjectRecord:
 def _project(row) -> Project:
     return Project(project_id=row["id"], owner=row["owner"], name=row["name"], brief=row["brief"] or "",
                    settings=json.loads(row["settings"] or "{}"), ceiling_usd=row["ceiling_usd"], created_at=row["created_at"],
-                   brief_version=row["brief_version"] if "brief_version" in row.keys() else None)
+                   brief_version=row["brief_version"] if "brief_version" in row.keys() else None,
+                   archived_at=row["archived_at"] if "archived_at" in row.keys() else None)
 
 
 # `list(owner)` lists every video; `list(owner, folder=None)` the standalone ones.

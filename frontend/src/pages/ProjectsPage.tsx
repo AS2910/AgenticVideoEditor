@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import type React from 'react'
 import type { DragEvent } from 'react'
-import type { ProjectFolder, ProjectSummary, SpendSummary } from '../types'
+import type { Pin, ProjectFolder, ProjectSummary, SpendSummary } from '../types'
 import type { Me } from '../api'
-import { frameUrl, getSpend } from '../api'
+import { frameUrl, getPins, getSpend, listArchivedFolders, setPin } from '../api'
 import { ofCeiling } from '../lib/money'
 import { hrefFor } from '../lib/route'
 import { clock } from '../transcript/format'
@@ -14,6 +14,16 @@ import { whenLabel } from './fmt'
 import { MoveDialog } from '../components/MoveDialog'
 import { LanguageChips } from './LanguageVersions'
 import { useFlags } from '../flags/useFlags'
+import { HomeSearch } from './HomeSearch'
+import { Tip } from '../guides/Tip'
+
+import type { Sort } from '../lib/home'
+import { SORTS, STAGES, needsAttention, sortVideos } from '../lib/home'
+
+/** A pin glyph; filled when pinned. */
+const PinGlyph = ({ on }: { on: boolean }) => (
+  <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true"><path d="M6 2h4l-.5 4 2.5 2.5V10H4V8.5L6.5 6zM8 10v4.5" fill={on ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" /></svg>
+)
 
 interface ProjectsPageProps {
   me: Me | null
@@ -89,6 +99,32 @@ export function ProjectsPage({ me, projects, folders = [], onOpen, onUpload, onS
   const languageChips = useFlags().enabled('projects.batch')
   // D3: deleting moves to the Bin, said as such.
   const binOn = useFlags().enabled('projects.reuse')
+  // D4 (projects.reuse too): pins, archived projects, search, sort and filter.
+  const reuseOn = binOn
+  const [pins, setPins] = useState<Pin[]>([])
+  const [archived, setArchived] = useState<ProjectFolder[]>([])
+  const [showArchived, setShowArchived] = useState(false)
+  const [sort, setSort] = useState<Sort>('edited')
+  const [stageFilter, setStageFilter] = useState('all')
+  const [attention, setAttention] = useState(false)
+  useEffect(() => {
+    if (!reuseOn) return
+    let live = true
+    getPins().then((p) => { if (live) setPins(p) }).catch(() => { /* the sidebar works without pins */ })
+    listArchivedFolders().then((a) => { if (live) setArchived(a) }).catch(() => { /* the filter just shows none */ })
+    return () => { live = false }
+  }, [reuseOn, folders])
+  const isPinned = (kind: Pin['kind'], id: string) => pins.some((p) => p.kind === kind && p.id === id)
+  const togglePin = async (kind: Pin['kind'], id: string, name: string) => {
+    const was = pins
+    const on = !isPinned(kind, id)
+    setPins(on ? [...was, { kind, id, name, pinned_at: new Date().toISOString() }] : was.filter((p) => !(p.kind === kind && p.id === id)))
+    try { await setPin(kind, id, on) } catch {
+      setPins(was)
+      setToast(on ? `Could not pin ${name}.` : `Could not unpin ${name}.`)
+      window.setTimeout(() => setToast(null), 5000)
+    }
+  }
   const [over, setOver] = useState(false)
   const [dest, setDest] = useState<string>('none')
   const [tab, setTab] = useState<Tab>('all')
@@ -157,9 +193,13 @@ export function ProjectsPage({ me, projects, folders = [], onOpen, onUpload, onS
   }
   // The new project leads the list until the page is left; the rest keep the server's order.
   const listed = selected ? [...folders.filter((f) => f.project_id === selected), ...folders.filter((f) => f.project_id !== selected)] : folders
-  const inProjects = projects.filter((p) => p.project_id)
-  const standalone = projects.filter((p) => !p.project_id)
-  const shown = tab === 'all' ? projects : tab === 'in' ? inProjects : standalone
+  // D4: a video in an archived project is not on Home (search still finds it).
+  const onHome = reuseOn ? projects.filter((p) => !p.project_archived) : projects
+  const inProjects = onHome.filter((p) => p.project_id)
+  const standalone = onHome.filter((p) => !p.project_id)
+  const inTab = tab === 'all' ? onHome : tab === 'in' ? inProjects : standalone
+  const narrowed = reuseOn ? inTab.filter((p) => (stageFilter === 'all' || (p.stage ?? 'draft') === stageFilter) && (!attention || needsAttention(p))) : inTab
+  const shown = reuseOn ? sortVideos(narrowed, sort) : narrowed
   const countIn = (fid: string) => projects.filter((p) => p.project_id === fid).length
 
   return (
@@ -193,26 +233,71 @@ export function ProjectsPage({ me, projects, folders = [], onOpen, onUpload, onS
             </div>
           </form>
         )}
+        {reuseOn && pins.length > 0 && (
+          <>
+            <span className="tag px-2.5 py-1.5 text-faint" id="pinned-h">Pinned</span>
+            <ul className="m-0 mb-2 flex list-none flex-col gap-0.5 p-0" aria-labelledby="pinned-h" data-testid="pinned">
+              {pins.map((pin) => (
+                <li key={`${pin.kind}:${pin.id}`} className="group/pin flex min-w-0 items-center rounded-lg hover:bg-sunk">
+                  <a href={pin.kind === 'project' ? hrefFor({ page: 'folder', projectId: pin.id }) : hrefFor({ page: 'editor', projectId: pin.id })} title={pin.name} className="flex min-w-0 flex-1 items-center gap-2.5 px-2.5 py-2 text-foreground no-underline">
+                    {pin.kind === 'project' ? <Folder filled /> : <span aria-hidden="true" className="grid w-[18px] flex-none place-items-center text-muted-foreground"><svg width="12" height="12" viewBox="0 0 16 16"><path d="M4.5 2.5v11l9-5.5z" fill="currentColor" /></svg></span>}
+                    <span className="min-w-0 flex-1 truncate font-medium">{pin.name}</span>
+                  </a>
+                  <button type="button" className="act mr-1 min-h-8 w-8 justify-center p-0 opacity-0 group-hover/pin:opacity-100 focus-visible:opacity-100 pointer-coarse:min-h-11 pointer-coarse:w-11 pointer-coarse:opacity-100" aria-label={`Unpin ${pin.name}`} onClick={() => void togglePin(pin.kind, pin.id, pin.name)}><PinGlyph on /></button>
+                </li>
+              ))}
+            </ul>
+          </>
+        )}
         <span className="tag px-2.5 py-1.5 text-faint">Projects</span>
         {folders.length === 0 && <span className="px-2.5 py-1.5 text-[13px] text-muted-foreground">A project holds videos that share a brief, voices and a ceiling.</span>}
-        {listed.map((f) => (
-          <a key={f.project_id} href={hrefFor({ page: 'folder', projectId: f.project_id })} aria-current={f.project_id === selected ? 'true' : undefined} title={f.name} className="flex min-w-0 items-center gap-2.5 rounded-lg px-2.5 py-2 text-foreground no-underline hover:bg-sunk aria-[current=true]:bg-sunk aria-[current=true]:font-semibold">
-            <Folder filled={countIn(f.project_id) > 0 || f.project_id === selected} />
-            <span className="min-w-0 flex-1 truncate font-medium">{f.name}</span>
-            <span className="tnum text-xs text-faint">{f.video_count ?? countIn(f.project_id)}</span>
-          </a>
-        ))}
+        {listed.map((f) => {
+          const row = (
+            <a key={f.project_id} href={hrefFor({ page: 'folder', projectId: f.project_id })} aria-current={f.project_id === selected ? 'true' : undefined} title={f.name} className="flex min-w-0 flex-1 items-center gap-2.5 rounded-lg px-2.5 py-2 text-foreground no-underline hover:bg-sunk aria-[current=true]:bg-sunk aria-[current=true]:font-semibold">
+              <Folder filled={countIn(f.project_id) > 0 || f.project_id === selected} />
+              <span className="min-w-0 flex-1 truncate font-medium">{f.name}</span>
+              <span className="tnum text-xs text-faint">{f.video_count ?? countIn(f.project_id)}</span>
+            </a>
+          )
+          if (!reuseOn) return row
+          const on = isPinned('project', f.project_id)
+          return (
+            <div key={f.project_id} className="group/row flex min-w-0 items-center gap-0.5">
+              {row}
+              <button type="button" className={cn('act min-h-8 w-8 flex-none justify-center p-0 focus-visible:opacity-100 pointer-coarse:min-h-11 pointer-coarse:w-11 pointer-coarse:opacity-100', on ? 'opacity-100' : 'opacity-0 group-hover/row:opacity-100')} aria-label={on ? `Unpin ${f.name}` : `Pin ${f.name}`} aria-pressed={on} title={on ? 'Pinned to the top of Home' : 'Pin to the top of Home'} onClick={() => void togglePin('project', f.project_id, f.name)}><PinGlyph on={on} /></button>
+            </div>
+          )
+        })}
         <span className="tag px-2.5 pt-4 pb-1.5 text-faint">Not in a project</span>
         <button type="button" className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left hover:bg-sunk" onClick={() => setTab('none')} aria-pressed={tab === 'none'}>
           <Folder dashed />
           <span className="flex-1 font-medium">Standalone videos</span>
           <span className="tnum text-xs text-faint">{standalone.length}</span>
         </button>
+        {reuseOn && (
+          <>
+            <button type="button" className="mt-3 flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-muted-foreground hover:bg-sunk" aria-pressed={showArchived} aria-expanded={showArchived} onClick={() => setShowArchived((v) => !v)} data-testid="archived-filter">
+              <span aria-hidden="true" className="w-[18px] text-center">{showArchived ? '▾' : '▸'}</span>
+              <span className="flex-1 font-medium">Archived · {archived.length}</span>
+            </button>
+            {showArchived && (archived.length === 0
+              ? <span className="px-2.5 py-1.5 text-[13px] text-muted-foreground">No archived projects. Archive one from its page when the work is done.</span>
+              : archived.map((f) => (
+                <a key={f.project_id} href={hrefFor({ page: 'folder', projectId: f.project_id })} title={f.name} className="flex min-w-0 items-center gap-2.5 rounded-lg px-2.5 py-2 text-muted-foreground no-underline hover:bg-sunk">
+                  <Folder />
+                  <span className="min-w-0 flex-1 truncate font-medium">{f.name}</span>
+                  <span className="stamp quiet">Archived</span>
+                </a>
+              )))}
+          </>
+        )}
       </aside>
 
       <div className="min-w-0 flex-[999_1_640px] px-4 pt-10 pb-20 sm:px-8">
         <div className="mx-auto flex max-w-[1040px] flex-col gap-10">
           {banner}
+          {reuseOn && <HomeSearch />}
+          {reuseOn && onHome.length > 1 && <Tip id="first-home-search" target="home-search" />}
           <section aria-labelledby="new-h" className="flex flex-col gap-[18px]">
             <h1 id="new-h" className="disp rise m-0 max-w-[820px] text-[clamp(36px,4.5vw,56px)] leading-none font-bold">
               What should your next video <span className="rounded-md bg-volt px-2 text-ink">say?</span>
@@ -276,23 +361,39 @@ export function ProjectsPage({ me, projects, folders = [], onOpen, onUpload, onS
             </span>
           </section>
 
-          <section aria-labelledby="recent-h" className="flex flex-col gap-3.5">
+          <section aria-labelledby="recent-h" className="flex flex-col gap-3.5" data-testid="recent-videos">
             <div className="flex flex-wrap items-center gap-3.5">
               <h2 id="recent-h" className="disp m-0 text-[26px] font-bold">Recent videos</h2>
               <div className="segs" role="tablist" aria-label="Which videos">
-                {([['all', `All · ${projects.length}`], ['in', `In projects · ${inProjects.length}`], ['none', `No project · ${standalone.length}`]] as const).map(([k, text]) => (
+                {([['all', `All · ${onHome.length}`], ['in', `In projects · ${inProjects.length}`], ['none', `No project · ${standalone.length}`]] as const).map(([k, text]) => (
                   <button key={k} type="button" role="tab" className="seg" aria-selected={tab === k} onClick={() => setTab(k)}>{text}</button>
                 ))}
               </div>
             </div>
+            {reuseOn && onHome.length > 0 && (
+              <div className="flex flex-wrap items-center gap-2.5" data-testid="video-controls" data-tour="video-controls">
+                <label className="flex items-center gap-2"><span className="tag text-faint">Sort</span>
+                  <select className="h-8 rounded-lg border-[1.5px] border-foreground bg-card px-2 text-[13px] text-foreground pointer-coarse:h-11" aria-label="Sort videos" value={sort} onChange={(e) => setSort(e.target.value as Sort)}>
+                    {SORTS.map((o) => <option key={o.key} value={o.key}>{o.label}</option>)}
+                  </select>
+                </label>
+                <label className="flex items-center gap-2"><span className="tag text-faint">Stage</span>
+                  <select className="h-8 rounded-lg border-[1.5px] border-foreground bg-card px-2 text-[13px] text-foreground pointer-coarse:h-11" aria-label="Stage" value={stageFilter} onChange={(e) => setStageFilter(e.target.value)}>
+                    <option value="all">Any stage</option>
+                    {STAGES.map((o) => <option key={o.key} value={o.key}>{o.label}</option>)}
+                  </select>
+                </label>
+                <button type="button" className="pill" aria-pressed={attention} onClick={() => setAttention((v) => !v)} title="Brief changed, out of sync with its master, or open review comments">Needs attention · {inTab.filter(needsAttention).length}</button>
+              </div>
+            )}
             {shown.length === 0 ? (
-              <p className="m-0 text-muted-foreground">{projects.length === 0 ? 'Your videos will show here after your first upload.' : tab === 'in' ? 'No video is in a project yet.' : 'Every video is in a project.'}</p>
+              <p className="m-0 text-muted-foreground">{onHome.length === 0 ? 'Your videos will show here after your first upload.' : inTab.length > 0 ? (attention && stageFilter === 'all' ? 'Nothing needs attention. Every video is current, in sync and has no open comments.' : 'No video matches. Choose Any stage or turn off Needs attention to see them all.') : tab === 'in' ? 'No video is in a project yet.' : 'Every video is in a project.'}</p>
             ) : (
               <ul className="m-0 -mx-3 grid list-none grid-cols-[repeat(auto-fill,minmax(240px,1fr))] gap-2.5 p-0">
                 {shown.map((p, i) => {
                   const id = p.video_id
                   return (
-                    <li key={id} className="min-w-0" data-project={p.project_id ?? 'none'}>
+                    <li key={id} className="min-w-0" data-project={p.project_id ?? 'none'} data-testid="video-card">
                       {deleting === id ? (
                         <div className="flex min-h-[200px] flex-col justify-center gap-2 rounded-xl border-[1.5px] border-line2 bg-card p-4 text-[13px] text-muted-foreground" role="status">
                           <span>{binOn ? 'Moved ' : 'Deleted '}<strong className="font-semibold text-foreground">{p.filename}</strong>{binOn ? <> to the <a href={hrefFor({ page: 'bin' })} className="text-foreground">Bin</a>.</> : '.'}</span>
@@ -343,6 +444,7 @@ export function ProjectsPage({ me, projects, folders = [], onOpen, onUpload, onS
                             {menu === id && (
                               <div role="menu" className="rise absolute right-0 z-10 mt-1 flex w-56 flex-col rounded-xl border-[1.5px] border-ink bg-card p-1.5 shadow-volt">
                                 <button type="button" role="menuitem" className="act justify-start" onClick={() => { setMenu(null); setMoving(p) }}>↗ Move to project…</button>
+                                {reuseOn && <button type="button" role="menuitem" className="act justify-start" onClick={() => { setMenu(null); void togglePin('video', id, p.filename) }}>{isPinned('video', id) ? 'Unpin from Home' : 'Pin to Home'}</button>}
                                 <button type="button" role="menuitem" className="act justify-start" onClick={() => { setMenu(null); setConfirming(id) }}>Delete…</button>
                               </div>
                             )}

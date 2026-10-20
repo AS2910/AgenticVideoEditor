@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { DragEvent } from 'react'
 import type { ProjectDetailFolder, ProjectFolder, ProjectSummary, MyVoice, MadeVoice, SpendSummary } from '../types'
 import type { Me } from '../api'
-import { ApiError, answerSuggestion, deleteFolder, deleteFolderFile, getFolder, getSpend, listMadeVoices, listVoices, shareVoice, unshareVoice, updateFolder, uploadFolderFile } from '../api'
+import { ApiError, answerSuggestion, archiveFolder, getPins, setPin, unarchiveFolder, deleteFolder, deleteFolderFile, getFolder, getSpend, listMadeVoices, listVoices, shareVoice, unshareVoice, updateFolder, uploadFolderFile } from '../api'
 import { go, hrefFor } from '../lib/route'
 import { clock } from '../transcript/format'
 import { cn } from '@/lib/utils'
@@ -88,6 +88,15 @@ export function ProjectPage({ me, projectId, onUpload, uploading, error, onDelet
   const [batchTick, setBatchTick] = useState(0)
   // C1 (projects.review): Grid or Board, and the feed's re-read after a move.
   const reviewOn = enabled('projects.review')
+  // D4 (projects.reuse): archive (read-only until unarchived) and pin to Home.
+  const reuseOn = enabled('projects.reuse')
+  const [pinned, setPinned] = useState(false)
+  useEffect(() => {
+    if (!reuseOn) return
+    let live = true
+    getPins().then((p) => { if (live) setPinned(p.some((x) => x.kind === 'project' && x.id === projectId)) }).catch(() => { /* the menu says Pin */ })
+    return () => { live = false }
+  }, [reuseOn, projectId])
   const [view, setView] = useState<VideosView>(() => readView(me))
   const [feedTick, setFeedTick] = useState(0)
   const fileInput = useRef<HTMLInputElement>(null)
@@ -148,6 +157,19 @@ export function ProjectPage({ me, projectId, onUpload, uploading, error, onDelet
       onDeleted?.()
       go({ page: 'projects' })
     } catch (e) { say(e, 'Could not delete the project.') } finally { setBusy(null); setDeleting(false) }
+  }
+  const setArchivedTo = async (on: boolean) => {
+    setBusy('archive')
+    try {
+      const p = on ? await archiveFolder(projectId) : await unarchiveFolder(projectId)
+      setDetail((d) => (d ? { ...d, project: { ...d.project, archived_at: p.archived_at ?? null } } : d))
+      onDeleted?.()   // Home's lists change: read them again
+    } catch (e) { say(e, on ? 'Could not archive the project.' : 'Could not unarchive the project.') } finally { setBusy(null) }
+  }
+  const togglePin = async () => {
+    const on = !pinned
+    setPinned(on)
+    try { await setPin('project', projectId, on) } catch (e) { setPinned(!on); say(e, 'Could not change the pin.') }
   }
   const saveCeiling = async () => {
     if (ceilingDraft === null) return
@@ -265,13 +287,22 @@ export function ProjectPage({ me, projectId, onUpload, uploading, error, onDelet
             {menu && (
               <div role="menu" className="rise absolute right-0 z-10 mt-1 flex w-56 flex-col rounded-xl border-[1.5px] border-ink bg-card p-1.5 shadow-volt">
                 <button type="button" role="menuitem" className="act justify-start" onClick={() => { setMenu(false); setRenaming(true) }}>Rename…</button>
+                {reuseOn && <button type="button" role="menuitem" className="act justify-start" onClick={() => { setMenu(false); void togglePin() }}>{pinned ? 'Unpin from Home' : 'Pin to Home'}</button>}
+                {reuseOn && <button type="button" role="menuitem" className="act justify-start" onClick={() => { setMenu(false); void setArchivedTo(!project.archived_at) }}>{project.archived_at ? 'Unarchive project' : 'Archive project'}</button>}
                 <button type="button" role="menuitem" className="act justify-start" onClick={() => { setMenu(false); setDeleting(true) }}>Delete project…</button>
               </div>
             )}
           </div>
-          <button type="button" className="btn volt shine" onClick={() => fileInput.current?.click()} disabled={uploading}>{uploading ? 'Uploading…' : '+ Upload to this project'}</button>
+          <button type="button" className="btn volt shine" onClick={() => fileInput.current?.click()} disabled={uploading || (reuseOn && !!project.archived_at)}>{uploading ? 'Uploading…' : '+ Upload to this project'}</button>
           <input ref={fileInput} className="sr-only" type="file" accept="video/*" aria-label="Choose a video for this project" tabIndex={-1} onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) onUpload(f, projectId) }} />
         </div>
+        {reuseOn && project.archived_at && (
+          <div className="flex flex-wrap items-center gap-3 rounded-xl border-[1.5px] border-foreground bg-sunk p-4" role="status" data-testid="archived-banner">
+            <span className="stamp quiet">Archived</span>
+            <span className="flex-1 text-sm">This project is archived. Unarchive it to make changes. It stays out of Home, and search still finds it.</span>
+            <button type="button" className="btn sm" onClick={() => void setArchivedTo(false)} disabled={busy === 'archive'} aria-busy={busy === 'archive' || undefined}>{busy === 'archive' ? 'Unarchiving…' : 'Unarchive'}</button>
+          </div>
+        )}
         {deleting && (
           <div className="flex flex-wrap items-center gap-3 rounded-xl border-[1.5px] border-destructive bg-card p-4" role="group" aria-label={`Delete ${project.name}?`} data-testid="delete-project">
             <span className="flex-1 text-sm">Delete <strong>{project.name}</strong>? Its {detail.videos.length} {detail.videos.length === 1 ? 'video' : 'videos'} can go with it, or stay as standalone videos. {enabled('projects.reuse') ? 'It goes to the Bin for 30 days and can be restored from there; after that, project voices go unless kept in your voices.' : 'It is kept for 30 days, then goes for good; project voices go with it unless kept in your voices.'}</span>
