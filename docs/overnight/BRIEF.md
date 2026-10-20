@@ -34,3 +34,10 @@ AgenticVideoEditor repo, unattended, overnight. The user is asleep; never ask qu
 
 ## Report back
 End with: commits (hash + message), test counts for every suite, what was skipped and why, decisions logged, anything the orchestrator should check.
+
+## Notes from earlier steps
+- Run backend commands from the worktree's `backend/` dir; standalone scripts need `PYTHONPATH=<worktree>/backend` (the shared .venv otherwise imports the main checkout's `app`).
+- Schema changes are numbered migrations in `backend/app/store/migrations/mNNNN_<name>.py` (up and down), run by `backend/app/store/migrate.py`; CLI `python -m app.store.migrate up|down|status --db PATH`. `AVE_LIVE_DB_COPY=<path>` enables the live-copy test.
+- Flags: `backend/app/flags.py` `flags.enabled(flag, owner)`; frontend `useFlags()` in `frontend/src/flags/useFlags.ts`.
+- Workspaces: `backend/app/store/workspaces.py`; every new user-data table gets `workspace_id` set on write.
+- Known load flake: tests/api/test_allow_more.py::test_allow_more_raises_this_turns_cap_and_carries_the_turn_on (passes alone).
