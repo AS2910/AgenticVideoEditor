@@ -1626,3 +1626,29 @@ describe('Spend scopes in the editor header', () => {
     expect(unlabelledMoney(pop)).toEqual([])
   })
 })
+
+describe('Lines too long for their gaps (p61)', () => {
+  const long = (id: string, start: number, end: number, words: string, cost: number) => ({
+    ...PLAN_ITEM, item_id: id, selection: { start, end }, old_text: '', new_text: words, mix: 'layer', status: 'failed',
+    error: 'Too long for its gap: needs 1.2 s, has 0.8 s.',
+    fit_failure: { reason: 'too_long', needs: 1.2, has: 0.8, tried: ['trimmed the take\'s pauses'], syllables: 7, budget: 4, cost_usd: cost,
+      text: words, eased_candidate_id: null, ease_s: null },
+  })
+  const PLAN_LONG = { ...PLAN, status: 'done', items: [long('i1', 0.1, 0.9, '[excited] Red catches him clean!', 0.03), long('i2', 1.2, 2.0, 'Blue is down, he is down!', 0.03)] }
+
+  it('the grouped banner’s Shorten all makes one turn naming every line', async () => {
+    const calls = agent(PLAN_LONG)
+    const user = userEvent.setup()
+    render(<App />)
+    await reachGoal(user)
+    await hearNewWords(user)
+    const banner = await screen.findByTestId('fit-banner')
+    expect(banner).toHaveTextContent('2 lines are too long for their gaps.')
+    expect(screen.getAllByTestId('fit-reason').map((r) => r.textContent)).toEqual(['1.2 s for a 0.8 s gap', '1.2 s for a 0.8 s gap'])
+    const before = saidTo(calls).length
+    await user.click(within(banner).getByRole('button', { name: 'Shorten all and voice (~$0.06)' }))
+    await waitFor(() => expect(saidTo(calls).length).toBe(before + 1))
+    expect(saidTo(calls).at(-1)).toBe('Shorten these 2 lines so each fits its gap, and voice each again once: '
+      + 'i1 (“Red catches him clean!”, about 4 syllables for 0.8 s); i2 (“Blue is down, he is down!”, about 4 syllables for 0.8 s).')
+  })
+})

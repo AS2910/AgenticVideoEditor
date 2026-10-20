@@ -18,7 +18,7 @@ import anthropic
 
 from app.agent.context import SYSTEM
 from app.agent.guards import TurnStopped, WaitingForUser
-from app.agent.tools import BY_NAME, Tool, ToolResult, Turn, Workbench
+from app.agent.tools import BY_NAME, Tool, ToolResult, Turn, Workbench, fit_followup
 
 log = logging.getLogger(__name__)
 
@@ -148,6 +148,14 @@ def dangling_tool_uses(history: Sequence[dict]) -> list[dict]:
     return _unanswered(history[-1], None)
 
 
+def _question_of(w: WaitingForUser) -> dict:
+    """The question a turn ends with, as the API carries it."""
+    question = {"text": w.question, "options": list(w.options), "guess": w.guess, "gate": w.gate, "cost_usd": w.cost_usd}
+    if w.details:
+        question["details"] = list(w.details)
+    return question
+
+
 def _result_block(tool_use_id: str, result: ToolResult, is_error: bool = False) -> dict:
     content: Any = result.blocks if result.blocks else result.text
     block = {"type": "tool_result", "tool_use_id": tool_use_id, "content": content}
@@ -233,9 +241,17 @@ class Agent:
                 if uses and stop == "max_tokens":
                     # The reply was cut mid tool call; answer the calls as not run so the thread stays valid.
                     append("user", [_result_block(u["id"], ToolResult("Not run: the reply was cut short."), True) for u in uses])
+                # p61: a turn never ends with lines that ran long and were not
+                # tried shorter: Voltage is told to try them, or the user is asked once.
+                follow = fit_followup(wb, turn) if not uses else None
+                if isinstance(follow, str):
+                    append("user", [{"type": "text", "text": follow}])
+                    continue
                 out.reply = _text_of(content) or out.reply
                 if stop == "max_tokens":
                     out.stopped = "max_tokens"
+                if isinstance(follow, WaitingForUser):
+                    out.question = _question_of(follow)
                 break
             results: list[dict] = []
             ended: WaitingForUser | TurnStopped | None = None
@@ -275,15 +291,17 @@ class Agent:
                     on_card(result.card["text"], result.card["data"])
             append("user", results)
             if isinstance(ended, WaitingForUser):
-                out.question = {"text": ended.question, "options": list(ended.options), "guess": ended.guess, "gate": ended.gate,
-                                "cost_usd": ended.cost_usd}
-                if ended.details:
-                    out.question["details"] = list(ended.details)
+                out.question = _question_of(ended)
                 out.reply = _text_of(content)
                 break
             if isinstance(ended, TurnStopped):
                 out.reply = _text_of(content) or str(ended)
                 out.stopped = str(ended)
+                # The turn cannot go on, so lines that ran long are asked about together.
+                turn.fit_nudged = True
+                follow = fit_followup(wb, turn)
+                if isinstance(follow, WaitingForUser):
+                    out.question = _question_of(follow)
                 break
         out.spent_usd = max(0.0, wb.ledger.spent_usd(turn.project_id) - started)
         return out

@@ -41,6 +41,11 @@ class PlanItem:
     # may set its state, and each outcome is kept here (newest last).
     attempt: int = 0
     history: tuple = ()
+    # 2026-10-20 (p61): why the line could not be fitted, when it ran long:
+    # {reason, needs, has, tried, syllables, budget, cost_usd, eased_candidate_id, ease_s}.
+    fit_failure: dict | None = None
+    # The beat the line was written for: {at, key_word, miss} (miss once it is voiced).
+    beat: dict | None = None
 
 
 @dataclass(frozen=True)
@@ -92,6 +97,7 @@ def item_from_dict(d: dict) -> PlanItem:
         status=d.get("status", "planned"), fit=d.get("fit"), candidate_id=d.get("candidate_id"),
         edit_id=d.get("edit_id"), question=d.get("question"), error=d.get("error"), note=d.get("note"),
         progress=d.get("progress"), attempt=int(d.get("attempt", 0)), history=tuple(d.get("history", ())),
+        fit_failure=d.get("fit_failure"), beat=d.get("beat"),
     )
 
 

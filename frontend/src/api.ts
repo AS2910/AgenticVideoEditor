@@ -242,6 +242,10 @@ export const roleQuestion = (e: unknown): RoleQuestion | null => {
 export const dismissItem = (id: string, planId: string, itemId: string) =>
   post<Plan>(`/videos/${id}/plans/${planId}/items/${itemId}/dismiss`)
 
+/** p61: a line that ran long takes the take already voiced, the picture easing so it fits. Nothing is paid. */
+export const easeItem = (id: string, planId: string, itemId: string) =>
+  post<Plan>(`/videos/${id}/plans/${planId}/items/${itemId}/ease`)
+
 /** Undoes an approved edit. The edit is kept and marked; the render skips it. */
 export const revertEdit = (id: string, editId: string) =>
   post<{ edit_id: string; reverted: boolean }>(`/videos/${id}/edits/${editId}/revert`)

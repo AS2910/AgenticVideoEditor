@@ -543,6 +543,10 @@ class ElevenLabsVoiceAdapter:
         self.last_notes: list[str] = []
         # The last take's own word times, at their fitted positions (P-3).
         self.last_words: tuple[Word, ...] = ()
+        # p61: the last paid take's spoken length before fitting, {seconds, speed, faster_tried}.
+        self.last_measure: dict | None = None
+        self._faster_tried: float | None = None
+        self._chosen_speed: float | None = None
 
     def cost_of(self, plan: EditPlan) -> int:
         model = model_of(plan, self._model)
@@ -746,14 +750,24 @@ class ElevenLabsVoiceAdapter:
         r = ratio(best)
         # Too far for a tempo change, but within the model's speed range once
         # the two are combined: generate again at that speed.
-        if (r > ffmpeg.MAX_TEMPO and r <= ffmpeg.MAX_TEMPO * SPEED_MAX) or \
+        # p61: faster only up to fit.MODEL_SPEED_MAX, past which a take stops sounding natural.
+        if (r > ffmpeg.MAX_TEMPO and r <= ffmpeg.MAX_TEMPO * fit.MODEL_SPEED_MAX) or \
            (r < ffmpeg.MIN_TEMPO and r >= ffmpeg.MIN_TEMPO * SPEED_MIN):
-            speed = min(SPEED_MAX, max(SPEED_MIN, r))
+            speed = min(fit.MODEL_SPEED_MAX, max(SPEED_MIN, r))
             faster = self._take(project_id, voice_id, {**body, "voice_settings": {**body.get("voice_settings", {}), "speed": round(speed, 2)}}, plan)
+            if r > 1:
+                self._faster_tried = round(speed, 2)
             if abs(ratio(faster) - 1) < abs(r - 1):
                 notes.append(f"spoken at {speed:.2f}× by the model")
+                self._chosen_speed = round(speed, 2)
                 return faster
         return best
+
+    def holds(self, source: Source, plan: EditPlan, transcript: Transcript | None = None) -> bool:
+        """Whether a paid take for this exact line is held (it did not fit), so
+        voicing it again costs nothing (p61: the fit ladder's free rungs)."""
+        body = to_request(plan, transcript, self._model)
+        return f"{source.project_id}|{self.voice_for(plan)}|{json.dumps(body, sort_keys=True)}" in self._held
 
     def synthesize(
         self, source: Source, plan: EditPlan, transcript: Transcript | None = None,
@@ -764,12 +778,19 @@ class ElevenLabsVoiceAdapter:
         target = plan.selection.end - plan.selection.start
         notes: list[str] = []
         held = self._held.pop(key, None)
+        self._faster_tried, self._chosen_speed = None, None
+        fresh = held is None
         if held is None:
             if plan.fit is None and plan.mix != "concatenate":
                 held = self._choose(source.project_id, voice_id, body, plan, target, notes)
             else:
                 held = self._take(source.project_id, voice_id, body, plan)
         audio, words = held
+        # p61: the take's own spoken length before any fitting, for the voice's
+        # measured rate (a held take was measured when it was paid for).
+        spoken_s = (words[-1].end - words[0].start) if words else len(audio) / 2 / SAMPLE_RATE
+        speed = self._chosen_speed or float((body.get("voice_settings") or {}).get("speed") or 1.0)
+        self.last_measure = {"seconds": round(spoken_s, 3), "speed": speed, "faster_tried": self._faster_tried} if fresh else None
 
         with tempfile.TemporaryDirectory() as tmp:
             raw, _ = ffmpeg.pcm_to_wav(audio, Path(tmp) / "raw.wav", SAMPLE_RATE)

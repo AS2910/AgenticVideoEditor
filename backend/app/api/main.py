@@ -2441,6 +2441,25 @@ def _generate(
     return candidate
 
 
+def _held_take(
+    project_id: str, record: ProjectRecord, candidate_id: str, selection: Selection,
+    text: str, voice_id: str, fit: str | None, mix: str, report,
+    delivery: str | None = None, voice_notes: tuple[str, ...] = (),
+    voice_settings: dict | None = None, model: str | None = None, flex_max: float | None = None,
+    max_regenerations: int | None = None, role: str | None = None, offset_db: float | None = None,
+) -> EditCandidate | None:
+    """p61: `_generate` from a take already paid for and held because it did
+    not fit (the fit ladder's free rungs, and the eased take kept for the
+    user). None when no such take is held, so nothing here is ever paid."""
+    plan = EditPlan(selection, text, voice_id, fit=fit, mix=mix, delivery=delivery,
+                    voice_settings=voice_settings or None, model=model or None, flex_max=flex_max)
+    holds = getattr(voice, "holds", None)
+    if holds is None or not holds(record.source, plan, record.transcript):
+        return None
+    return _generate(project_id, record, candidate_id, selection, text, voice_id, fit, mix, report, delivery, voice_notes,
+                     voice_settings, model, flex_max, max_regenerations, role, offset_db)
+
+
 @app.get("/jobs/{job_id}")
 def get_job(job_id: str) -> dict:
     job = jobs.get(job_id)
@@ -2844,6 +2863,8 @@ def _item_dict(project_id: str, item: PlanItem) -> dict:
         "error": item.error,
         "note": item.note,
         "progress": item.progress,
+        "fit_failure": item.fit_failure,
+        "beat": item.beat,
     }
 
 
@@ -3056,6 +3077,30 @@ def dismiss_item(project_id: str, plan_id: str, item_id: str, owner: str = Depen
         raise HTTPException(status_code=409, detail="That line is in the video; undo it instead.")
     plan = repo.update_item(project_id, plan_id, item_id, status="dismissed", enabled=False)
     repo.append_log(project_id, plan_id, f"You discarded the line at {_clock(item.selection.start)}")
+    return _plan_dict(repo.get_plan(project_id, plan_id))
+
+
+@app.post("/videos/{project_id}/plans/{plan_id}/items/{item_id}/ease")
+def ease_item(project_id: str, plan_id: str, item_id: str, owner: str = Depends(current_owner)) -> dict:
+    """p61: a line that ran long, voiced already: use that take with the
+    picture easing so it fits. The take was kept when the fit failed; nothing
+    is voiced again and nothing is paid."""
+    _owned(project_id, owner)
+    plan = _plan_or_404(project_id, plan_id)
+    item = plan.item(item_id)
+    if item is None:
+        raise HTTPException(status_code=404, detail="item not found")
+    failure = item.fit_failure or {}
+    eased = failure.get("eased_candidate_id")
+    candidate = repo.get_candidate(project_id, eased) if eased and item.status == "failed" else None
+    if candidate is None:
+        raise HTTPException(status_code=409, detail="There is no voiced take to ease in for this line. Ask Voltage to shorten it.")
+    ease = failure.get("ease_s")
+    sel = candidate.plan.selection
+    repo.update_item(project_id, plan_id, item_id, status="ready", candidate_id=candidate.candidate_id, error=None,
+                     fit_failure=None, selection=Selection(sel.start, sel.end),
+                     note=f"The picture eases {ease:.1f} s so this take fits." if ease else None)
+    repo.append_log(project_id, plan_id, f"You let the picture ease for the line at {_clock(item.selection.start)}")
     return _plan_dict(repo.get_plan(project_id, plan_id))
 
 
@@ -3694,6 +3739,7 @@ def _workbench() -> Workbench:
         speakers=repo.speakers, voice_for=_voice_for, remove_words=_remove_words, shift_words=_shift_by_pin, move_take=_moved,
         project=_project_view, suggest=_suggest_brief, help_search=lambda query: search_help_articles(query, limit=3),
         spend=lambda pid: _spend_summary(repo.get(pid).owner if repo.get(pid) else LOCAL_OWNER, video_id=pid),
+        measured=lambda: getattr(voice, "last_measure", None), held_take=_held_take,
     )
 
 

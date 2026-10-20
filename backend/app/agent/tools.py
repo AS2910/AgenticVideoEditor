@@ -8,6 +8,7 @@ model reads, what the thread shows as one step, and what it cost.
 from __future__ import annotations
 
 import base64
+import math
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -80,6 +81,13 @@ class Workbench:
     help_search: Callable[[str], Sequence[dict]] = lambda query: []
     # Spend scopes: the one summary for a video ({turn?, video, project?, month, binding}) -> or None.
     spend: Callable[[str], dict | None] = lambda video_id: None
+    # 2026-10-20 (p61): the last take's own spoken length before any fitting,
+    # {seconds, speed}, for the voice's measured rate; None when unknown (a mock).
+    measured: Callable[[], dict | None] = lambda: None
+    # The same call as `generate`, but only from a take already paid for and
+    # held (one that did not fit): never calls the vendor. None when the take
+    # is not held; raises SpanMismatch when it still does not fit.
+    held_take: Callable[..., Any] | None = None
 
 
 @dataclass
@@ -98,6 +106,11 @@ class Turn:
     # The steps the user chose to be asked about even under Just do it
     # (Settings): shipping, cloning a speaker, designing a voice.
     ask_before: dict = field(default_factory=lambda: {"ship": False, "clone": False, "design": False})
+    # 2026-10-20 (p61): the lines that ran long this turn ({item_id: facts}),
+    # the ones voiced again since, and whether Voltage was told to finish them.
+    fit_failed: dict = field(default_factory=dict)
+    fit_retried: set = field(default_factory=set)
+    fit_nudged: bool = False
 
     def asks_before(self, what: str) -> bool:
         """Whether this committing step waits for the user: always under
@@ -193,19 +206,76 @@ def _read_transcript(wb: Workbench, turn: Turn, args: dict) -> ToolResult:
     return ToolResult("\n".join(out), step=f"Read all {len(lines)} {'line' if len(lines) == 1 else 'lines'}")
 
 
+def _pace(wb: Workbench, turn: Turn, voice_id: str) -> tuple[str, float, int]:
+    """(the voice's id, its measured rate, how many takes measured it): the default voice when none is named."""
+    from app.agent import fitting
+    vid = (voice_id or "").strip() or wb.default_voice()
+    rate, takes = fitting.voice_rate(wb.repo, vid)
+    return vid, rate, takes
+
+
 def _room(wb: Workbench, turn: Turn, args: dict) -> ToolResult:
+    from app.agent import fitting
+    from app.media import fit as fitmod
     record = turn.record
     duration = record.source.duration
     lines = list(wb.lines(record))
+    vid, rate, takes = _pace(wb, turn, args.get("voice_id") or "")
+    pace = fitting.rate_words(_voice_name(wb, vid, turn), rate, takes) + "."
     if not lines:
-        return ToolResult(f"The whole clip is free: 0.0–{duration:.1f} s with no speech. A line placed here plays "
-                          "over the picture and the sound. At a narration pace about 4 syllables fit each second.",
-                          step="Found room: the whole clip")
-    out = ["Room after each line (silence a new line could play over, in seconds):"]
+        marks = fitting.beats(wb.repo.settings(turn.project_id))
+        out = [f"The whole clip is free: 0.0–{duration:.1f} s with no speech. A line placed here plays over the picture and the sound. {pace}",
+               "Placement windows (each runs to the next beat; a line's budget is the syllables its window holds at that rate, "
+               f"less a {fitmod.LINE_GAP:.1f} s breath before the next line):"]
+        for start, end, label in fitting.windows(duration, marks):
+            room = max(0.0, end - start - (fitmod.LINE_GAP if end < duration - 1e-6 else 0.0))
+            out.append(f"- {start:.1f}–{end:.1f} s ({end - start:.1f} s): up to {fitmod.syllables_for(room, rate)} syllables"
+                       + (f"; beat: {label}" if label else ""))
+        out.append(f"Commentary or narration: keep the talk under about {fitmod.COMMENTARY_SHARE:.0%} of the clip "
+                   f"({duration * fitmod.COMMENTARY_SHARE:.1f} s here), so the lines breathe. Writing several lines? "
+                   "plan_lines checks them together before anything is voiced.")
+        return ToolResult("\n".join(out), step="Found room: the whole clip")
+    out = [f"Room after each line (silence a new line could play over, in seconds, and the syllables it holds). {pace}"]
     for ln in lines:
         room = wb.room_after(record.transcript, Selection(ln.start, ln.end), duration)
-        out.append(f"- after line {ln.index} ({ln.end:.1f} s): {room:.1f} s")
+        out.append(f"- after line {ln.index} ({ln.end:.1f} s): {room:.1f} s"
+                   + (f", up to {fitmod.syllables_for(room, rate)} syllables" if room >= 0.3 else ""))
     return ToolResult("\n".join(out), step="Found the pauses")
+
+
+def _plan_lines(wb: Workbench, turn: Turn, args: dict) -> ToolResult:
+    """Several added lines, planned together before any is voiced (p61)."""
+    from app.agent import fitting
+    from app.media import fit as fitmod
+    wanted = [ln for ln in (args.get("lines") or []) if isinstance(ln, dict)]
+    if not wanted:
+        return ToolResult("Give the lines: each one's start (seconds), its words (or empty to get a budget), and its end or -1.")
+    vid, rate, takes = _pace(wb, turn, args.get("voice_id") or "")
+    speed = float(args.get("speed") or 1.0) or 1.0
+    duration = turn.record.source.duration
+    out_plan = fitting.plan(wanted, duration, rate, speed, commentary=bool(args.get("commentary")))
+    out = [f"{len(out_plan['lines'])} lines over {duration:.1f} s. {fitting.rate_words(_voice_name(wb, vid, turn), rate, takes)}"
+           + (f", at speed {speed:g}" if abs(speed - 1) > 1e-6 else "") + "."]
+    long = 0
+    for n, r in enumerate(out_plan["lines"], 1):
+        head = f"{n}. {r['start']:.1f}–{r['end']:.1f} s, a {r['window']:.1f} s window: up to {r['budget']} syllables"
+        if r["estimate"] is None:
+            out.append(head + ".")
+        elif r["fits"]:
+            out.append(head + f"; “{r['text']}” runs about {r['estimate']:.1f} s ({r['syllables']} syllables). Fits.")
+        else:
+            long += 1
+            out.append(head + f"; “{r['text']}” runs about {r['estimate']:.1f} s ({r['syllables']} syllables). Too long: "
+                       f"rewrite to about {r['budget']} syllables.")
+    if out_plan["breathing"]:
+        out.append(f"The budgets hold the talk to about {fitmod.COMMENTARY_SHARE:.0%} of the clip, so the lines breathe.")
+    out.append(f"Talk: about {out_plan['talk']:.1f} s, {out_plan['share']:.0%} of the clip.")
+    if out_plan["over"]:
+        out.append(f"For commentary that is too much: keep it under about {out_plan['limit']:.1f} s "
+                   f"({fitmod.COMMENTARY_SHARE:.0%}). Cut a line or shorten several, so they breathe.")
+    out.append("Write each line to its budget, then voice them. synthesize_take refuses a line it estimates too long, before paying.")
+    step = f"Planned {len(out_plan['lines'])} lines together" + (f": {long} too long, to rewrite" if long else ": each fits its window")
+    return ToolResult("\n".join(out), step=step)
 
 
 def _hear(wb: Workbench, turn: Turn, args: dict) -> ToolResult:
@@ -611,10 +681,39 @@ def _synthesize_take(wb: Workbench, turn: Turn, args: dict) -> ToolResult:
         selection, old_text, speaker = Selection(round(start, 2), round(end, 2)), "", None
         mix = "concatenate" if args.get("mix") == "concatenate" else "layer"
 
+    from app.agent import fitting
+    from app.media import fit as fitmod
+    fit = {"natural": "start", "stretch": "stretch"}.get(args.get("fit") or "fit")
+    picture = args.get("picture") or "default"
+    flex_max = 1.0 if picture == "as shot" or (picture == "default" and old_text == "") else None
+    settings = voice_settings_of(args)
+    speed = float((settings or {}).get("speed") or 1.0)
+    window = round(selection.end - selection.start, 3)
+    # Pre-flight (p61): the line's length at the voice's own measured rate,
+    # before anything is paid. Too long for its window: refused, free.
+    estimate = None
+    if fit is None and mix != "concatenate":
+        rate, takes = fitting.voice_rate(wb.repo, _rate_voice(wb, turn, voice_id, own, speaker))
+        if old_text and not takes and window > 0:
+            # A replacement in a voice not measured yet: the pace the line was spoken at.
+            rate = min(7.0, max(2.5, fitmod.syllables(old_text) / window))
+        estimate = fitmod.estimate_seconds(text, rate, speed)
+        check = fitting.preflight(text, window, rate, speed, 1.0 if flex_max == 1.0 else fitmod.DEFAULT_MAX_FLEX)
+        if check:
+            return ToolResult(fitting.refusal_text(check),
+                              step=f"Checked “{_short(text)}” before voicing: about {check['estimate']:.1f} s for {window:.1f} s, too long")
+    retry = existing is not None and existing.item_id in turn.fit_failed
+
     chars, usd = wb.estimate_usd(text)
     spent = wb.ledger.spent_usd_since(turn.project_id, turn.started_at)
     refusal = turn.budget.refuses(spent, usd)
     if refusal:
+        if retry or turn.fit_failed:
+            # The lines that ran long are asked about together, once, at the end of the turn.
+            turn.budget.refused_usd = 0.0
+            return ToolResult("The turn's cap does not cover voicing this now. Do not ask about it on its own: finish "
+                              "what you can, then close the turn; the editor asks the user once about every line that "
+                              "needs a shorter version.")
         return ToolResult(refusal)
     who = _speaker_name(wb, turn, speaker) if speaker else None
     if own:
@@ -633,13 +732,9 @@ def _synthesize_take(wb: Workbench, turn: Turn, args: dict) -> ToolResult:
             voice_id, voice_notes = choice.voice_id, tuple(choice.notes)
             whose = f"{who}'s own voice" if choice.cloned else f"{_voice_name(wb, voice_id)}'s voice"
     name = whose[:-len("'s voice")] if whose.endswith("'s voice") else whose
-    fit = {"natural": "start", "stretch": "stretch"}.get(args.get("fit") or "fit")
-    picture = args.get("picture") or "default"
-    flex_max = 1.0 if picture == "as shot" or (picture == "default" and old_text == "") else None
 
     direction = (args.get("direction") or "").strip() or None
     delivery = delivery_of(direction)
-    settings = voice_settings_of(args)
     model = model_for(text, args.get("model"))
     role = args.get("role") if args.get("role") in ROLES else None
     offset_db = float(args.get("offset_db") or 0.0) or None
@@ -661,29 +756,131 @@ def _synthesize_take(wb: Workbench, turn: Turn, args: dict) -> ToolResult:
         turn.report(turn.progress, what)
         wb.repo.update_item(turn.project_id, turn.plan_id, item.item_id, progress=what)
 
+    if retry:
+        turn.fit_retried.add(item.item_id)
+    beat_at, key_word = args.get("beat_at"), (args.get("key_word") or "").strip()
+    beat = {"at": float(beat_at), "key_word": key_word} if isinstance(beat_at, (int, float)) and beat_at >= 0 else None
+
+    def voice_it(sel: Selection, sets: dict | None, *, held: bool = False, flex: float | None = flex_max) -> Any:
+        """One call to the pipeline; `held` only reuses the take already paid for (None when there is none)."""
+        fn = wb.held_take if held else wb.generate
+        if fn is None:
+            return None
+        return fn(turn.project_id, record, wb.repo.next_candidate_id(turn.project_id), sel, text, voice_id,
+                  fit, mix, step, delivery=delivery, voice_notes=voice_notes,
+                  voice_settings=sets, model=model, flex_max=flex, max_regenerations=0,
+                  role=role, offset_db=offset_db)
+
+    def measure(outcome: str, sets: dict | None, win: float) -> dict:
+        """The take's own length against the estimate: the voice's rate learns from it, and the log keeps both."""
+        got = wb.measured() or {}
+        if got.get("seconds"):
+            fitting.learn(wb.repo, voice_id, text, float(got["seconds"]), float(got.get("speed") or (sets or {}).get("speed") or 1.0),
+                          estimate=estimate if sets == settings else None, window=win, video=turn.project_id,
+                          item=item.item_id, outcome=outcome, at=wb.now())
+        return got
+
+    def climb(first: Exception, seen: dict) -> tuple[Any, Selection, list[str], Exception]:
+        """The fit ladder (p61), in order, after the take's own pauses are trimmed:
+        start up to 150 ms early; the model's own speed up to 1.15 on a retake;
+        let the next added line flow later if it has room before its beat; the
+        picture eases only where allowed. (candidate or None, its span, what was tried, the last mismatch.)"""
+        from app.media.ffmpeg import MAX_TEMPO
+        tried = ["trimmed the take's pauses, lead-in and tail, and sped the speech up to 1.25×"]
+        last, sel, sets = first, selection, settings
+        if old_text == "" and mix == "layer":
+            early = round(max(0.0, _end_before(wb, turn, item.item_id, sel.start), sel.start - fitmod.EARLY_START), 2)
+            ahead = round(sel.start - early, 2)
+            if ahead >= 0.01:
+                moved_to = Selection(early, sel.end)
+                try:
+                    got = voice_it(moved_to, sets, held=True)
+                except Exception as exc:  # noqa: BLE001
+                    if not _too_long(exc):
+                        return None, sel, tried, last
+                    got, last = None, exc
+                    tried.append(f"started {ahead * 1000:.0f} ms early")
+                    sel = moved_to
+                if got is not None:
+                    return got, moved_to, tried + [f"started {ahead * 1000:.0f} ms early"], last
+            else:
+                tried.append("could not start earlier: the line before ends there")
+        current = float((sets or {}).get("speed") or 1.0)
+        want = current * last.natural / max(0.1, (sel.end - sel.start) * MAX_TEMPO)
+        if seen.get("faster_tried"):
+            tried.append(f"a retake at {float(seen['faster_tried']):.2f}× speed")
+        elif current >= fitmod.MODEL_SPEED_MAX - 1e-6:
+            tried.append(f"already spoken at {current:.2f}× by the model")
+        elif want > fitmod.MODEL_SPEED_MAX:
+            tried.append(f"a faster retake would need {want:.2f}× speed, past the {fitmod.MODEL_SPEED_MAX:.2f}× that still sounds natural")
+        elif _over_cap(wb, turn, text):
+            tried.append("a faster retake would pass this turn's cap")
+        else:
+            faster = {**(sets or {}), "speed": round(min(fitmod.MODEL_SPEED_MAX, max(math.ceil(want * 100) / 100, current + 0.05)), 2)}
+            try:
+                got = voice_it(sel, faster)
+                measure("fit", faster, sel.end - sel.start)
+                return got, sel, tried + [f"a retake at {faster['speed']:.2f}× speed"], last
+            except Exception as exc:  # noqa: BLE001
+                if not _too_long(exc):
+                    return None, sel, tried, last
+                measure("too long", faster, sel.end - sel.start)
+                last, sets = exc, faster
+                tried.append(f"a retake at {faster['speed']:.2f}× speed")
+        extra = round(last.natural / MAX_TEMPO - (sel.end - sel.start) + 0.02, 2)
+        if extra > 0 and old_text == "" and mix == "layer":
+            room, nxt, shift = _flow_room(wb, turn, item.item_id, sel, extra)
+            if room >= extra:
+                longer = Selection(sel.start, round(min(duration, sel.end + extra), 2))
+                try:
+                    got = voice_it(longer, sets, held=True)
+                except Exception as exc:  # noqa: BLE001
+                    if not _too_long(exc):
+                        return None, sel, tried, last
+                    got, last = None, exc
+                    tried.append(f"ran on {extra:.1f} s into the room after it, still too long")
+                if got is not None:
+                    flowed = _flow_later(wb, turn, nxt, shift) if nxt is not None and shift > 0 else ""
+                    return got, longer, tried + [f"ran on {extra:.1f} s into the room after it" + flowed], last
+            else:
+                tried.append("the next line had no room before its beat" if nxt is not None else "no free room after it")
+        if flex_max is None or flex_max > 1.0:
+            tried.append("let the picture ease, as allowed")
+        else:
+            tried.append("the picture may not ease unless you allow it")
+        return None, sel, tried, last
+
     before = wb.ledger.spent_usd(turn.project_id)
-    candidate_id = wb.repo.next_candidate_id(turn.project_id)
+    used, tried = selection, []
     try:
         # One take per call (the adapter's takes-by-duration aside): a take that
         # fails the sound check comes back with its report, and the retry — with
         # a different direction, voice or wording — is Voltage's own call.
-        candidate = wb.generate(turn.project_id, record, candidate_id, selection, text, voice_id,
-                                fit, mix, step, delivery=delivery, voice_notes=voice_notes,
-                                voice_settings=settings, model=model, flex_max=flex_max, max_regenerations=0,
-                                role=role, offset_db=offset_db)
+        candidate = voice_it(selection, settings)
+        measure("fit", settings, window)
     except Exception as exc:  # noqa: BLE001 — the model hears why and decides; nothing crashes the turn
-        reason = str(exc) or type(exc).__name__
-        finish = getattr(wb.repo, "finish_attempt", None)
-        state = finish(turn.project_id, turn.plan_id, item.item_id, attempt, error=reason) if finish else "failed"
-        if not finish:
-            wb.repo.update_item(turn.project_id, turn.plan_id, item.item_id, status="failed", error=reason, progress=None)
-        kept = (f" {item.item_id} keeps its earlier take {wb.repo.get_plan(turn.project_id, turn.plan_id).item(item.item_id).candidate_id}, ready to hear."
-                if state == "ready" else f" {item.item_id} has no take.")
-        return ToolResult(f"The take could not be made: {reason}{kept}", step=f"Could not voice “{text[:40]}”: {reason[:80]}")
+        candidate = None
+        if _too_long(exc):
+            seen = measure("too long", settings, window)
+            candidate, used, tried, last = climb(exc, seen)
+            if candidate is None:
+                return _ran_long(wb, turn, item, attempt, text, window, last, tried, before, voice_it, used, settings, flex_max,
+                                 retried=item.item_id in turn.fit_retried, beat=beat)
+        if candidate is None:
+            reason = str(exc) or type(exc).__name__
+            finish = getattr(wb.repo, "finish_attempt", None)
+            state = finish(turn.project_id, turn.plan_id, item.item_id, attempt, error=reason) if finish else "failed"
+            if not finish:
+                wb.repo.update_item(turn.project_id, turn.plan_id, item.item_id, status="failed", error=reason, progress=None)
+            kept = (f" {item.item_id} keeps its earlier take {wb.repo.get_plan(turn.project_id, turn.plan_id).item(item.item_id).candidate_id}, ready to hear."
+                    if state == "ready" else f" {item.item_id} has no take.")
+            return ToolResult(f"The take could not be made: {reason}{kept}", step=f"Could not voice “{text[:40]}”: {reason[:80]}")
     cost = max(0.0, wb.ledger.spent_usd(turn.project_id) - before)
     finish = getattr(wb.repo, "finish_attempt", None)
     if finish:
-        state = finish(turn.project_id, turn.plan_id, item.item_id, attempt, candidate_id=candidate.candidate_id, fit=candidate.plan.fit, note=None)
+        extra_changes = {"selection": used} if used != selection else {}
+        state = finish(turn.project_id, turn.plan_id, item.item_id, attempt, candidate_id=candidate.candidate_id, fit=candidate.plan.fit, note=None,
+                       fit_failure=None, beat=beat, **extra_changes)
         if state == "stale":
             return ToolResult(f"Take {candidate.candidate_id} was made, but a newer attempt on {item.item_id} has started; "
                               "it is kept in the item's history, not shown.")
@@ -713,8 +910,10 @@ def _synthesize_take(wb: Workbench, turn: Turn, args: dict) -> ToolResult:
         landing, miss = landing_note(candidate.words, took.start, key_word, float(beat_at))
         landed = {"beat_at": float(beat_at), "key_word": key_word, "miss": miss}
         if miss is not None:
-            wb.repo.update_item(turn.project_id, turn.plan_id, item.item_id,
+            wb.repo.update_item(turn.project_id, turn.plan_id, item.item_id, beat={**(beat or {}), "miss": miss},
                                 note=None if abs(miss) <= 0.3 else f"“{key_word}” lands {abs(miss):.1f} s {'late' if miss > 0 else 'early'} for its beat.")
+    if len(tried) > 1:
+        notes += f" It ran long at first; it fits now after: {'; '.join(tried)}."
     text_out = (f"Take {candidate.candidate_id} on {item.item_id}, {whose}, {where}. It {verdict}.{notes}{wps}{landing}{how_said} "
                 f"Cost ${cost:.2f}.{' The item moved to the new span.' if moved else ''} "
                 f"The user can hear it now; voice it again (same item_id) to try another direction or wording, "
@@ -729,6 +928,186 @@ def _statements(record) -> list:
     return list(statements_of(record.transcript))
 
 
+# ── lines that run long (p61) ─────────────────────────────────────────────────
+
+def _short(text: str, n: int = 40) -> str:
+    return text[:n] + ("…" if len(text) > n else "")
+
+
+def _too_long(exc: Exception) -> bool:
+    """A take that came back longer than its gap (SpanMismatch, too long)."""
+    from app.media.ffmpeg import SpanMismatch
+    return isinstance(exc, SpanMismatch) and exc.natural > exc.target
+
+
+def _rate_voice(wb: Workbench, turn: Turn, voice_id: str, own: bool, speaker: str | None) -> str:
+    """The voice whose measured rate a line is estimated at: the one asked
+    for; for the speaker's own voice their clone (or the voice picked for them)."""
+    if not own:
+        return voice_id
+    if speaker:
+        spk = next((s for s in wb.speakers(turn.project_id) if s.label == speaker), None)
+        if spk is not None:
+            return getattr(spk, "voice_id", None) or getattr(spk, "clone_voice_id", None) or wb.default_voice()
+    return wb.default_voice()
+
+
+def _over_cap(wb: Workbench, turn: Turn, text: str) -> bool:
+    """Whether voicing `text` again would pass this turn's cap (asked without
+    marking it refused: the ladder only skips the rung)."""
+    _, usd = wb.estimate_usd(text)
+    spent = wb.ledger.spent_usd_since(turn.project_id, turn.started_at)
+    if turn.budget.excused is not None:
+        spent = max(0.0, spent - turn.budget.excused())
+    return spent + usd > turn.budget.usd + 1e-9
+
+
+def _added_spans(wb: Workbench, turn: Turn, skip: str) -> list[tuple[float, float, Any]]:
+    """Every added line on the clip, as (start, end, item or None for a shipped one)."""
+    plan = _plan(wb, turn)
+    out = [(i.selection.start, i.selection.end, i) for i in plan.items
+           if i.kind == "planned" and i.old_text == "" and i.item_id != skip and i.status not in ("dismissed", "approved")]
+    for e in wb.edits(turn.project_id):
+        p = getattr(e, "plan", None)
+        if p is not None and getattr(p, "mix", "") in ("layer", "over", "concatenate") and not getattr(e, "reverted", False):
+            out.append((p.selection.start, p.selection.end, None))
+    return sorted(out, key=lambda s: s[0])
+
+
+def _end_before(wb: Workbench, turn: Turn, item_id: str, start: float) -> float:
+    """Where the added line before `start` ends (0 when there is none)."""
+    ends = [end for s, end, _ in _added_spans(wb, turn, item_id) if s < start - 1e-6 and end <= start + 0.01]
+    return max(ends, default=0.0)
+
+
+def _flow_room(wb: Workbench, turn: Turn, item_id: str, sel: Selection, extra: float) -> tuple[float, Any, float]:
+    """How far a line may run on past its end (the arrangement rule: the next
+    added line flows later if it has room before its beat). Returns (room,
+    the next line's item or None, how far that line must move)."""
+    duration = turn.record.source.duration
+    later = [s for s in _added_spans(wb, turn, item_id) if s[0] >= sel.end - 0.01]
+    if not later:
+        return max(0.0, duration - sel.end), None, 0.0
+    start, end, nxt = later[0]
+    free = max(0.0, start - _line_gap() - sel.end)
+    if nxt is None:                 # a shipped line does not move
+        return free, None, 0.0
+    after = later[1][0] - _line_gap() if len(later) > 1 else duration
+    beat = nxt.beat or {}
+    if nxt.candidate_id:
+        room = max(0.0, after - end)
+        if beat.get("miss") is not None:
+            from app.agent.landing import WITHIN
+            room = min(room, max(0.0, WITHIN - float(beat["miss"])))
+    else:
+        from app.agent import fitting
+        rate, _ = fitting.voice_rate(wb.repo, wb.default_voice())
+        from app.media import fit as fitmod
+        room = max(0.0, (end - start) - fitmod.estimate_seconds(nxt.new_text, rate))
+        if beat.get("at") is not None:
+            room = min(room, max(0.0, float(beat["at"]) - start))
+    shift = round(max(0.0, extra - free), 2)
+    return free + room, nxt, shift
+
+
+def _line_gap() -> float:
+    from app.media import fit as fitmod
+    return fitmod.LINE_GAP
+
+
+def _flow_later(wb: Workbench, turn: Turn, nxt: Any, shift: float) -> str:
+    """Move the next added line later by `shift` seconds: its take as it is
+    (nothing voiced again), or its planned span when it has none yet."""
+    if nxt.candidate_id and wb.move_take is not None:
+        candidate = wb.repo.get_candidate(turn.project_id, nxt.candidate_id)
+        if candidate is None:
+            return ""
+        moved = wb.move_take(turn.project_id, turn.record, candidate, round(candidate.plan.selection.start + shift, 2), None)
+        sel = moved.plan.selection
+        wb.repo.update_item(turn.project_id, turn.plan_id, nxt.item_id, candidate_id=moved.candidate_id, selection=Selection(sel.start, sel.end))
+    else:
+        wb.repo.update_item(turn.project_id, turn.plan_id, nxt.item_id,
+                            selection=Selection(round(nxt.selection.start + shift, 2), nxt.selection.end))
+    return f"; the next line flows {shift:.1f} s later"
+
+
+def _ran_long(wb: Workbench, turn: Turn, item: PlanItem, attempt: int, text: str, window: float, last: Exception,
+              tried: list[str], before: float, voice_it: Callable[..., Any], used: Selection, settings: dict | None,
+              flex_max: float | None, *, retried: bool, beat: dict | None) -> ToolResult:
+    """Every rung tried and the take still runs long: the item fails with
+    exactly what was tried. The paid take is not thrown away: when the picture
+    may not ease on its own, the same audio is fitted with the picture eased
+    and kept for the user to choose, at no new cost."""
+    from app.agent import fitting
+    from app.media import fit as fitmod
+    needs, has = float(last.natural), window
+    eased_id, ease_s = None, None
+    if flex_max == 1.0:
+        try:
+            eased = voice_it(used, settings, held=True, flex=fitmod.USER_EASE_MAX)
+        except Exception:  # noqa: BLE001 — too long even with the picture eased: nothing to offer
+            eased = None
+        if eased is not None:
+            factor = getattr(eased.plan, "flex", None) or fitmod.flex_of(eased.fit_notes)
+            slot = eased.plan.selection.end - eased.plan.selection.start
+            eased_id, ease_s = eased.candidate_id, round(slot * (float(factor) - 1.0), 2) if factor else None
+    cost = max(0.0, wb.ledger.spent_usd(turn.project_id) - before)
+    n = fitmod.syllables(fitmod.spoken(text))
+    budget = fitting.shorter_budget(n, needs, has)
+    reason = f"Too long for its gap: needs {needs:.1f} s, has {has:.1f} s."
+    finish = getattr(wb.repo, "finish_attempt", None)
+    state = finish(turn.project_id, turn.plan_id, item.item_id, attempt, error=reason) if finish else "failed"
+    if not finish:
+        wb.repo.update_item(turn.project_id, turn.plan_id, item.item_id, status="failed", error=reason, progress=None)
+    failure = {"reason": fitting.TOO_LONG, "needs": round(needs, 2), "has": round(has, 2), "tried": list(tried),
+               "syllables": n, "budget": budget, "cost_usd": round(cost, 4), "text": text,
+               "eased_candidate_id": eased_id, "ease_s": ease_s if ease_s and ease_s > 0 else None}
+    if state == "failed":
+        wb.repo.update_item(turn.project_id, turn.plan_id, item.item_id, fit_failure=failure, beat=beat)
+        turn.fit_failed[item.item_id] = {"item_id": item.item_id, "text": text, "budget": budget, "has": has, "cost_usd": cost}
+    out = [f"The take on {item.item_id} could not be fitted. {reason} "
+           f"Tried, in order: {'; '.join(tried)}."]
+    if eased_id and failure["ease_s"]:
+        out.append(f"The take is kept: with the picture easing {failure['ease_s']:.1f} s it fits, and the user can use it from "
+                   "the line at no new cost.")
+    if state == "ready":
+        out.append(f"{item.item_id} keeps its earlier take.")
+    elif retried:
+        out.append("It was already tried shorter once this turn; leave it for the user, who can shorten it, let the picture ease "
+                   "or discard it from its line.")
+    else:
+        out.append(f"Rewrite it to about {budget} syllables (it has {n}) and voice it again now on {item.item_id}, once. "
+                   "If the turn's cap stops that, finish the rest and close the turn: the editor asks the user once about every "
+                   "line that needs a shorter version.")
+    out.append(f"Cost ${cost:.2f}.")
+    return ToolResult(" ".join(out), step=f"Too long for its gap: “{_short(text)}”, {needs:.1f} s for {has:.1f} s",
+                      cost_usd=cost)
+
+
+def fit_followup(wb: Workbench, turn: Turn) -> str | WaitingForUser | None:
+    """At the end of a turn: lines that ran long and were not tried shorter.
+    Voltage is told once to try them (when the turn can pay for it), else the
+    user is asked once about all of them together. None when there are none."""
+    from app.agent import fitting
+    if not fitting.pending(turn.fit_failed, turn.fit_retried):
+        return None
+    plan = wb.repo.get_plan(turn.project_id, turn.plan_id)
+    left =[info for info in fitting.pending(turn.fit_failed, turn.fit_retried)
+            if plan is None or ((it := plan.item(info["item_id"])) is not None and it.status == "failed")]
+    if not left:
+        return None
+    usd = sum(wb.estimate_usd(i["text"])[1] for i in left)
+    spent = wb.ledger.spent_usd_since(turn.project_id, turn.started_at)
+    if turn.budget.excused is not None:
+        spent = max(0.0, spent - turn.budget.excused())
+    affordable = spent + usd <= turn.budget.usd + 1e-9 and turn.budget.calls_made + len(left) <= turn.budget.calls
+    if affordable and not turn.fit_nudged:
+        turn.fit_nudged = True
+        return fitting.nudge(left)
+    question, options, details, total = fitting.group_question([{**i, "cost_usd": wb.estimate_usd(i["text"])[1]} for i in left])
+    return WaitingForUser(question, options, options[0], gate=True, cost_usd=total, details=details)
+
+
 def _keep_take(wb: Workbench, turn: Turn, args: dict) -> ToolResult:
     plan = _plan(wb, turn)
     item = plan.item(args["item_id"])
@@ -738,7 +1117,7 @@ def _keep_take(wb: Workbench, turn: Turn, args: dict) -> ToolResult:
     if candidate is None:
         return ToolResult(f"There is no take {args['candidate_id']}.")
     wb.repo.update_item(turn.project_id, turn.plan_id, item.item_id, status="ready", candidate_id=candidate.candidate_id,
-                        new_text=candidate.plan.new_text)
+                        new_text=candidate.plan.new_text, error=None, fit_failure=None)
     return ToolResult(f"{item.item_id} now carries take {candidate.candidate_id}.", step=f"Kept take {candidate.candidate_id} on {item.item_id}")
 
 
@@ -1106,8 +1485,21 @@ TOOLS: tuple[Tool, ...] = (
          _schema({"at": {"type": "array", "items": {"type": "number"}, "description": "Times in seconds to look at; empty for an even spread."}}), Guard.FREE, _look_at_frames),
     Tool("read_transcript", "Read every spoken line with who says it, when, and how many syllables its slot can hold. Says so when no one speaks.",
          _schema({}), Guard.FREE, _read_transcript),
-    Tool("find_room", "Where a new line can go: the whole clip when there is no speech, else the pause after each line.",
-         _schema({}), Guard.FREE, _room),
+    Tool("find_room", "Where a new line can go: the whole clip when there is no speech (with its placement windows, beat to beat), "
+         "else the pause after each line. Every window comes with its length and the syllables it holds at the voice's measured rate.",
+         _schema({"voice_id": {"type": "string", "description": "The voice that will speak, for its measured rate; empty for the default."}}),
+         Guard.FREE, _room),
+    Tool("plan_lines", "Before voicing several added lines, plan them together: each line's window (ending where the next line starts, "
+         "less a breath), the syllables it holds at the voice's measured rate, whether the words fit, and how much of the clip is talk "
+         "(commentary: under about 70%). Free. Write each line to its budget, then voice them.",
+         _schema({"voice_id": {"type": "string", "description": "The voice that will speak; empty for the default."},
+                  "speed": {"type": "number", "description": "The model speed the lines will be voiced at; 1 for natural."},
+                  "commentary": {"type": "boolean", "description": "True for commentary or narration over the picture (the 70% rule)."},
+                  "lines": {"type": "array", "description": "The lines in any order.", "items": _schema({
+                      "start": {"type": "number", "description": "Seconds."},
+                      "end": {"type": "number", "description": "Seconds; -1 to end where the next line starts."},
+                      "text": {"type": "string", "description": "The words (audio tags allowed); empty to get just the budget."}})}}),
+         Guard.FREE, _plan_lines),
     Tool("hear", "Listen to a span: whether anyone speaks there and what they say, and how loud the background and the speech are.",
          _schema({"start": {"type": "number", "description": "Seconds."}, "end": {"type": "number", "description": "Seconds."}}), Guard.FREE, _hear),
     Tool("list_voices", "The voices a line can be spoken in: id, name, gender, accent, age, how they sound.",
@@ -1138,7 +1530,9 @@ TOOLS: tuple[Tool, ...] = (
          "[long pause], [excited], [sad], [curious]; an ellipsis for a held beat, CAPITALS for weight. "
          "Models: v4 (the vendor's newest; the most emotive, performs tags, keeps the sentence around a seam), v3 (expressive, performs tags, "
          "but a replacement inside someone's sentence loses that context), v2 (the steadiest, finest style control, reads a tag as words so tags are stripped). "
-         "Null picks the default, v4 when the text carries tags.",
+         "Null picks the default, v4 when the text carries tags. Before paying, the line's length is estimated at the voice's "
+         "measured rate: one too long for its window is refused, free, with the syllables to rewrite to. A take that still runs long "
+         "climbs the fit ladder (an earlier start, a faster retake, the next line flowing later) before it fails.",
          _schema({"text": {"type": "string", "description": "The spoken words only; no name or label in front. Audio tags in square brackets are allowed."},
                   "voice_id": {"type": "string", "description": "A voice_id from list_voices; empty for the speaker's own voice (a replacement) or the default (a placed line)."},
                   "direction": {"type": "string", "description": "How to say it, in your words: e.g. warm and unhurried, a half-smile; brisk and confident. Empty for none."},

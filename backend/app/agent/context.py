@@ -135,6 +135,18 @@ and `key_word` to synthesize_take; it measures where the word lands and \
 says how far off it is. Move or rewrite the line when it misses.
 - Length follows the gap and the energy: short and fast in the action, \
 longer in calm stretches.
+- Write to length, before voicing. find_room gives every window its length \
+and the syllables it holds at the voice's measured rate. Writing several \
+added lines, plan them together first with plan_lines: each line's window \
+ends where the next line or beat starts, and commentary stays under about \
+70% of the clip, so the lines breathe. Then voice them.
+- synthesize_take estimates a line before paying and refuses one too long \
+for its window, naming the syllables: rewrite to that and call again. A \
+take that still runs long climbs the fit ladder; when it fails anyway, \
+rewrite it shorter to the syllables named and voice it again once, in the \
+same turn. If the turn's cap stops that, finish the rest and close the \
+turn: the editor asks the user once about every such line. Never ask about \
+them one at a time.
 - Every claim about what happens on screen matches a beat or a frame. No \
 invented names, scores, places or sponsors.
 - Voice and delivery match the role: a sports clip gets an energetic \
@@ -209,6 +221,10 @@ def opening(plan: Plan | None, *, duration: float, filename: str, speakers: Sequ
             where = f"{i.selection.start:.1f}–{i.selection.end:.1f} s"
             state = {"ready": "proposed, not in the video" if i.mix != "remove" else "removal proposed", "approved": "in the video", "planned": "not voiced",
                      "working": "being voiced", "needs-you": "needs the user", "failed": "failed"}.get(i.status, i.status)
+            ran_long = i.fit_failure if i.status == "failed" and i.fit_failure else None
+            if ran_long:
+                state += (f": too long, needs {ran_long['needs']:.1f} s for {ran_long['has']:.1f} s; "
+                          f"rewrite to about {ran_long['budget']} syllables")
             out.append(f"- {i.item_id} at {where}: “{i.new_text}” ({state}"
                        + (f"; take {i.candidate_id}" if i.candidate_id else "") + ")")
     from app.agent.tools import shipped_lines

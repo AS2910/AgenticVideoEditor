@@ -24,6 +24,9 @@ import { cn } from '@/lib/utils'
 import { Chip, ControlRow, LinkButton } from './EditorControls'
 import { editorClass, riseClass, selectClass } from './editorStyles'
 
+import { FitBanner } from './FitBanner'
+import { fitReason, ranLong } from '../transcript/fit'
+import { TaggedWords } from './TaggedWords'
 import { addKeyOf, keyOf } from '../transcript/keys'
 import type { LineKey } from '../transcript/keys'
 
@@ -92,6 +95,12 @@ interface LineDocProps {
   onDelivery?: (item: PlanItem, delivery: string) => void
   /** p60: a line whose latest attempt failed (and has no take) asks Voltage to try again, as a turn. */
   onRetry?: (item: PlanItem) => void
+  /** p61: a line too long for its gap is rewritten shorter and voiced again, as a turn. */
+  onShorten?: (item: PlanItem) => void
+  /** p61: the same, for every line that ran long at once: one turn. */
+  onShortenAll?: (items: PlanItem[]) => void
+  /** p61: the take already voiced goes on the line with the picture easing; nothing is paid. */
+  onEase?: (item: PlanItem) => void | Promise<unknown>
   /** The arrangement (2026-10-19): where every spoken line plays, in playback order. */
   arranged?: ArrangementView | null
   /** A move, a pin, Tighten gaps or how the end is handled: the whole arrangement, one action. */
@@ -184,6 +193,7 @@ export function LineDoc({
   statements, words = [], speakers = [], voices = [], revisions = [], selection, currentTime,
   pendingLines = [], items = [], disabled, usdPerChar, playing,
   onSeek, onHear, onAdd, onDiscard, onAddAll, onUndo, onRemove, onHearTake, onRole, mixLines = [], bedUnderDb = 15, onDelivery, onRetry,
+  onShorten, onShortenAll, onEase,
   onEditingChange, onMove, onMoveKept, placing, onPlacing, duration, version = 'edited',
   arranged, onArrange, onArrangeUndo, onPreview,
 }: LineDocProps) {
@@ -734,6 +744,25 @@ export function LineDoc({
       )
     }
     if (item.status === 'ready' && item.candidate) return takeMeta(item, item.candidate, speaker)
+    if (ranLong(item)) {
+      // p61: compact. One quiet reason, then the three ways on, on one row.
+      const ease = item.fit_failure?.eased_candidate_id ? item.fit_failure.ease_s : null
+      return (
+        <div className="flex flex-col gap-1" data-testid="failed">
+          <div className={metaClass} data-testid="fit-reason" title={item.fit_failure ? `Tried: ${item.fit_failure.tried.join('; ')}` : undefined}>{fitReason(item)}</div>
+          <span className="-ml-2 flex flex-wrap items-center gap-0.5" role="group" aria-label={`What to do with the line at ${clock(item.selection.start)}`}>
+            {onShorten && <button type="button" className="act" onClick={() => onShorten(item)} disabled={disabled}>Shorten</button>}
+            {onEase && ease !== null && (
+              <button type="button" className="act" onClick={() => void run(`ease-${item.item_id}`, () => onEase(item))} disabled={disabled || pending !== null}
+                title={`Use this take anyway, the picture eases ${ease.toFixed(1)} s. Nothing is paid again.`} aria-busy={pending === `ease-${item.item_id}` || undefined}>
+                Let the picture ease (+{ease.toFixed(1)} s)
+              </button>
+            )}
+            <button type="button" className="act" onClick={() => void run(`discard-${item.item_id}`, () => onDiscard(item))} disabled={disabled || pending !== null}>Discard</button>
+          </span>
+        </div>
+      )
+    }
     if (item.status === 'failed') {
       return (
         <div className="flex flex-col gap-1.5" data-testid="failed">
@@ -986,7 +1015,7 @@ export function LineDoc({
             {whoLine(<>+ New line{rev.speaker && name(rev.speaker) ? ` · ${name(rev.speaker)}` : ''}</>, <>{<StatusBadge status="kept" role="status">{STATUS.kept}</StatusBadge>}{asShot && NOT_IN_VERSION}</>)}
             {isEditing ? <div className={unfold}>{editor(s, 'layer')}</div> : (
               <>
-                <span className="say">{rev.text}</span>
+                <TaggedWords text={rev.text} className="say" />
                 <div className={metaClass}>{(MIX_NOTE[rev.mix] ?? 'Over the picture').replace(/^./, (ch) => ch.toUpperCase())}{voice ? ` · ${voice}'s voice` : ''}{others > 0 ? ` · with ${others} other ${others === 1 ? 'line' : 'lines'} at this moment` : ''}</div>
                 <div className="flex flex-wrap items-center gap-x-3 gap-y-1 empty:hidden">
                   {rev.edit_id && onMoveKept && placeControl(`edit-${rev.edit_id}`, rev.start, Math.max(0.05, rev.end - rev.start), (t) => onMoveKept(rev.edit_id!, t))}
@@ -1024,14 +1053,16 @@ export function LineDoc({
             {whoLine(<>+ New line{item.speaker && name(item.speaker) ? ` · ${name(item.speaker)}` : ''}</>, status && <StatusBadge status={status} role="status">{STATUS[status]}</StatusBadge>)}
             {isEditing ? <div className={unfold}>{editor(s, 'layer')}</div> : inDepth ? depth(item, c!, s, order, 'layer') : (
               <>
-                <span className={cn('say', item.status === 'ready' && 'text-lg')}><ins>{item.new_text}</ins></span>
-                <div className={metaClass}>
-                  {after && statements.length > 0 ? `New line after ${clock(after.start)}` : 'New line'} · {item.mix === 'concatenate' ? 'the picture makes room' : 'over the picture'}
-                </div>
+                <TaggedWords text={item.new_text} className={cn('say', item.status === 'ready' && 'text-lg')} wrap={(w) => <ins>{w}</ins>} />
+                {!ranLong(item) && (
+                  <div className={metaClass}>
+                    {after && statements.length > 0 ? `New line after ${clock(after.start)}` : 'New line'} · {item.mix === 'concatenate' ? 'the picture makes room' : 'over the picture'}
+                  </div>
+                )}
                 {item.note && !(item.status === 'ready' && c) && <div className={cn(metaClass, 'text-needs')}>{item.note}</div>}
                 <div className={unfold}>{lineBlock(item, item.speaker)}</div>
                 {item.status === 'ready' && c && verbs(item, c, order, 'layer')}
-                {(item.status === 'needs-you' || item.status === 'failed' || item.status === 'planned') && (
+                {(item.status === 'needs-you' || (item.status === 'failed' && !ranLong(item)) || item.status === 'planned') && (
                   <span className="-ml-2 flex"><button type="button" className="act" onClick={() => void run(`discard-${item.item_id}`, () => onDiscard(item))} disabled={disabled || pending !== null}>Discard</button></span>
                 )}
               </>
@@ -1241,6 +1272,11 @@ export function LineDoc({
   // Volt: the heading — how many lines, how many proposed, how many in the video.
   const inVideo = layerRevisions.length + revisions.filter((r) => !isAdd(r) && !r.partner).length
   const shownRows = rows.map((r, order) => ({ r, order })).filter(({ order }) => !folds.hidden.has(order))
+  // p61: lines that ran long for their gaps, two or more, are said once, above the first of them.
+  const longItems = items.filter(ranLong)
+  const longFirst = longItems.length > 1
+    ? shownRows.find(({ r }) => { const it = r.kind === 'item' ? r.item : r.kind === 'line' ? ownItem(r.s) : null; return !!it && ranLong(it) })?.order ?? null
+    : null
 
   return (
     <section className="flex min-h-0 flex-col gap-2.5" aria-label="Transcript">
@@ -1317,6 +1353,11 @@ export function LineDoc({
       <div role="list" className="flex flex-col gap-1.5" ref={list} onFocusCapture={() => setFocusTick((t) => t + 1)} onBlurCapture={() => setFocusTick((t) => t + 1)} data-focus-tick={focusTick}>
         {shownRows.map(({ r: entry, order }) => (
           <Fragment key={`r-${order}`}>
+            {order === longFirst && onShortenAll && (
+              <div role="listitem"><FitBanner items={longItems} disabled={disabled || pending !== null} onShortenAll={onShortenAll}
+                onEaseAll={onEase && ((its) => run('ease-all', async () => { for (const it of its) await onEase(it) }))}
+                onDiscardAll={(its) => run('discard-all', async () => { for (const it of its) await onDiscard(it) })} /></div>
+            )}
             {entry.kind === 'layer' ? layerRow(entry, order)
               : entry.kind === 'item' ? itemRow(entry, order)
               : lineRow(entry, order)}

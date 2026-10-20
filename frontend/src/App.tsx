@@ -9,6 +9,7 @@ import { VoltagePane } from './components/VoltagePane'
 import { SpendPill } from './components/Spend'
 import { LineDoc } from './components/LineDoc'
 import type { LineRequest, PendingLine } from './components/LineDoc'
+import { shortenSentence } from './transcript/fit'
 import type { LineKey } from './transcript/keys'
 import { WhatVoltageMayDo } from './components/WhatVoltageMayDo'
 import type { MayDo } from './components/WhatVoltageMayDo'
@@ -38,7 +39,7 @@ import { go, hrefFor, useRoute } from './lib/route'
 import { cn } from '@/lib/utils'
 import { clock } from './transcript/format'
 import {
-  createProject, confirmPlace, exportProject, artifactUrl, pollJob, PollCancelled, ApiError, listVideos, listFolders, createFolder, startTutorial, getProject, deleteProject, getUsage, getSpend, listVoices, updateSpeaker, detectSpeakers, revertEdit, updateSettings, removeLine, dismissItem, setEditRole, setCandidateRole, roleQuestion, moveCandidate, moveEdit, getArrangement, putArrangement, undoArrangement, getPlan, approvePlan, readProject, grantConsent, getMe, postTurn, postAllowMore, getMessages, chipEvent, getUnderstanding, correctUnderstanding, setStyle,
+  createProject, confirmPlace, exportProject, artifactUrl, pollJob, PollCancelled, ApiError, listVideos, listFolders, createFolder, startTutorial, getProject, deleteProject, getUsage, getSpend, listVoices, updateSpeaker, detectSpeakers, revertEdit, updateSettings, removeLine, dismissItem, easeItem, setEditRole, setCandidateRole, roleQuestion, moveCandidate, moveEdit, getArrangement, putArrangement, undoArrangement, getPlan, approvePlan, readProject, grantConsent, getMe, postTurn, postAllowMore, getMessages, chipEvent, getUnderstanding, correctUnderstanding, setStyle,
 } from './api'
 import type { ArrangementView, Me, PlanApproval, RoleChange, RoleQuestion } from './api'
 import type { Arrangement, Placed } from './transcript/arrange'
@@ -496,6 +497,17 @@ function Studio() {
       setPreview(null)
     } catch (e) {
       setError(e instanceof ApiError ? e.message : 'Could not discard that line.')
+    }
+  }
+  /** p61: a line that ran long takes its take already voiced, the picture easing; nothing is paid. */
+  const easeLine = async (item: PlanItem) => {
+    if (!projectId || !plan) return
+    setError(null)
+    try {
+      setPlan(await easeItem(projectId, plan.plan_id, item.item_id))
+      setPreview(null)
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : 'Could not ease that line in.')
     }
   }
   const removeStatement = async (s: Statement) => {
@@ -1351,6 +1363,9 @@ function Studio() {
                 bedUnderDb={project.settings?.mix?.bed_under_db ?? 15}
                 onDelivery={(item, delivery) => void takeTurn(`Voice ${item.item_id} again, said ${delivery}`)}
             onRetry={(item) => void takeTurn(`Try ${item.item_id} again (“${item.new_text}”): ${item.error ?? 'the last try failed'}`)}
+                onShorten={(item) => void takeTurn(shortenSentence([item]))}
+                onShortenAll={(items) => void takeTurn(shortenSentence(items))}
+                onEase={(item) => easeLine(item)}
                 onUndo={(id) => void revert(id)}
                 onRemove={(s) => void removeStatement(s)}
                 arranged={arranged}
