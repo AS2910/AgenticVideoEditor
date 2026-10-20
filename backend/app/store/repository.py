@@ -41,6 +41,8 @@ class ProjectRecord:
     created_at: str = ""
     # Folders: the project (folder) the video is in, or None when standalone.
     folder_id: str | None = None
+    # F5: draft | in_review | changes_asked | approved | exported (changed only through app.store.stages).
+    stage: str = "draft"
 
 
 @dataclass(frozen=True)
@@ -89,6 +91,7 @@ def _record(row) -> ProjectRecord:
         owner=row["owner"],
         created_at=row["created_at"],
         folder_id=row["project_id"] if "project_id" in row.keys() else None,
+        stage=row["stage"] if "stage" in row.keys() else "draft",
     )
 
 

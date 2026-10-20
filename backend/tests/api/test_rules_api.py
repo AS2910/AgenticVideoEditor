@@ -52,3 +52,4 @@ def test_the_rules_are_in_the_opening_view_of_a_video_in_the_project(client, sam
     head = main.repo.turns("p1")[0]["content"][0]["text"]
     assert "Every video in this project carries these lines: “T&C apply”.\nThe clip: ad.mp4" in head
     assert "carries these lines" not in main.repo.turns("p2")[0]["content"][0]["text"]
+

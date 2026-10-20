@@ -59,7 +59,7 @@ from app.usage import (
     Ledger, SpendCeilingReached, WHISPER_USD_PER_MINUTE, claude_usd, current_turn, money, month_name, month_start,
 )
 from app import auth
-from app.store import briefs, rules
+from app.store import briefs, rules, stages
 from app.store.repository import Project, ProjectRecord, ProjectRepository, LOCAL_OWNER
 from app.store.artifacts import ArtifactStore
 from app.render.renderer import render
@@ -1149,7 +1149,17 @@ def _summary(r: ProjectRecord) -> dict:
         "state": state,
         "last_change": last,
         "variant_of": settings_.get("variant_of"),
+        "stage": r.stage,
     }
+
+
+@app.get("/videos/{project_id}/stage")
+def get_stage(project_id: str, owner: str = Depends(current_owner)) -> dict:
+    """F5: the video's stage and every move it made, newest first. Moves
+    come through app.store.stages only (C1 adds the ways to make one)."""
+    record = _owned(project_id, owner)
+    return {"stage": record.stage, "label": stages.LABELS[record.stage],
+            "history": [m.to_dict() for m in stages.history(database, project_id)]}
 
 
 @app.get("/videos/{project_id}")
