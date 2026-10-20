@@ -70,6 +70,8 @@ export interface PlanItem {
   progress: string | null
   /** p61: why the line could not be fitted, when it ran long for its gap. */
   fit_failure?: FitFailure | null
+  /** A3: the take held against the project's words. A take that breaks a rule is not Voltage's to add. */
+  word_rule?: { breaks: string[]; warnings: string[] } | null
 }
 
 /** A line that ran long (p61): every figure measured or recorded by the server. */
@@ -540,6 +542,10 @@ export interface BriefUpdateVideo {
   outcome: 'current' | 'updated' | 'proposed' | 'waiting' | null
   why: string | null
 }
+/** F3/A3: one of the project's rules. */
+export type RuleKind = 'pronounce' | 'banned' | 'required_line' | 'style'
+export interface RuleData { term?: string; say?: string; respell?: string; audio?: string; word?: string; text?: string }
+export interface ProjectRule { rule_id: number; project_id: string; kind: RuleKind; data: RuleData; version: number; created_by: string; updated_at: string }
 export interface BriefUpdateRun { run_id: string; to: number; status: 'running' | 'finished'; started_at: string; finished_at: string | null; videos: BriefUpdateVideo[] }
 export interface ProjectFile { name: string; sha256: string; size: number; kind: string; at: string }
 export interface BriefSuggestion { id: string; text: string; why?: string | null; video_id?: string | null; filename?: string | null; at: string }

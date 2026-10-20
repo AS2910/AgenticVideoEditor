@@ -33,6 +33,7 @@ from typing import Callable
 import httpx
 
 from app.adapters.base import VendorError
+from app.adapters.pronounce import for_synthesis
 from app.budget import VoiceBudget
 from app.domain.models import Word, EditPlan, MediaArtifact, Source, Transcript
 from app.errors import NonRetryableError
@@ -272,7 +273,8 @@ DELIVERY_SETTINGS: dict[str, dict] = {
 
 def to_request(plan: EditPlan, transcript: Transcript | None, model: str, speed: float = 1.0) -> dict:
     model = model_of(plan, model)
-    body: dict = {"text": spoken_text(plan.new_text, model), "model_id": model}
+    # A3: the project's respellings go in the text sent; the plan keeps the words as written.
+    body: dict = {"text": spoken_text(for_synthesis(plan.new_text), model), "model_id": model}
     settings: dict = (clamp_settings(plan.voice_settings) if plan.voice_settings
                       else dict(DELIVERY_SETTINGS.get((plan.delivery or "").lower(), {})))
     if abs(speed - 1.0) > 1e-3:

@@ -16,6 +16,7 @@ import hashlib
 import tempfile
 from pathlib import Path
 
+from app.adapters.pronounce import for_synthesis
 from app.domain.models import Source, Statement, Transcript, Word, EditPlan, MediaArtifact
 from app.media import ffmpeg
 from app.store.artifacts import ArtifactStore
@@ -118,6 +119,8 @@ class MockVoiceAdapter:
     def synthesize(
         self, source: Source, plan: EditPlan, transcript: Transcript | None = None,
     ) -> MediaArtifact:
+        # A3: what a real vendor would be sent (respellings in), kept for the tests.
+        self.last_sent_text = for_synthesis(plan.new_text)
         seed = _digest(plan.voice_profile_id, plan.new_text)
         frequency = 200 + int(seed[:4], 16) % 600  # 200–800 Hz, stable per input
         with tempfile.TemporaryDirectory() as tmp:

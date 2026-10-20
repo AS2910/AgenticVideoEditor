@@ -46,6 +46,9 @@ class PlanItem:
     fit_failure: dict | None = None
     # The beat the line was written for: {at, key_word, miss} (miss once it is voiced).
     beat: dict | None = None
+    # A3: the take held against the project's words: {breaks: [...], warnings: [...]};
+    # a take that breaks a rule is not Voltage's to add. None when nothing to say.
+    word_rule: dict | None = None
 
 
 @dataclass(frozen=True)
@@ -97,7 +100,7 @@ def item_from_dict(d: dict) -> PlanItem:
         status=d.get("status", "planned"), fit=d.get("fit"), candidate_id=d.get("candidate_id"),
         edit_id=d.get("edit_id"), question=d.get("question"), error=d.get("error"), note=d.get("note"),
         progress=d.get("progress"), attempt=int(d.get("attempt", 0)), history=tuple(d.get("history", ())),
-        fit_failure=d.get("fit_failure"), beat=d.get("beat"),
+        fit_failure=d.get("fit_failure"), beat=d.get("beat"), word_rule=d.get("word_rule"),
     )
 
 

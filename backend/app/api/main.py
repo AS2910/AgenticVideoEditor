@@ -61,6 +61,7 @@ from app.usage import (
 )
 from app import auth
 from app.store import briefs, events as activity_log, rules, stages
+from app.adapters import pronounce
 from app.store.actors import VOLTAGE, Actor, user as user_actor
 from app.store.repository import Project, ProjectRecord, ProjectRepository, LOCAL_OWNER
 from app.store.artifacts import ArtifactStore
@@ -2169,6 +2170,68 @@ def change_project_rule(project_id: str, rule_id: int, req: RuleRequest, owner: 
     return rule.to_dict()
 
 
+# A3: a short clip of how a project word is said, kept with the project.
+MAX_WORD_CLIP_BYTES = 5 << 20
+MAX_WORD_CLIP_SECONDS = 10.0
+
+
+def _words_store(project_id: str) -> str:
+    """Where a project's word clips live: under the project's own folder, so the purge (F8) takes them with it."""
+    return f"projects/{project_id}/words"
+
+
+def _pronounce_rule_or_404(project_id: str, rule_id: int) -> rules.Rule:
+    rule = rules.get(database, project_id, rule_id)
+    if rule is None or rule.kind != "pronounce":
+        raise HTTPException(status_code=404, detail="word not found")
+    return rule
+
+
+@app.post("/projects/{project_id}/rules/{rule_id}/audio")
+async def add_word_audio(project_id: str, rule_id: int, file: UploadFile = File(...),
+                         owner: str = Depends(current_owner)) -> dict:
+    """A3: an example of how a project word is said (up to 10 s), stored as an
+    artifact and named on the rule. Optional; a new clip replaces the old one."""
+    _consistency_on(owner)
+    _owned_project(project_id, owner)
+    rule = _pronounce_rule_or_404(project_id, rule_id)
+    filename = Path(file.filename or "word.wav").name
+    with tempfile.TemporaryDirectory() as tmp:
+        staged = Path(tmp) / filename
+        await _spool(file, staged)
+        if staged.stat().st_size > MAX_WORD_CLIP_BYTES:
+            raise HTTPException(status_code=422, detail="That clip is too big. A few seconds of audio is all a word needs.")
+        try:
+            wav, seconds = ffmpeg.extract_audio(staged, Path(tmp) / "word.wav", sample_rate=44100)
+        except Exception:  # noqa: BLE001 - a file ffmpeg cannot read is the user's to replace
+            raise HTTPException(status_code=422, detail="That file has no audio I can read. A WAV, MP3, M4A or WebM works.") from None
+        if seconds > MAX_WORD_CLIP_SECONDS:
+            raise HTTPException(status_code=422, detail=f"That clip is {seconds:.0f} s. Keep it under {MAX_WORD_CLIP_SECONDS:.0f} s: just the word, said right.")
+        clip = artifacts.put_file(_words_store(project_id), wav, kind="audio", container="wav", duration=seconds)
+    return _rule_or_422(lambda: rules.update(database, project_id, rule_id, {**rule.data, "audio": clip.sha256}, owner)).to_dict()
+
+
+@app.get("/projects/{project_id}/rules/{rule_id}/audio")
+def get_word_audio(project_id: str, rule_id: int, owner: str = Depends(current_owner)) -> FileResponse:
+    _owned_project(project_id, owner)
+    rule = _pronounce_rule_or_404(project_id, rule_id)
+    sha = rule.data.get("audio")
+    path = artifacts.find(_words_store(project_id), sha) if sha else None
+    if path is None:
+        raise HTTPException(status_code=404, detail="no clip for this word")
+    return FileResponse(path, media_type="audio/wav")
+
+
+@app.delete("/projects/{project_id}/rules/{rule_id}/audio")
+def delete_word_audio(project_id: str, rule_id: int, owner: str = Depends(current_owner)) -> dict:
+    """A3: the word keeps its spelling and respelling; only the clip goes (the stored file stays until the purge)."""
+    _consistency_on(owner)
+    _owned_project(project_id, owner)
+    rule = _pronounce_rule_or_404(project_id, rule_id)
+    data = {k: v for k, v in rule.data.items() if k != "audio"}
+    return _rule_or_422(lambda: rules.update(database, project_id, rule_id, data, owner)).to_dict()
+
+
 @app.delete("/projects/{project_id}/rules/{rule_id}", status_code=204)
 def delete_project_rule(project_id: str, rule_id: int, owner: str = Depends(current_owner)) -> Response:
     _owned_project(project_id, owner)
@@ -2763,11 +2826,26 @@ def _generate(
 
     # A take that does not fit its slot raises SpanMismatch to the caller:
     # Voltage hears why and decides (a shorter wording, another placement).
-    candidate = generate(plan)
+    # A3: the project's respellings go to the vendor; the plan keeps the words as written.
+    with pronounce.respelling(_respellings(project_id)):
+        candidate = generate(plan)
     # Retained so approval commits this exact candidate rather than re-running
     # generation, which real vendors would not reproduce byte-for-byte.
     repo.save_candidate(project_id, candidate)
     return candidate
+
+
+def _project_rules(video_id: str) -> list[dict]:
+    """The rules of the project a video is in ([] when standalone), as the turn reads them."""
+    record = repo.get(video_id)
+    if record is None or not record.folder_id:
+        return []
+    return [{"kind": r.kind, "data": r.data} for r in rules.list_rules(database, record.folder_id)]
+
+
+def _respellings(video_id: str) -> tuple[tuple[str, str], ...]:
+    """A3: (term, respelling) pairs for the text sent to the voice vendor."""
+    return pronounce.pairs_from(_project_rules(video_id))
 
 
 def _held_take(
@@ -2783,7 +2861,9 @@ def _held_take(
     plan = EditPlan(selection, text, voice_id, fit=fit, mix=mix, delivery=delivery,
                     voice_settings=voice_settings or None, model=model or None, flex_max=flex_max)
     holds = getattr(voice, "holds", None)
-    if holds is None or not holds(record.source, plan, record.transcript):
+    with pronounce.respelling(_respellings(project_id)):
+        held = holds is not None and holds(record.source, plan, record.transcript)
+    if not held:
         return None
     return _generate(project_id, record, candidate_id, selection, text, voice_id, fit, mix, report, delivery, voice_notes,
                      voice_settings, model, flex_max, max_regenerations, role, offset_db)
@@ -3528,6 +3608,7 @@ def _item_dict(project_id: str, item: PlanItem) -> dict:
         "progress": item.progress,
         "fit_failure": item.fit_failure,
         "beat": item.beat,
+        "word_rule": item.word_rule,
     }
 
 
@@ -3668,6 +3749,10 @@ def _ship(project_id: str, record: ProjectRecord, plan_id: str, item_ids: list[s
         overridden = not candidate.continuity.passed
         if overridden and not override:
             skipped.append({"item_id": item.item_id, "reason": "continuity check failed"})
+            continue
+        # A3: a take that breaks a word rule is never Voltage's pick; the user may still add it by hand.
+        if current_turn.get() and (item.word_rule or {}).get("breaks"):
+            skipped.append({"item_id": item.item_id, "reason": "breaks a word rule: " + " ".join(item.word_rule["breaks"])})
             continue
         edit_id = _approve_candidate(project_id, candidate, overridden)
         approved.append({"item_id": item.item_id, "edit_id": edit_id, "overridden": overridden,
@@ -4600,7 +4685,7 @@ def _start_turn(project_id: str, record: ProjectRecord, text: str, owner: str, a
         if carry:
             # The raise is for the step the cap refused; this continuation's own thinking is not charged to it.
             budget_.excused = lambda: ledger.spent_usd_since(project_id, started_at, vendor="anthropic")
-        turn = AgentTurn(project_id=project_id, record=record, plan_id=plan.plan_id, autonomy=autonomy,
+        turn = AgentTurn(project_id=project_id, record=record, plan_id=plan.plan_id, autonomy=autonomy, said=text,
                          spend_approved=approve or bool(carry) or autonomy == "draft", budget=budget_, started_at=since,
                          report=report, commit_approved=approve, ask_before=prefs["ask_before"],
                          stop_requested=lambda: turn_id in _stops)

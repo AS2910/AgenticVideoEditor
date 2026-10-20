@@ -44,12 +44,13 @@ import { OnboardingProvider, useOnboarding } from './guides/onboarding'
 import { Checklist } from './guides/Checklist'
 import { Tip } from './guides/Tip'
 import { useFlags } from './flags/useFlags'
+import { LearnWord } from './components/LearnWord'
 import { go, hrefFor, useRoute } from './lib/route'
 import { cn } from '@/lib/utils'
 import { clock } from './transcript/format'
 import {
   createProject, confirmPlace, exportProject, artifactUrl, pollJob, PollCancelled, ApiError, listVideos, listFolders, createFolder, startTutorial, getProject, deleteProject, getUsage, getSpend, listVoices, updateSpeaker, detectSpeakers, revertEdit, updateSettings, removeLine, dismissItem, easeItem, setEditRole, setCandidateRole, roleQuestion, moveCandidate, moveEdit, getArrangement, putArrangement, undoArrangement, getPlan, approvePlan, readProject, grantConsent, getMe, postTurn, postAllowMore, getMessages, chipEvent, getUnderstanding, correctUnderstanding, setStyle,
-  retryJob, stopJobs, getLatestRender, startRender, getJobs,
+  retryJob, stopJobs, getLatestRender, startRender, getJobs, listRules,
 } from './api'
 import type { ArrangementView, Me, PlanApproval, RoleChange, RoleQuestion } from './api'
 import type { Arrangement, Placed } from './transcript/arrange'
@@ -57,7 +58,7 @@ import type {
   Word, Selection, Candidate, Segment, Project, ChatMessage,
   Insert, ProjectSummary, Usage, SpendSummary, Statement, Voice, Revision,
   Plan, PlanItem, Autonomy, Reading, Piece, ProjectDetail, ApprovedEditSummary, MyVoice, ProjectFolder, ExportManifest, MixReport, Suggestion, Understanding,
-  ActivityJob, PlanQuestion, RenderIncludes, RenderRecord,
+  ActivityJob, PlanQuestion, RenderIncludes, RenderRecord, ProjectRule,
 } from './types'
 import { piecesFromInserts, renderTimeFrom, sourceTimeFrom } from './timeline/selection'
 
@@ -162,6 +163,15 @@ function Studio() {
   const [crumbMenu, setCrumbMenu] = useState(false)
   // Phase A (projects.consistency): brief versions and project words in the editor.
   const consistency = useFlags().enabled('projects.consistency')
+  // A3: the project's words, for the typed-line warning and Learn a word.
+  const [projectRules, setProjectRules] = useState<ProjectRule[]>([])
+  const rulesProject = consistency ? project?.project_id ?? null : null
+  useEffect(() => {
+    if (!rulesProject) { setProjectRules([]); return }
+    let live = true
+    listRules(rulesProject).then((r) => { if (live) setProjectRules(r) }).catch(() => { /* no warnings shown; nothing else depends on them */ })
+    return () => { live = false }
+  }, [rulesProject])
   const [usage, setUsage] = useState<Usage | null>(null)
   // Spend scopes: this turn, this video, its project, the month, and the one that stops paid work first.
   const [spend, setSpend] = useState<SpendSummary | null>(null)
@@ -1486,6 +1496,7 @@ function Studio() {
     const isTutorial = !!project.settings?.tutorial
     const tipCandidates: { id: string; target: string; when: boolean }[] = [
       { id: 'first-failed-take', target: 'transcript-row', when: planItems.some((i) => i.status === 'failed') },
+      { id: 'first-word-rule', target: 'transcript-row', when: consistency && planItems.some((i) => !!i.word_rule?.breaks?.length) },
       { id: 'first-ceiling', target: 'spend', when: !!error && /ceiling/i.test(error) },
       { id: 'first-question', target: 'question', when: !!clarifying && !plan?.question?.gate },
       { id: 'first-voice-design', target: 'composer', when: messages.some((m) => m.kind === 'previews') },
@@ -1675,7 +1686,11 @@ function Studio() {
                 duration={project.duration}
                 version={version}
                 activity={rowActivity}
+                bannedWords={projectRules.filter((r) => r.kind === 'banned').map((r) => r.data.word ?? '').filter(Boolean)}
               />
+              {consistency && project.project_id && (
+                <LearnWord projectId={project.project_id} projectName={project.project_name} onAdded={(rule) => setProjectRules((r) => [...r, rule])} />
+              )}
             </div>
           </main>
   

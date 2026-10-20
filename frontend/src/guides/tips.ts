@@ -13,6 +13,7 @@ export const TIPS: TipDef[] = [
   { id: 'first-undo-after-export', title: 'Still undoable', text: 'The file is rendered, and every change can still be taken out. Export again to update it.', link: 'Undo anything', slug: 'undo-anything' },
   { id: 'first-ceiling', title: 'Ceiling reached', text: 'This project has spent up to its ceiling, so paid steps wait. Raise it in the header, or in Settings for new projects.', link: 'Turn, project and monthly ceilings', slug: 'turn-project-and-monthly-ceilings' },
   { id: 'first-failed-take', title: 'A take failed', text: 'Nothing was charged. Try it again, or ask Voltage what happened.', link: 'A take failed', slug: 'a-take-failed' },
+  { id: 'first-word-rule', title: 'Word rule', text: 'This take did not say a project word the project\'s way, so Voltage will not add it. Voice it again, or add it yourself if it sounds right.', link: 'Project words', slug: 'project-words' },
   { id: 'first-brief-changed', title: 'Brief changed', text: 'Some videos here were made with an older brief. Bring up to date changes only the lines the change touches; a video it does not touch is marked current for free.', link: 'Brief versions', slug: 'brief-versions-and-brief-changed' },
 ]
 

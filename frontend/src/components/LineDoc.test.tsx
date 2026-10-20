@@ -684,3 +684,36 @@ describe('LineDoc: one chip per line, read from the jobs (2026-10-20)', () => {
     expect(screen.getByTestId('voice-estimate')).toHaveTextContent('≈ 9 characters · ready in about 2 s')
   })
 })
+
+describe('A3: the project words on a line', () => {
+  it('marks a take that breaks a word rule, and the user may still add it', async () => {
+    const h = doc({ items: [item({ word_rule: { breaks: ['“Bhaji Cam” did not come out as written (the take says “badge cam”).'], warnings: [] } })] })
+    const mark = screen.getByTestId('word-rule')
+    expect(mark).toHaveTextContent('Breaks a word rule')
+    expect(mark).toHaveTextContent('did not come out as written')
+    await userEvent.click(screen.getByRole('button', { name: /^Add it/ }))
+    expect(h.onAdd).toHaveBeenCalled()
+  })
+
+  it('warns about a banned word in a typed line and still voices it', async () => {
+    const h = doc({ bannedWords: ['cheap'] })
+    const actions = screen.getByRole('group', { name: 'Actions for 0:07' })
+    await userEvent.click(within(actions).getByRole('button', { name: 'Edit it' }))
+    const box = screen.getByRole('textbox', { name: 'New wording' })
+    await userEvent.clear(box)
+    await userEvent.type(box, 'Cheap groceries, live now.')
+    expect(screen.getByTestId('banned-warning')).toHaveTextContent('“cheap” is a banned word in this project. You can still voice it.')
+    await userEvent.keyboard('{Enter}')
+    expect(h.onHear).toHaveBeenCalledWith(KEY, expect.objectContaining({ text: 'Cheap groceries, live now.' }))
+  })
+
+  it('says nothing for a word that only contains a banned one', async () => {
+    doc({ bannedWords: ['cheap'] })
+    const actions = screen.getByRole('group', { name: 'Actions for 0:07' })
+    await userEvent.click(within(actions).getByRole('button', { name: 'Edit it' }))
+    const box = screen.getByRole('textbox', { name: 'New wording' })
+    await userEvent.clear(box)
+    await userEvent.type(box, 'Cheaply done.')
+    expect(screen.queryByTestId('banned-warning')).toBeNull()
+  })
+})

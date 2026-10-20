@@ -142,6 +142,8 @@ interface LineDocProps {
   version?: 'edited' | 'proposals' | 'as-shot'
   /** 2026-10-20: the jobs and renders every row's chip is read from. */
   activity?: RowActivity
+  /** A3: the project's banned words; a line typed with one is warned about, never blocked. */
+  bannedWords?: string[]
 }
 
 /** The picture's flex for a take, as a factor ("0.94"), or null when it plays as shot. */
@@ -217,6 +219,26 @@ const MIX_NOTE: Record<string, string | null> = {
 }
 const voiceLabel = (v: Voice) => (v.category === 'mine' ? `${v.name} (yours)` : v.gender ? `${v.name} (${v.gender})` : v.name)
 
+/** A3: the banned words a typed line uses (whole words, any case). */
+function bannedIn(text: string, banned: string[]): string[] {
+  const t = text.toLowerCase()
+  return banned.filter((w) => w.trim() && new RegExp(`(^|[^\\p{L}\\p{N}])${w.trim().toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}($|[^\\p{L}\\p{N}])`, 'u').test(t))
+}
+
+/** A3: a take held against the project's words. A break is marked and is not Voltage's to add; a warning only says so. */
+const WordRuleMarks = ({ item }: { item: PlanItem }) => (
+  <>
+    {item.word_rule?.breaks?.length ? (
+      <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1 text-sm" data-testid="word-rule">
+        <span className="stamp need">Breaks a word rule</span><span>{item.word_rule.breaks.join(' ')} Voice it again, or add it if it sounds right to you.</span>
+      </div>
+    ) : null}
+    {item.word_rule?.warnings?.length ? (
+      <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1 text-sm" data-testid="word-warning"><span className="stamp need">Banned word</span><span>{item.word_rule.warnings.join(' ')}</span></div>
+    ) : null}
+  </>
+)
+
 const Spinner = () => <Loader2 size={16} aria-hidden="true" className="shrink-0 animate-spin text-changed" />
 
 /** The transcript as the working surface: every line carries its own state,
@@ -227,7 +249,7 @@ export function LineDoc({
   onSeek, onHear, onAdd, onDiscard, onAddAll, onUndo, onRemove, onHearTake, onRole, mixLines = [], bedUnderDb = 15, onDelivery, onRetry,
   onShorten, onShortenAll, onEase,
   onEditingChange, onMove, onMoveKept, placing, onPlacing, duration, version = 'edited',
-  arranged, onArrange, onArrangeUndo, onPreview, activity = NO_ACTIVITY,
+  arranged, onArrange, onArrangeUndo, onPreview, activity = NO_ACTIVITY, bannedWords = [],
 }: LineDocProps) {
   const chipOf = (facts: { item?: PlanItem | null; editId?: string | null; removed?: boolean }) => rowChip({ ...facts, ...activity })
   const asShot = version === 'as-shot'
@@ -637,6 +659,9 @@ export function LineDoc({
             ))}
           </div>
         )}
+        {bannedIn(draft, bannedWords).map((w) => (
+          <p key={w} className="m-0 flex flex-wrap items-baseline gap-x-2 gap-y-1 text-sm" role="status" data-testid="banned-warning"><span className="stamp need">Banned word</span><span>“{w}” is a banned word in this project. You can still voice it.</span></p>
+        ))}
         <ControlRow label="Delivery">
           <Chip on={delivery === null && ownWords === null} onClick={() => { setDelivery(null); setOwnWords(null) }}>As spoken</Chip>
           {DELIVERIES.map((d) => (
@@ -767,6 +792,7 @@ export function LineDoc({
           {!v.passed && ' Add it anyway if it sounds right to you.'}
         </div>
         {item.note && <div className={metaClass} data-testid="item-note">{item.note}</div>}
+        <WordRuleMarks item={item} />
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
           {onMove && placeControl(c.candidate_id, c.plan.selection.start, c.audio.duration, (t) => onMove(item, c, t))}
           {isAdd(item) && levelControl(c.plan, { candidate: c, item }, { text: item.new_text, start: c.plan.selection.start, end: c.plan.selection.end, speaker: null })}
@@ -834,6 +860,7 @@ export function LineDoc({
           ) : <span className="tag text-faint">Not measured yet</span>}
           <span className="tag text-faint">Lip-sync · not measured yet</span>
           {facts.flagged && <span className="meta text-needs">Flagged: {facts.flagged}</span>}
+          <WordRuleMarks item={item} />
         </div>
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
           {onMove && placeControl(c.candidate_id, c.plan.selection.start, c.audio.duration, (t) => onMove(item, c, t))}

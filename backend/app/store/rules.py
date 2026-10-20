@@ -25,7 +25,8 @@ from app.timefmt import now_iso
 KINDS = ("pronounce", "banned", "required_line", "style")
 # What each kind holds: its required text fields, then its optional ones.
 FIELDS = {
-    "pronounce": (("term", "say"), ("respell",)),
+    # A3: `audio` is the sha256 of an optional short clip of the right pronunciation.
+    "pronounce": (("term", "say"), ("respell", "audio")),
     "banned": (("word",), ()),
     "required_line": (("text",), ()),
     "style": (("text",), ()),

@@ -14,6 +14,7 @@ import { FillBar } from './bits'
 import { useFlags } from '../flags/useFlags'
 import { BriefHistory, BriefMeta, StaleLine } from './BriefVersions'
 import { Tip } from '../guides/Tip'
+import { ProjectWords } from './ProjectWords'
 
 interface ProjectPageProps {
   me: Me | null
@@ -281,6 +282,7 @@ export function ProjectPage({ me, projectId, onUpload, uploading, error, onDelet
             <span className="tag text-volt">Later</span>
             <span className="flex-1 text-sm">One goal across every video here, like “make all three 25% off”, is planned as a batch turn.</span>
           </div>
+          {consistency && <ProjectWords projectId={projectId} />}
         </section>
 
         <aside aria-label="Shared with every video" className="flex min-w-0 flex-[1_1_340px] flex-col gap-3.5">

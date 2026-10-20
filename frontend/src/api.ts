@@ -6,7 +6,7 @@ import type {
   Project, ExportManifest, Job, ProjectSummary, ProjectDetail, Usage, Voice, Speaker,
   ProjectSettings, Autonomy, Effort, Plan, Mix, Selection, Candidate, Reading, Sight, ChatMessage,
   ProjectFolder, ProjectDetailFolder, ProjectFile, HelpArticle, Onboarding, ProjectVoice,
-  ActivityJob, TurnView, RenderState, BriefVersion, BriefChange, BriefUpdateRun,
+  ActivityJob, TurnView, RenderState, BriefVersion, BriefChange, BriefUpdateRun, ProjectRule, RuleKind, RuleData,
 } from './types'
 
 const BASE = '/api'
@@ -138,6 +138,19 @@ export const diffBriefVersions = (id: string, a: number, b: number) => get<{ a: 
 /** A1: the latest "Bring up to date" run (null before the first), and starting one. */
 export const getBriefUpdate = (id: string) => get<{ run: BriefUpdateRun | null }>(`/projects/${id}/brief-update`)
 export const startBriefUpdate = (id: string) => post<{ run: BriefUpdateRun }>(`/projects/${id}/brief-update`, {})
+/** F3/A3: the project's words (how to say a term, banned words, required lines). */
+export const listRules = async (id: string) => (await get<{ rules: ProjectRule[]; rules_version: number }>(`/projects/${id}/rules`)).rules
+export const addRule = (id: string, kind: RuleKind, data: RuleData) => post<ProjectRule>(`/projects/${id}/rules`, { kind, data })
+export const updateRule = (id: string, ruleId: number, data: RuleData) => patch<ProjectRule>(`/projects/${id}/rules/${ruleId}`, { data })
+export const deleteRule = (id: string, ruleId: number) => del(`/projects/${id}/rules/${ruleId}`)
+export async function uploadRuleAudio(id: string, ruleId: number, file: File): Promise<ProjectRule> {
+  const body = new FormData()
+  body.append('file', file)
+  return request<ProjectRule>(`/projects/${id}/rules/${ruleId}/audio`, { method: 'POST', body })
+}
+export const deleteRuleAudio = (id: string, ruleId: number) => request<ProjectRule>(`/projects/${id}/rules/${ruleId}/audio`, { method: 'DELETE' })
+/** The clip's address; `v` (the clip's hash) makes a new clip a new address. */
+export const ruleAudioUrl = (id: string, ruleId: number, v = '') => `${BASE}/projects/${id}/rules/${ruleId}/audio${v ? `?v=${v.slice(0, 12)}` : ''}`
 
 /** Help and onboarding (2026-10-19). */
 export const listHelp = async () => (await get<{ articles: HelpArticle[] }>('/help')).articles

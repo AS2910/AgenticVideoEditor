@@ -135,6 +135,8 @@ class Turn:
     fit_nudged: bool = False
     # 2026-10-20: the user pressed Stop; the turn ends after the step that is running.
     stop_requested: Callable[[], bool] = lambda: False
+    # A3: what the user said this turn; a banned word they typed themselves only warns.
+    said: str = ""
 
     def asks_before(self, what: str) -> bool:
         """Whether this committing step waits for the user: always under
@@ -680,6 +682,18 @@ def _plan(wb: Workbench, turn: Turn) -> Plan:
     return plan
 
 
+def _word_check(wb: Workbench, turn: Turn, text: str, candidate: Any):
+    """A3: the take's words (its transcript) against the project's word rules.
+    Nothing to check for a standalone video or one whose project has none."""
+    from app.agent.word_rules import WordCheck, check_take
+    view = wb.project(turn.project_id) if wb.project is not None else None
+    found = (view or {}).get("rules") or []
+    if not found:
+        return WordCheck()
+    heard = [w.text for w in (getattr(candidate, "words", None) or ())]
+    return check_take(text, heard, found, typed=turn.said)
+
+
 def _synthesize_take(wb: Workbench, turn: Turn, args: dict) -> ToolResult:
     text = (args.get("text") or "").strip().strip('"').strip("“”")
     if not text:
@@ -946,17 +960,19 @@ def _synthesize_take(wb: Workbench, turn: Turn, args: dict) -> ToolResult:
                         if state == "ready" else f" {item.item_id} has no take.")
                 return ToolResult(f"The take could not be made: {reason}{kept}", step=f"Could not voice “{text[:40]}”: {reason[:80]}")
         cost = max(0.0, wb.ledger.spent_usd(turn.project_id) - before)
+        # A3: after the sound and fit checks, the take's own words against the project's words.
+        words_check = _word_check(wb, turn, text, candidate)
         finish = getattr(wb.repo, "finish_attempt", None)
         if finish:
             extra_changes = {"selection": used} if used != selection else {}
             state = finish(turn.project_id, turn.plan_id, item.item_id, attempt, candidate_id=candidate.candidate_id, fit=candidate.plan.fit, note=None,
-                           fit_failure=None, beat=beat, **extra_changes)
+                           fit_failure=None, beat=beat, word_rule=words_check.to_dict(), **extra_changes)
             if state == "stale":
                 return ToolResult(f"Take {candidate.candidate_id} was made, but a newer attempt on {item.item_id} has started; "
                                   "it is kept in the item's history, not shown.")
         else:
             wb.repo.update_item(turn.project_id, turn.plan_id, item.item_id, status="ready", candidate_id=candidate.candidate_id,
-                                progress=None, error=None, fit=candidate.plan.fit)
+                                progress=None, error=None, fit=candidate.plan.fit, word_rule=words_check.to_dict())
         turn.takes.append(candidate.candidate_id)
         report = candidate.continuity
         verdict = "sounds right" if report.passed else "did not pass the sound check" + (
@@ -984,6 +1000,11 @@ def _synthesize_take(wb: Workbench, turn: Turn, args: dict) -> ToolResult:
                                     note=None if abs(miss) <= 0.3 else f"“{key_word}” lands {abs(miss):.1f} s {'late' if miss > 0 else 'early'} for its beat.")
         if len(tried) > 1:
             notes += f" It ran long at first; it fits now after: {'; '.join(tried)}."
+        if words_check.breaks:
+            notes += (f" {words_check.sentence()} It is marked on the line and is not yours to add or to offer as your pick: "
+                      "voice it again (same item_id) so the term comes out as the project says it, or change the wording.")
+        elif words_check.warnings:
+            notes += " " + words_check.sentence()
         text_out = (f"Take {candidate.candidate_id} on {item.item_id}, {whose}, {where}. It {verdict}.{notes}{wps}{landing}{how_said} "
                     f"Cost ${cost:.2f}.{' The item moved to the new span.' if moved else ''} "
                     f"The user can hear it now; voice it again (same item_id) to try another direction or wording, "
