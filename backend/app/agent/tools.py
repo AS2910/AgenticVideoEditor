@@ -81,6 +81,8 @@ class Workbench:
     help_search: Callable[[str], Sequence[dict]] = lambda query: []
     # Spend scopes: the one summary for a video ({turn?, video, project?, month, binding}) -> or None.
     spend: Callable[[str], dict | None] = lambda video_id: None
+    # C1: the video's stage (draft, in_review, changes_asked, approved, exported), or None when stages are off.
+    stage: Callable[[str], str | None] = lambda video_id: None
     # 2026-10-20 (p61): the last take's own spoken length before any fitting,
     # {seconds, speed}, for the voice's measured rate; None when unknown (a mock).
     measured: Callable[[], dict | None] = lambda: None
@@ -1577,6 +1579,11 @@ def _ship(wb: Workbench, turn: Turn, args: dict) -> ToolResult:
         # F4: in a batch the user adds lines from the batch board ("Add all that passed"), never the turn.
         return ToolResult(f"This video is part of a batch: its {n} ready {'line waits' if n == 1 else 'lines wait'} for the user "
                           "to add from the batch board. Do not ship; say what is ready and end the turn.")
+    # C1: shipping onto an Approved video takes it back to Draft, so the user is
+    # asked first under either setting, unless they already said yes this turn.
+    if wb.stage(turn.project_id) == "approved" and not turn.commit_approved:
+        raise WaitingForUser(f"This video is Approved. Adding this moves it back to Draft. Ship {n} "
+                             f"{'change' if n == 1 else 'changes'} anyway?", ("Ship it", "Not yet"), "Ship it")
     if turn.asks_before("ship"):
         raise WaitingForUser(f"Ship {n} {'change' if n == 1 else 'changes'} and render the video?"
                              + (" One did not pass its check." if anyway else ""), ("Ship it", "Not yet"), "Ship it")

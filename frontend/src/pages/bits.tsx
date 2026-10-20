@@ -1,5 +1,14 @@
+import { useState } from 'react'
 import type { ReactNode } from 'react'
+import { frameUrl } from '../api'
 import { cn } from '@/lib/utils'
+
+/** The video's first frame; a plain dark block when there is none to fetch (project page cards and board). */
+export function Frame({ id }: { id: string }) {
+  const [broken, setBroken] = useState(false)
+  if (broken) return <span className="absolute inset-0 block bg-pic" aria-hidden="true" />
+  return <img className="absolute inset-0 size-full object-cover" src={frameUrl(id, 0)} alt="" loading="lazy" decoding="async" onError={() => setBroken(true)} />
+}
 
 /** A volt fill in an outlined track — the spend bars. `strong` is the 1.5 px ink outline of the big ones. */
 export function FillBar({ share, height = 10, strong = false, label, className }: {

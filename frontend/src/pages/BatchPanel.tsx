@@ -1,6 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import type { Batch, BatchRow, BatchRowState, ProjectSummary } from '../types'
-import { addAllBatch, answerBatchVideo, cancelBatch, goBatch, listBatches, planBatch, undoBatchAdd } from '../api'
+import { addAllBatch, answerBatchVideo, cancelBatch, goBatch, listBatches, planBatch, stageHold, undoBatchAdd } from '../api'
+import { useFlags } from '../flags/useFlags'
+import { StageWarning } from './StageWarning'
+import { approvedWords } from './feedWords'
 import { hrefFor } from '../lib/route'
 import { cn } from '@/lib/utils'
 import { said, usd } from './fmt'
@@ -59,8 +62,11 @@ function Row({ row, busy, onAnswer, onUndo }: { row: BatchRow; busy: string | nu
  *  (all by default, each with its stage), one plan and one gate card with the
  *  totals and the batch's cap, then a board with one row per video, three
  *  working at a time, and Add all that passed last. */
-export function BatchPanel({ projectId, videos, fix, onFixHandled, refresh = 0 }: { projectId: string; videos: ProjectSummary[]; fix?: FixRequest | null; onFixHandled?: () => void; refresh?: number }) {
+export function BatchPanel({ projectId, videos, fix, onFixHandled, refresh = 0, onAdded }: { projectId: string; videos: ProjectSummary[]; fix?: FixRequest | null; onFixHandled?: () => void; refresh?: number; onAdded?: () => void }) {
   const [batch, setBatch] = useState<Batch | null>(null)
+  // C1 (projects.review): the warning before Add all that passed lands on Approved videos.
+  const reviewOn = useFlags().enabled('projects.review')
+  const [hold, setHold] = useState<string | null>(null)
   const [loaded, setLoaded] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [note, setNote] = useState<string | null>(null)
@@ -122,6 +128,27 @@ export function BatchPanel({ projectId, videos, fix, onFixHandled, refresh = 0 }
   const gate = showing?.phase === 'gate'
   const board = showing && !gate
   const passing = showing?.rows.filter((r) => r.state === 'ready').length ?? 0
+  /** C1: Add all that passed on Approved videos warns first; Add anyway sends the yes. */
+  const addAll = async (confirm: boolean) => {
+    if (!showing) return
+    if (!confirm && reviewOn) {
+      const held = showing.rows.filter((r) => r.state === 'ready' && (videos.find((v) => v.video_id === r.video_id)?.stage ?? r.stage) === 'approved')
+      if (held.length > 0) { setHold(approvedWords(held.map((r) => r.filename))); return }
+    }
+    setBusy('add')
+    setNote(null)
+    try {
+      setBatch(await addAllBatch(projectId, showing.batch_id, confirm))
+      setHold(null)
+      setDismissed(null)
+      setTick((t) => t + 1)
+      onAdded?.()
+    } catch (e) {
+      const h = stageHold(e)
+      if (h) setHold(h.message)
+      else setNote(said(e, 'Could not add the lines.'))
+    } finally { setBusy(null) }
+  }
 
   return (
     <section aria-label="Ask Voltage about all videos" className="rise flex flex-col gap-3 rounded-xl bg-pane p-[18px] text-ptext" data-testid="batch" data-tour="batch">
@@ -199,12 +226,13 @@ export function BatchPanel({ projectId, videos, fix, onFixHandled, refresh = 0 }
           </ul>
           {showing.phase === 'running' && <Tip id="first-batch" target="batch" />}
           {note && <p className="m-0 text-sm text-destructive" role="alert">{note}</p>}
+          {hold && <StageWarning message={hold} busy={busy === 'add'} onCancel={() => setHold(null)} onAnyway={() => void addAll(true)} />}
           <div className="flex flex-wrap items-center justify-end gap-2 border-t border-line pt-2">
             {showing.phase === 'running'
               ? <button type="button" className="btn sm" disabled={busy !== null} onClick={() => void act('cancel', () => cancelBatch(projectId, showing.batch_id), 'Could not cancel the batch.')}>{busy === 'cancel' ? 'Cancelling…' : 'Cancel the rest'}</button>
               : <button type="button" className="act" onClick={() => setDismissed(showing.batch_id)}>Ask something new</button>}
-            {passing > 0 && (
-              <button type="button" className="btn volt sm" disabled={busy !== null} onClick={() => void act('add', () => addAllBatch(projectId, showing.batch_id), 'Could not add the lines.')}>
+            {passing > 0 && !hold && (
+              <button type="button" className="btn volt sm" disabled={busy !== null} onClick={() => void addAll(false)}>
                 {busy === 'add' ? 'Adding…' : `Add all that passed · ${passing} ${passing === 1 ? 'video' : 'videos'}`}
               </button>
             )}

@@ -238,6 +238,8 @@ export interface Project {
   brief_version?: number | null
   made_with_brief?: number | null
   brief_changed?: boolean
+  /** C1: its stage; adding to an Approved video warns first. */
+  stage?: string
   /** B2: a language version's master, its language and whether the master moved on since it last synced. */
   master_id?: string | null
   language?: string | null
@@ -338,6 +340,8 @@ export interface ProjectSummary {
   state?: 'new' | 'draft' | 'shipped'
   /** F5: draft | in_review | changes_asked | approved | exported. */
   stage?: string
+  /** C1: the board card's open review comments (C2 fills it; 0 until then). */
+  open_comments?: number
   last_change?: string
   variant_of?: string | null
   /** A1: the brief version its last shipped edit was made with (0: before this project's brief; null: nothing shipped). */
@@ -814,3 +818,22 @@ export interface LanguageGate { videos: number; lines: number; est_usd: number |
 export interface LanguagesMade { gate: LanguageGate; batch_id: string | null; children: { video_id: string; language: string; label: string }[] }
 
 export interface SyncStarted { job_id: string; lines: { edit_id: string; start: number; end: number; what: string; text: string }[]; to: number }
+
+// ── C1: stages and the project board ─────────────────────────────────────────
+
+export type Stage = 'draft' | 'in_review' | 'changes_asked' | 'approved' | 'exported'
+export interface StageMoved { video_id: string; stage: Stage; label: string; moved: boolean }
+/** One line of the activity log (F7), newest first. `you`: the caller did it. */
+export interface ProjectEvent {
+  id: number
+  project_id: string | null
+  video_id: string | null
+  actor_kind: 'user' | 'voltage' | 'reviewer'
+  actor_name: string
+  verb: string
+  target: string
+  payload: Record<string, unknown>
+  at: string
+  you?: boolean
+}
+export interface EventPage { events: ProjectEvent[]; next: number | null }

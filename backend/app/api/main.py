@@ -178,6 +178,8 @@ class ApproveRequest(BaseModel):
     # Approve even though continuity failed. Explicit, per approval, and
     # recorded on the edit — never a default.
     override: bool = False
+    # C1: yes to "This video is Approved. Adding this moves it back to Draft."
+    confirm_stage: bool = False
 
 
 def _continuity_dict(report: ContinuityReport) -> dict:
@@ -538,6 +540,12 @@ def get_frame(project_id: str, index: int, owner: str = Depends(current_owner)) 
     return FileResponse(frames[index].path, media_type="image/jpeg")
 
 
+def _stage_for_turn(video_id: str) -> str | None:
+    """C1: the video's stage as Voltage's ship sees it; None without `projects.review`."""
+    record = repo.get(video_id)
+    return record.stage if record is not None and _review_on(record.owner) else None
+
+
 def _project_dict(record: ProjectRecord) -> dict:
     """A video record. `video_id` is its own id; `project_id` the folder it
     is in, or null (Folders)."""
@@ -551,6 +559,8 @@ def _project_dict(record: ProjectRecord) -> dict:
         "brief_version": folder.brief_version if folder else None,
         "made_with_brief": record.made_with_brief,
         "brief_changed": briefs.stale(record.made_with_brief, folder.brief_version if folder else None),
+        # C1: its stage; an add on an Approved video warns first.
+        "stage": record.stage,
         # B2: the language set it belongs to ("Out of sync with master" in the header).
         **_language_fields(record),
         "filename": source.filename,
@@ -1178,6 +1188,8 @@ def _summary(r: ProjectRecord) -> dict:
         "last_change": last,
         "variant_of": settings_.get("variant_of"),
         "stage": r.stage,
+        # C1: the board card's open comments; C2's review comments fill it.
+        "open_comments": 0,
         # A1: the brief version its last shipped edit was made with, and whether the project's is newer.
         "made_with_brief": r.made_with_brief,
         "brief_changed": briefs.stale(r.made_with_brief, folder.brief_version if folder else None),
@@ -1193,6 +1205,56 @@ def list_video_events(project_id: str, limit: int = 50, before: int | None = Non
     `/videos/{id}/events`; this is the record)."""
     _owned(project_id, owner)
     return activity_log.for_video(database, project_id, limit, before)
+
+
+# ── C1: stages and the project board ─────────────────────────────────────────
+# Manual moves come through POST /videos/{id}/stage; the automatic ones live
+# in app.store.stages (a new edit on an Approved video, a review link sent, a
+# reviewer's answer). Every move is one `stage.moved` event.
+
+def _review_on(owner: str) -> bool:
+    return flags.enabled("projects.review", owner)
+
+
+def _review_flag(owner: str) -> None:
+    if not _review_on(owner):
+        raise HTTPException(status_code=404, detail="Not found")
+
+
+def _stage_gate(video_ids: list[str], owner: str, confirmed: bool) -> None:
+    """C1: before an add from the editor or a board lands on an Approved
+    video, the user is warned (409 with the sentence and the videos) and
+    answers with `confirm_stage`. Off without `projects.review`."""
+    if confirmed or not _review_on(owner):
+        return
+    held = [v for v in video_ids if stages.current(database, v) == "approved"]
+    if not held:
+        return
+    names = [r.source.filename for r in (repo.get(v) for v in held) if r is not None]
+    message = stages.APPROVED_WARNING if len(held) == 1 else (
+        f"{len(held)} videos are Approved ({', '.join(names)}). Adding these moves them back to Draft.")
+    raise HTTPException(status_code=409, detail={"code": "stage_approved", "message": message, "videos": held,
+                                                 "options": ["Add anyway", "Cancel"]})
+
+
+class StageMoveRequest(BaseModel):
+    to: str
+    why: str = ""
+
+
+@app.post("/videos/{project_id}/stage")
+def move_stage(project_id: str, req: StageMoveRequest, owner: str = Depends(current_owner)) -> dict:
+    """C1: a manual move (the board's drag, or its Move to menu). One event
+    per move; a move to the stage it is in changes nothing and logs nothing."""
+    _review_flag(owner)
+    _owned(project_id, owner)
+    try:
+        moved = stages.move(database, project_id, req.to, user_actor(owner), req.why)
+    except stages.StageError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    now = stages.current(database, project_id) or "draft"
+    return {"video_id": project_id, "stage": now, "label": stages.LABELS[now], "moved": moved is not None,
+            "move": moved.to_dict() if moved else None}
 
 
 @app.get("/videos/{project_id}/stage")
@@ -3368,14 +3430,23 @@ def _passing_items(video_id: str) -> tuple[Plan | None, list[str]]:
     return plan, ids
 
 
+class AddAllRequest(BaseModel):
+    # C1: yes to adding to videos that are Approved (they go back to Draft).
+    confirm_stage: bool = False
+
+
 @app.post("/projects/{project_id}/batches/{batch_id}/add-all")
-def add_all_batch(project_id: str, batch_id: str, owner: str = Depends(current_owner)) -> dict:
+def add_all_batch(project_id: str, batch_id: str, req: AddAllRequest | None = None,
+                  owner: str = Depends(current_owner)) -> dict:
     """B1: Add all that passed. Every video of the batch with proposals that
     passed is shipped as its own Add all (its own render), and what each
-    added is kept so it can be undone in one step per video."""
+    added is kept so it can be undone in one step per video. C1: an Approved
+    video among them needs `confirm_stage` first."""
     record = _owned_batch(project_id, batch_id, owner)
     if record["phase"] == "gate":
         raise HTTPException(status_code=409, detail="Nothing has run yet. Go first.")
+    _stage_gate([c["video_id"] for c in record["children"] if _passing_items(c["video_id"])[1]], owner,
+                bool(req and req.confirm_stage))
     added: dict[str, dict] = {}
     for child in record["children"]:
         video = repo.get(child["video_id"])
@@ -3720,7 +3791,11 @@ def list_project_events(project_id: str, limit: int = 50, before: int | None = N
     """F7: what happened in the project and its videos, newest first; pass
     `next` back as `before` for the page after."""
     _owned_project(project_id, owner)
-    return activity_log.for_project(database, project_id, limit, before)
+    page = activity_log.for_project(database, project_id, limit, before)
+    # C1: the feed says "You" for the caller's own events.
+    for e in page["events"]:
+        e["you"] = e["actor_kind"] == "user" and e["actor_name"] == owner
+    return page
 
 
 @app.get("/projects/{project_id}/videos")
@@ -4363,6 +4438,7 @@ def approve_edit(
     overridden = not candidate.continuity.passed
     if overridden and not req.override:
         raise HTTPException(status_code=422, detail="continuity check failed")
+    _stage_gate([project_id], owner, req.confirm_stage)
     edit_id = _approve_candidate(project_id, candidate, overridden)
     return {
         "edit_id": edit_id,
@@ -4868,6 +4944,8 @@ def get_receipt(project_id: str, owner: str = Depends(current_owner)) -> dict:
 class PlanApproveRequest(BaseModel):
     items: list[str] | None = None
     override: bool = False
+    # C1: yes to "This video is Approved. Adding this moves it back to Draft."
+    confirm_stage: bool = False
 
 
 def _item_dict(project_id: str, item: PlanItem) -> dict:
@@ -4993,6 +5071,7 @@ def approve_plan(
     take failed continuity is skipped unless `override` is set."""
     record = _owned(project_id, owner)
     _plan_or_404(project_id, plan_id)
+    _stage_gate([project_id], owner, req.confirm_stage)
     return _ship(project_id, record, plan_id, req.items, req.override)
 
 
@@ -5784,6 +5863,7 @@ def _workbench() -> Workbench:
         repo=repo, ledger=ledger, frames=_frames, lines=_lines, room_after=room_after,
         voices=_catalogue, library=getattr(voice, "library", lambda accent, language="en": []),
         estimate_usd=estimate_usd, generate=_generate, ensure_spend=_ensure_spend, ship=_ship,
+        stage=_stage_for_turn,
         edits=lambda pid: [e for e in repo.list_edits(pid) if not e.reverted],
         render_state=lambda pid: _render_status(pid, "final"),
         revert=lambda pid, edit_id: _revert(pid, edit_id, by="Voltage"),
@@ -6395,12 +6475,32 @@ def create_share(project_id: str, req: ShareRequest, owner: str = Depends(curren
     project = _owned_project(project_id, owner)
     target = req.target or project_id
     _check_share_target(project, req.scope, target)
+    reviewing = review_videos(project, req.scope, target) if req.role == "reviewer" else []
     try:
-        share, _ = shares_store.create(database, share_key, owner=owner, project_id=project_id, scope=req.scope,
-                                       target=target, role=req.role, days=req.days, name=req.name, by=owner)
+        with database.tx() as c:
+            share, _ = shares_store.create_in(c, share_key, owner=owner, project_id=project_id, scope=req.scope,
+                                              target=target, role=req.role, days=req.days, name=req.name, by=owner)
+            review_link_sent(c, reviewing, owner, req.name)
     except shares_store.ShareError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
     return _share_dict(share)
+
+
+def review_videos(project: Project, scope: str, target: str) -> list[str]:
+    """C1: the videos a review link asks about: the video, or every video in the project."""
+    if scope == "video":
+        return [target]
+    if scope == "project":
+        return [r.source.project_id for r in repo.list(project.owner, folder=project.project_id)]
+    return []
+
+
+def review_link_sent(c, video_ids: list[str], owner: str, name: str | None = None) -> list:
+    """C1: sending a review link puts those videos In review, in the caller's
+    transaction (the link's own). C2's Send for review calls this with
+    `review_videos(...)` read before the transaction opens."""
+    why = f"Review link sent to {name}." if name else "Review link sent."
+    return stages.review_sent_in(c, video_ids, user_actor(owner), why)
 
 
 @app.get("/projects/{project_id}/shares")

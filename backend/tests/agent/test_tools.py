@@ -476,3 +476,17 @@ def test_project_state_and_ship_never_call_the_video_ready_without_a_finished_re
     assert "matches the edits in the video now" in render_line({"edits": 2, "render": {"sha256": "x"}, "at": "t"})
     assert "nothing is in the video yet" in render_line({"edits": 0})
     assert "unknown in this setup" in render_line({})
+
+
+def test_ship_on_an_approved_video_asks_first_even_under_just_do_it(world):
+    """C1: an edit on an Approved video takes it back to Draft, so Voltage's ship asks first; a yes carries it."""
+    import dataclasses
+    t = world.turn()
+    BY_NAME["synthesize_take"].run(world.wb, t, {"text": "Welcome.", "voice_id": "kL06KYMvPY56NluIQ72m", "start": 0, "end": 2, "direction": None, "mix": None, "line": None, "item_id": None})
+    approved = dataclasses.replace(world.wb, stage=lambda vid: "approved")
+    with pytest.raises(WaitingForUser) as w:
+        BY_NAME["ship"].run(approved, world.turn(autonomy="draft"), {"item_ids": None})
+    assert w.value.question == "This video is Approved. Adding this moves it back to Draft. Ship 1 change anyway?"
+    assert w.value.options == ("Ship it", "Not yet") and world.shipped == []
+    out = BY_NAME["ship"].run(approved, world.turn(autonomy="ask", commit_approved=True), {"item_ids": None})
+    assert out.text.startswith("Shipped 1 change") and world.shipped == [["i1"]]

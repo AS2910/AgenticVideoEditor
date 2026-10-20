@@ -1,6 +1,6 @@
 import type { Arrangement } from './transcript/arrange'
 import type {
-  LanguageSet, LanguagesMade, SyncStarted,
+  LanguageSet, LanguagesMade, SyncStarted, Stage, StageMoved, EventPage,
   Suggestion, SuggestionKind, Understanding,
   Role,
   MyVoice, UserSettings, UsageReport, SpendSummary, MadeVoice, CloneableSpeaker, DesignedPreview, Receipt,
@@ -165,8 +165,18 @@ export const planBatch = (id: string, body: { source: 'ask' | 'fix'; goal?: stri
 export const goBatch = (id: string, batchId: string) => post<Batch>(`/projects/${id}/batches/${batchId}/go`)
 export const cancelBatch = (id: string, batchId: string) => post<Batch>(`/projects/${id}/batches/${batchId}/cancel`)
 export const answerBatchVideo = (id: string, batchId: string, videoId: string, text: string) => post<Batch>(`/projects/${id}/batches/${batchId}/videos/${videoId}/answer`, { text })
-export const addAllBatch = (id: string, batchId: string) => post<Batch>(`/projects/${id}/batches/${batchId}/add-all`)
+export const addAllBatch = (id: string, batchId: string, confirmStage = false) => post<Batch>(`/projects/${id}/batches/${batchId}/add-all`, confirmStage ? { confirm_stage: true } : undefined)
 export const undoBatchAdd = (id: string, batchId: string, videoId: string) => post<Batch>(`/projects/${id}/batches/${batchId}/videos/${videoId}/undo-add`)
+// C1 (projects.review): a video's stage, moved by hand; the project's activity feed (F7).
+export const moveStage = (videoId: string, to: Stage) => post<StageMoved>(`/videos/${videoId}/stage`, { to })
+export const getProjectEvents = (id: string, before?: number | null, limit = 30) =>
+  get<EventPage>(`/projects/${id}/events?limit=${limit}${before ? `&before=${before}` : ''}`)
+/** C1: the 409 an add answers on an Approved video (the user says Add anyway or Cancel), if that is what it was. */
+export interface StageHold { code: 'stage_approved'; message: string; videos: string[]; options: string[] }
+export const stageHold = (e: unknown): StageHold | null => {
+  const detail = e instanceof ApiError && e.status === 409 ? (e.body as { detail?: unknown } | null)?.detail : null
+  return detail && typeof detail === 'object' && (detail as { code?: unknown }).code === 'stage_approved' ? detail as StageHold : null
+}
 // B3 (projects.batch): export presets, batch export, its zip and share link (F6).
 export const listExportPresets = (id: string) => get<ExportPresetPage>(`/projects/${id}/export-presets`)
 export const addExportPreset = (id: string, body: ExportPresetChange) => post<ExportPreset>(`/projects/${id}/export-presets`, body)
@@ -373,7 +383,7 @@ export interface PlanApproval {
 
 /** Approves the ready items named (every one, by default) and renders: Ship,
  *  and Keep on one line. */
-export const approvePlan = (id: string, planId: string, req: { items?: string[]; override?: boolean } = {}) =>
+export const approvePlan = (id: string, planId: string, req: { items?: string[]; override?: boolean; confirm_stage?: boolean } = {}) =>
   post<PlanApproval>(`/videos/${id}/plans/${planId}/approve`, req)
 
 /** Voltage's first look at the clip (UX-2): an opening line and each speaker's

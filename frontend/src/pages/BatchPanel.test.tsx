@@ -138,6 +138,7 @@ describe('B1: Ask Voltage about all videos', () => {
     let first = true
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
       if (url.endsWith('/me/onboarding')) return ok({ tour: { step: 0, finished: true, skipped: true }, tips: ['first-batch'], checklist: [], checklist_hidden: true })
+      if (url.endsWith('/me/flags')) return ok({ flags: ['projects.batch'] })
       if (first) { first = false; return fail('Server down', 500) }
       return ok({ batches: [] })
     }))

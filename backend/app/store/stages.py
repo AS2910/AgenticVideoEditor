@@ -6,10 +6,16 @@ when and why in the activity log (F7, verb `stage.moved`).
     move(db, video_id, to, actor, why="")     -> StageMove | None (already there)
     history(db, video_id)                     -> [StageMove], newest first
     after_new_edit(db, video_id, actor)       -> StageMove | None
+    review_sent(db, video_ids, actor)         -> [StageMove]
+    reviewer_approved(db, video_id, name)     -> StageMove | None
+    reviewer_asked_changes(db, video_id, name)-> StageMove | None
 
-`after_new_edit` is the rule C1 calls when a new edit is added: an Approved
-video goes back to Draft. Every move has a `move_in(c, ...)` form for a
-transaction the caller holds.
+The automatic moves (C1): a new edit on an Approved video takes it back to
+Draft (`after_new_edit`, called where every edit is written, so every ship
+path follows it); sending a review link puts a video In review; a reviewer's
+approval makes it Approved, a change request Changes asked (C2 calls those
+two). Everything else is a manual move. Every move has a `*_in(c, ...)` form
+for a transaction the caller holds.
 """
 from __future__ import annotations
 
@@ -25,6 +31,10 @@ from app.timefmt import now_iso
 STAGES = ("draft", "in_review", "changes_asked", "approved", "exported")
 LABELS = {"draft": "Draft", "in_review": "In review", "changes_asked": "Changes asked",
           "approved": "Approved", "exported": "Exported"}
+
+
+# What the editor and the project page say before an edit lands on an Approved video (C1).
+APPROVED_WARNING = "This video is Approved. Adding this moves it back to Draft."
 
 
 class StageError(ValueError):
@@ -87,6 +97,39 @@ def after_new_edit_in(c: sqlite3.Connection, video_id: str, actor: Actor) -> Sta
 def after_new_edit(db: Database, video_id: str, actor: Actor) -> StageMove | None:
     with db.tx() as c:
         return after_new_edit_in(c, video_id, actor)
+
+
+def review_sent_in(c: sqlite3.Connection, video_ids: list[str], actor: Actor,
+                   why: str = "A review link was sent.") -> list[StageMove]:
+    """Sending a review link puts each video In review (one already there stays)."""
+    moves = [move_in(c, v, "in_review", actor, why) for v in video_ids if current_in(c, v) is not None]
+    return [m for m in moves if m]
+
+
+def review_sent(db: Database, video_ids: list[str], actor: Actor, why: str = "A review link was sent.") -> list[StageMove]:
+    with db.tx() as c:
+        return review_sent_in(c, video_ids, actor, why)
+
+
+def reviewer_approved_in(c: sqlite3.Connection, video_id: str, name: str, version: int | None = None) -> StageMove | None:
+    """A reviewer approved the video (C2): Approved, logged under their name."""
+    why = f"Approved v{version} by review link." if version else "Approved by review link."
+    return move_in(c, video_id, "approved", Actor("reviewer", name or "A reviewer"), why)
+
+
+def reviewer_approved(db: Database, video_id: str, name: str, version: int | None = None) -> StageMove | None:
+    with db.tx() as c:
+        return reviewer_approved_in(c, video_id, name, version)
+
+
+def reviewer_asked_changes_in(c: sqlite3.Connection, video_id: str, name: str, why: str = "") -> StageMove | None:
+    """A reviewer asked for changes (C2): Changes asked, logged under their name."""
+    return move_in(c, video_id, "changes_asked", Actor("reviewer", name or "A reviewer"), why or "Changes asked by review link.")
+
+
+def reviewer_asked_changes(db: Database, video_id: str, name: str, why: str = "") -> StageMove | None:
+    with db.tx() as c:
+        return reviewer_asked_changes_in(c, video_id, name, why)
 
 
 def history(db: Database, video_id: str) -> list[StageMove]:

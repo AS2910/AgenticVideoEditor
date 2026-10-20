@@ -17,7 +17,7 @@ from datetime import datetime, timezone
 
 from app.domain.models import ApprovedEdit, Consent, EditCandidate, Source, Transcript
 from app.domain.plan import Plan, plan_from_dict
-from app.store import briefs, codec, events
+from app.store import briefs, codec, events, stages
 from app.store.actors import Actor
 from app.store.db import PROJECT_TABLES, Database
 from app.store.workspaces import personal, stamp_last
@@ -393,8 +393,9 @@ class ProjectRepository:
 
     def append_edit(self, project_id: str, edit: ApprovedEdit, actor: Actor | None = None,
                     made_with_brief: int | None = None) -> None:
-        """Ship an edit; with an `actor` it is in the activity log (F7); with
-        `made_with_brief` the video now counts as made with that brief version (A1)."""
+        """Ship an edit; with an `actor` it is in the activity log (F7) and an
+        Approved video goes back to Draft (C1); with `made_with_brief` the
+        video now counts as made with that brief version (A1)."""
         with self.db.tx() as c:
             if made_with_brief is not None:
                 briefs.made_with_in(c, project_id, made_with_brief)
@@ -408,6 +409,8 @@ class ProjectRepository:
                 events.record(c, "edit.shipped", actor, video_id=project_id, target=edit.edit_id,
                               payload={"text": edit.plan.new_text, "candidate_id": edit.candidate_id,
                                        "overridden": edit.overridden})
+                # C1: a new edit on an Approved video takes it back to Draft, in the same transaction.
+                stages.after_new_edit_in(c, project_id, actor)
 
     def list_edits(self, project_id: str) -> list[ApprovedEdit]:
         """Every approved edit in approval order, reverted ones included —

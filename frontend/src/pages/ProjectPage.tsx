@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { DragEvent } from 'react'
 import type { ProjectDetailFolder, ProjectFolder, ProjectSummary, MyVoice, MadeVoice, SpendSummary } from '../types'
 import type { Me } from '../api'
-import { ApiError, answerSuggestion, deleteFolder, deleteFolderFile, frameUrl, getFolder, getSpend, listMadeVoices, listVoices, shareVoice, unshareVoice, updateFolder, uploadFolderFile } from '../api'
+import { ApiError, answerSuggestion, deleteFolder, deleteFolderFile, getFolder, getSpend, listMadeVoices, listVoices, shareVoice, unshareVoice, updateFolder, uploadFolderFile } from '../api'
 import { go, hrefFor } from '../lib/route'
 import { clock } from '../transcript/format'
 import { cn } from '@/lib/utils'
@@ -10,7 +10,7 @@ import { Shell } from './Shell'
 import { formatDate } from '../lib/dates'
 import { usd, usdShort } from './fmt'
 import { ceilingWord } from '../lib/money'
-import { FillBar } from './bits'
+import { FillBar, Frame } from './bits'
 import { useFlags } from '../flags/useFlags'
 import { BriefHistory, BriefMeta, StaleLine } from './BriefVersions'
 import { Tip } from '../guides/Tip'
@@ -22,6 +22,9 @@ import { BatchExport } from './BatchExport'
 import { ExportPresets } from './ExportPresets'
 import type { ExportPreset } from '../types'
 import { LanguageDialog, SyncChip } from './LanguageVersions'
+import { ProjectBoard } from './ProjectBoard'
+import { ProjectFeed } from './ProjectFeed'
+import type { Stage } from '../types'
 
 interface ProjectPageProps {
   me: Me | null
@@ -34,15 +37,18 @@ interface ProjectPageProps {
   onDeleted?: () => void
 }
 
+/** C1: Grid or Board, remembered per user in this browser. */
+type VideosView = 'grid' | 'board'
+const viewKey = (me: Me | null) => `voltage-project-view:${me?.user?.sub ?? 'local'}`
+function readView(me: Me | null): VideosView {
+  try { return localStorage.getItem(viewKey(me)) === 'board' ? 'board' : 'grid' } catch { return 'grid' }
+}
+function keepView(me: Me | null, view: VideosView) {
+  try { localStorage.setItem(viewKey(me), view) } catch { /* the choice lasts this visit only */ }
+}
+
 const STATE_WORD: Record<NonNullable<ProjectSummary['state']>, string> = { new: 'New', draft: 'Draft', shipped: 'Exported' }
 const AUTONOMY_WORD: Record<string, string> = { ask: 'Check with me', draft: 'Just do it' }
-
-/** The video's first frame; a plain dark block when there is none to fetch. */
-function Frame({ id }: { id: string }) {
-  const [broken, setBroken] = useState(false)
-  if (broken) return <span className="absolute inset-0 block bg-pic" aria-hidden="true" />
-  return <img className="absolute inset-0 size-full object-cover" src={frameUrl(id, 0)} alt="" loading="lazy" decoding="async" onError={() => setBroken(true)} />
-}
 
 /** A project (folders, 2026-10-19): its videos, and what they share — the
  *  brief Voltage reads in every turn (with its suggestions to accept), the
@@ -76,6 +82,10 @@ export function ProjectPage({ me, projectId, onUpload, uploading, error, onDelet
   // B2 (projects.batch): the master whose language versions are being made, and the batch board's re-read.
   const [langFor, setLangFor] = useState<ProjectSummary | null>(null)
   const [batchTick, setBatchTick] = useState(0)
+  // C1 (projects.review): Grid or Board, and the feed's re-read after a move.
+  const reviewOn = enabled('projects.review')
+  const [view, setView] = useState<VideosView>(() => readView(me))
+  const [feedTick, setFeedTick] = useState(0)
   const fileInput = useRef<HTMLInputElement>(null)
   const refInput = useRef<HTMLInputElement>(null)
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -198,6 +208,12 @@ export function ProjectPage({ me, projectId, onUpload, uploading, error, onDelet
       setDetail((d) => (d ? { ...d, files: d.files.filter((f) => f.sha256 !== sha) } : d))
     } catch (e) { say(e, 'Could not remove that file.') } finally { setBusy(null) }
   }
+  const chooseView = (v: VideosView) => { setView(v); keepView(me, v) }
+  /** C1: a card changed stage on the board (or went back after a refusal). */
+  const staged = (videoId: string, stage: Stage) => {
+    setDetail((d) => (d ? { ...d, videos: d.videos.map((v) => (v.video_id === videoId ? { ...v, stage } : v)) } : d))
+    setFeedTick((t) => t + 1)
+  }
   const onDrop = (e: DragEvent) => { e.preventDefault(); setOver(false); const f = e.dataTransfer?.files?.[0]; if (f && !uploading) onUpload(f, projectId) }
 
   if (missing) {
@@ -265,10 +281,23 @@ export function ProjectPage({ me, projectId, onUpload, uploading, error, onDelet
 
       <div className="flex flex-wrap items-start gap-7">
         <section aria-label="Videos" className="flex min-w-0 flex-[999_1_560px] flex-col gap-3.5">
-          <h2 className="disp m-0 text-2xl font-bold">Videos</h2>
+          <div className="flex flex-wrap items-center gap-3">
+            <h2 className="disp m-0 text-2xl font-bold">Videos</h2>
+            {reviewOn && (
+              <div className="segs" role="group" aria-label="Show videos as" data-tour="board-toggle">
+                {(['grid', 'board'] as const).map((v) => <button key={v} type="button" className="seg" aria-pressed={view === v} onClick={() => chooseView(v)}>{v === 'grid' ? 'Grid' : 'Board'}</button>)}
+              </div>
+            )}
+          </div>
           {consistency && <StaleLine projectId={projectId} count={project.stale_count ?? 0} version={project.brief_version} onChanged={() => void load()} />}
           {consistency && (project.stale_count ?? 0) > 0 && <Tip id="first-brief-changed" target="stale-line" />}
-          <div className="-mx-3 grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-2.5">
+          {reviewOn && view === 'board' && (
+            detail.videos.length === 0
+              ? <p className="m-0 text-sm text-muted-foreground">No videos here yet. Upload one and it starts in Draft.</p>
+              : <ProjectBoard videos={detail.videos} briefChips={consistency} syncChips={batchOn} onMoved={staged} />
+          )}
+          {reviewOn && view === 'board' && detail.videos.length > 0 && <Tip id="first-board" target="board-toggle" />}
+          <div className={cn('-mx-3 grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-2.5', reviewOn && view === 'board' && 'hidden')}>
             {detail.videos.filter((v) => !(batchOn && v.master_id && detail.videos.some((m) => m.video_id === v.master_id))).map((v, i) => {
               const state = v.state ?? 'new'
               // B2: a master and its language versions are one stacked card.
@@ -312,7 +341,7 @@ export function ProjectPage({ me, projectId, onUpload, uploading, error, onDelet
               <span><span className="disp block text-lg font-bold text-foreground">Drop a video here</span>It joins {project.name} with its brief and voices.</span>
             </div>
           </div>
-          {batchOn ? <BatchPanel projectId={projectId} videos={detail.videos} fix={fixAll} onFixHandled={() => setFixAll(null)} refresh={batchTick} /> : (
+          {batchOn ? <BatchPanel projectId={projectId} videos={detail.videos} fix={fixAll} onFixHandled={() => setFixAll(null)} refresh={batchTick} onAdded={() => { void load(); setFeedTick((t) => t + 1) }} /> : (
             <div className="flex items-center gap-3 rounded-xl bg-pane px-4 py-3.5 text-ptext">
               <span className="tag text-volt">Later</span>
               <span className="flex-1 text-sm">One goal across every video here, like “make all three 25% off”, is planned as a batch turn.</span>
@@ -344,6 +373,8 @@ export function ProjectPage({ me, projectId, onUpload, uploading, error, onDelet
               </div>
             ))}
           </div>
+
+          {reviewOn && <ProjectFeed projectId={projectId} tick={feedTick} nameOf={(id) => detail.videos.find((v) => v.video_id === id)?.filename ?? null} />}
 
           <div className="rise d1 flex flex-col gap-2 rounded-xl border-[1.5px] border-foreground bg-card p-[18px]" data-testid="shared-voices">
             <div className="flex items-center gap-2"><span className="disp text-xl font-bold">Shared voices</span><span className="flex-1" /><button type="button" className="btn sm" onClick={() => void openAdd()} aria-expanded={adding}>+ Add</button></div>

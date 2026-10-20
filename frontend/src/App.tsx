@@ -45,12 +45,14 @@ import { Checklist } from './guides/Checklist'
 import { Tip } from './guides/Tip'
 import { useFlags } from './flags/useFlags'
 import { LanguageDialog, SyncChip } from './pages/LanguageVersions'
+import { StageWarning } from './pages/StageWarning'
+import { approvedWords } from './pages/feedWords'
 import { LearnWord } from './components/LearnWord'
 import { go, hrefFor, useRoute } from './lib/route'
 import { cn } from '@/lib/utils'
 import { clock } from './transcript/format'
 import {
-  createProject, confirmPlace, exportProject, artifactUrl, pollJob, PollCancelled, ApiError, listVideos, listFolders, createFolder, startTutorial, getProject, deleteProject, getUsage, getSpend, listVoices, updateSpeaker, detectSpeakers, revertEdit, updateSettings, removeLine, dismissItem, easeItem, setEditRole, setCandidateRole, roleQuestion, moveCandidate, moveEdit, getArrangement, putArrangement, undoArrangement, getPlan, approvePlan, readProject, grantConsent, getMe, postTurn, postAllowMore, getMessages, chipEvent, getUnderstanding, correctUnderstanding, setStyle,
+  createProject, confirmPlace, exportProject, artifactUrl, stageHold, pollJob, PollCancelled, ApiError, listVideos, listFolders, createFolder, startTutorial, getProject, deleteProject, getUsage, getSpend, listVoices, updateSpeaker, detectSpeakers, revertEdit, updateSettings, removeLine, dismissItem, easeItem, setEditRole, setCandidateRole, roleQuestion, moveCandidate, moveEdit, getArrangement, putArrangement, undoArrangement, getPlan, approvePlan, readProject, grantConsent, getMe, postTurn, postAllowMore, getMessages, chipEvent, getUnderstanding, correctUnderstanding, setStyle,
   retryJob, stopJobs, getLatestRender, startRender, getJobs, listRules,
 } from './api'
 import type { ArrangementView, Me, PlanApproval, RoleChange, RoleQuestion } from './api'
@@ -166,6 +168,9 @@ function Studio() {
   const consistency = useFlags().enabled('projects.consistency')
   // B2: language versions (Make language versions, Out of sync with master).
   const batchOn = useFlags().enabled('projects.batch')
+  // C1 (projects.review): an add on an Approved video asks first ("Add anyway" runs it with the yes).
+  const reviewOn = useFlags().enabled('projects.review')
+  const [stageAsk, setStageAsk] = useState<{ message: string; run: () => void } | null>(null)
   const [languagesOpen, setLanguagesOpen] = useState(false)
   // A3: the project's words, for the typed-line warning and Learn a word.
   const [projectRules, setProjectRules] = useState<ProjectRule[]>([])
@@ -519,24 +524,44 @@ function Studio() {
     }
   }
 
+  /** C1: an add on an Approved video waits for "Add anyway"; true when it was held. */
+  const heldByStage = (run: () => void): boolean => {
+    if (!reviewOn || project?.stage !== 'approved') return false
+    setStageAsk({ message: approvedWords([]), run })
+    return true
+  }
+  /** C1: the server held the add (the stage moved since the video was read): the same warning. */
+  const stageHeld = (e: unknown, run: () => void): boolean => {
+    const hold = stageHold(e)
+    if (!hold) return false
+    setProject((p) => (p ? { ...p, stage: 'approved' } : p))
+    setStageAsk({ message: hold.message, run })
+    return true
+  }
+  /** C1: an edit landed, so an Approved video is a Draft again (the server moved it in the same step). */
+  const leftApproved = () => setProject((p) => (p && p.stage === 'approved' ? { ...p, stage: 'draft' } : p))
+
   /** Add it (20e): the proposal under a line goes into the video — its plan
    *  item is approved and rendered. A take that failed its sound check is
    *  added on the user's word. */
-  const addItem = async (item: PlanItem) => {
+  const addItem = async (item: PlanItem, confirmStage = false) => {
     if (!projectId || !plan) return
     setError(null)
+    if (!confirmStage && heldByStage(() => void addItem(item, true))) return
     try {
       const passed = item.candidate?.continuity.passed ?? true
       const seq = beginRender('final')
       let result: PlanApproval | null = null
       try {
-        result = await approvePlan(projectId, plan.plan_id, passed ? { items: [item.item_id] } : { items: [item.item_id], override: true })
+        result = await approvePlan(projectId, plan.plan_id, { items: [item.item_id], ...(passed ? {} : { override: true }), ...(confirmStage ? { confirm_stage: true } : {}) })
         takeInApproval(result, seq)
+        if (result.approved.length > 0) leftApproved()
       } finally {
         endRender('final', seq, result?.export ?? null)
       }
       setPreview(null)
     } catch (e) {
+      if (stageHeld(e, () => void addItem(item, true))) return
       setError(e instanceof ApiError ? e.message : 'Could not add that line.')
     } finally {
       void refreshUsage(projectId)
@@ -866,22 +891,26 @@ function Studio() {
 
   /** Add them all (20e): every proposal goes into the video in one render,
    *  flagged takes included — the user asked for all of them. */
-  const approveAll = async (items: PlanItem[]) => {
+  const approveAll = async (items: PlanItem[], confirmStage = false) => {
     if (!projectId || !plan) return
     setError(null)
+    if (!confirmStage && heldByStage(() => void approveAll(items, true))) return
     const seq = beginRender('final')
     let manifest: ExportManifest | null = null
     try {
       const result = await approvePlan(projectId, plan.plan_id, {
         items: items.map((i) => i.item_id), override: items.some((i) => !(i.candidate?.continuity.passed ?? true)),
+        ...(confirmStage ? { confirm_stage: true } : {}),
       })
       manifest = result.export ?? null
       takeInApproval(result, seq)
+      if (result.approved.length > 0) leftApproved()
       setPreview(null)
       if (result.skipped.length > 0) {
         setError(`${result.skipped.length} ${result.skipped.length === 1 ? 'line was' : 'lines were'} not added. Hear them, then Add it one by one or ask for another take.`)
       }
     } catch (e) {
+      if (stageHeld(e, () => void approveAll(items, true))) return
       setError(e instanceof ApiError ? e.message : 'Could not add those lines.')
     } finally {
       endRender('final', seq, manifest)
@@ -1669,6 +1698,7 @@ function Studio() {
                 </section>
               )}
               {error && <div className="rounded-lg border-[1.5px] border-warn bg-card px-3.5 py-2.5 text-sm" role="alert">{error}</div>}
+              {stageAsk && <StageWarning className="fixed bottom-6 left-1/2 z-40 w-[min(560px,calc(100vw-32px))] -translate-x-1/2 shadow-volt" message={stageAsk.message} onCancel={() => setStageAsk(null)} onAnyway={() => { const run = stageAsk.run; setStageAsk(null); run() }} />}
               {firstRead && speakers.length > 0 && (
                 <WhoSpeaks speakers={speakers} statements={statements} reading={readingBusy ? null : reading} onName={(label, name) => void changeSpeaker(label, { name })} />
               )}
