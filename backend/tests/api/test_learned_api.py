@@ -180,3 +180,53 @@ def test_the_flag_off_hides_learned_style_and_skips_the_pass(client, in_project,
         main._log_decision("p1", "plan1", item(n), "added")
     assert reader.calls == []
     assert client.get("/projects/f1/learned").status_code == 404
+
+
+def learn_jobs():
+    return [j for j in main.activity.list("f1", limit=200) if j.kind == "learn"]
+
+
+def test_each_pass_is_an_activity_job_keyed_by_the_project(client, in_project, monkeypatch):
+    monkeypatch.setattr(main, "_learn_reader", FakeReader())
+    for n in range(20):
+        main._log_decision("p1", "plan1", item(n), "added")
+    done = learn_jobs()
+    assert len(done) == 2 and all(j.status == "done" for j in done)
+    assert done[0].step_label == "Suggested one line" and done[0].cost_usd and done[0].detail["at_count"] == 20
+    assert done[0].video_id == "f1"
+
+
+def test_a_pass_that_finds_nothing_or_fails_says_so_on_its_job(client, in_project, monkeypatch):
+    monkeypatch.setattr(main, "_learn_reader", FakeReader({"kind": "none"}))
+    for n in range(10):
+        main._log_decision("p1", "plan1", item(n), "added")
+
+    class Broken(FakeReader):
+        def suggest(self, text, meter=None):
+            raise RuntimeError("Claude is unavailable right now.")
+    monkeypatch.setattr(main, "_learn_reader", Broken())
+    for n in range(10):
+        assert main._log_decision("p1", "plan1", item(n), "added") is not None   # the add still stands
+    failed, nothing = learn_jobs()
+    assert nothing.status == "done" and nothing.step_label == "No pattern yet"
+    assert failed.status == "failed" and failed.error_code == "learn_failed" and "unavailable" in failed.error_text
+
+
+def test_a_skipped_pass_makes_no_job(client, in_project, monkeypatch):
+    monkeypatch.setattr(main, "_learn_reader", None)
+    monkeypatch.setattr(main, "settings", replace(main.settings, anthropic_api_key=""))
+    for n in range(10):
+        main._log_decision("p1", "plan1", item(n), "added")
+    assert learn_jobs() == []
+
+
+def test_a_fake_key_never_reaches_the_real_model(client, in_project, monkeypatch):
+    """A fake key and no fake reader: the real client is built, and the
+    suite's network guard stops its request; the job fails, nothing is spent."""
+    monkeypatch.setattr(main, "_learn_reader", None)
+    monkeypatch.setattr(main, "_learn_reader_built", None)
+    monkeypatch.setattr(main, "settings", replace(main.settings, anthropic_api_key="k"))
+    for n in range(10):
+        main._log_decision("p1", "plan1", item(n), "added")
+    [job] = learn_jobs()
+    assert job.status == "failed" and ledger.spent_usd_by_folder("f1") == 0

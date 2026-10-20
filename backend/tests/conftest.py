@@ -32,6 +32,36 @@ os.environ["AVE_VOICE_BUDGET_CHARS"] = "2000"
 os.environ["AVE_MEASURE"] = "0"
 
 
+# No test reaches a real model, vendor or link host. A test that sets a fake
+# key (`anthropic_api_key="k"`) and forgets to swap in a fake client would
+# otherwise send a real request; here it fails at once instead. Mocked HTTP
+# (httpx.MockTransport, injected clients) never reaches the real transport,
+# and the app's own TestClient never leaves the process. The opt-in live
+# model test (AVE_LIVE_MODELS=1) is the one exception.
+_LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1", "testserver"}
+
+
+class RealNetworkInTests(RuntimeError):
+    pass
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _no_real_network():
+    if os.environ.get("AVE_LIVE_MODELS") == "1":
+        yield
+        return
+    import httpx
+    real = httpx.HTTPTransport.handle_request
+
+    def guarded(self, request):
+        if request.url.host not in _LOCAL_HOSTS:
+            raise RealNetworkInTests(f"a test tried to reach {request.url.host}; mock it")
+        return real(self, request)
+    httpx.HTTPTransport.handle_request = guarded
+    yield
+    httpx.HTTPTransport.handle_request = real
+
+
 @pytest.fixture(scope="session", autouse=True)
 def _clean_up_artifacts():
     yield

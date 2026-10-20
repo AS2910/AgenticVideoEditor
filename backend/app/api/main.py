@@ -3978,7 +3978,8 @@ def _folder_from_template(req: ProjectCreate, owner: str) -> dict:
 # project as "Learned style") may suggest ONE line for the brief or a style
 # rule. It changes nothing until accepted; "What Voltage has learned" lists
 # what was, each removable. No Claude key, or the project at its ceiling:
-# the pass is skipped silently. The pass needs `projects.reuse`.
+# the pass is skipped silently. The pass needs `projects.reuse`. Each pass
+# is an Activity job (kind "learn", keyed by the project's id).
 
 # Tests swap in a fake reader here; None means the real one when a key is set.
 _learn_reader = None
@@ -4041,22 +4042,30 @@ def _decided_add(video_id: str, plan_id: str, item: PlanItem) -> None:
         _log_decision(video_id, plan_id, item, "added", final=item.new_text)
 
 
-def _start_learn_pass(project_id: str, owner: str, at_count: int) -> None:
+def _start_learn_pass(project_id: str, owner: str, at_count: int) -> str | None:
+    """Working rule 2: the pass is an Activity job (kind "learn", keyed by
+    the project's id like the project check). Nothing is created when the
+    pass would be skipped (no key, archived, over a ceiling): the user never
+    sees a job that did not run. Returns the job id."""
+    ready = _learn_ready(project_id)
+    if ready is None:
+        return None
+    job = activity.create(project_id, "learn", step_label="Queued",
+                          detail={"project_id": project_id, "at_count": at_count})
+
     def run() -> None:
-        try:
-            _learn_pass(project_id, owner, at_count)
-        except Exception:  # noqa: BLE001 - a pass that fails suggests nothing
-            log.exception("learned-style pass for %s", project_id)
+        _learn_pass(project_id, owner, at_count, job.job_id)
     if LEARN_IN_BACKGROUND:
         work_pool.submit(run)
     else:
         run()
+    return job.job_id
 
 
-def _learn_pass(project_id: str, owner: str, at_count: int) -> dict | None:
-    """One pass: the brief, rules and the last 30 decisions to Claude; at most
-    one suggestion back, stored as waiting. Skipped silently without a key,
-    on an archived project, or when the call would cross a ceiling."""
+def _learn_ready(project_id: str):
+    """(reader, project, request text) when the pass can run now, else None:
+    skipped silently without a key, on an archived project, or when the call
+    would cross the project or monthly ceiling."""
     reader = _learn_reader_for()
     project = repo.get_project(project_id)
     if reader is None or project is None or project.archived_at:
@@ -4068,12 +4077,36 @@ def _learn_pass(project_id: str, owner: str, at_count: int) -> dict | None:
     estimate = claude_usd(settings.check_model, len(text) // 3 + 400, STYLE_MAX_TOKENS)
     if _check_spend_refusal(project, estimate):
         return None
+    return reader, project, text
+
+
+def _learn_pass(project_id: str, owner: str, at_count: int, job_id: str) -> dict | None:
+    """One pass inside its job: the brief, rules and the last 30 decisions to
+    Claude; at most one suggestion back, stored as waiting. The job ends
+    saying whether there was one; a failure fails the job, never the add or
+    discard that started it."""
+    activity.start(job_id, "Reading your decisions")
     spent: list[float] = []
-    out = reader.suggest(text, meter=_project_meter(project_id, "Learned style", spent))
-    if not out or out.get("kind") not in learned_store.KINDS:
+    try:
+        ready = _learn_ready(project_id)
+        if ready is None:              # archived or the ceiling reached while it waited
+            activity.finish(job_id, step_label="Skipped", detail={"suggested": False, "skipped": True})
+            return None
+        reader, _, text = ready
+        out = reader.suggest(text, meter=_project_meter(project_id, "Learned style", spent))
+        cost = round(sum(spent), 6) or None
+        found = None
+        if out and out.get("kind") in learned_store.KINDS:
+            found = learned_store.suggest(database, project_id, out["kind"], plain(out.get("text") or ""),
+                                          plain(out.get("why") or ""), at_count)
+        activity.finish(job_id, step_label="Suggested one line" if found else "No pattern yet", cost_usd=cost,
+                        detail={"suggested": bool(found)})
+        return found
+    except Exception as exc:  # noqa: BLE001 - a pass that fails suggests nothing and says why
+        log.exception("learned-style pass for %s", project_id)
+        activity.fail(job_id, "learn_failed", f"Looking for a pattern stopped: {str(exc)[:200] or type(exc).__name__}",
+                      cost_usd=round(sum(spent), 6) or None)
         return None
-    return learned_store.suggest(database, project_id, out["kind"], plain(out.get("text") or ""),
-                                 plain(out.get("why") or ""), at_count)
 
 
 def _learned_page(project_id: str) -> dict:
