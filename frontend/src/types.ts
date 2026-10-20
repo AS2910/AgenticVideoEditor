@@ -238,6 +238,14 @@ export interface Project {
   brief_version?: number | null
   made_with_brief?: number | null
   brief_changed?: boolean
+  /** B2: a language version's master, its language and whether the master moved on since it last synced. */
+  master_id?: string | null
+  language?: string | null
+  language_label?: string | null
+  out_of_sync?: boolean
+  master_filename?: string | null
+  /** B2: a master's language versions, as chips. */
+  languages?: LanguageChip[]
   filename: string
   /** Measured server-side by ffprobe — the client never asserts this. */
   duration: number
@@ -336,6 +344,14 @@ export interface ProjectSummary {
   made_with_brief?: number | null
   /** A1: its project's brief is newer than the one it was made with ("Brief changed"). */
   brief_changed?: boolean
+  /** B2: a language version's master, its language and whether the master moved on since it last synced. */
+  master_id?: string | null
+  language?: string | null
+  language_label?: string | null
+  out_of_sync?: boolean
+  master_filename?: string | null
+  /** B2: a master's language versions, as chips. */
+  languages?: LanguageChip[]
 }
 
 export interface ApprovedEditSummary {
@@ -546,7 +562,9 @@ export interface BriefUpdateVideo {
 }
 /** F3/A3: one of the project's rules. */
 export type RuleKind = 'pronounce' | 'banned' | 'required_line' | 'style'
-export interface RuleData { term?: string; say?: string; respell?: string; audio?: string; word?: string; text?: string }
+export interface RuleData { term?: string; say?: string; respell?: string; audio?: string; word?: string; text?: string
+  /** B2: a brand name never translates; `lang` + `translation` say the term in one language version. */
+  brand?: boolean; lang?: string; translation?: string }
 export interface ProjectRule { rule_id: number; project_id: string; kind: RuleKind; data: RuleData; version: number; created_by: string; updated_at: string }
 export interface BriefUpdateRun { run_id: string; to: number; status: 'running' | 'finished'; started_at: string; finished_at: string | null; videos: BriefUpdateVideo[] }
 /** A2: one place an issue was found: a video, the time in it (null: the whole video) and the words there. */
@@ -774,3 +792,25 @@ export interface PublicShare {
   exported_at?: string
   files: { file_id: string; name: string; kind: string; size: number; duration: number | null; label?: string | null; video_id?: string }[]
 }
+
+/** B2: one language version of a master, as a chip. */
+export interface LanguageChip { video_id: string; language: string | null; label: string | null; out_of_sync: boolean }
+
+/** B2: a master's language set: its own language, its versions, what it can still be made in. */
+export interface LanguageSet {
+  master_id: string
+  master_filename: string
+  original: string
+  original_label: string | null
+  in_project: boolean
+  children: (LanguageChip & { synced_edit?: number | null })[]
+  options: { code: string; label: string; made: boolean }[]
+  lines: number
+}
+
+/** B2: the one gate's numbers for a set of languages (unknown parts are null). */
+export interface LanguageGate { videos: number; lines: number; est_usd: number | null; cap_usd: number; per_video_cap_usd: number }
+
+export interface LanguagesMade { gate: LanguageGate; batch_id: string | null; children: { video_id: string; language: string; label: string }[] }
+
+export interface SyncStarted { job_id: string; lines: { edit_id: string; start: number; end: number; what: string; text: string }[]; to: number }

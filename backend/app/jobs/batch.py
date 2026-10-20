@@ -48,7 +48,7 @@ log = logging.getLogger(__name__)
 CONCURRENCY = 3
 KEY = "batch:{}"
 INDEX = "batches:{}"
-SOURCES = ("ask", "fix", "brief")
+SOURCES = ("ask", "fix", "brief", "language")   # B2: language versions
 # How many finished child jobs the time estimate reads.
 HISTORY = 20
 

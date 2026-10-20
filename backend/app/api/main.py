@@ -65,7 +65,7 @@ from app.usage import (
 )
 from app import auth
 from app.store import briefs, checks as checks_store, events as activity_log, rules, stages
-from app.store import shares as shares_store, presets as presets_store
+from app.store import shares as shares_store, presets as presets_store, languages as langs
 from app.render import captions as captions_mod, deliver as deliver_mod
 from app.jobs import exports as exports_mod
 from app.agent import project_check as pcheck
@@ -551,6 +551,8 @@ def _project_dict(record: ProjectRecord) -> dict:
         "brief_version": folder.brief_version if folder else None,
         "made_with_brief": record.made_with_brief,
         "brief_changed": briefs.stale(record.made_with_brief, folder.brief_version if folder else None),
+        # B2: the language set it belongs to ("Out of sync with master" in the header).
+        **_language_fields(record),
         "filename": source.filename,
         "duration": source.duration,
         "media": _artifact_dict(source.media),
@@ -1179,6 +1181,8 @@ def _summary(r: ProjectRecord) -> dict:
         # A1: the brief version its last shipped edit was made with, and whether the project's is newer.
         "made_with_brief": r.made_with_brief,
         "brief_changed": briefs.stale(r.made_with_brief, folder.brief_version if folder else None),
+        # B2: a language version's language and whether it is in step; a master's versions.
+        **_language_fields(r),
     }
 
 
@@ -2038,7 +2042,9 @@ def _project_view(video_id: str) -> dict | None:
             "brief_version": project.brief_version,
             "rules": [{"kind": r.kind, "data": r.data} for r in rules.list_rules(database, project.project_id)],
             "rules_version": rules.rules_version(database, project.project_id),
-            "voices": _project_voices(project.project_id), "videos": sisters, "files": _project_files(project.project_id)}
+            "voices": _project_voices(project.project_id), "videos": sisters, "files": _project_files(project.project_id),
+            # B2: a language version reads what it is a version of, its words that never translate, its glossary.
+            "language": _language_view(record)}
 
 
 def _suggest_brief(video_id: str, addition: str, why: str) -> str | None:
@@ -3000,7 +3006,9 @@ def _batch_child(video_id: str, goal: str, owner: str, *, lines: list[str] | Non
     else:
         n = None if lines is None else len(lines)
         est = None if lines is None or thinking is None else thinking + sum(_voicing_usd(t) for t in lines)
-    return batch_mod.Child(video_id=video_id, filename=record.source.filename, goal=goal, cap_usd=cap,
+    # B2: a language version is named with its language (it shares the master's file name).
+    name = record.source.filename + (f" · {langs.label(record.language)}" if record.language else "")
+    return batch_mod.Child(video_id=video_id, filename=name, goal=goal, cap_usd=cap,
                            stage=getattr(record, "stage", None) or "draft", lines=n, est_usd=est, extra=dict(extra or {}))
 
 
@@ -3055,7 +3063,7 @@ def _run_batch_child(record: dict, child: dict) -> None:
                               int(record["extra"]["to"]), owner, batch_cap=float(child["cap_usd"]))
     else:
         _fix_one(child["video_id"], job_id, child["goal"], owner, batch_cap=float(child["cap_usd"]),
-                 done_label="Fixed" if record["source"] == "fix" else "Changed")
+                 done_label={"fix": "Fixed", "language": "Translated"}.get(record["source"], "Changed"))
 
 
 def _batch_closed(record: dict) -> None:
@@ -3418,6 +3426,284 @@ def undo_batch_add(project_id: str, batch_id: str, video_id: str, owner: str = D
     return _batch_view(batch_id)
 
 
+# ── B2: language sets ────────────────────────────────────────────────────────
+#
+# A master video and its language versions: each version is a variant of the
+# master (the same clip, no plan copied) linked by `videos.master_id`, with
+# its `language`. "Make language versions" makes the variants, then ONE batch
+# turn (F4, source "language") whose child per version translates and voices
+# every line in place, fitting each line's time. In step: a version is out of
+# sync when the master's edit marker (app/store/languages.py, from F7's
+# edit.shipped / edit.undone) is past the one it last synced to; "Sync this
+# change" runs one turn on it for only the master's changed lines. Behind
+# `projects.batch`.
+
+VOICE_HANDLING = ("same", "designed")
+
+
+def _language_code(record: ProjectRecord) -> str:
+    """A video's language: a version's own, else the master's, guessed from its script."""
+    if record.language:
+        return record.language
+    return langs.guess(" ".join(w.text for w in record.transcript.words))
+
+
+def _out_of_sync(record: ProjectRecord) -> bool:
+    if not record.master_id:
+        return False
+    master = repo.get(record.master_id)
+    return master is not None and langs.marker(database, record.master_id) > int(record.synced_edit or 0)
+
+
+def _language_fields(record: ProjectRecord) -> dict:
+    """What a card and the editor header show: a version's language and
+    whether it is in step; a master's versions as chips."""
+    out: dict = {"master_id": record.master_id, "language": record.language,
+                 "language_label": langs.label(record.language), "out_of_sync": _out_of_sync(record)}
+    if record.master_id:
+        master = repo.get(record.master_id)
+        out["master_filename"] = master.source.filename if master else None
+        out["languages"] = []
+    else:
+        out["master_filename"] = None
+        out["languages"] = [{"video_id": c.source.project_id, "language": c.language, "label": langs.label(c.language),
+                             "out_of_sync": _out_of_sync(c)} for c in repo.language_children(record.source.project_id)]
+    return out
+
+
+def _master_lines(master_id: str) -> list[dict]:
+    """What the master says now, line by line in time order."""
+    master = repo.get(master_id)
+    if master is None:
+        return []
+    return [{"start": round(p.start, 2), "end": round(p.end, 2), "text": p.text}
+            for p in sorted(_caption_passages(master_id, master), key=lambda p: p.start) if p.text.strip()]
+
+
+def _language_view(record: ProjectRecord) -> dict | None:
+    """The language block of a version's opening view (and its take check)."""
+    if not record.master_id or not record.language:
+        return None
+    master = repo.get(record.master_id)
+    return {"code": record.language, "label": langs.label(record.language),
+            "master_id": record.master_id, "master_filename": master.source.filename if master else None,
+            "master_lines": _master_lines(record.master_id)}
+
+
+def _clock_span(start: float, end: float) -> str:
+    return f"{start:.1f}–{end:.1f} s"
+
+
+def _keep_words(project_id: str | None) -> list[str]:
+    from app.agent.word_rules import brand_terms
+    found = [{"kind": r.kind, "data": r.data} for r in rules.list_rules(database, project_id)] if project_id else []
+    return brand_terms(found)
+
+
+def _translate_goal(master: ProjectRecord, code: str, voice_handling: str, lines: list[dict], keep: list[str]) -> str:
+    name = langs.LANGUAGES[code]
+    how = ("Speak each line in the same speaker's own voice (their cloned voice when they have one, else the voice "
+           f"the line is in now) with model v2, the multilingual model, so it is their voice speaking {name}."
+           if voice_handling == "same" else
+           f"Design one voice for {name} that suits the speaker (design_voice, then save_voice) and speak every line in it.")
+    listed = "\n".join(f"- {_clock_span(ln['start'], ln['end'])}: “{ln['text']}”" for ln in lines) or "- (no spoken lines)"
+    return (f"Make this the {name} version of {master.source.filename}: translate every line into {name} and voice "
+            "each one in place of the line it replaces, fitting that line's time. When a line runs long, let the fit "
+            f"ladder work first, then write it shorter in {name}. "
+            + (f"Never translate: {', '.join(keep)}; say them exactly as written. " if keep else "")
+            + how + f"\nThe lines, as the master says them now:\n{listed}")
+
+
+def _sync_lines(master_id: str, since: int) -> list[dict]:
+    """The master's lines that changed after marker `since`: each with what it says now."""
+    master = repo.get(master_id)
+    if master is None:
+        return []
+    edits = {e.edit_id: e for e in repo.list_edits(master_id)}
+    out = []
+    for change in langs.changes_since(database, master_id, since):
+        edit = edits.get(change["edit_id"])
+        if edit is None:
+            continue
+        sel = edit.plan.selection
+        shot = " ".join(w.text for w in master.transcript.words if w.end > sel.start and w.start < sel.end)
+        if change["verb"] == "edit.undone":
+            now, what = shot, "back"
+        elif edit.plan.mix == "remove":
+            now, what = "", "removed"
+        else:
+            now, what = edit.plan.new_text, "changed"
+        out.append({"edit_id": edit.edit_id, "start": round(sel.start, 2), "end": round(sel.end, 2),
+                    "what": what, "text": now, "was": shot})
+    return out
+
+
+def _sync_goal(child: ProjectRecord, master: ProjectRecord, lines: list[dict], keep: list[str]) -> str:
+    name = langs.label(child.language) or "this language"
+    said = []
+    for ln in lines:
+        where = _clock_span(ln["start"], ln["end"])
+        if ln["what"] == "removed":
+            said.append(f"- {where}: the master took this line out; take it out here too.")
+        elif ln["what"] == "back":
+            said.append(f"- {where}: the master put this line back as shot: “{ln['text']}”. Say that in {name}.")
+        else:
+            said.append(f"- {where}: the master now says “{ln['text']}”. Say that in {name}.")
+    return (f"Sync with the master, {master.source.filename}: it changed {len(lines)} "
+            f"{'line' if len(lines) == 1 else 'lines'} since this version last synced. Change only these lines here, "
+            f"in {name}, each fitting its time, and leave every other line as it is. "
+            + (f"Never translate: {', '.join(keep)}. " if keep else "") + "\n" + "\n".join(said))
+
+
+def _language_master(video_id: str, owner: str) -> ProjectRecord:
+    _batch_flag(owner)
+    record = _owned(video_id, owner)
+    if record.master_id:
+        raise HTTPException(status_code=409, detail="This is a language version. Make language versions from its master.")
+    return record
+
+
+def _language_gate(record: ProjectRecord, owner: str, codes: list[str]) -> dict:
+    """The one gate's numbers for these languages, before anything is made:
+    every line once per language, Voltage's measured thinking per turn and
+    the voice price (None when nothing is measured), the cap = each version's
+    turn cap added up."""
+    lines = _master_lines(record.source.project_id)
+    thinking = _thinking_usd(owner)
+    per = None if thinking is None else thinking + sum(_voicing_usd(ln["text"]) for ln in lines)
+    cap = round(float(_settings(record.source.project_id, owner)["turn_usd"]), 2)
+    return {"videos": len(codes), "lines": len(lines) * len(codes),
+            "est_usd": None if per is None else batch_mod._round_up_cent(per * len(codes)),
+            "cap_usd": round(cap * len(codes), 2), "per_video_cap_usd": cap}
+
+
+@app.get("/videos/{video_id}/languages")
+def get_languages(video_id: str, owner: str = Depends(current_owner)) -> dict:
+    """B2: a video's language set: the master's own language, its versions
+    (each in step or not) and the languages it can still be made in."""
+    _batch_flag(owner)
+    record = _owned(video_id, owner)
+    master = repo.get(record.master_id) if record.master_id else record
+    if master is None:
+        raise HTTPException(status_code=404, detail="The master video was deleted.")
+    original = _language_code(master)
+    children = repo.language_children(master.source.project_id)
+    made = {c.language for c in children}
+    return {"master_id": master.source.project_id, "master_filename": master.source.filename,
+            "original": original, "original_label": langs.label(original),
+            "in_project": bool(master.folder_id),
+            "children": [{"video_id": c.source.project_id, "language": c.language, "label": langs.label(c.language),
+                          "out_of_sync": _out_of_sync(c), "synced_edit": c.synced_edit} for c in children],
+            "options": [{"code": code, "label": label, "made": code in made}
+                        for code, label in langs.LANGUAGES.items() if code != original],
+            "lines": len(_master_lines(master.source.project_id))}
+
+
+class LanguagesRequest(BaseModel):
+    languages: list[str]
+    voice: Literal["same", "designed"] = "same"
+    # True: only the gate's numbers, nothing made or spent.
+    dry_run: bool = False
+
+
+@app.post("/videos/{video_id}/languages", status_code=201)
+def make_languages(video_id: str, req: LanguagesRequest, owner: str = Depends(current_owner)) -> dict:
+    """B2: Make language versions. One variant per language linked to this
+    master, then one batch turn over them (F4) that translates and voices
+    every line, fitting each line's time. `dry_run` gives the numbers first;
+    the press after them is the batch's gate."""
+    record = _language_master(video_id, owner)
+    if not record.folder_id:
+        raise HTTPException(status_code=409, detail="Language versions are made inside a project. Move this video into a project first.")
+    project = _owned_project(record.folder_id, owner)
+    codes = list(dict.fromkeys(c.strip().lower() for c in req.languages if c.strip()))
+    if not codes:
+        raise HTTPException(status_code=422, detail="Pick at least one language.")
+    original = _language_code(record)
+    bad = [c for c in codes if c not in langs.LANGUAGES or c == original]
+    if bad:
+        raise HTTPException(status_code=422, detail=f"{bad[0]} is not a language this video can be made in.")
+    made = {c.language for c in repo.language_children(video_id)}
+    again = [langs.LANGUAGES[c] for c in codes if c in made]
+    if again:
+        raise HTTPException(status_code=409, detail=f"The {again[0]} version is made already. Open it from the project.")
+    gate = _language_gate(record, owner, codes)
+    refusal = _batch_start_refusal(project, owner, gate["cap_usd"])
+    if refusal:
+        raise HTTPException(status_code=409, detail=refusal)
+    if req.dry_run:
+        return {"gate": gate, "batch_id": None, "children": []}
+    if record.consent is None:
+        raise HTTPException(status_code=403, detail=CONSENT_REQUIRED)
+    if not _agent_on():
+        raise HTTPException(status_code=409, detail="Voltage needs Claude to translate a video (set AVE_AGENT=1 and an Anthropic key).")
+    at = langs.marker(database, video_id)
+    lines = _master_lines(video_id)
+    keep = _keep_words(record.folder_id)
+    thinking = _thinking_usd(owner)
+    children, made_ids = [], []
+    for code in codes:
+        child_id = _make_variant(video_id, record, owner, copy_plan=False)
+        repo.link_language(child_id, video_id, code, at)
+        repo.set_settings(child_id, language=code, language_voice=req.voice)
+        made_ids.append(child_id)
+        children.append(_batch_child(child_id, _translate_goal(record, code, req.voice, lines, keep), owner,
+                                     thinking=thinking, lines=[ln["text"] for ln in lines], extra={"language": code}))
+    with database.tx() as c:
+        activity_log.record(c, "language.versions_made", user_actor(owner), video_id=video_id, target=video_id,
+                            payload={"languages": codes, "voice": req.voice, "videos": made_ids})
+    opened = _open_batch(project, owner, "language", f"Make {', '.join(langs.LANGUAGES[c] for c in codes)} versions of "
+                         f"{record.source.filename}", children, extra={"master_id": video_id, "voice": req.voice})
+    started = _go_batch(opened, owner)
+    return {"gate": gate, "batch_id": started["batch_id"],
+            "children": [{"video_id": v, "language": c, "label": langs.LANGUAGES[c]} for v, c in zip(made_ids, codes)]}
+
+
+def _sync_settles(child_id: str, turn_job_id: str, to: int, owner: str) -> None:
+    """The sync turn ended: in step at the marker it synced to, unless it failed."""
+    turn_job = _await_turn(turn_job_id)
+    out = (turn_job.result or {}) if turn_job is not None else {}
+    if turn_job is None or turn_job.status != "succeeded" or out.get("stopped") == "error" or out.get("ceiling"):
+        return
+    now = repo.get(child_id)
+    if now is None:
+        return
+    repo.set_synced_edit(child_id, max(int(now.synced_edit or 0), to))
+    with database.tx() as c:
+        activity_log.record(c, "language.synced", user_actor(owner), video_id=child_id, target=child_id,
+                            payload={"master_id": now.master_id, "synced_edit": to})
+
+
+@app.post("/videos/{video_id}/sync", status_code=202)
+def sync_language(video_id: str, owner: str = Depends(current_owner)) -> dict:
+    """B2: Sync this change. One turn on the language version for only the
+    master's lines changed since it last synced (the press is the yes for
+    its paid steps); in step again once that turn finishes."""
+    _batch_flag(owner)
+    record = _owned(video_id, owner)
+    if not record.master_id:
+        raise HTTPException(status_code=409, detail="This video is not a language version.")
+    master = repo.get(record.master_id)
+    if master is None:
+        raise HTTPException(status_code=409, detail="The master video was deleted, so there is nothing to sync with.")
+    to = langs.marker(database, record.master_id)
+    lines = _sync_lines(record.master_id, int(record.synced_edit or 0))
+    if to <= int(record.synced_edit or 0) or not lines:
+        if to > int(record.synced_edit or 0):
+            repo.set_synced_edit(video_id, to)       # changes that cancel out: in step already
+        raise HTTPException(status_code=409, detail="This version is in step with its master.")
+    if not _agent_on():
+        raise HTTPException(status_code=409, detail="Voltage needs Claude to change a video (set AVE_AGENT=1 and an Anthropic key).")
+    goal = _sync_goal(record, master, lines, _keep_words(record.folder_id))
+    started = _start_turn(video_id, record, goal, owner, approve=True)
+    with database.tx() as c:
+        activity_log.record(c, "language.sync_started", user_actor(owner), video_id=video_id, target=video_id,
+                            payload={"master_id": record.master_id, "lines": [ln["edit_id"] for ln in lines], "to": to})
+    threading.Thread(target=_sync_settles, args=(video_id, started["job_id"], to, owner), daemon=True,
+                     name=f"language-sync-{video_id}").start()
+    return {"job_id": started["job_id"], "lines": lines, "to": to}
+
+
 @app.delete("/projects/{project_id}", status_code=204)
 def delete_folder(project_id: str, videos: Literal["delete", "keep"], owner: str = Depends(current_owner)) -> Response:
     """Delete a project (F8): it goes to the Bin with its videos (`delete`),
@@ -3671,6 +3957,12 @@ def create_variant(project_id: str, owner: str = Depends(current_owner)) -> dict
     plan copied as a draft — every line planned again, nothing voiced — so
     another offer or another wording starts from the plan, not an upload."""
     record = _owned(project_id, owner)
+    return _project_dict(repo.get(_make_variant(project_id, record, owner)))
+
+
+def _make_variant(project_id: str, record: ProjectRecord, owner: str, copy_plan: bool = True) -> str:
+    """The variant itself (create_variant; B2's language versions with
+    `copy_plan=False`: a translation starts from the lines, not the plan)."""
     new_id = repo.next_id()
     path = artifacts.find(project_id, record.source.media.sha256)
     if path is None:
@@ -3687,7 +3979,7 @@ def create_variant(project_id: str, owner: str = Depends(current_owner)) -> dict
     if "reading" in repo.settings(project_id):
         saved["reading"] = repo.settings(project_id)["reading"]
     repo.set_settings(new_id, **saved)
-    plan = repo.latest_plan(project_id)
+    plan = repo.latest_plan(project_id) if copy_plan else None
     if plan is not None:
         items = tuple(
             replace(i, status="planned" if i.kind == "planned" else "suggested", candidate_id=None, edit_id=None,
@@ -3701,7 +3993,7 @@ def create_variant(project_id: str, owner: str = Depends(current_owner)) -> dict
         )
         repo.save_plan(draft)
         repo.append_log(new_id, draft.plan_id, f"Made as a variant of {record.source.filename}, with its plan as a draft")
-    return _project_dict(repo.get(new_id))
+    return new_id
 
 
 @app.post("/videos/{project_id}/consent")
@@ -6207,7 +6499,7 @@ def _deliver_one(record: dict, item: dict) -> dict:
     if src is None:
         raise RuntimeError("The render could not be found.")
     cues = captions_mod.cues(_caption_passages(video_id, video), out.get("pieces")) if preset["captions"] else None
-    lang = repo.settings(video_id).get("language") or "en"        # B2 gives videos a language
+    lang = _language_code(video)        # B2: a language version's language, else the master's own
     name = presets_store.file_name(preset["pattern"], project=project.name if project else "", video=video.source.filename,
                                    lang=lang, preset=preset["name"], version=out["version"])
     folder = _exports_dir(record["project_id"], record["export_id"])

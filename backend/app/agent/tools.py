@@ -684,16 +684,31 @@ def _plan(wb: Workbench, turn: Turn) -> Plan:
     return plan
 
 
-def _word_check(wb: Workbench, turn: Turn, text: str, candidate: Any):
+def _word_check(wb: Workbench, turn: Turn, text: str, candidate: Any, item: Any = None):
     """A3: the take's words (its transcript) against the project's word rules.
     Nothing to check for a standalone video or one whose project has none."""
-    from app.agent.word_rules import WordCheck, check_take
+    from app.agent.word_rules import WordCheck, brand_breaks, check_take, translated_brands
     view = wb.project(turn.project_id) if wb.project is not None else None
     found = (view or {}).get("rules") or []
     if not found:
         return WordCheck()
     heard = [w.text for w in (getattr(candidate, "words", None) or ())]
-    return check_take(text, heard, found, typed=turn.said)
+    got = check_take(text, heard, found, typed=turn.said)
+    # B2: in a language version, a brand term the master's line says must come through verbatim.
+    language = (view or {}).get("language")
+    if language and item is not None:
+        missing = translated_brands(_master_line(language, item), text, found)
+        if missing:
+            return WordCheck(got.breaks + brand_breaks(missing), got.warnings, tuple(missing))
+    return got
+
+
+def _master_line(language: dict, item: Any) -> str:
+    """What the master says now over the item's span (B2), else the line as shot."""
+    sel = item.selection
+    hits = [ln["text"] for ln in language.get("master_lines") or ()
+            if float(ln["end"]) > sel.start and float(ln["start"]) < sel.end]
+    return " ".join(hits) or (item.old_text or "")
 
 
 def _synthesize_take(wb: Workbench, turn: Turn, args: dict) -> ToolResult:
@@ -963,7 +978,7 @@ def _synthesize_take(wb: Workbench, turn: Turn, args: dict) -> ToolResult:
                 return ToolResult(f"The take could not be made: {reason}{kept}", step=f"Could not voice “{text[:40]}”: {reason[:80]}")
         cost = max(0.0, wb.ledger.spent_usd(turn.project_id) - before)
         # A3: after the sound and fit checks, the take's own words against the project's words.
-        words_check = _word_check(wb, turn, text, candidate)
+        words_check = _word_check(wb, turn, text, candidate, item)
         finish = getattr(wb.repo, "finish_attempt", None)
         if finish:
             extra_changes = {"selection": used} if used != selection else {}

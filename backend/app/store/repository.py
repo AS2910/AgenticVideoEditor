@@ -47,6 +47,11 @@ class ProjectRecord:
     # A1: the brief version its last shipped edit was made with (0: before
     # this project's brief; None: nothing shipped). See app.store.briefs.stale.
     made_with_brief: int | None = None
+    # B2: a language version's master (None for a master or a plain video), its
+    # language (None: the master's own) and the master's edit marker it last synced to.
+    master_id: str | None = None
+    language: str | None = None
+    synced_edit: int | None = None
 
 
 @dataclass(frozen=True)
@@ -97,6 +102,9 @@ def _record(row) -> ProjectRecord:
         folder_id=row["project_id"] if "project_id" in row.keys() else None,
         stage=row["stage"] if "stage" in row.keys() else "draft",
         made_with_brief=row["made_with_brief"] if "made_with_brief" in row.keys() else None,
+        master_id=row["master_id"] if "master_id" in row.keys() else None,
+        language=row["language"] if "language" in row.keys() else None,
+        synced_edit=row["synced_edit"] if "synced_edit" in row.keys() else None,
     )
 
 
@@ -179,6 +187,26 @@ class ProjectRepository:
             rows = c.execute(
                 f"SELECT * FROM videos WHERE {where} ORDER BY created_at DESC, id DESC", args,
             ).fetchall()
+        return [_record(r) for r in rows]
+
+    # ── B2: language sets ──
+
+    def link_language(self, video_id: str, master_id: str, language: str, synced_edit: int) -> None:
+        """Make `video_id` the `language` version of `master_id`, in step with
+        the master's edits up to `synced_edit`."""
+        with self.db.tx() as c:
+            c.execute("UPDATE videos SET master_id = ?, language = ?, synced_edit = ? WHERE id = ?",
+                      (master_id, language, synced_edit, video_id))
+
+    def set_synced_edit(self, video_id: str, synced_edit: int) -> None:
+        with self.db.tx() as c:
+            c.execute("UPDATE videos SET synced_edit = ? WHERE id = ?", (synced_edit, video_id))
+
+    def language_children(self, master_id: str) -> list[ProjectRecord]:
+        """The master's live language versions, oldest first."""
+        with self.db.tx() as c:
+            rows = c.execute("SELECT * FROM videos WHERE master_id = ? AND deleted_at IS NULL "
+                             "ORDER BY created_at, id", (master_id,)).fetchall()
         return [_record(r) for r in rows]
 
     def set_folder(self, project_id: str, folder_id: str | None, actor: Actor | None = None) -> bool:

@@ -21,6 +21,7 @@ import type { FixRequest } from './BatchPanel'
 import { BatchExport } from './BatchExport'
 import { ExportPresets } from './ExportPresets'
 import type { ExportPreset } from '../types'
+import { LanguageDialog, SyncChip } from './LanguageVersions'
 
 interface ProjectPageProps {
   me: Me | null
@@ -72,6 +73,9 @@ export function ProjectPage({ me, projectId, onUpload, uploading, error, onDelet
   const [fixAll, setFixAll] = useState<FixRequest | null>(null)
   // B3 (projects.batch): the presets the Presets section holds, for the export panel.
   const [exportPresets, setExportPresets] = useState<ExportPreset[] | null>(null)
+  // B2 (projects.batch): the master whose language versions are being made, and the batch board's re-read.
+  const [langFor, setLangFor] = useState<ProjectSummary | null>(null)
+  const [batchTick, setBatchTick] = useState(0)
   const fileInput = useRef<HTMLInputElement>(null)
   const refInput = useRef<HTMLInputElement>(null)
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -265,9 +269,11 @@ export function ProjectPage({ me, projectId, onUpload, uploading, error, onDelet
           {consistency && <StaleLine projectId={projectId} count={project.stale_count ?? 0} version={project.brief_version} onChanged={() => void load()} />}
           {consistency && (project.stale_count ?? 0) > 0 && <Tip id="first-brief-changed" target="stale-line" />}
           <div className="-mx-3 grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-2.5">
-            {detail.videos.map((v, i) => {
+            {detail.videos.filter((v) => !(batchOn && v.master_id && detail.videos.some((m) => m.video_id === v.master_id))).map((v, i) => {
               const state = v.state ?? 'new'
-              return (
+              // B2: a master and its language versions are one stacked card.
+              const versions = batchOn ? detail.videos.filter((c) => c.master_id === v.video_id) : []
+              const card = (
                 <a key={v.video_id} href={hrefFor({ page: 'editor', projectId: v.video_id })} className="rise flex flex-col gap-2.5 rounded-xl border-[1.5px] border-transparent p-3 text-foreground no-underline transition-all duration-200 hover:-translate-x-0.5 hover:-translate-y-0.5 hover:border-foreground hover:bg-card hover:shadow-ink focus-visible:border-foreground" style={{ animationDelay: `${Math.min(i, 6) * 80}ms` }}>
                   <span className="relative block aspect-[16/10] overflow-hidden rounded-[10px] border-[1.5px] border-ink bg-pic">
                     <Frame id={v.video_id} />
@@ -275,9 +281,26 @@ export function ProjectPage({ me, projectId, onUpload, uploading, error, onDelet
                     <span className="tnum absolute right-2 bottom-2 rounded bg-ink/60 px-1.5 text-xs text-ptext">{clock(v.duration)}</span>
                     {consistency && v.brief_changed && <span className="stamp need absolute top-2 right-2" title={`Made with brief v${v.made_with_brief ?? 0}; the project is on v${project.brief_version}`} data-testid="brief-changed">Brief changed</span>}
                   </span>
-                  <span className="truncate font-semibold">{v.filename}</span>
+                  <span className="truncate font-semibold">{v.filename}{batchOn && v.language_label ? ` · ${v.language_label}` : ''}</span>
                   <span className="truncate text-[13px] text-muted-foreground">{v.last_change ?? (v.edits > 0 ? `${v.edits} ${v.edits === 1 ? 'change' : 'changes'} in the file` : 'Nothing changed yet')}</span>
                 </a>
+              )
+              if (!batchOn) return card
+              return (
+                <div key={v.video_id} className={cn('flex flex-col', versions.length > 0 && 'm-1.5 rounded-xl border-[1.5px] border-foreground bg-card')} data-testid="video-stack">
+                  {card}
+                  {versions.length > 0 && (
+                    <ul className="m-0 flex list-none flex-col gap-1.5 border-t border-line px-3 py-2.5" aria-label={`Language versions of ${v.filename}`} data-testid="language-versions" data-tour="language-versions">
+                      {versions.map((c) => (
+                        <li key={c.video_id} className="flex flex-wrap items-center gap-2">
+                          <a className="stamp in whitespace-nowrap no-underline" href={hrefFor({ page: 'editor', projectId: c.video_id })} aria-label={`Open the ${c.language_label} version`}>{c.language_label}</a>
+                          {c.out_of_sync ? <SyncChip videoId={c.video_id} compact onStarted={() => void load()} /> : <span className="tag text-faint">In step</span>}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                  {!v.master_id && <button type="button" className="act mx-3 mb-2 self-start" onClick={() => setLangFor(v)} data-testid="make-languages">+ Language versions</button>}
+                </div>
               )
             })}
             <div
@@ -289,7 +312,7 @@ export function ProjectPage({ me, projectId, onUpload, uploading, error, onDelet
               <span><span className="disp block text-lg font-bold text-foreground">Drop a video here</span>It joins {project.name} with its brief and voices.</span>
             </div>
           </div>
-          {batchOn ? <BatchPanel projectId={projectId} videos={detail.videos} fix={fixAll} onFixHandled={() => setFixAll(null)} /> : (
+          {batchOn ? <BatchPanel projectId={projectId} videos={detail.videos} fix={fixAll} onFixHandled={() => setFixAll(null)} refresh={batchTick} /> : (
             <div className="flex items-center gap-3 rounded-xl bg-pane px-4 py-3.5 text-ptext">
               <span className="tag text-volt">Later</span>
               <span className="flex-1 text-sm">One goal across every video here, like “make all three 25% off”, is planned as a batch turn.</span>
@@ -298,7 +321,12 @@ export function ProjectPage({ me, projectId, onUpload, uploading, error, onDelet
           {batchOn && <BatchExport projectId={projectId} presets={exportPresets} />}
           {consistency && <ProjectCheck projectId={projectId} briefVersion={project.brief_version}
             onFixAll={batchOn ? (issue) => { setFixAll({ issueId: issue.issue_id, message: issue.message, videoIds: [...new Set(issue.places.map((p) => p.video_id))] }); document.querySelector('[data-testid="batch"]')?.scrollIntoView({ behavior: 'smooth', block: 'start' }) } : undefined} />}
-          {consistency && <ProjectWords projectId={projectId} />}
+          {consistency && <ProjectWords projectId={projectId} languages={batchOn} />}
+          {batchOn && langFor && (
+            <LanguageDialog videoId={langFor.video_id} filename={langFor.filename} projectId={projectId} onClose={() => setLangFor(null)}
+              onMade={() => { setLangFor(null); setBatchTick((t) => t + 1); void load(); document.querySelector('[data-testid="batch"]')?.scrollIntoView({ behavior: 'smooth', block: 'start' }) }} />
+          )}
+          {batchOn && detail.videos.some((v) => v.out_of_sync) && <Tip id="first-language-sync" target="out-of-sync" />}
         </section>
 
         <aside aria-label="Shared with every video" className="flex min-w-0 flex-[1_1_340px] flex-col gap-3.5">

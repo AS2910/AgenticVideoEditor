@@ -44,6 +44,7 @@ import { OnboardingProvider, useOnboarding } from './guides/onboarding'
 import { Checklist } from './guides/Checklist'
 import { Tip } from './guides/Tip'
 import { useFlags } from './flags/useFlags'
+import { LanguageDialog, SyncChip } from './pages/LanguageVersions'
 import { LearnWord } from './components/LearnWord'
 import { go, hrefFor, useRoute } from './lib/route'
 import { cn } from '@/lib/utils'
@@ -163,6 +164,9 @@ function Studio() {
   const [crumbMenu, setCrumbMenu] = useState(false)
   // Phase A (projects.consistency): brief versions and project words in the editor.
   const consistency = useFlags().enabled('projects.consistency')
+  // B2: language versions (Make language versions, Out of sync with master).
+  const batchOn = useFlags().enabled('projects.batch')
+  const [languagesOpen, setLanguagesOpen] = useState(false)
   // A3: the project's words, for the typed-line warning and Learn a word.
   const [projectRules, setProjectRules] = useState<ProjectRule[]>([])
   const rulesProject = consistency ? project?.project_id ?? null : null
@@ -1553,6 +1557,7 @@ function Studio() {
                   {folderOf && <span className="tag text-faint">{folderOf.video_count ?? 0} {folderOf.video_count === 1 ? 'video' : 'videos'}</span>}
                 </a>
                 <button type="button" role="menuitem" className="act justify-start gap-2.5" onClick={() => { setCrumbMenu(false); setMoving(true) }}><span aria-hidden="true" className="w-4 text-center">↗</span>Move to project…</button>
+                {batchOn && !project.master_id && <button type="button" role="menuitem" className="act justify-start gap-2.5" onClick={() => { setCrumbMenu(false); setLanguagesOpen(true) }} data-testid="menu-languages"><span aria-hidden="true" className="w-4 text-center">⇄</span>Make language versions…</button>}
                 <div className="mx-1 mt-1.5 mb-1 flex flex-col gap-1 rounded-lg bg-sunk p-2.5">
                   <span className="tag text-faint">Brief Voltage is using</span>
                   <span className="line-clamp-3 text-[13px]">{folderOf?.brief?.trim() ? folderOf.brief : 'No brief yet.'}</span>
@@ -1565,6 +1570,11 @@ function Studio() {
           {consistency && project.project_id && project.brief_changed && (
             <a className="stamp need no-underline" href={hrefFor({ page: 'folder', projectId: project.project_id })} title={`Made with brief v${project.made_with_brief ?? 0}; ${project.project_name ?? 'the project'} is on v${project.brief_version}. Open the project to bring it up to date.`} data-testid="brief-changed">Brief changed</a>
           )}
+          {/* B2: a language version names its master, and says when the master moved on. */}
+          {batchOn && project.master_id && (
+            <a className="stamp in whitespace-nowrap no-underline" href={hrefFor({ page: 'editor', projectId: project.master_id })} title={`The ${project.language_label} version of ${project.master_filename ?? 'its master'}. Open the master.`} data-testid="language-of">{project.language_label} · of {project.master_filename ?? 'master'}</a>
+          )}
+          {batchOn && project.master_id && project.out_of_sync && <SyncChip videoId={project.video_id} compact />}
           <span className="text-faint max-sm:hidden" aria-hidden="true">/</span>
           <h1 className="disp m-0 min-w-0 max-w-[28ch] truncate text-[15px] font-semibold lg:max-w-none lg:flex-[1_1_0]" title={project.filename}>{project.filename}</h1>
           <span className="tag text-faint">{timecode(project.duration)}{speakers.length > 0 ? ` · ${speakers.length} ${speakers.length === 1 ? 'voice' : 'voices'}` : ''}</span>
@@ -1586,6 +1596,8 @@ function Studio() {
             {exporting ? 'Rendering…' : 'Export'}
           </a>
           <AccountDot me={me} />
+          {batchOn && languagesOpen && <LanguageDialog videoId={project.video_id} filename={project.filename} projectId={project.project_id} onClose={() => setLanguagesOpen(false)}
+            onMade={(pid) => { setLanguagesOpen(false); if (pid) go({ page: 'folder', projectId: pid }) }} />}
           <WhatVoltageMayDo open={mayDoOpen} value={mayDo} onChange={(c) => void changeMayDo(c)} onClose={() => setMayDoOpen(false)} />
         </header>
         <StatusStrip state={strip} open={activityOpen} onOpen={openActivity} onStop={canStop ? () => void stopAll() : undefined} stopping={stopping} />

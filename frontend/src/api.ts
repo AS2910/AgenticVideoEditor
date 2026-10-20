@@ -1,5 +1,6 @@
 import type { Arrangement } from './transcript/arrange'
 import type {
+  LanguageSet, LanguagesMade, SyncStarted,
   Suggestion, SuggestionKind, Understanding,
   Role,
   MyVoice, UserSettings, UsageReport, SpendSummary, MadeVoice, CloneableSpeaker, DesignedPreview, Receipt,
@@ -400,6 +401,14 @@ export const grantConsent = (id: string) =>
 
 /** A variant: the same clip as a new project, with the plan as a draft. */
 export const createVariant = (id: string) => post<Project>(`/videos/${id}/variants`)
+
+/** B2: a video's language set (its master's, for a version). */
+export const getLanguages = (videoId: string) => get<LanguageSet>(`/videos/${videoId}/languages`)
+/** B2: Make language versions; `dry_run` gives the gate's numbers and makes nothing. */
+export const makeLanguages = (videoId: string, body: { languages: string[]; voice: 'same' | 'designed'; dry_run?: boolean }) =>
+  post<LanguagesMade>(`/videos/${videoId}/languages`, body)
+/** B2: Sync this change: one turn on the version for only the master's changed lines. */
+export const syncLanguage = (videoId: string) => post<SyncStarted>(`/videos/${videoId}/sync`)
 
 /** Phase 9c: whether sign-in is on, and who is signed in. */
 export interface Me { mode: 'off' | 'google'; user: { sub: string; email: string | null; name: string | null; picture: string | null } | null }

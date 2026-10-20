@@ -59,7 +59,7 @@ function Row({ row, busy, onAnswer, onUndo }: { row: BatchRow; busy: string | nu
  *  (all by default, each with its stage), one plan and one gate card with the
  *  totals and the batch's cap, then a board with one row per video, three
  *  working at a time, and Add all that passed last. */
-export function BatchPanel({ projectId, videos, fix, onFixHandled }: { projectId: string; videos: ProjectSummary[]; fix?: FixRequest | null; onFixHandled?: () => void }) {
+export function BatchPanel({ projectId, videos, fix, onFixHandled, refresh = 0 }: { projectId: string; videos: ProjectSummary[]; fix?: FixRequest | null; onFixHandled?: () => void; refresh?: number }) {
   const [batch, setBatch] = useState<Batch | null>(null)
   const [loaded, setLoaded] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -85,7 +85,7 @@ export function BatchPanel({ projectId, videos, fix, onFixHandled }: { projectId
     }).catch((e) => { if (live.current) { setLoaded(true); setError(said(e, 'Could not read the batches.')) } })
     void read()
     return () => { live.current = false; if (timer) clearTimeout(timer) }
-  }, [projectId, tick])
+  }, [projectId, tick, refresh])
 
   // A Fix in all from the check: plan that issue across its videos at once (the gate still waits for Go).
   useEffect(() => {
@@ -147,7 +147,7 @@ export function BatchPanel({ projectId, videos, fix, onFixHandled }: { projectId
               {videos.map((v) => (
                 <label key={v.video_id} className="flex cursor-pointer items-center gap-2.5 rounded-md px-1.5 py-1 hover:bg-psunk">
                   <input type="checkbox" className="size-4 accent-volt" checked={chosen.has(v.video_id)} onChange={() => toggle(v.video_id)} />
-                  <span className="min-w-0 flex-1 truncate text-sm">{v.filename}</span>
+                  <span className="min-w-0 flex-1 truncate text-sm">{v.filename}{v.language_label ? ` · ${v.language_label}` : ''}</span>
                   <span className="tag text-pmuted">{STAGE_WORD[v.stage ?? 'draft'] ?? v.stage}</span>
                 </label>
               ))}

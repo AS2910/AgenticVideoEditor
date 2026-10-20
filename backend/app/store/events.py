@@ -24,7 +24,9 @@ VERBS = ("brief.saved", "rule.added", "rule.changed", "rule.removed", "stage.mov
          "video.moved_in", "video.moved_out", "edit.shipped", "edit.undone",
          "video.deleted", "video.restored", "project.deleted", "project.restored",
          # A1: bringing videos up to date with a changed brief.
-         "brief.update_started", "brief.video_current", "brief.update_finished")
+         "brief.update_started", "brief.video_current", "brief.update_finished",
+         # B2: language versions made from a master, and a version brought back in step.
+         "language.versions_made", "language.sync_started", "language.synced")
 MAX_PAGE = 200
 
 

@@ -12,6 +12,7 @@ import { Shell } from './Shell'
 import { FillBar } from './bits'
 import { whenLabel } from './fmt'
 import { MoveDialog } from '../components/MoveDialog'
+import { LanguageChips } from './LanguageVersions'
 import { useFlags } from '../flags/useFlags'
 
 interface ProjectsPageProps {
@@ -84,6 +85,8 @@ export function ProjectsPage({ me, projects, folders = [], onOpen, onUpload, onS
   const input = useRef<HTMLInputElement>(null)
   // A1: "Brief changed" on a card whose project's brief moved on since it was made.
   const briefChips = useFlags().enabled('projects.consistency')
+  // B2: a language version says its language; a master shows its versions as chips.
+  const languageChips = useFlags().enabled('projects.batch')
   const [over, setOver] = useState(false)
   const [dest, setDest] = useState<string>('none')
   const [tab, setTab] = useState<Tab>('all')
@@ -312,8 +315,10 @@ export function ProjectsPage({ me, projects, folders = [], onOpen, onUpload, onS
                               <span className="tnum absolute right-2 bottom-2 rounded bg-ink/60 px-1.5 text-xs text-ptext">{clock(p.duration)}</span>
                               {briefChips && p.brief_changed && <span className="stamp need absolute top-2 left-2" title={`${p.project_name ?? 'Its project'} has a newer brief than this video was made with`} data-testid="brief-changed">Brief changed</span>}
                             </span>
-                            <span className="truncate px-0.5 font-semibold">{p.filename}</span>
+                            <span className="truncate px-0.5 font-semibold">{p.filename}{languageChips && p.language_label ? ` · ${p.language_label}` : ''}</span>
                           </a>
+                          {languageChips && p.out_of_sync && <span className="stamp need self-start whitespace-nowrap" data-testid="out-of-sync">Out of sync with master</span>}
+                          {languageChips && (p.languages?.length ?? 0) > 0 && <LanguageChips languages={p.languages ?? []} className="px-0.5" />}
                           <div className="flex items-center gap-2 px-0.5">
                             <span className={cn('inline-flex h-6 max-w-[60%] items-center gap-1.5 truncate rounded-full border px-2 text-xs font-medium', p.project_id ? 'border-line2 bg-card text-foreground' : 'border-dashed border-line2 text-faint')} data-testid="project-chip">
                               <Folder dashed={!p.project_id} size={12} />

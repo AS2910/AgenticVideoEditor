@@ -10,12 +10,15 @@ const inputClass = 'h-8 min-w-0 rounded-md border-[1.5px] border-line2 bg-backgr
  *  voice is sent, and an optional clip of it said right), the words no video
  *  says, and the lines every video carries. Voltage reads them in every turn
  *  and checks each take against them before it is offered. */
-export function ProjectWords({ projectId }: { projectId: string }) {
+const LANG_WORDS: Record<string, string> = { hi: 'Hindi', hinglish: 'Hinglish', ta: 'Tamil', mr: 'Marathi', en: 'English' }
+
+/** `languages` (B2, projects.batch): a word can be a brand name that never translates, or say how it goes in one language. */
+export function ProjectWords({ projectId, languages = false }: { projectId: string; languages?: boolean }) {
   const [rules, setRules] = useState<ProjectRule[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [note, setNote] = useState<string | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
-  const [word, setWord] = useState({ term: '', say: '', respell: '' })
+  const [word, setWord] = useState({ term: '', say: '', respell: '', brand: false, lang: '', translation: '' })
   const [banned, setBanned] = useState('')
   const [line, setLine] = useState('')
   const clipFor = useRef<number | null>(null)
@@ -53,7 +56,11 @@ export function ProjectWords({ projectId }: { projectId: string }) {
   const submitWord = (e: FormEvent) => {
     e.preventDefault()
     if (!word.term.trim() || !word.say.trim()) return
-    void add('pronounce', { term: word.term.trim(), say: word.say.trim(), ...(word.respell.trim() ? { respell: word.respell.trim() } : {}) }, () => setWord({ term: '', say: '', respell: '' }))
+    void add('pronounce', {
+      term: word.term.trim(), say: word.say.trim(), ...(word.respell.trim() ? { respell: word.respell.trim() } : {}),
+      ...(languages && word.brand ? { brand: true } : {}),
+      ...(languages && !word.brand && word.lang && word.translation.trim() ? { lang: word.lang, translation: word.translation.trim() } : {}),
+    }, () => setWord({ term: '', say: '', respell: '', brand: false, lang: '', translation: '' }))
   }
   const submitBanned = (e: FormEvent) => { e.preventDefault(); if (banned.trim()) void add('banned', { word: banned.trim() }, () => setBanned('')) }
   const submitLine = (e: FormEvent) => { e.preventDefault(); if (line.trim()) void add('required_line', { text: line.trim() }, () => setLine('')) }
@@ -92,7 +99,10 @@ export function ProjectWords({ projectId }: { projectId: string }) {
                   <tbody>
                     {words.map((r) => (
                       <tr key={r.rule_id} className="border-t border-line align-middle" data-testid="word-row">
-                        <td className="px-1 py-2 font-semibold">{r.data.term}</td>
+                        <td className="px-1 py-2 font-semibold">{r.data.term}
+                          {languages && r.data.brand && <span className="stamp in ml-1.5 whitespace-nowrap" title="Never translated in a language version">Brand</span>}
+                          {languages && r.data.lang && r.data.translation && <span className="ml-1.5 block text-[13px] font-normal text-muted-foreground">{LANG_WORDS[r.data.lang] ?? r.data.lang}: {r.data.translation}</span>}
+                        </td>
                         <td className="px-1 py-2">{r.data.say}</td>
                         <td className="px-1 py-2 text-muted-foreground">{r.data.respell ?? <span className="text-faint">None</span>}</td>
                         <td className="px-1 py-2">
@@ -118,6 +128,20 @@ export function ProjectWords({ projectId }: { projectId: string }) {
               <input className={`${inputClass} flex-[1_1_120px]`} placeholder="Term, e.g. Bhaji Cam" aria-label="Term" value={word.term} onChange={(e) => setWord({ ...word, term: e.target.value })} />
               <input className={`${inputClass} flex-[1_1_120px]`} placeholder="How to say it" aria-label="How to say it" value={word.say} onChange={(e) => setWord({ ...word, say: e.target.value })} />
               <input className={`${inputClass} flex-[1_1_120px]`} placeholder="Respell (optional)" aria-label="Respell" value={word.respell} onChange={(e) => setWord({ ...word, respell: e.target.value })} />
+              {languages && (
+                <span className="flex w-full flex-wrap items-center gap-2" data-testid="word-languages">
+                  <label className="flex min-h-8 items-center gap-1.5 text-sm"><input type="checkbox" className="size-4" checked={word.brand} onChange={(e) => setWord({ ...word, brand: e.target.checked })} />Brand name, never translate</label>
+                  {!word.brand && (
+                    <>
+                      <select className={`${inputClass} flex-[0_1_140px]`} aria-label="In language" value={word.lang} onChange={(e) => setWord({ ...word, lang: e.target.value })}>
+                        <option value="">Any language</option>
+                        {Object.entries(LANG_WORDS).map(([code, name]) => <option key={code} value={code}>{name}</option>)}
+                      </select>
+                      {word.lang && <input className={`${inputClass} flex-[1_1_140px]`} placeholder="Translation" aria-label="Translation" value={word.translation} onChange={(e) => setWord({ ...word, translation: e.target.value })} />}
+                    </>
+                  )}
+                </span>
+              )}
               <button type="submit" className="btn sm" disabled={!word.term.trim() || !word.say.trim() || busy !== null}>{busy === 'add-pronounce' ? 'Adding…' : '+ Add word'}</button>
             </form>
           </div>

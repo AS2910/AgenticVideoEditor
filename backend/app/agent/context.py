@@ -198,6 +198,25 @@ def brief_block(project: dict | None) -> list[str]:
     if files:
         out.append("Reference files: " + ", ".join(files) + " (read_project_files searches them).")
     out.extend(rules_lines(project.get("rules") or []))
+    out.extend(language_lines(project.get("language"), project.get("rules") or []))
+    return out
+
+
+def language_lines(language: dict | None, rules: Sequence[dict]) -> list[str]:
+    """B2: a language version's own block: what it is a version of, the
+    words that never translate and the glossary for its language. Nothing
+    for a master or a plain video."""
+    if not language:
+        return []
+    from app.agent.word_rules import brand_terms, glossary_for
+    name = language.get("label") or language.get("code")
+    out = [f"This video is the {name} version of {language.get('master_filename') or 'its master'}. "
+           f"Every line is spoken in {name}, each fitting the time of the line it replaces."]
+    keep = brand_terms(rules)
+    out.append("Never translate: " + (", ".join(keep) if keep else "(no brand names set)") + ". Say them exactly as written.")
+    words = glossary_for(rules, language.get("code") or "")
+    if words:
+        out.append(f"{name} glossary: " + "; ".join(f"“{t}” is “{tr}”" for t, tr in words) + ".")
     return out
 
 

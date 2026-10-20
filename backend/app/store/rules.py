@@ -26,12 +26,18 @@ KINDS = ("pronounce", "banned", "required_line", "style")
 # What each kind holds: its required text fields, then its optional ones.
 FIELDS = {
     # A3: `audio` is the sha256 of an optional short clip of the right pronunciation.
-    "pronounce": (("term", "say"), ("respell", "audio")),
+    # B2: `lang` + `translation` say the term in a language version (a per-language
+    # glossary entry); `brand` (a flag) means it is never translated.
+    "pronounce": (("term", "say"), ("respell", "audio", "lang", "translation", "brand")),
     "banned": (("word",), ()),
     "required_line": (("text",), ()),
     "style": (("text",), ()),
 }
 MAX_TEXT = 500
+# Fields that are a yes/no, kept as true (and left out when false).
+FLAGS = frozenset({"brand"})
+# B2: the languages a glossary entry may name (app.store.languages).
+LANGS = ("en", "hi", "hinglish", "ta", "mr")
 
 
 class RuleError(ValueError):
@@ -70,9 +76,19 @@ def clean(kind: str, data: dict) -> dict:
         value = data.get(key)
         if value is None:
             continue
+        if key in FLAGS:
+            if value is True or str(value).strip().lower() in ("true", "1", "yes"):
+                out[key] = True
+            continue
         text = " ".join(str(value).split())[:MAX_TEXT]
         if text:
             out[key] = text
+    if "lang" in out:
+        out["lang"] = out["lang"].lower()
+        if out["lang"] not in LANGS:
+            raise RuleError(f"A language is one of: {', '.join(LANGS)}.")
+    if "translation" in out and "lang" not in out:
+        raise RuleError("A translation needs the language it is in.")
     missing = [k for k in required if k not in out]
     if missing:
         raise RuleError(f"A {kind.replace('_', ' ')} rule needs {' and '.join(missing)}.")

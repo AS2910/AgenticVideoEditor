@@ -44,6 +44,8 @@ def _joined(seq: Sequence[str], sub: Sequence[str]) -> bool:
 class WordCheck:
     breaks: tuple[str, ...] = ()
     warnings: tuple[str, ...] = ()
+    # B2: brand terms a language version's take translated (each is also a break).
+    brand: tuple[str, ...] = ()
 
     @property
     def ok(self) -> bool:
@@ -53,7 +55,10 @@ class WordCheck:
         """What the item carries; None when there is nothing to say."""
         if not self.breaks and not self.warnings:
             return None
-        return {"breaks": list(self.breaks), "warnings": list(self.warnings)}
+        out: dict = {"breaks": list(self.breaks), "warnings": list(self.warnings)}
+        if self.brand:
+            out["brand"] = list(self.brand)
+        return out
 
     def sentence(self) -> str:
         if self.breaks:
@@ -107,3 +112,29 @@ def check_text(text: str, rules: Iterable[dict]) -> list[str]:
     return [f"“{d.get('word')}” is a banned word in this project. You can still voice it."
             for d in _by_kind(rules).get("banned", []) if _has(said, tokens(str(d.get("word") or "")))]
 
+
+
+# ── B2: language versions ────────────────────────────────────────────────────
+
+def brand_terms(rules: Iterable[dict]) -> list[str]:
+    """The project's words that never translate: glossary terms marked brand."""
+    return [str(d.get("term")) for d in _by_kind(rules).get("pronounce", []) if d.get("brand") and d.get("term")]
+
+
+def glossary_for(rules: Iterable[dict], lang: str) -> list[tuple[str, str]]:
+    """(term, translation) for one language, from glossary entries naming it."""
+    return [(str(d.get("term")), str(d.get("translation"))) for d in _by_kind(rules).get("pronounce", [])
+            if d.get("lang") == lang and d.get("translation") and d.get("term") and not d.get("brand")]
+
+
+def translated_brands(master_line: str, child_line: str, rules: Iterable[dict]) -> list[str]:
+    """Brand terms the master's line says that the language version's line
+    does not carry verbatim (as written, any case): each was translated or
+    dropped. Free and deterministic."""
+    said = tokens(master_line)
+    lowered = child_line.lower()
+    return [t for t in brand_terms(rules) if _has(said, tokens(t)) and t.lower() not in lowered]
+
+
+def brand_breaks(missing: Sequence[str]) -> tuple[str, ...]:
+    return tuple(f"Brand name translated: “{t}” must stay as written." for t in missing)
