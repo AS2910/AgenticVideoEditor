@@ -182,6 +182,10 @@ def _words(text: str) -> set[str]:
     return out
 
 
+# The content words of any text (F4's batch plan reads which lines a goal names).
+content_words = _words
+
+
 def changed_words(runs: list[dict]) -> set[str]:
     """The words a brief change added or removed, without the common ones."""
     return set().union(*(_words(r["text"]) for r in runs if r["op"] != "same")) if runs else set()

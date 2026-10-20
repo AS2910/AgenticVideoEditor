@@ -137,6 +137,8 @@ class Turn:
     stop_requested: Callable[[], bool] = lambda: False
     # A3: what the user said this turn; a banned word they typed themselves only warns.
     said: str = ""
+    # F4: one video of a batch turn: its lines wait as proposals, added from the batch board.
+    batch: bool = False
 
     def asks_before(self, what: str) -> bool:
         """Whether this committing step waits for the user: always under
@@ -1556,6 +1558,10 @@ def _ship(wb: Workbench, turn: Turn, args: dict) -> ToolResult:
         return ToolResult("Nothing is ready to ship: no voiced line that is not already shipped.")
     n = len(ready)
     anyway = bool(args.get("anyway"))
+    if turn.batch:
+        # F4: in a batch the user adds lines from the batch board ("Add all that passed"), never the turn.
+        return ToolResult(f"This video is part of a batch: its {n} ready {'line waits' if n == 1 else 'lines wait'} for the user "
+                          "to add from the batch board. Do not ship; say what is ready and end the turn.")
     if turn.asks_before("ship"):
         raise WaitingForUser(f"Ship {n} {'change' if n == 1 else 'changes'} and render the video?"
                              + (" One did not pass its check." if anyway else ""), ("Ship it", "Not yet"), "Ship it")

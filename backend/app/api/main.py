@@ -4,6 +4,7 @@ import re
 import queue
 import time
 import threading
+import statistics
 from concurrent.futures import ThreadPoolExecutor
 import hashlib
 import logging
@@ -73,6 +74,7 @@ from app.render import retime
 from app.jobs.store import JobStore, Job
 from app.jobs.runner import JobRunner
 from app.jobs.activity import ActivityJobs, KINDS as JOB_KINDS
+from app.jobs import batch as batch_mod
 from app.jobs.events import EventBus
 from app.agent import loop as agent_loop
 from app.agent.guards import TurnBudget, is_go
@@ -122,7 +124,8 @@ clones = CloneService(repo, artifacts, voice, enabled=settings.clone and not set
                       min_seconds=settings.clone_min_seconds)
 planner, planner_label = select_planner(settings, chaos)
 jobs = JobStore()
-runner = JobRunner(jobs)
+# Four workers: a batch (F4) runs three videos' turns at a time, and one more stays free for the editor.
+runner = JobRunner(jobs, max_workers=4)
 # 2026-10-20 (one processing model): every piece of work the user waits on is
 # an Activity job, persisted; the editor hears each change on its live channel.
 events = EventBus()
@@ -2247,11 +2250,11 @@ def delete_project_rule(project_id: str, rule_id: int, owner: str = Depends(curr
 
 # ── A1: bring videos up to date with the brief ───────────────────────────────
 #
-# TODO(F4): this is a sequential loop of ordinary per-video turns, one Activity
-# job ("brief_update") per video, because the batch turn engine (F4) does not
-# exist yet. F4 replaces the loop with one batch turn: one plan, one gate, a
-# child turn per video under the parent's budget. Keep the free word-overlap
-# check in front of it (a video the change does not touch costs nothing).
+# With `projects.batch` on (F4) the run is one batch turn: a child per stale
+# video, three at a time, under the parent's cap (`_brief_update_batch`).
+# Off, it is the sequential loop below, one Activity job ("brief_update") per
+# video. Either way the free word-overlap check runs first in each video (a
+# video the change does not touch costs nothing).
 
 def _consistency_on(owner: str) -> None:
     """Phase A ships behind `projects.consistency`; off, its routes are not there."""
@@ -2305,10 +2308,12 @@ def _video_texts(video_id: str, record: ProjectRecord) -> list[str]:
     return texts
 
 
-def _bring_one_up_to_date(project_id: str, video_id: str, job_id: str, made: int, to: int, owner: str) -> None:
+def _bring_one_up_to_date(project_id: str, video_id: str, job_id: str, made: int, to: int, owner: str,
+                          batch_cap: float | None = None) -> None:
     """One video: the free word-overlap check first; a video the change does
     not touch is marked current without spending, saying why. Otherwise an
-    ordinary turn with the goal "Apply brief changes vN to vM" and the diff."""
+    ordinary turn with the goal "Apply brief changes vN to vM" and the diff.
+    `batch_cap`: one child of a batch (F4), its turn under that cap."""
     activity.start(job_id, "Checking what the change touches")
     record = repo.get(video_id)
     if record is None:
@@ -2335,24 +2340,10 @@ def _bring_one_up_to_date(project_id: str, video_id: str, job_id: str, made: int
             f"Apply brief changes v0 to v{to}: this video was made before the project's brief, which {_diff_words(runs)}. "
             f"This video mentions {', '.join(hit)}. Change only the lines the brief touches; if nothing needs to change, say so.")
     activity.update(job_id, step_label="Voltage is on it", detail={"touches": hit})
-    try:
-        started = _start_turn(video_id, record, goal, owner)
-    except HTTPException as exc:
-        activity.fail(job_id, "turn_refused", str(exc.detail))
+    ran = _turn_for_job(video_id, record, job_id, goal, owner, batch_cap)
+    if ran is None:
         return
-    deadline = time.time() + BRIEF_TURN_WAIT_S
-    turn_job = jobs.get(started["job_id"])
-    while turn_job is not None and not turn_job.done and time.time() < deadline:
-        time.sleep(0.05)
-        turn_job = jobs.get(started["job_id"])
-    if turn_job is None or not turn_job.done:
-        activity.fail(job_id, "timeout", "Voltage's turn on this video took too long; it is still in the video's chat.")
-        return
-    out = turn_job.result or {}
-    spent = round(float(out.get("turn_usd") or out.get("spent_usd") or 0.0), 4)
-    if turn_job.status == "failed" or out.get("stopped") == "error":
-        activity.fail(job_id, "turn_failed", (out.get("error") or turn_job.error or "Voltage's turn failed.")[:200], cost_usd=spent or None)
-        return
+    out, spent = ran
     plan = repo.latest_plan(video_id)
     ready = sum(1 for i in (plan.items if plan else ()) if i.kind == "planned" and i.status == "ready")
     now = repo.get(video_id)
@@ -2367,7 +2358,8 @@ def _bring_one_up_to_date(project_id: str, video_id: str, job_id: str, made: int
         briefs.made_with(database, video_id, to)
     activity.finish(job_id, step_label={"updated": "Updated", "waiting": "Waiting on you", "proposed": "Ready to review",
                                         "current": "Up to date, nothing to change"}[outcome],
-                    cost_usd=spent or None, detail={"outcome": outcome, "why": why, "spent_usd": spent})
+                    cost_usd=spent or None, detail={"outcome": outcome, "why": why, "spent_usd": spent, "ready": ready,
+                                                    "question": _question_of(out)})
 
 
 def _bring_up_to_date_loop(project_id: str, owner: str) -> None:
@@ -2415,6 +2407,8 @@ def start_brief_update(project_id: str, owner: str = Depends(current_owner)) -> 
         n = 1 + int((now or {}).get("run_id", "u0")[1:] or 0)
         run = {"run_id": f"u{n}", "to": project.brief_version, "status": "running", "started_at": _now(), "finished_at": None,
                "videos": []}
+        if _batch_on(owner):
+            return {"run": _brief_update_batch(project, owner, run, stale)}
         for vid in stale:
             record = repo.get(vid)
             made = int(record.made_with_brief or 0)
@@ -2429,6 +2423,37 @@ def start_brief_update(project_id: str, owner: str = Depends(current_owner)) -> 
     threading.Thread(target=_bring_up_to_date_loop, args=(project_id, owner), daemon=True,
                      name=f"brief-update-{project_id}").start()
     return {"run": _brief_run(project_id)}
+
+
+def _brief_update_batch(project: Project, owner: str, run: dict, stale: list[str]) -> dict:
+    """F4 (`projects.batch` on): Bring up to date as one batch turn. The press
+    is the gate's yes (the button says what it does, and the free check still
+    runs first in each video); the run record points at the batch's children.
+    Called with `_brief_runs_lock` held."""
+    project_id, to = project.project_id, project.brief_version
+    thinking = _thinking_usd(owner)
+    children = []
+    for vid in stale:
+        record = repo.get(vid)
+        made = int(record.made_with_brief or 0)
+        runs = briefs.diff(database, project_id, made, to) or []
+        changed = briefs.changed_words(runs)
+        lines = [t for t in _statement_texts(record) if changed & briefs.content_words(t)]
+        hit = bool(briefs.touches(runs, _video_texts(vid, record)))
+        children.append(_batch_child(vid, f"Apply brief changes v{made} to v{to}", owner, lines=lines, thinking=thinking,
+                                     turn=hit, extra={"from": made}))
+    opened = _open_batch(project, owner, "brief", f"Apply brief changes to v{to}", children,
+                         extra={"to": to, "run_id": run["run_id"]})
+    started = _go_batch(opened, owner)
+    run["batch_id"] = started["batch_id"]
+    for child in started["children"]:
+        run["videos"].append({"video_id": child["video_id"], "filename": child["filename"], "from": child["extra"]["from"],
+                              "job_id": child["job_id"], "status": "queued", "step": "Queued", "outcome": None, "why": None})
+    _save_brief_run(project_id, run)
+    with database.tx() as c:
+        activity_log.record(c, "brief.update_started", user_actor(owner), project_id=project_id, target=run["run_id"],
+                            payload={"to": to, "videos": stale, "batch_id": run["batch_id"]})
+    return _brief_run(project_id)
 
 
 # ── A2: the project check ────────────────────────────────────────────────────
@@ -2748,12 +2773,13 @@ def fix_check_issue(project_id: str, issue_id: int, req: FixRequest, owner: str 
     return {"video_id": req.video_id, "job_id": started["job_id"], "t": t}
 
 
-# TODO(F4): "Fix in all" is the same sequential loop of ordinary per-video
-# turns A1's Bring up to date uses, one Activity job (kind "check") per video,
-# because the batch turn engine does not exist yet. F4 replaces the loop with
-# one batch turn: one plan, one gate, a child turn per video.
+# "Fix in all": with `projects.batch` on (F4), one batch turn (`_fix_all_batch`);
+# off, the same sequential loop A1's Bring up to date uses, one Activity job
+# (kind "check") per video.
 
-def _fix_one(video_id: str, job_id: str, goal: str, owner: str) -> None:
+def _fix_one(video_id: str, job_id: str, goal: str, owner: str, batch_cap: float | None = None,
+             done_label: str = "Fixed") -> None:
+    """One video's turn with `goal` (A2's Fix in all; F4's batch children with `batch_cap`)."""
     activity.start(job_id, "Voltage is on it")
     record = repo.get(video_id)
     if record is None:
@@ -2763,37 +2789,72 @@ def _fix_one(video_id: str, job_id: str, goal: str, owner: str) -> None:
         activity.fail(job_id, "no_agent", "Voltage needs Claude to change this video (set AVE_AGENT=1 and an Anthropic key).")
         return
     shipped = len([e for e in repo.list_edits(video_id) if not e.reverted])
-    try:
-        started = _start_turn(video_id, record, goal, owner)
-    except HTTPException as exc:
-        activity.fail(job_id, "turn_refused", str(exc.detail))
+    ran = _turn_for_job(video_id, record, job_id, goal, owner, batch_cap)
+    if ran is None:
         return
-    deadline = time.time() + BRIEF_TURN_WAIT_S
-    turn_job = jobs.get(started["job_id"])
+    out, spent = ran
+    outcome, why, ready = _turn_outcome(video_id, out, shipped)
+    activity.finish(job_id, step_label={"updated": done_label, "waiting": "Waiting on you", "proposed": "Ready to review",
+                                        "current": "Nothing to change"}[outcome],
+                    cost_usd=spent or None, detail={"outcome": outcome, "why": why, "spent_usd": spent, "ready": ready,
+                                                    "question": _question_of(out)})
+
+
+def _turn_outcome(video_id: str, out: dict, shipped_before: int) -> tuple[str, str, int]:
+    """How a video's turn ended, for a run row: updated (it added lines),
+    waiting (a question), proposed (lines ready to hear) or current."""
+    plan = repo.latest_plan(video_id)
+    ready = sum(1 for i in (plan.items if plan else ()) if i.kind == "planned" and i.status == "ready")
+    if len([e for e in repo.list_edits(video_id) if not e.reverted]) > shipped_before:
+        return "updated", "Voltage fixed it and added the change.", ready
+    if out.get("question"):
+        return "waiting", "Voltage has a question in this video. Answer it there.", ready
+    if ready:
+        return "proposed", f"{ready} {'line is' if ready == 1 else 'lines are'} ready to hear. Add them in the video.", ready
+    return "current", "Voltage found nothing to change here.", ready
+
+
+def _question_of(out: dict) -> dict | None:
+    """A turn's closing question as a run row shows it: the words and the options."""
+    q = out.get("question")
+    if not q:
+        return None
+    return {"text": q.get("text"), "options": [o.get("label") if isinstance(o, dict) else o for o in q.get("options") or []]}
+
+
+def _await_turn(turn_job_id: str, wait_s: float = None) -> Job | None:
+    deadline = time.time() + (BRIEF_TURN_WAIT_S if wait_s is None else wait_s)
+    turn_job = jobs.get(turn_job_id)
     while turn_job is not None and not turn_job.done and time.time() < deadline:
         time.sleep(0.05)
-        turn_job = jobs.get(started["job_id"])
+        turn_job = jobs.get(turn_job_id)
+    return turn_job
+
+
+def _turn_for_job(video_id: str, record: ProjectRecord, job_id: str, goal: str, owner: str,
+                  batch_cap: float | None = None) -> tuple[dict, float] | None:
+    """Run one ordinary turn for a run's job (A1, A2, F4) and wait for it:
+    (its result, what it spent), or None with the job failed saying why."""
+    try:
+        started = _start_turn(video_id, record, goal, owner, cap_usd=batch_cap, batch=batch_cap is not None)
+    except HTTPException as exc:
+        activity.fail(job_id, "turn_refused", str(exc.detail))
+        return None
+    activity.update(job_id, detail={"turn_ids": [started["job_id"]]})
+    turn_job = _await_turn(started["job_id"])
     if turn_job is None or not turn_job.done:
         activity.fail(job_id, "timeout", "Voltage's turn on this video took too long; it is still in the video's chat.")
-        return
+        return None
     out = turn_job.result or {}
     spent = round(float(out.get("turn_usd") or out.get("spent_usd") or 0.0), 4)
     if turn_job.status == "failed" or out.get("stopped") == "error":
         activity.fail(job_id, "turn_failed", (out.get("error") or turn_job.error or "Voltage's turn failed.")[:200], cost_usd=spent or None)
-        return
-    plan = repo.latest_plan(video_id)
-    ready = sum(1 for i in (plan.items if plan else ()) if i.kind == "planned" and i.status == "ready")
-    if len([e for e in repo.list_edits(video_id) if not e.reverted]) > shipped:
-        why, outcome = "Voltage fixed it and added the change.", "updated"
-    elif out.get("question"):
-        why, outcome = "Voltage has a question in this video. Answer it there.", "waiting"
-    elif ready:
-        why, outcome = f"{ready} {'line is' if ready == 1 else 'lines are'} ready to hear. Add them in the video.", "proposed"
-    else:
-        why, outcome = "Voltage found nothing to change here.", "current"
-    activity.finish(job_id, step_label={"updated": "Fixed", "waiting": "Waiting on you", "proposed": "Ready to review",
-                                        "current": "Nothing to change"}[outcome],
-                    cost_usd=spent or None, detail={"outcome": outcome, "why": why, "spent_usd": spent})
+        return None
+    if out.get("ceiling"):
+        # The turn met a ceiling before it could spend: the video stops here, saying which.
+        activity.fail(job_id, "ceiling", (out.get("reply") or "A spending ceiling was reached.")[:300], cost_usd=spent or None)
+        return None
+    return out, spent
 
 
 def _fix_all_loop(project_id: str, owner: str) -> None:
@@ -2830,6 +2891,9 @@ def fix_check_issue_everywhere(project_id: str, issue_id: int, owner: str = Depe
         n = 1 + int((now or {}).get("run_id", "x0")[1:] or 0)
         run = {"run_id": f"x{n}", "issue_id": issue_id, "message": found["message"], "status": "running", "started_at": _now(),
                "finished_at": None, "videos": []}
+        if _batch_on(owner):
+            _fix_all_batch(project, owner, run, found)
+            return _check_page(project)
         for vid in dict.fromkeys(p["video_id"] for p in found["places"]):
             record = repo.get(vid)
             if record is None or record.folder_id != project_id:
@@ -2845,6 +2909,435 @@ def fix_check_issue_everywhere(project_id: str, issue_id: int, owner: str = Depe
                                 payload={"issue_id": issue_id, "videos": [v["video_id"] for v in run["videos"]]})
     threading.Thread(target=_fix_all_loop, args=(project_id, owner), daemon=True, name=f"check-fix-{project_id}").start()
     return _check_page(project)
+
+
+def _fix_all_batch(project: Project, owner: str, run: dict, found: dict) -> None:
+    """F4 (`projects.batch` on): Fix in all as one batch turn, the press its
+    gate's yes. Called with `_checks_lock` held."""
+    project_id = project.project_id
+    thinking = _thinking_usd(owner)
+    children = []
+    for vid in dict.fromkeys(p["video_id"] for p in found["places"]):
+        record = repo.get(vid)
+        if record is None or record.folder_id != project_id:
+            continue
+        children.append(_batch_child(vid, _fix_goal(found, vid), owner, thinking=thinking,
+                                     lines=[p["text"] for p in found["places"] if p["video_id"] == vid and p.get("text")]))
+    if not children:
+        raise HTTPException(status_code=409, detail="None of the videos this issue names are in the project now.")
+    opened = _open_batch(project, owner, "fix", found["message"], children,
+                         extra={"issue_id": run["issue_id"], "run_id": run["run_id"]})
+    started = _go_batch(opened, owner)
+    run["batch_id"] = started["batch_id"]
+    for child in started["children"]:
+        run["videos"].append({"video_id": child["video_id"], "filename": child["filename"], "job_id": child["job_id"],
+                              "goal": child["goal"], "status": "queued", "step": "Queued", "outcome": None, "why": None})
+    repo.set_meta(CHECK_FIX_KEY.format(project_id), json.dumps(run))
+    with database.tx() as c:
+        activity_log.record(c, "check.fix_all_started", user_actor(owner), project_id=project_id, target=run["run_id"],
+                            payload={"issue_id": run["issue_id"], "videos": [v["video_id"] for v in run["videos"]],
+                                     "batch_id": run["batch_id"]})
+
+
+# ── F4: the batch turn engine ────────────────────────────────────────────────
+#
+# One goal across N videos of a project: one plan (a free, deterministic
+# estimate per video), one gate (the totals and the parent's cap), then one
+# ordinary turn per video, three at a time (app/jobs/batch.py). Behind
+# `projects.batch`; A1's Bring up to date and A2's Fix in all run through it
+# when the flag is on and keep their own loops when it is off.
+
+def _batch_on(owner: str) -> bool:
+    return flags.enabled("projects.batch", owner)
+
+
+def _batch_flag(owner: str) -> None:
+    if not _batch_on(owner):
+        raise HTTPException(status_code=404, detail="Not found")
+
+
+def _voicing_usd(text: str) -> float:
+    """What voicing one line of these words costs (every take is billed), as the agent's own estimate reckons it."""
+    takes = max(1, int(getattr(voice, "takes_per_line", 1)))
+    chars = voice.cost_of(EditPlan(Selection(0.0, 1.0), text, getattr(voice, "default_voice", "speaker-1"))) * takes
+    return chars * budget.usd_per_1k / 1000
+
+
+def _thinking_usd(owner: str) -> float | None:
+    """The median of what Voltage's own thinking cost per turn, from this
+    owner's last turns; None with no history (no number that was not measured)."""
+    with database.tx() as c:
+        rows = c.execute(
+            "SELECT turn_id, SUM(usd) AS usd FROM usage WHERE vendor = 'anthropic' AND turn_id IS NOT NULL "
+            "AND project_id IN (SELECT id FROM videos WHERE owner = ?) GROUP BY project_id, turn_id "
+            "ORDER BY MAX(at) DESC LIMIT 20", (owner,)).fetchall()
+    spent = [float(r["usd"]) for r in rows if r["usd"]]
+    return statistics.median(spent) if spent else None
+
+
+def _statement_texts(record: ProjectRecord) -> list[str]:
+    return [st.text for st in statements_of(record.transcript)] or [" ".join(w.text for w in record.transcript.words)]
+
+
+def _batch_child(video_id: str, goal: str, owner: str, *, lines: list[str] | None = None, thinking: float | None,
+                 turn: bool = True, extra: dict | None = None) -> batch_mod.Child:
+    """One video's part of the plan. `lines`: the lines the goal names here
+    (None: worked out from the goal's words against the video's lines, and
+    left unknown when none share a word); `turn=False`: nothing to run (A1's
+    free check found nothing), so nothing is estimated."""
+    record = repo.get(video_id)
+    cap = round(float(_settings(video_id, owner)["turn_usd"]), 2)
+    if lines is None:
+        words = briefs.content_words(goal)
+        lines = [t for t in _statement_texts(record) if words & briefs.content_words(t)] or None
+    if not turn:
+        est, n = 0.0, 0
+    else:
+        n = None if lines is None else len(lines)
+        est = None if lines is None or thinking is None else thinking + sum(_voicing_usd(t) for t in lines)
+    return batch_mod.Child(video_id=video_id, filename=record.source.filename, goal=goal, cap_usd=cap,
+                           stage=getattr(record, "stage", None) or "draft", lines=n, est_usd=est, extra=dict(extra or {}))
+
+
+def _batch_start_refusal(project: Project, owner: str, cap: float) -> str | None:
+    """Decision 3: a batch does not start above the project's ceiling (or the
+    month's) until the owner raises it; the sentence names the ceiling."""
+    if project.ceiling_usd is not None:
+        ours = ledger.spent_usd_by_folder(project.project_id)
+        if ours + cap > float(project.ceiling_usd) + 1e-9:
+            return (f"This batch may spend up to {money(cap)}, which would take {project.name} past its "
+                    f"{money(float(project.ceiling_usd))} project ceiling ({money(ours)} spent). "
+                    "Raise the ceiling on the project page, or pick fewer videos.")
+    if settings.user_budget_usd is not None:
+        mine = ledger.spent_usd_by_owner(owner, iso(month_start()))
+        if mine + cap > settings.user_budget_usd + 1e-9:
+            return (f"This batch may spend up to {money(cap)}, which would take you past your "
+                    f"{money(settings.user_budget_usd)} ceiling for {month_name()} ({money(mine)} spent). Pick fewer videos.")
+    return None
+
+
+def _batch_refusal(child: dict, held: float) -> str | None:
+    """Why a child may not reserve its cap now: the video's, the project's or
+    the month's ceiling would be crossed, counting what running children hold."""
+    record = repo.get(child["video_id"])
+    if record is None:
+        return "This video was deleted."
+    cap = float(child["cap_usd"])
+    spent = ledger.spent_usd(record.source.project_id)
+    if spent + cap > ledger.ceiling_usd + 1e-9:
+        return (f"Stopped before starting: this video's turn could take it past its {money(ledger.ceiling_usd)} "
+                f"video ceiling ({money(spent)} spent).")
+    project = _folder_of(record)
+    if project is not None and project.ceiling_usd is not None:
+        ours = ledger.spent_usd_by_folder(project.project_id)
+        if ours + held + cap > float(project.ceiling_usd) + 1e-9:
+            return (f"Stopped before starting: this video's turn could take {project.name} past its "
+                    f"{money(float(project.ceiling_usd))} project ceiling ({money(ours)} spent).")
+    if settings.user_budget_usd is not None:
+        mine = ledger.spent_usd_by_owner(record.owner, iso(month_start()))
+        if mine + held + cap > settings.user_budget_usd + 1e-9:
+            return (f"Stopped before starting: this video's turn could take you past your "
+                    f"{money(settings.user_budget_usd)} ceiling for {month_name()} ({money(mine)} spent).")
+    return None
+
+
+def _run_batch_child(record: dict, child: dict) -> None:
+    """One video of a batch, by where the batch came from: A1's brief change
+    (the free check first), A2's issue, or the user's own goal."""
+    owner, job_id = record["owner"], child["job_id"]
+    if record["source"] == "brief":
+        _bring_one_up_to_date(record["project_id"], child["video_id"], job_id, int(child["extra"].get("from") or 0),
+                              int(record["extra"]["to"]), owner, batch_cap=float(child["cap_usd"]))
+    else:
+        _fix_one(child["video_id"], job_id, child["goal"], owner, batch_cap=float(child["cap_usd"]),
+                 done_label="Fixed" if record["source"] == "fix" else "Changed")
+
+
+def _batch_closed(record: dict) -> None:
+    """The batch ended: A1's and A2's run records end with it, and the log says so."""
+    owner, project_id = record["owner"], record["project_id"]
+    if record["source"] == "brief":
+        with _brief_runs_lock:
+            final = _brief_run(project_id)
+            if final is not None and final.get("batch_id") == record["batch_id"]:
+                final.update(status="finished", finished_at=_now())
+                _save_brief_run(project_id, final)
+                with database.tx() as c:
+                    activity_log.record(c, "brief.update_finished", user_actor(owner), project_id=project_id, target=final["run_id"],
+                                        payload={"to": final["to"], "batch_id": record["batch_id"],
+                                                 "outcomes": {v["video_id"]: v.get("outcome") for v in final["videos"]}})
+    elif record["source"] == "fix" and record["extra"].get("run_id"):
+        with _checks_lock:
+            final = _fix_run(project_id)
+            if final is not None and final.get("batch_id") == record["batch_id"]:
+                final.update(status="finished", finished_at=_now())
+                repo.set_meta(CHECK_FIX_KEY.format(project_id), json.dumps(final))
+                with database.tx() as c:
+                    activity_log.record(c, "check.fix_all_finished", user_actor(owner), project_id=project_id, target=final["run_id"],
+                                        payload={"issue_id": final["issue_id"], "batch_id": record["batch_id"],
+                                                 "outcomes": {v["video_id"]: v.get("outcome") for v in final["videos"]}})
+    summary = record.get("summary") or {}
+    with database.tx() as c:
+        activity_log.record(c, "batch.cancelled" if record.get("cancelled") else "batch.finished", user_actor(owner),
+                            project_id=project_id, target=record["batch_id"],
+                            payload={"source": record["source"], **{k: summary.get(k) for k in ("finished", "waiting", "failed", "cancelled", "spent_usd")}})
+
+
+batch_engine = batch_mod.BatchEngine(activity, repo.get_meta, repo.set_meta, _run_batch_child, _batch_refusal,
+                                     lambda video_id: _stop_video(video_id), on_close=_batch_closed)
+
+
+def _open_batch(project: Project, owner: str, source: str, goal: str, children: list, extra: dict | None = None) -> dict:
+    """Plan once and open the gate, refused above the project's or month's ceiling."""
+    cap = round(sum(c.cap_usd for c in children), 2)
+    refusal = _batch_start_refusal(project, owner, cap)
+    if refusal:
+        raise HTTPException(status_code=409, detail=refusal)
+    turns = sum(1 for c in children if c.lines != 0)
+    try:
+        record = batch_engine.open_gate(project.project_id, owner, source, goal, children,
+                                        est_s=batch_mod.batch_seconds(batch_mod.child_seconds(activity), turns), extra=extra)
+    except batch_mod.BatchError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    with database.tx() as c:
+        activity_log.record(c, "batch.planned", user_actor(owner), project_id=project.project_id, target=record["batch_id"],
+                            payload={"source": source, "videos": [ch.video_id for ch in children], "totals": record["totals"]})
+    return record
+
+
+def _go_batch(record: dict, owner: str) -> dict:
+    project = repo.get_project(record["project_id"])
+    if project is not None:
+        refusal = _batch_start_refusal(project, owner, float(record["totals"]["cap_usd"]))
+        if refusal:
+            raise HTTPException(status_code=409, detail=refusal)
+    try:
+        started = batch_engine.go(record["batch_id"])
+    except batch_mod.BatchError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    with database.tx() as c:
+        activity_log.record(c, "batch.started", user_actor(owner), project_id=record["project_id"], target=record["batch_id"],
+                            payload={"source": record["source"], "cap_usd": record["totals"]["cap_usd"]})
+    return started
+
+
+ROW_LABELS = {"planned": "Planned", "queued": "Queued", "working": "Working", "ready": "Ready to review",
+              "nothing": "Nothing to change", "failed": "Failed", "waiting": "Waiting on you", "cancelled": "Cancelled",
+              "added": "Added"}
+
+
+def _batch_row(child: dict) -> dict:
+    """One video's row as the board shows it, read live: a finished child
+    reads its video as it is now (an answer turn running, a question still
+    open, proposals still waiting, lines added)."""
+    job = child.get("job")
+    row = {"video_id": child["video_id"], "filename": child["filename"], "stage": child.get("stage") or "draft",
+           "stage_label": stages.LABELS.get(child.get("stage") or "draft", "Draft"), "lines": child.get("lines"),
+           "est_usd": None if child.get("est_usd") is None else round(child["est_usd"], 4), "cap_usd": child["cap_usd"],
+           "job_id": child.get("job_id"), "why": None, "question": None, "ready": 0,
+           "spent_usd": round(float((job or {}).get("detail", {}).get("spent_usd") or (job or {}).get("cost_usd") or 0.0)
+                              + sum(float(a.get("spent_usd") or 0.0) for a in child.get("answers") or []), 4),
+           "added": child.get("added"), "answers": child.get("answers") or []}
+    if job is None:
+        state = "planned"
+    elif job["status"] == "queued":
+        state = "queued"
+    elif job["status"] == "running":
+        state, row["why"] = "working", job["step_label"]
+    elif job["status"] == "failed":
+        state, row["why"] = "failed", job["error_text"]
+    elif job["status"] == "cancelled":
+        state, row["why"] = "cancelled", job["step_label"]
+    else:
+        record = repo.get(child["video_id"])
+        plan = repo.latest_plan(child["video_id"]) if record is not None else None
+        ready = sum(1 for i in (plan.items if plan else ()) if i.kind == "planned" and i.status == "ready")
+        open_q = plan.question if plan is not None and plan.status == "clarifying" and plan.question \
+            and not plan.question.get("resolved") else None
+        busy = any(j.kind == "turn" and j.project_id == child["video_id"] and not j.done for j in jobs.all())
+        row["ready"] = ready
+        if record is None:
+            state, row["why"] = "failed", "This video was deleted."
+        elif busy and child.get("answers"):
+            state, row["why"] = "working", "Voltage is on your answer"
+        elif open_q:
+            state = "waiting"
+            row["question"] = {"text": open_q.get("text"),
+                               "options": [o.get("label") if isinstance(o, dict) else o for o in open_q.get("options") or []]}
+        elif ready:
+            state = "ready"
+            row["why"] = f"{ready} {'line is' if ready == 1 else 'lines are'} ready to hear."
+        elif child.get("added"):
+            state = "added"
+            n = len(child["added"].get("edit_ids") or [])
+            row["why"] = f"{n} {'line' if n == 1 else 'lines'} added."
+        else:
+            state, row["why"] = "nothing", job["detail"].get("why") or "Voltage found nothing to change here."
+            if job["detail"].get("outcome") == "updated":
+                state = "added"
+    row["state"], row["label"] = state, ROW_LABELS[state]
+    return row
+
+
+def _batch_view(batch_id: str) -> dict:
+    record = batch_engine.get(batch_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="batch not found")
+    rows = [_batch_row(c) for c in record["children"]]
+    counts: dict[str, int] = {}
+    for r in rows:
+        counts[r["state"]] = counts.get(r["state"], 0) + 1
+    return {"batch_id": record["batch_id"], "project_id": record["project_id"], "source": record["source"],
+            "goal": record["goal"], "phase": record["phase"], "status": record["status"], "step": record["step"],
+            "created_at": record["created_at"], "started_at": record.get("started_at"), "finished_at": record.get("finished_at"),
+            "totals": record["totals"], "summary": record.get("summary"), "rows": rows, "counts": counts,
+            "spent_usd": round(sum(r["spent_usd"] for r in rows), 4),
+            "can_add": any(r["state"] == "ready" for r in rows) and record["phase"] != "gate"}
+
+
+def _owned_batch(project_id: str, batch_id: str, owner: str) -> dict:
+    _batch_flag(owner)
+    _owned_project(project_id, owner)
+    record = batch_engine.get(batch_id)
+    if record is None or record["project_id"] != project_id:
+        raise HTTPException(status_code=404, detail="batch not found")
+    return record
+
+
+class BatchRequest(BaseModel):
+    # "ask": the user's own goal; "fix": an issue from the project check (A2).
+    source: Literal["ask", "fix"] = "ask"
+    goal: str | None = None
+    issue_id: int | None = None
+    # None: every live video in the project (for a fix, every video the issue names).
+    video_ids: list[str] | None = None
+
+
+@app.post("/projects/{project_id}/batches", status_code=201)
+def plan_batch(project_id: str, req: BatchRequest, owner: str = Depends(current_owner)) -> dict:
+    """F4/B1: plan one goal across the project's videos and open the one gate:
+    the videos, the lines the goal names, about what it costs (from measured
+    prices and this owner's own turns), about how long (from finished batch
+    turns; left out with none) and the parent's cap, the sum of each video's
+    turn cap. Nothing runs or spends until Go."""
+    _batch_flag(owner)
+    project = _owned_project(project_id, owner)
+    if not _agent_on():
+        raise HTTPException(status_code=409, detail="Voltage needs Claude to change a video (set AVE_AGENT=1 and an Anthropic key).")
+    live = {r.source.project_id: r for r in reversed(repo.list(owner, folder=project_id))}   # oldest first
+    thinking = _thinking_usd(owner)
+    if req.source == "fix":
+        if req.issue_id is None:
+            raise HTTPException(status_code=422, detail="Name the issue to fix.")
+        found = _issue_or_404(project_id, req.issue_id)
+        named = [v for v in dict.fromkeys(p["video_id"] for p in found["places"]) if v in live]
+        picked = [v for v in named if req.video_ids is None or v in req.video_ids]
+        children = [_batch_child(v, _fix_goal(found, v), owner, thinking=thinking,
+                                 lines=[p["text"] for p in found["places"] if p["video_id"] == v and p.get("text")])
+                    for v in picked]
+        goal, extra = found["message"], {"issue_id": req.issue_id}
+    else:
+        goal = (req.goal or "").strip()
+        if not goal:
+            raise HTTPException(status_code=422, detail="Say what you want done in the videos.")
+        picked = [v for v in live if req.video_ids is None or v in req.video_ids]
+        children = [_batch_child(v, goal, owner, thinking=thinking) for v in picked]
+        extra = {}
+    if not children:
+        raise HTTPException(status_code=422, detail="Pick at least one video.")
+    return _batch_view(_open_batch(project, owner, req.source, goal, children, extra)["batch_id"])
+
+
+@app.get("/projects/{project_id}/batches")
+def list_batches(project_id: str, owner: str = Depends(current_owner)) -> dict:
+    """F4: the project's batches, newest first (the latest in full)."""
+    _batch_flag(owner)
+    _owned_project(project_id, owner)
+    ids = batch_engine.of_project(project_id)
+    return {"batches": [_batch_view(b) for b in ids[:10]]}
+
+
+@app.get("/projects/{project_id}/batches/{batch_id}")
+def get_batch(project_id: str, batch_id: str, owner: str = Depends(current_owner)) -> dict:
+    _owned_batch(project_id, batch_id, owner)
+    return _batch_view(batch_id)
+
+
+@app.post("/projects/{project_id}/batches/{batch_id}/go", status_code=202)
+def go_batch(project_id: str, batch_id: str, owner: str = Depends(current_owner)) -> dict:
+    """F4: the gate's yes. Every video is queued; three run at a time."""
+    record = _owned_batch(project_id, batch_id, owner)
+    if not _agent_on():
+        raise HTTPException(status_code=409, detail="Voltage needs Claude to change a video (set AVE_AGENT=1 and an Anthropic key).")
+    _go_batch(record, owner)
+    return _batch_view(batch_id)
+
+
+@app.post("/projects/{project_id}/batches/{batch_id}/cancel")
+def cancel_batch(project_id: str, batch_id: str, owner: str = Depends(current_owner)) -> dict:
+    """F4: at the gate, drop it; running, the queued videos are cancelled and
+    the running ones finish the step they are on (each video's Stop)."""
+    _owned_batch(project_id, batch_id, owner)
+    try:
+        batch_engine.cancel(batch_id)
+    except batch_mod.BatchError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return _batch_view(batch_id)
+
+
+class BatchAnswer(BaseModel):
+    text: str
+
+
+def _answer_settles(batch_id: str, video_id: str, index: int, turn_job_id: str) -> None:
+    turn_job = _await_turn(turn_job_id)
+    out = (turn_job.result or {}) if turn_job is not None else {}
+    spent = round(float(out.get("turn_usd") or out.get("spent_usd") or 0.0), 4)
+
+    def note(record: dict) -> None:
+        for child in record["children"]:
+            if child["video_id"] == video_id and index < len(child["answers"]):
+                child["answers"][index].update(spent_usd=spent, status=getattr(turn_job, "status", "failed"))
+    batch_engine.update(batch_id, note)
+
+
+@app.post("/projects/{project_id}/batches/{batch_id}/videos/{video_id}/answer", status_code=202)
+def answer_batch_video(project_id: str, batch_id: str, video_id: str, req: BatchAnswer,
+                       owner: str = Depends(current_owner)) -> dict:
+    """F4: answer a paused video's question from the batch board: an
+    ordinary turn in that video with the answer, under what is left of its
+    share of the batch's cap."""
+    record = _owned_batch(project_id, batch_id, owner)
+    text = req.text.strip()
+    if not text:
+        raise HTTPException(status_code=422, detail="Say your answer.")
+    child = next((c for c in record["children"] if c["video_id"] == video_id), None)
+    if child is None:
+        raise HTTPException(status_code=404, detail="That video is not in this batch.")
+    row = _batch_row(child)
+    if row["state"] != "waiting":
+        raise HTTPException(status_code=409, detail="This video is not waiting on an answer.")
+    left = round(float(child["cap_usd"]) - row["spent_usd"], 2)
+    if left < 0.01:
+        raise HTTPException(status_code=409, detail=(f"This video has used its {money(float(child['cap_usd']))} share of the batch. "
+                                                     "Open it to carry on there."))
+    if not _agent_on():
+        raise HTTPException(status_code=409, detail="Voltage needs Claude to change a video (set AVE_AGENT=1 and an Anthropic key).")
+    video = _owned(video_id, owner)
+    started = _start_turn(video_id, video, text, owner, cap_usd=left, batch=True)
+    index = len(child["answers"])
+
+    def note(rec: dict) -> None:
+        for c in rec["children"]:
+            if c["video_id"] == video_id:
+                c["answers"].append({"text": text[:200], "turn_job_id": started["job_id"], "at": _now(), "spent_usd": 0.0})
+    batch_engine.update(batch_id, note)
+    with database.tx() as c:
+        activity_log.record(c, "batch.answered", user_actor(owner), video_id=video_id, project_id=project_id, target=batch_id,
+                            payload={"answer": text[:200]})
+    threading.Thread(target=_answer_settles, args=(batch_id, video_id, index, started["job_id"]), daemon=True,
+                     name=f"batch-answer-{video_id}").start()
+    return _batch_view(batch_id)
 
 
 @app.delete("/projects/{project_id}", status_code=204)
@@ -5029,9 +5522,12 @@ def allow_more(project_id: str, owner: str = Depends(current_owner)) -> dict:
 
 
 def _start_turn(project_id: str, record: ProjectRecord, text: str, owner: str, approve: bool = False,
-                carry: dict | None = None) -> dict:
+                carry: dict | None = None, cap_usd: float | None = None, batch: bool = False) -> dict:
     """Queue one turn. `carry` continues the turn a cap question ended: the
-    same turn id and start, its cap raised (`cap_usd`), the paid step approved."""
+    same turn id and start, its cap raised (`cap_usd`), the paid step approved.
+    `batch` (F4): one video of a batch turn, past the batch's one gate: its paid
+    steps are approved, its cap is `cap_usd` (its share of the batch's) and its
+    lines wait as proposals for the batch board."""
     if any(j.kind == "turn" and j.project_id == project_id and not j.done for j in jobs.all()):
         raise HTTPException(status_code=409, detail="Voltage is still on the last thing you said.")
     prefs = _settings(project_id, owner)
@@ -5044,7 +5540,7 @@ def _start_turn(project_id: str, record: ProjectRecord, text: str, owner: str, a
     approve = approve or bool(gate and (is_go(text) or text.strip().lower() == str(gate["options"][0]).lower()))
     # Consent binds before anything synthesizes this speaker's voice: under
     # Just do it before the turn, under Check with me at the yes (and at "allow more").
-    if record.consent is None and (autonomy == "draft" or approve or carry):
+    if record.consent is None and (autonomy == "draft" or approve or carry or batch):
         raise HTTPException(status_code=403, detail=CONSENT_REQUIRED)
     repo.add_message(project_id, "user", text)
     # The open question is answered by this turn, or superseded by it; either way it is kept, resolved.
@@ -5064,7 +5560,7 @@ def _start_turn(project_id: str, record: ProjectRecord, text: str, owner: str, a
     # A carried-on turn keeps the first one's id and start, so "this turn" is one figure.
     turn_id = (carry or {}).get("turn_id") or job.job_id
     since = (carry or {}).get("since") or started_at
-    cap_usd = float((carry or {}).get("cap_usd") or prefs["turn_usd"])
+    cap_usd = float((carry or {}).get("cap_usd") or cap_usd or prefs["turn_usd"])
     repo.set_settings(project_id, last_turn={"id": turn_id, "at": since, **({"cap_usd": cap_usd} if carry else {})})
     # One processing model (2026-10-20): the turn as the editor shows it, and
     # on a Go every line it will voice queued at once.
@@ -5108,9 +5604,9 @@ def _start_turn(project_id: str, record: ProjectRecord, text: str, owner: str, a
             # The raise is for the step the cap refused; this continuation's own thinking is not charged to it.
             budget_.excused = lambda: ledger.spent_usd_since(project_id, started_at, vendor="anthropic")
         turn = AgentTurn(project_id=project_id, record=record, plan_id=plan.plan_id, autonomy=autonomy, said=text,
-                         spend_approved=approve or bool(carry) or autonomy == "draft", budget=budget_, started_at=since,
+                         spend_approved=approve or bool(carry) or autonomy == "draft" or batch, budget=budget_, started_at=since,
                          report=report, commit_approved=approve, ask_before=prefs["ask_before"],
-                         stop_requested=lambda: turn_id in _stops)
+                         stop_requested=lambda: turn_id in _stops, batch=batch)
         held["turn"] = turn
         lines = _lines(record)
         names = [s.name for s in repo.speakers(project_id)]
@@ -5357,6 +5853,12 @@ def stop_jobs(project_id: str, owner: str = Depends(current_owner)) -> dict:
     """Stop: every queued job is cancelled; running ones finish; the turn
     ends after the step it is on."""
     _owned(project_id, owner)
+    return {"cancelled": _stop_video(project_id)}
+
+
+def _stop_video(project_id: str) -> int:
+    """The Stop path: queued jobs cancelled, and the running turn ends after
+    the step it is on (F4's batch cancel uses it for each running video)."""
     cancelled = 0
     for job in activity.list(project_id, active=True, limit=200):
         if job.status == "queued":
@@ -5366,7 +5868,7 @@ def stop_jobs(project_id: str, owner: str = Depends(current_owner)) -> dict:
     if view and view.get("status") == "running" and view.get("turn_id"):
         _stops.add(view["turn_id"])
         _set_turn(project_id, status="stopping", step="Stopping after this step")
-    return {"cancelled": cancelled}
+    return cancelled
 
 
 PING_SECONDS = 15.0

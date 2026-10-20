@@ -605,7 +605,7 @@ export interface HelpRef { slug: string; title: string; section: string; tour?: 
 // Every surface (the status strip, Activity, the row chips, the player's badge,
 // the chat's step list, toasts, the tab title) reads from these records.
 
-export type ActivityKind = 'voice_line' | 'design_voice' | 'clone' | 'mix' | 'render_preview' | 'export' | 'brief_update' | 'check'
+export type ActivityKind = 'voice_line' | 'design_voice' | 'clone' | 'mix' | 'render_preview' | 'export' | 'brief_update' | 'check' | 'batch'
 export type ActivityStatus = 'queued' | 'running' | 'done' | 'failed' | 'cancelled'
 /** The takes a render carries: kept edits, proposals (items), and their candidates. */
 export interface RenderIncludes { candidate_ids: string[]; edit_ids: string[]; item_ids: string[] }
