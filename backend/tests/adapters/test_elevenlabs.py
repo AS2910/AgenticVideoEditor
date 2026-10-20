@@ -239,6 +239,24 @@ def test_a_take_that_did_not_fit_is_reused_when_the_user_answers(store):
     assert len(post.calls) == 2
 
 
+@needs_ffmpeg
+def test_a_take_that_ran_long_is_measured_and_held_for_the_free_rungs_of_the_fit_ladder(store):
+    """p61: the take's own spoken length is measured for the voice's rate, and
+    the paid take is held, so an earlier start or an eased picture reuses it."""
+    from dataclasses import replace
+    post = FakePost()
+    voice = adapter(store, post=post)
+    tiny = EditPlan(Selection(0.4, 0.5), "30% off", "speaker-1")
+    assert not voice.holds(SOURCE, tiny, TRANSCRIPT)
+    with pytest.raises(ffmpeg.SpanMismatch):
+        voice.synthesize(SOURCE, tiny, TRANSCRIPT)
+    assert voice.holds(SOURCE, tiny, TRANSCRIPT)
+    assert voice.last_measure["speed"] == 1.0 and voice.last_measure["seconds"] > 0.3
+    with pytest.raises(ffmpeg.SpanMismatch):
+        voice.synthesize(SOURCE, replace(tiny, flex_max=1.25), TRANSCRIPT)
+    assert len(post.calls) == 1 and voice.last_measure is None      # reused, so not paid or measured twice
+
+
 # --- Phase 10: choosing a voice ------------------------------------------------
 
 @needs_ffmpeg
@@ -319,13 +337,13 @@ def test_a_take_that_misses_gets_more_takes_and_the_nearest_wins(store):
 
 @needs_ffmpeg
 def test_when_every_take_is_too_long_the_model_is_asked_to_speak_faster(store):
-    # 1.3 s against 0.9 s is 1.44×: past atempo's 1.25, inside 1.25 × 1.2.
-    post = Takes([1.3, 1.3, 1.3, 1.0])
+    # 1.25 s against 0.9 s is 1.39×: past atempo's 1.25, inside 1.25 × 1.15 (p61: no faster than 1.15).
+    post = Takes([1.25, 1.25, 1.25, 1.0])
     voice = adapter(store, post=post)
     voice._takes = 3
     artifact = voice.synthesize(SOURCE, PLAN, TRANSCRIPT)
     assert len(post.calls) == 4
-    assert post.calls[3][1]["voice_settings"] == {"speed": 1.2}
+    assert post.calls[3][1]["voice_settings"] == {"speed": 1.15}
     assert artifact.duration == pytest.approx(0.9, abs=0.02)
     assert any("by the model" in n for n in voice.last_notes)
 

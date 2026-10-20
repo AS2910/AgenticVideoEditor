@@ -82,7 +82,7 @@ def test_the_turns_money_cap_refuses_in_a_sentence_instead_of_spending(world):
     t = world.turn(budget=TurnBudget(usd=0.01))
     world.ledger.record("p1", "elevenlabs", "take", 10, "characters", 0.01)
     out = BY_NAME["synthesize_take"].run(world.wb, t, {"text": "A long line that costs more than a cent to voice, surely.", "voice_id": "kL06KYMvPY56NluIQ72m",
-                                                       "start": 0, "end": 3, "direction": None, "mix": None, "line": None, "item_id": None})
+                                                       "start": 0, "end": 5, "direction": None, "mix": None, "line": None, "item_id": None})
     assert out.text.startswith("This step would cost about $0.02; the turn's cap is $0.01 and $0.01 is spent.")
     assert world.made == []
 

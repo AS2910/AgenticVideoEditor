@@ -393,3 +393,77 @@ def place(
     path, duration = ffmpeg.place(source, dest, target, fit, mix)
     scale = natural / target if fit == "stretch" and mix != "concatenate" and natural > 0 else 1.0
     return path, duration, [], remap_words(words, [], 1, scale)
+
+
+# ── Writing to length (2026-10-20, the fit ladder) ────────────────────────────
+#
+# A line is written to its window before it is voiced: the window's length and
+# the voice's own measured rate give a syllable budget, and a pre-flight check
+# refuses a line that would run long before anything is paid for.
+
+# A voice with no takes measured yet. Slower than speech in a transcript
+# (DEFAULT_RATE): directed takes run slower, and p61's commentary needed
+# 4.4 s for 13 syllables (about 3 a second) where 4.5 a second promised 2.9.
+DEFAULT_VOICE_RATE = 4.0
+# What a delivery mark adds to a take, beyond its syllables (seconds).
+TAG_SECONDS = 0.1                 # an audio tag ([excited]): a breath, a beat
+HOLD_SECONDS = 0.35               # an ellipsis: a held beat
+COMMA_SECONDS = 0.12
+STOP_SECONDS = 0.25               # a full stop, ! or ? inside the line
+# The pre-flight check: a line estimated past its window by more than this is refused.
+PREFLIGHT_OVER = 0.10
+# The fit ladder's rungs, in order, after the take's own pauses are trimmed.
+EARLY_START = 0.15                # a placed line may start this much earlier
+MODEL_SPEED_MAX = 1.15            # the model's own speed on a retake
+# The most the picture slows when the user lets it ease a line in.
+USER_EASE_MAX = 1.25
+# The breathing room between two added lines, and how much of a clip
+# commentary may fill.
+LINE_GAP = 0.2
+COMMENTARY_SHARE = 0.7
+
+_TAG_RE = re.compile(r"\[[^\[\]\n]{1,40}\]")
+
+
+def tags_of(text: str) -> list[str]:
+    """The audio tags in a line, without brackets: "[curious] So..." -> ["curious"]."""
+    return [t[1:-1].strip() for t in _TAG_RE.findall(text or "")]
+
+
+def spoken(text: str) -> str:
+    """The words a line says: its audio tags taken out."""
+    return " ".join(_TAG_RE.sub(" ", text or "").split())
+
+
+def allowance(text: str) -> float:
+    """Seconds a line takes beyond its syllables: tags, held beats, commas
+    and the stops inside it (the last one ends the line and costs nothing)."""
+    words = spoken(text)
+    holds = words.count("...") + words.count("…")
+    plain = words.replace("...", " ").replace("…", " ")
+    commas = plain.count(",") + plain.count(";") + plain.count(":")
+    stops = len(re.findall(r"[.!?]+(?=\s+\S)", plain))
+    return round(len(tags_of(text)) * TAG_SECONDS + holds * HOLD_SECONDS + commas * COMMA_SECONDS + stops * STOP_SECONDS, 3)
+
+
+def estimate_seconds(text: str, rate: float, speed: float = 1.0) -> float:
+    """How long a line runs as spoken: its syllables at the voice's rate (and
+    the model's speed setting), plus what its marks add."""
+    pace = max(0.5, rate) * max(0.5, speed or 1.0)
+    return round(syllables(spoken(text)) / pace + allowance(text), 3)
+
+
+def syllables_for(seconds: float, rate: float, text: str = "", speed: float = 1.0) -> int:
+    """The syllables a window of `seconds` holds at `rate`, after what the
+    line's own marks take (none when `text` is empty)."""
+    return max(1, int(max(0.0, seconds - allowance(text)) * max(0.5, rate) * max(0.5, speed or 1.0)))
+
+
+def rate_sample(text: str, seconds: float, speed: float = 1.0) -> tuple[int, float] | None:
+    """One measured take as (syllables, seconds at speed 1 with the marks
+    taken out), for the voice's rate; None when it is too short to say much."""
+    n = syllables(spoken(text))
+    talk = (seconds - allowance(text)) * max(0.5, speed or 1.0)
+    if n < 3 or talk < 0.5:
+        return None
+    return n, round(talk, 3)

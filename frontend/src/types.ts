@@ -68,6 +68,27 @@ export interface PlanItem {
   note: string | null
   /** What is happening to it right now, in words, while the plan runs. */
   progress: string | null
+  /** p61: why the line could not be fitted, when it ran long for its gap. */
+  fit_failure?: FitFailure | null
+}
+
+/** A line that ran long (p61): every figure measured or recorded by the server. */
+export interface FitFailure {
+  reason: 'too_long'
+  /** Seconds the take needs, and seconds its gap has. */
+  needs: number
+  has: number
+  /** The fit ladder's rungs, in the order they were tried. */
+  tried: string[]
+  syllables: number
+  /** The syllables a shorter line should be written to. */
+  budget: number
+  /** What the take that ran long cost (a shorter one costs no more). */
+  cost_usd: number
+  text: string
+  /** The paid take, fitted with the picture easing, kept for the user (no new cost). */
+  eased_candidate_id: string | null
+  ease_s: number | null
 }
 
 /** One thing the planner wants to know first, with its own guess. */
