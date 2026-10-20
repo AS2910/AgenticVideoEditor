@@ -62,6 +62,10 @@ def _narrator(on_step: OnStep | None) -> Callable[[str, float, str, Any], None] 
     return lambda step, cost, tool, data: on_step(step, cost)
 
 
+# Why a turn ended when the user pressed Stop (2026-10-20).
+STOPPED = "Stopped by you."
+
+
 @dataclass
 class Outcome:
     reply: str = ""
@@ -256,6 +260,8 @@ class Agent:
             results: list[dict] = []
             ended: WaitingForUser | TurnStopped | None = None
             for use in uses:
+                if ended is None and turn.stop_requested():
+                    ended = TurnStopped(STOPPED)
                 if ended is not None:
                     results.append(_result_block(use["id"], ToolResult("Not run: the turn ended before this step."), True))
                     continue
@@ -294,7 +300,12 @@ class Agent:
                 out.question = _question_of(ended)
                 out.reply = _text_of(content)
                 break
-            if isinstance(ended, TurnStopped):
+            if isinstance(ended, TurnStopped) or (ended is None and turn.stop_requested()):
+                if ended is None or str(ended) == STOPPED:
+                    # The user's Stop: no follow-up question, the editor says what finished.
+                    out.reply = _text_of(content) or None
+                    out.stopped = STOPPED
+                    break
                 out.reply = _text_of(content) or str(ended)
                 out.stopped = str(ended)
                 # The turn cannot go on, so lines that ran long are asked about together.

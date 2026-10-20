@@ -88,11 +88,23 @@ CREATE TABLE IF NOT EXISTS usage (
     turn_id    TEXT                    -- the turn that caused it (spend scopes); NULL outside a turn
 );
 CREATE INDEX IF NOT EXISTS usage_by_project ON usage (project_id);
+CREATE TABLE IF NOT EXISTS jobs (
+    seq        INTEGER PRIMARY KEY AUTOINCREMENT,
+    job_id     TEXT NOT NULL UNIQUE,   -- J<seq>
+    project_id TEXT NOT NULL,          -- the video
+    turn_id    TEXT,
+    kind       TEXT NOT NULL,          -- voice_line | design_voice | clone | mix | render_preview | export
+    status     TEXT NOT NULL,          -- queued | running | done | failed | cancelled
+    touched    REAL NOT NULL,          -- epoch seconds of the last change, for the timeout sweep
+    body       TEXT NOT NULL           -- JSON: the whole record (2026-10-20, one processing model)
+);
+CREATE INDEX IF NOT EXISTS jobs_by_video ON jobs (project_id, seq);
+CREATE INDEX IF NOT EXISTS jobs_by_status ON jobs (status);
 """
 
 # The tables keyed by a video's id (their `project_id` column is the video id,
 # from before projects were folders).
-PROJECT_TABLES = ("candidates", "edits", "messages", "usage", "plans", "turns")
+PROJECT_TABLES = ("candidates", "edits", "messages", "usage", "plans", "turns", "jobs")
 
 # Columns added after a table first shipped: (table, column, definition).
 # Applied to databases created before them; new databases get them from SCHEMA.

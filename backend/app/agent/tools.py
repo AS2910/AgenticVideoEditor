@@ -10,7 +10,7 @@ from __future__ import annotations
 import base64
 import math
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Callable, Sequence
 
@@ -88,6 +88,28 @@ class Workbench:
     # held (one that did not fit): never calls the vendor. None when the take
     # is not held; raises SpanMismatch when it still does not fit.
     held_take: Callable[..., Any] | None = None
+    # 2026-10-20 (one processing model): every line voiced is a Job the editor
+    # can show; None in a setup without them (the agent tests).
+    jobs: Any = None
+
+
+class NoJobs:
+    """The job hooks when there are none: every call is a no-op."""
+
+    def claim(self, project_id: str, item_id: str, **kw) -> str | None:
+        return None
+
+    def begin(self, project_id: str, kind: str, label: str, **kw) -> str | None:
+        return None
+
+    def step(self, job_id: str | None, label: str, progress: float | None = None) -> None:
+        return None
+
+    def settle(self, job_id: str | None, **kw) -> None:
+        return None
+
+
+NO_JOBS = NoJobs()
 
 
 @dataclass
@@ -111,6 +133,8 @@ class Turn:
     fit_failed: dict = field(default_factory=dict)
     fit_retried: set = field(default_factory=set)
     fit_nudged: bool = False
+    # 2026-10-20: the user pressed Stop; the turn ends after the step that is running.
+    stop_requested: Callable[[], bool] = lambda: False
 
     def asks_before(self, what: str) -> bool:
         """Whether this committing step waits for the user: always under
@@ -257,12 +281,14 @@ def _plan_lines(wb: Workbench, turn: Turn, args: dict) -> ToolResult:
     out = [f"{len(out_plan['lines'])} lines over {duration:.1f} s. {fitting.rate_words(_voice_name(wb, vid, turn), rate, takes)}"
            + (f", at speed {speed:g}" if abs(speed - 1) > 1e-6 else "") + "."]
     long = 0
+    planned = _plan_rows(wb, turn, out_plan["lines"])
     for n, r in enumerate(out_plan["lines"], 1):
         head = f"{n}. {r['start']:.1f}–{r['end']:.1f} s, a {r['window']:.1f} s window: up to {r['budget']} syllables"
         if r["estimate"] is None:
             out.append(head + ".")
         elif r["fits"]:
-            out.append(head + f"; “{r['text']}” runs about {r['estimate']:.1f} s ({r['syllables']} syllables). Fits.")
+            out.append(head + f"; “{r['text']}” runs about {r['estimate']:.1f} s ({r['syllables']} syllables). Fits."
+                       + (f" Planned as {planned[n - 1]}." if planned.get(n - 1) else ""))
         else:
             long += 1
             out.append(head + f"; “{r['text']}” runs about {r['estimate']:.1f} s ({r['syllables']} syllables). Too long: "
@@ -273,9 +299,37 @@ def _plan_lines(wb: Workbench, turn: Turn, args: dict) -> ToolResult:
     if out_plan["over"]:
         out.append(f"For commentary that is too much: keep it under about {out_plan['limit']:.1f} s "
                    f"({fitmod.COMMENTARY_SHARE:.0%}). Cut a line or shorten several, so they breathe.")
-    out.append("Write each line to its budget, then voice them. synthesize_take refuses a line it estimates too long, before paying.")
+    out.append("Write each line to its budget, then voice them. synthesize_take refuses a line it estimates too long, before paying."
+               + (" Voice a planned line with its item_id." if planned else ""))
     step = f"Planned {len(out_plan['lines'])} lines together" + (f": {long} too long, to rewrite" if long else ": each fits its window")
     return ToolResult("\n".join(out), step=step)
+
+
+def _plan_rows(wb: Workbench, turn: Turn, rows: Sequence[dict]) -> dict[int, str]:
+    """Lines planned with their words, that fit, stand in the plan as items
+    before any is voiced (2026-10-20): the user sees each row, and their Go
+    queues every one at once. A line planned again at the same start keeps its
+    item. Returns {row index: item id}."""
+    plan = _plan(wb, turn)
+    items = list(plan.items)
+    out: dict[int, str] = {}
+    for n, r in enumerate(rows):
+        if not r.get("text") or not r.get("fits"):
+            continue
+        sel = Selection(round(float(r["start"]), 2), round(float(r["end"]), 2))
+        same = next((k for k, i in enumerate(items) if i.kind == "planned" and i.old_text == "" and i.status == "planned"
+                     and abs(i.selection.start - sel.start) < 0.05), None)
+        if same is not None:
+            items[same] = replace(items[same], new_text=r["text"], selection=sel)
+            out[n] = items[same].item_id
+            continue
+        item = PlanItem(item_id=f"i{len(items) + 1}", selection=sel, old_text="", new_text=r["text"], speaker=None,
+                        mix="layer", delivery=None, reason="", kind="planned", enabled=True, status="planned")
+        items.append(item)
+        out[n] = item.item_id
+    if out:
+        wb.repo.update_plan(turn.project_id, turn.plan_id, items=tuple(items))
+    return out
 
 
 def _hear(wb: Workbench, turn: Turn, args: dict) -> ToolResult:
@@ -652,6 +706,12 @@ def _synthesize_take(wb: Workbench, turn: Turn, args: dict) -> ToolResult:
                              and i.status not in ("dismissed", "approved")
                              and abs(i.selection.start - hit.start) < 0.01 and abs(i.selection.end - hit.end) < 0.01), None)
 
+    if existing is None and not item_id and not line_no and args.get("start") is not None:
+        # A line planned with its words (plan_lines) is voiced as its own item, even when the call names only its start.
+        at = float(args["start"])
+        existing = next((i for i in plan.items if i.kind == "planned" and i.old_text == "" and i.status == "planned"
+                         and abs(i.selection.start - at) < 0.05), None)
+
     moved = False
     if existing is not None:
         selection, old_text, mix, speaker = existing.selection, existing.old_text, existing.mix, existing.speaker
@@ -752,175 +812,220 @@ def _synthesize_take(wb: Workbench, turn: Turn, args: dict) -> ToolResult:
         wb.repo.update_item(turn.project_id, turn.plan_id, item.item_id, status="working", new_text=text,
                             delivery=delivery, reason=direction or "", error=None, selection=selection, mix=mix)
 
+    # The line's Job (one processing model): the one the user's Go queued for this item, or a new one.
+    jobs = wb.jobs or NO_JOBS
+    job_id = jobs.claim(turn.project_id, item.item_id, text=text, voice_name=name, params={
+        "plan_id": turn.plan_id, "selection": [selection.start, selection.end], "text": text, "voice_id": voice_id,
+        "fit": fit, "mix": mix, "delivery": delivery, "voice_notes": list(voice_notes), "voice_settings": settings,
+        "model": model, "flex_max": flex_max, "role": role, "offset_db": offset_db})
+
     def step(progress: float, what: str) -> None:
         turn.report(turn.progress, what)
         wb.repo.update_item(turn.project_id, turn.plan_id, item.item_id, progress=what)
+        jobs.step(job_id, what)
 
-    if retry:
-        turn.fit_retried.add(item.item_id)
-    beat_at, key_word = args.get("beat_at"), (args.get("key_word") or "").strip()
-    beat = {"at": float(beat_at), "key_word": key_word} if isinstance(beat_at, (int, float)) and beat_at >= 0 else None
+    def voice_and_report() -> ToolResult:
+        if retry:
+            turn.fit_retried.add(item.item_id)
+        beat_at, key_word = args.get("beat_at"), (args.get("key_word") or "").strip()
+        beat = {"at": float(beat_at), "key_word": key_word} if isinstance(beat_at, (int, float)) and beat_at >= 0 else None
 
-    def voice_it(sel: Selection, sets: dict | None, *, held: bool = False, flex: float | None = flex_max) -> Any:
-        """One call to the pipeline; `held` only reuses the take already paid for (None when there is none)."""
-        fn = wb.held_take if held else wb.generate
-        if fn is None:
-            return None
-        return fn(turn.project_id, record, wb.repo.next_candidate_id(turn.project_id), sel, text, voice_id,
-                  fit, mix, step, delivery=delivery, voice_notes=voice_notes,
-                  voice_settings=sets, model=model, flex_max=flex, max_regenerations=0,
-                  role=role, offset_db=offset_db)
+        def voice_it(sel: Selection, sets: dict | None, *, held: bool = False, flex: float | None = flex_max) -> Any:
+            """One call to the pipeline; `held` only reuses the take already paid for (None when there is none)."""
+            fn = wb.held_take if held else wb.generate
+            if fn is None:
+                return None
+            return fn(turn.project_id, record, wb.repo.next_candidate_id(turn.project_id), sel, text, voice_id,
+                      fit, mix, step, delivery=delivery, voice_notes=voice_notes,
+                      voice_settings=sets, model=model, flex_max=flex, max_regenerations=0,
+                      role=role, offset_db=offset_db)
 
-    def measure(outcome: str, sets: dict | None, win: float) -> dict:
-        """The take's own length against the estimate: the voice's rate learns from it, and the log keeps both."""
-        got = wb.measured() or {}
-        if got.get("seconds"):
-            fitting.learn(wb.repo, voice_id, text, float(got["seconds"]), float(got.get("speed") or (sets or {}).get("speed") or 1.0),
-                          estimate=estimate if sets == settings else None, window=win, video=turn.project_id,
-                          item=item.item_id, outcome=outcome, at=wb.now())
-        return got
+        def measure(outcome: str, sets: dict | None, win: float) -> dict:
+            """The take's own length against the estimate: the voice's rate learns from it, and the log keeps both."""
+            got = wb.measured() or {}
+            if got.get("seconds"):
+                fitting.learn(wb.repo, voice_id, text, float(got["seconds"]), float(got.get("speed") or (sets or {}).get("speed") or 1.0),
+                              estimate=estimate if sets == settings else None, window=win, video=turn.project_id,
+                              item=item.item_id, outcome=outcome, at=wb.now())
+            return got
 
-    def climb(first: Exception, seen: dict) -> tuple[Any, Selection, list[str], Exception]:
-        """The fit ladder (p61), in order, after the take's own pauses are trimmed:
-        start up to 150 ms early; the model's own speed up to 1.15 on a retake;
-        let the next added line flow later if it has room before its beat; the
-        picture eases only where allowed. (candidate or None, its span, what was tried, the last mismatch.)"""
-        from app.media.ffmpeg import MAX_TEMPO
-        tried = ["trimmed the take's pauses, lead-in and tail, and sped the speech up to 1.25×"]
-        last, sel, sets = first, selection, settings
-        if old_text == "" and mix == "layer":
-            early = round(max(0.0, _end_before(wb, turn, item.item_id, sel.start), sel.start - fitmod.EARLY_START), 2)
-            ahead = round(sel.start - early, 2)
-            if ahead >= 0.01:
-                moved_to = Selection(early, sel.end)
+        def climb(first: Exception, seen: dict) -> tuple[Any, Selection, list[str], Exception]:
+            """The fit ladder (p61), in order, after the take's own pauses are trimmed:
+            start up to 150 ms early; the model's own speed up to 1.15 on a retake;
+            let the next added line flow later if it has room before its beat; the
+            picture eases only where allowed. (candidate or None, its span, what was tried, the last mismatch.)"""
+            from app.media.ffmpeg import MAX_TEMPO
+            tried = ["trimmed the take's pauses, lead-in and tail, and sped the speech up to 1.25×"]
+            last, sel, sets = first, selection, settings
+            if old_text == "" and mix == "layer":
+                early = round(max(0.0, _end_before(wb, turn, item.item_id, sel.start), sel.start - fitmod.EARLY_START), 2)
+                ahead = round(sel.start - early, 2)
+                if ahead >= 0.01:
+                    moved_to = Selection(early, sel.end)
+                    try:
+                        got = voice_it(moved_to, sets, held=True)
+                    except Exception as exc:  # noqa: BLE001
+                        if not _too_long(exc):
+                            return None, sel, tried, last
+                        got, last = None, exc
+                        tried.append(f"started {ahead * 1000:.0f} ms early")
+                        sel = moved_to
+                    if got is not None:
+                        return got, moved_to, tried + [f"started {ahead * 1000:.0f} ms early"], last
+                else:
+                    tried.append("could not start earlier: the line before ends there")
+            current = float((sets or {}).get("speed") or 1.0)
+            want = current * last.natural / max(0.1, (sel.end - sel.start) * MAX_TEMPO)
+            if seen.get("faster_tried"):
+                tried.append(f"a retake at {float(seen['faster_tried']):.2f}× speed")
+            elif current >= fitmod.MODEL_SPEED_MAX - 1e-6:
+                tried.append(f"already spoken at {current:.2f}× by the model")
+            elif want > fitmod.MODEL_SPEED_MAX:
+                tried.append(f"a faster retake would need {want:.2f}× speed, past the {fitmod.MODEL_SPEED_MAX:.2f}× that still sounds natural")
+            elif _over_cap(wb, turn, text):
+                tried.append("a faster retake would pass this turn's cap")
+            else:
+                faster = {**(sets or {}), "speed": round(min(fitmod.MODEL_SPEED_MAX, max(math.ceil(want * 100) / 100, current + 0.05)), 2)}
+                jobs.step(job_id, f"Retake at {faster['speed']:.2f}x")
                 try:
-                    got = voice_it(moved_to, sets, held=True)
+                    got = voice_it(sel, faster)
+                    measure("fit", faster, sel.end - sel.start)
+                    return got, sel, tried + [f"a retake at {faster['speed']:.2f}× speed"], last
                 except Exception as exc:  # noqa: BLE001
                     if not _too_long(exc):
                         return None, sel, tried, last
-                    got, last = None, exc
-                    tried.append(f"started {ahead * 1000:.0f} ms early")
-                    sel = moved_to
-                if got is not None:
-                    return got, moved_to, tried + [f"started {ahead * 1000:.0f} ms early"], last
+                    measure("too long", faster, sel.end - sel.start)
+                    last, sets = exc, faster
+                    tried.append(f"a retake at {faster['speed']:.2f}× speed")
+            extra = round(last.natural / MAX_TEMPO - (sel.end - sel.start) + 0.02, 2)
+            if extra > 0 and old_text == "" and mix == "layer":
+                room, nxt, shift = _flow_room(wb, turn, item.item_id, sel, extra)
+                if room >= extra:
+                    longer = Selection(sel.start, round(min(duration, sel.end + extra), 2))
+                    try:
+                        got = voice_it(longer, sets, held=True)
+                    except Exception as exc:  # noqa: BLE001
+                        if not _too_long(exc):
+                            return None, sel, tried, last
+                        got, last = None, exc
+                        tried.append(f"ran on {extra:.1f} s into the room after it, still too long")
+                    if got is not None:
+                        flowed = _flow_later(wb, turn, nxt, shift) if nxt is not None and shift > 0 else ""
+                        return got, longer, tried + [f"ran on {extra:.1f} s into the room after it" + flowed], last
+                else:
+                    tried.append("the next line had no room before its beat" if nxt is not None else "no free room after it")
+            if flex_max is None or flex_max > 1.0:
+                tried.append("let the picture ease, as allowed")
             else:
-                tried.append("could not start earlier: the line before ends there")
-        current = float((sets or {}).get("speed") or 1.0)
-        want = current * last.natural / max(0.1, (sel.end - sel.start) * MAX_TEMPO)
-        if seen.get("faster_tried"):
-            tried.append(f"a retake at {float(seen['faster_tried']):.2f}× speed")
-        elif current >= fitmod.MODEL_SPEED_MAX - 1e-6:
-            tried.append(f"already spoken at {current:.2f}× by the model")
-        elif want > fitmod.MODEL_SPEED_MAX:
-            tried.append(f"a faster retake would need {want:.2f}× speed, past the {fitmod.MODEL_SPEED_MAX:.2f}× that still sounds natural")
-        elif _over_cap(wb, turn, text):
-            tried.append("a faster retake would pass this turn's cap")
-        else:
-            faster = {**(sets or {}), "speed": round(min(fitmod.MODEL_SPEED_MAX, max(math.ceil(want * 100) / 100, current + 0.05)), 2)}
-            try:
-                got = voice_it(sel, faster)
-                measure("fit", faster, sel.end - sel.start)
-                return got, sel, tried + [f"a retake at {faster['speed']:.2f}× speed"], last
-            except Exception as exc:  # noqa: BLE001
-                if not _too_long(exc):
-                    return None, sel, tried, last
-                measure("too long", faster, sel.end - sel.start)
-                last, sets = exc, faster
-                tried.append(f"a retake at {faster['speed']:.2f}× speed")
-        extra = round(last.natural / MAX_TEMPO - (sel.end - sel.start) + 0.02, 2)
-        if extra > 0 and old_text == "" and mix == "layer":
-            room, nxt, shift = _flow_room(wb, turn, item.item_id, sel, extra)
-            if room >= extra:
-                longer = Selection(sel.start, round(min(duration, sel.end + extra), 2))
-                try:
-                    got = voice_it(longer, sets, held=True)
-                except Exception as exc:  # noqa: BLE001
-                    if not _too_long(exc):
-                        return None, sel, tried, last
-                    got, last = None, exc
-                    tried.append(f"ran on {extra:.1f} s into the room after it, still too long")
-                if got is not None:
-                    flowed = _flow_later(wb, turn, nxt, shift) if nxt is not None and shift > 0 else ""
-                    return got, longer, tried + [f"ran on {extra:.1f} s into the room after it" + flowed], last
-            else:
-                tried.append("the next line had no room before its beat" if nxt is not None else "no free room after it")
-        if flex_max is None or flex_max > 1.0:
-            tried.append("let the picture ease, as allowed")
-        else:
-            tried.append("the picture may not ease unless you allow it")
-        return None, sel, tried, last
+                tried.append("the picture may not ease unless you allow it")
+            return None, sel, tried, last
 
-    before = wb.ledger.spent_usd(turn.project_id)
-    used, tried = selection, []
-    try:
-        # One take per call (the adapter's takes-by-duration aside): a take that
-        # fails the sound check comes back with its report, and the retry — with
-        # a different direction, voice or wording — is Voltage's own call.
-        candidate = voice_it(selection, settings)
-        measure("fit", settings, window)
-    except Exception as exc:  # noqa: BLE001 — the model hears why and decides; nothing crashes the turn
-        candidate = None
-        if _too_long(exc):
-            seen = measure("too long", settings, window)
-            candidate, used, tried, last = climb(exc, seen)
+        before = wb.ledger.spent_usd(turn.project_id)
+        used, tried = selection, []
+        try:
+            # One take per call (the adapter's takes-by-duration aside): a take that
+            # fails the sound check comes back with its report, and the retry — with
+            # a different direction, voice or wording — is Voltage's own call.
+            candidate = voice_it(selection, settings)
+            measure("fit", settings, window)
+        except Exception as exc:  # noqa: BLE001 — the model hears why and decides; nothing crashes the turn
+            candidate = None
+            if _too_long(exc):
+                seen = measure("too long", settings, window)
+                candidate, used, tried, last = climb(exc, seen)
+                if candidate is None:
+                    return _ran_long(wb, turn, item, attempt, text, window, last, tried, before, voice_it, used, settings, flex_max,
+                                     retried=item.item_id in turn.fit_retried, beat=beat)
             if candidate is None:
-                return _ran_long(wb, turn, item, attempt, text, window, last, tried, before, voice_it, used, settings, flex_max,
-                                 retried=item.item_id in turn.fit_retried, beat=beat)
-        if candidate is None:
-            reason = str(exc) or type(exc).__name__
-            finish = getattr(wb.repo, "finish_attempt", None)
-            state = finish(turn.project_id, turn.plan_id, item.item_id, attempt, error=reason) if finish else "failed"
-            if not finish:
-                wb.repo.update_item(turn.project_id, turn.plan_id, item.item_id, status="failed", error=reason, progress=None)
-            kept = (f" {item.item_id} keeps its earlier take {wb.repo.get_plan(turn.project_id, turn.plan_id).item(item.item_id).candidate_id}, ready to hear."
-                    if state == "ready" else f" {item.item_id} has no take.")
-            return ToolResult(f"The take could not be made: {reason}{kept}", step=f"Could not voice “{text[:40]}”: {reason[:80]}")
-    cost = max(0.0, wb.ledger.spent_usd(turn.project_id) - before)
-    finish = getattr(wb.repo, "finish_attempt", None)
-    if finish:
-        extra_changes = {"selection": used} if used != selection else {}
-        state = finish(turn.project_id, turn.plan_id, item.item_id, attempt, candidate_id=candidate.candidate_id, fit=candidate.plan.fit, note=None,
-                       fit_failure=None, beat=beat, **extra_changes)
-        if state == "stale":
-            return ToolResult(f"Take {candidate.candidate_id} was made, but a newer attempt on {item.item_id} has started; "
-                              "it is kept in the item's history, not shown.")
-    else:
-        wb.repo.update_item(turn.project_id, turn.plan_id, item.item_id, status="ready", candidate_id=candidate.candidate_id,
-                            progress=None, error=None, fit=candidate.plan.fit)
-    turn.takes.append(candidate.candidate_id)
-    report = candidate.continuity
-    verdict = "sounds right" if report.passed else "did not pass the sound check" + (
-        f": {'; '.join(report.warnings)}" if report.warnings else "")
-    took = candidate.plan.selection
-    notes = f" Fit: {', '.join(candidate.fit_notes)}." if candidate.fit_notes else ""
-    wps = ""
-    if candidate.words:
-        secs = max(0.1, candidate.words[-1].end - candidate.words[0].start)
-        wps = f" The take itself runs {secs:.1f} s, {len(candidate.words) / secs:.1f} words a second."
-    where = (f"placed at {took.start:.2f} s, over the picture" if item.old_text == "" and mix == "layer"
-             else f"at {took.start:.2f}–{took.end:.2f} s ({took.end - took.start:.2f} s slot)")
-    how_said = f" Spoken with {model or 'the default model'}" + (
-        f", {', '.join(f'{k} {v:g}' for k, v in settings.items())}" if settings else "") + "."
-    if voice_notes:
-        how_said += " " + " ".join(voice_notes)
-    beat_at, key_word = args.get("beat_at"), (args.get("key_word") or "").strip()
-    landing, landed = "", None
-    if key_word and isinstance(beat_at, (int, float)) and beat_at >= 0:
-        from app.agent.landing import landing_note
-        landing, miss = landing_note(candidate.words, took.start, key_word, float(beat_at))
-        landed = {"beat_at": float(beat_at), "key_word": key_word, "miss": miss}
-        if miss is not None:
-            wb.repo.update_item(turn.project_id, turn.plan_id, item.item_id, beat={**(beat or {}), "miss": miss},
-                                note=None if abs(miss) <= 0.3 else f"“{key_word}” lands {abs(miss):.1f} s {'late' if miss > 0 else 'early'} for its beat.")
-    if len(tried) > 1:
-        notes += f" It ran long at first; it fits now after: {'; '.join(tried)}."
-    text_out = (f"Take {candidate.candidate_id} on {item.item_id}, {whose}, {where}. It {verdict}.{notes}{wps}{landing}{how_said} "
-                f"Cost ${cost:.2f}.{' The item moved to the new span.' if moved else ''} "
-                f"The user can hear it now; voice it again (same item_id) to try another direction or wording, "
-                f"or with a new start and end to move it.")
-    how = f" · {direction}" if direction else ""
-    return ToolResult(text_out, step=f"Voiced “{text[:48]}{'…' if len(text) > 48 else ''}” with {name}{how}", cost_usd=cost,
-                      data={"landing": landed} if landed else None)
+                reason = str(exc) or type(exc).__name__
+                finish = getattr(wb.repo, "finish_attempt", None)
+                state = finish(turn.project_id, turn.plan_id, item.item_id, attempt, error=reason) if finish else "failed"
+                if not finish:
+                    wb.repo.update_item(turn.project_id, turn.plan_id, item.item_id, status="failed", error=reason, progress=None)
+                kept = (f" {item.item_id} keeps its earlier take {wb.repo.get_plan(turn.project_id, turn.plan_id).item(item.item_id).candidate_id}, ready to hear."
+                        if state == "ready" else f" {item.item_id} has no take.")
+                return ToolResult(f"The take could not be made: {reason}{kept}", step=f"Could not voice “{text[:40]}”: {reason[:80]}")
+        cost = max(0.0, wb.ledger.spent_usd(turn.project_id) - before)
+        finish = getattr(wb.repo, "finish_attempt", None)
+        if finish:
+            extra_changes = {"selection": used} if used != selection else {}
+            state = finish(turn.project_id, turn.plan_id, item.item_id, attempt, candidate_id=candidate.candidate_id, fit=candidate.plan.fit, note=None,
+                           fit_failure=None, beat=beat, **extra_changes)
+            if state == "stale":
+                return ToolResult(f"Take {candidate.candidate_id} was made, but a newer attempt on {item.item_id} has started; "
+                                  "it is kept in the item's history, not shown.")
+        else:
+            wb.repo.update_item(turn.project_id, turn.plan_id, item.item_id, status="ready", candidate_id=candidate.candidate_id,
+                                progress=None, error=None, fit=candidate.plan.fit)
+        turn.takes.append(candidate.candidate_id)
+        report = candidate.continuity
+        verdict = "sounds right" if report.passed else "did not pass the sound check" + (
+            f": {'; '.join(report.warnings)}" if report.warnings else "")
+        took = candidate.plan.selection
+        notes = f" Fit: {', '.join(candidate.fit_notes)}." if candidate.fit_notes else ""
+        wps = ""
+        if candidate.words:
+            secs = max(0.1, candidate.words[-1].end - candidate.words[0].start)
+            wps = f" The take itself runs {secs:.1f} s, {len(candidate.words) / secs:.1f} words a second."
+        where = (f"placed at {took.start:.2f} s, over the picture" if item.old_text == "" and mix == "layer"
+                 else f"at {took.start:.2f}–{took.end:.2f} s ({took.end - took.start:.2f} s slot)")
+        how_said = f" Spoken with {model or 'the default model'}" + (
+            f", {', '.join(f'{k} {v:g}' for k, v in settings.items())}" if settings else "") + "."
+        if voice_notes:
+            how_said += " " + " ".join(voice_notes)
+        beat_at, key_word = args.get("beat_at"), (args.get("key_word") or "").strip()
+        landing, landed = "", None
+        if key_word and isinstance(beat_at, (int, float)) and beat_at >= 0:
+            from app.agent.landing import landing_note
+            landing, miss = landing_note(candidate.words, took.start, key_word, float(beat_at))
+            landed = {"beat_at": float(beat_at), "key_word": key_word, "miss": miss}
+            if miss is not None:
+                wb.repo.update_item(turn.project_id, turn.plan_id, item.item_id, beat={**(beat or {}), "miss": miss},
+                                    note=None if abs(miss) <= 0.3 else f"“{key_word}” lands {abs(miss):.1f} s {'late' if miss > 0 else 'early'} for its beat.")
+        if len(tried) > 1:
+            notes += f" It ran long at first; it fits now after: {'; '.join(tried)}."
+        text_out = (f"Take {candidate.candidate_id} on {item.item_id}, {whose}, {where}. It {verdict}.{notes}{wps}{landing}{how_said} "
+                    f"Cost ${cost:.2f}.{' The item moved to the new span.' if moved else ''} "
+                    f"The user can hear it now; voice it again (same item_id) to try another direction or wording, "
+                    f"or with a new start and end to move it.")
+        how = f" · {direction}" if direction else ""
+        return ToolResult(text_out, step=f"Voiced “{text[:48]}{'…' if len(text) > 48 else ''}” with {name}{how}", cost_usd=cost,
+                          data={"landing": landed} if landed else None)
+
+
+    made_before = len(turn.takes)
+    try:
+        result = voice_and_report()
+    except BaseException as exc:
+        jobs.settle(job_id, ok=False, code="unknown", text=str(exc) or type(exc).__name__)
+        raise
+    _settle_line_job(wb, turn, jobs, job_id, item.item_id, result, made=len(turn.takes) > made_before)
+    return result
+
+
+def _settle_line_job(wb: Workbench, turn: Turn, jobs: Any, job_id: str | None, item_id: str, result: ToolResult,
+                     *, made: bool) -> None:
+    """The line's Job ends the way the attempt did: done with its take, or
+    failed with the reason the row shows (too long for its gap, the vendor)."""
+    if job_id is None:
+        return
+    if made:
+        jobs.settle(job_id, ok=True, cost=result.cost_usd)
+        return
+    if "a newer attempt on" in result.text:
+        jobs.settle(job_id, ok=False, code="cancelled", text="A newer try on this line replaced it.")
+        return
+    after = _plan(wb, turn).item(item_id)
+    history = getattr(after, "history", ()) if after else ()
+    last_error = str((history[-1].get("error") if history else None) or "")
+    failure = getattr(after, "fit_failure", None) if after else None
+    if failure and last_error.startswith("Too long"):
+        text = f"Too long for its gap: needs {failure['needs']:.1f} s, has {failure['has']:.1f} s."
+        jobs.settle(job_id, ok=False, code="too_long", text=text, cost=result.cost_usd)
+        return
+    # The attempt's own reason: the item's error, or (when an earlier take still stands) its last history entry.
+    reason = (getattr(after, "error", None) if after else None) or last_error or None
+    jobs.settle(job_id, ok=False, code="vendor_failed", text=reason or "The take could not be made.", cost=result.cost_usd)
 
 
 def _statements(record) -> list:
@@ -1152,15 +1257,20 @@ def _design_voice(wb: Workbench, turn: Turn, args: dict) -> ToolResult:
         raise WaitingForUser(f"Design a voice from “{description}”: three previews to hear, about ${usd:.2f}?", cost_usd=usd)
     wb.ensure_spend(turn.project_id)
     turn.report(turn.progress, "Designing a voice")
+    jobs = wb.jobs or NO_JOBS
+    job_id = jobs.begin(turn.project_id, "design_voice", "Designing a voice", detail={"text": description[:120], "chars": chars})
     before = wb.ledger.spent_usd(turn.project_id)
     try:
         previews = list(wb.design(turn.project_id, description, sample))
     except Exception as exc:  # noqa: BLE001 — the model hears why
         reason = str(exc) or type(exc).__name__
+        jobs.settle(job_id, ok=False, code="vendor_failed", text=f"The voice could not be designed: {reason}")
         return ToolResult(f"The voice could not be designed: {reason}", step=f"Could not design a voice: {reason[:80]}")
     cost = max(0.0, wb.ledger.spent_usd(turn.project_id) - before)
     if not previews:
+        jobs.settle(job_id, ok=False, code="vendor_failed", text="The voice service sent no previews back.", cost=cost)
         return ToolResult("The vendor sent no previews back.", step="Designed a voice: nothing came back", cost_usd=cost)
+    jobs.settle(job_id, ok=True, cost=cost, label=f"{len(previews)} previews to hear")
     designs = dict(wb.repo.settings(turn.project_id).get("designs") or {})
     rows = []
     for n, pv in enumerate(previews, 1):

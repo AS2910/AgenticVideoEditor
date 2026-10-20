@@ -50,6 +50,8 @@ class CloneService:
         # free slot) is remembered for the run, so every line is not another
         # doomed call; a vendor outage is not remembered.
         self._refused: dict[tuple[str, str], str] = {}
+        # (video_id, who) -> an object with done() and fail(text): the clone's Job. None: untracked.
+        self.tracker = None
 
     @property
     def available(self) -> bool:
@@ -93,16 +95,27 @@ class CloneService:
             )
             if reference is None:
                 return VoiceChoice(requested, (f"Stock voice: could not cut a clean sample of {who}'s voice.",))
+            # One processing model (2026-10-20): the clone is a Job the editor shows.
+            track = self.tracker(project_id, who) if self.tracker else None
             try:
                 voice_id = self._voice.create_clone(f"voltage-{project_id}-{key}", Path(reference.path))
             except NonRetryableError as exc:
                 note = f"Stock voice: could not clone {who}'s voice. {exc}"
                 self._refused[(project_id, key)] = note
+                if track:
+                    track.fail(note)
                 return VoiceChoice(requested, (note,))
             except VendorError:
-                return VoiceChoice(requested, (
-                    f"Stock voice: ElevenLabs was unavailable when cloning {who}'s voice; the next line will try again.",
-                ))
+                note = f"Stock voice: ElevenLabs was unavailable when cloning {who}'s voice; the next line will try again."
+                if track:
+                    track.fail(note)
+                return VoiceChoice(requested, (note,))
+            except BaseException as exc:
+                if track:
+                    track.fail(str(exc) or type(exc).__name__)
+                raise
+            if track:
+                track.done()
             self._repo.set_clone(project_id, key, voice_id)
             return VoiceChoice(voice_id, cloned=True)
 

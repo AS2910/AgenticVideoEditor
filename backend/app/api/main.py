@@ -1,6 +1,9 @@
+import asyncio
 import json
+import queue
 import time
 import threading
+from concurrent.futures import ThreadPoolExecutor
 import hashlib
 import logging
 import tempfile
@@ -11,7 +14,7 @@ from pathlib import Path
 import shutil
 
 from fastapi import Depends, FastAPI, HTTPException, File, Form, Request, Response, UploadFile
-from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, StreamingResponse
 from pydantic import BaseModel
 
 from typing import Literal, Sequence
@@ -62,6 +65,8 @@ from app.render.compose import compose
 from app.render import retime
 from app.jobs.store import JobStore, Job
 from app.jobs.runner import JobRunner
+from app.jobs.activity import ActivityJobs, KINDS as JOB_KINDS
+from app.jobs.events import EventBus
 from app.agent import loop as agent_loop
 from app.agent.guards import TurnBudget, is_go
 from app.agent.tools import Turn as AgentTurn, Workbench
@@ -109,6 +114,14 @@ clones = CloneService(repo, artifacts, voice, enabled=settings.clone and not set
 planner, planner_label = select_planner(settings, chaos)
 jobs = JobStore()
 runner = JobRunner(jobs)
+# 2026-10-20 (one processing model): every piece of work the user waits on is
+# an Activity job, persisted; the editor hears each change on its live channel.
+events = EventBus()
+activity = ActivityJobs(database, on_change=lambda j: events.publish(j.video_id, "job.updated", j.to_dict()))
+activity.interrupt_leftovers()
+# Renders and retries started from the editor run here, off the request thread
+# and apart from the turns' pool, so a long turn never holds a preview back.
+work_pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix="ave-work")
 # Phase 9c: who signs people in. None while AVE_AUTH=off.
 oidc: auth.Provider | None = (
     auth.GoogleProvider(settings.google_client_id or "", settings.google_client_secret or "")
@@ -2460,6 +2473,195 @@ def _held_take(
                      voice_settings, model, flex_max, max_regenerations, role, offset_db)
 
 
+# ── One processing model (2026-10-20): the user-facing jobs ─────────────────
+#
+# Every line voiced, voice made or cloned, mix change and render is an Activity
+# job (app/jobs/activity.py). These are the seams the pipeline reports through;
+# the editor reads GET /videos/{id}/jobs and the live channel.
+
+# The pipeline's own step words, as a row and the status strip say them.
+STEP_LABELS = (
+    ("Synthesizing", "Voicing"), ("Take ", "Voicing again"), ("Checking continuity", "Checking fit"),
+    ("Matching mouth", "Matching the picture"), ("No room to play over", "Holding the picture for it"),
+)
+
+
+def _job_label(step: str) -> str:
+    for start, label in STEP_LABELS:
+        if step.startswith(start):
+            return label
+    return step
+
+
+class LineJobs:
+    """The job hooks a tool reports through (Workbench.jobs)."""
+
+    def claim(self, project_id: str, item_id: str, *, text: str, voice_name: str | None, params: dict) -> str:
+        """The line's Job: the one the user's Go queued for this item, or a new one; running from here."""
+        detail = {"text": text, "voice_name": voice_name, "chars": len(text)}
+        queued = activity.active_for_line(project_id, item_id)
+        if queued is not None and queued.status == "queued":
+            activity.update(queued.job_id, detail=detail, params=params)
+            job_id = queued.job_id
+        else:
+            job_id = activity.create(project_id, "voice_line", turn_id=current_turn.get(), line_ids=[item_id],
+                                     detail=detail, params=params).job_id
+        activity.start(job_id, "Voicing")
+        return job_id
+
+    def begin(self, project_id: str, kind: str, label: str, *, detail: dict | None = None,
+              line_ids: Sequence[str] = ()) -> str:
+        job = activity.create(project_id, kind, turn_id=current_turn.get(), line_ids=line_ids, step_label=label,
+                              detail=detail)
+        activity.start(job.job_id, label)
+        return job.job_id
+
+    def step(self, job_id: str | None, label: str, progress: float | None = None) -> None:
+        if job_id:
+            activity.update(job_id, step_label=_job_label(label), progress=progress)
+
+    def settle(self, job_id: str | None, *, ok: bool, cost: float | None = None, code: str | None = None,
+               text: str | None = None, label: str | None = None) -> None:
+        if not job_id:
+            return
+        job = activity.get(job_id)
+        if ok:
+            activity.finish(job_id, step_label=label or ("Ready to hear" if job and job.kind == "voice_line" else "Done"),
+                            cost_usd=cost)
+        elif code == "cancelled":
+            activity.cancel(job_id, text or "Cancelled")
+        else:
+            activity.fail(job_id, code or "unknown", text, cost_usd=cost)
+
+
+line_jobs = LineJobs()
+
+
+class CloneTrack:
+    """A speaker's clone, made the first time a line needs it, as a Job."""
+
+    def __init__(self, project_id: str, who: str) -> None:
+        self.who = who
+        self.job_id = line_jobs.begin(project_id, "clone", f"Cloning {who}'s voice", detail={"voice_name": who})
+
+    def done(self) -> None:
+        activity.finish(self.job_id, step_label=f"{self.who[0].upper() + self.who[1:]}'s voice is ready")
+
+    def fail(self, text: str) -> None:
+        activity.fail(self.job_id, "vendor_failed", text)
+
+
+clones.tracker = CloneTrack
+
+
+def _turn_running(project_id: str) -> bool:
+    return any(j.kind == "turn" and j.project_id == project_id and not j.done for j in jobs.all())
+
+
+def _turn_view(project_id: str) -> dict | None:
+    """The last turn, as the editor shows it. A turn the server lost (a
+    restart mid-turn) reads as failed, never running forever."""
+    view = repo.settings(project_id).get("turn_view")
+    if view and view.get("status") in ("running", "stopping") and not _turn_running(project_id):
+        view = _set_turn(project_id, status="failed", step="Interrupted", finished_at=_now())
+    return view
+
+
+def _set_turn(project_id: str, **changes) -> dict:
+    view = {**(repo.settings(project_id).get("turn_view") or {}), **changes}
+    repo.set_settings(project_id, turn_view=view)
+    events.publish(project_id, "turn.updated", view)
+    return view
+
+
+# The turns the user asked to stop (by turn id); the agent loop checks between steps.
+_stops: set[str] = set()
+
+
+def _cancel_leftovers(project_id: str, turn_id: str, why: str = "Not voiced this turn") -> int:
+    n = 0
+    for job in activity.of_turn(project_id, turn_id):
+        if job.status == "queued":
+            activity.cancel(job.job_id, why)
+            n += 1
+    return n
+
+
+def _queue_lines(project_id: str, plan_id: str, turn_id: str) -> list[str]:
+    """The user's Go: every planned line not voiced yet is queued at once, so
+    each row says Queued before the first take starts."""
+    plan = repo.get_plan(project_id, plan_id)
+    out = []
+    for item in (plan.items if plan else ()):
+        if item.kind != "planned" or not item.enabled or item.status != "planned":
+            continue
+        if activity.active_for_line(project_id, item.item_id) is not None:
+            continue
+        activity.create(project_id, "voice_line", turn_id=turn_id, line_ids=[item.item_id],
+                        detail={"text": item.new_text, "voice_name": None, "chars": len(item.new_text)})
+        out.append(item.item_id)
+    return out
+
+
+def _retry_line(project_id: str, job_id: str) -> None:
+    """A failed line voiced again with the same words and voice, outside a
+    turn: the same pipeline, the same item, the same job flow."""
+    job = activity.get(job_id)
+    if job is None or job.done:
+        return
+    p = job.params or {}
+    item_id = job.line_ids[0]
+    plan_id = p.get("plan_id")
+    record = repo.get(project_id)
+    activity.start(job_id, "Voicing")
+    attempt = repo.begin_attempt(project_id, plan_id, item_id, error=None)
+    before = ledger.spent_usd(project_id)
+    selection = Selection(*p["selection"])
+
+    def report(progress: float, step: str) -> None:
+        activity.update(job_id, step_label=_job_label(step), progress=progress)
+        repo.update_item(project_id, plan_id, item_id, progress=step)
+
+    def failed(code: str, reason: str) -> None:
+        repo.finish_attempt(project_id, plan_id, item_id, attempt, error=reason)
+        activity.fail(job_id, code, reason, cost_usd=max(0.0, ledger.spent_usd(project_id) - before))
+
+    try:
+        _ensure_spend(project_id)
+        candidate = _generate(
+            project_id, record, repo.next_candidate_id(project_id), selection, p["text"], p["voice_id"],
+            p.get("fit"), p.get("mix") or "replace", report, delivery=p.get("delivery"),
+            voice_notes=tuple(p.get("voice_notes") or ()), voice_settings=p.get("voice_settings"), model=p.get("model"),
+            flex_max=p.get("flex_max"), max_regenerations=0, role=p.get("role"), offset_db=p.get("offset_db"),
+        )
+    except SpanMismatch as exc:
+        needs = getattr(exc, "natural", None)
+        has = selection.end - selection.start
+        failed("too_long", f"Too long for its gap: needs {needs:.1f} s, has {has:.1f} s." if needs else str(exc))
+        return
+    except (BudgetExceeded, SpendCeilingReached) as exc:
+        failed("budget", str(exc))
+        return
+    except Exception as exc:  # noqa: BLE001 - the row shows why; nothing stays Voicing
+        log.warning("retry %s failed: %s", job_id, exc)
+        failed("vendor_failed", str(exc) or "The take could not be made.")
+        return
+    repo.finish_attempt(project_id, plan_id, item_id, attempt, candidate_id=candidate.candidate_id,
+                        fit=candidate.plan.fit, note=None, fit_failure=None)
+    activity.finish(job_id, step_label="Ready to hear", cost_usd=max(0.0, ledger.spent_usd(project_id) - before))
+
+
+def _in_background(project_id: str, job_id: str, work) -> None:
+    """Run `work` on the work pool; a crash fails its job instead of leaving it running."""
+    def run() -> None:
+        try:
+            work()
+        except Exception as exc:  # noqa: BLE001
+            log.exception("background job %s crashed", job_id)
+            activity.fail(job_id, "unknown", str(exc) or "Something went wrong.")
+    work_pool.submit(run)
+
+
 @app.get("/jobs/{job_id}")
 def get_job(job_id: str) -> dict:
     job = jobs.get(job_id)
@@ -2537,6 +2739,9 @@ def _revert(project_id: str, edit_id: str, by: str = "You") -> bool:
     # A shifted line is two edits; undoing one undoes the other.
     if edit.partner:
         repo.revert_edit(project_id, edit.partner)
+    # One processing model: taking a line out is a change to the mix; the render that follows is its own job.
+    activity.instant(project_id, "mix", "Took the line out", turn_id=current_turn.get(),
+                     line_ids=[edit_id, *([edit.partner] if edit.partner else [])], detail={"edit_id": edit_id})
     # A shipped plan line goes back to a draft (ready, with its take), so the
     # review shows it held rather than shipped (UX-3).
     plan = repo.latest_plan(project_id)
@@ -2555,13 +2760,36 @@ class ExportRequest(BaseModel):
     # 20e: render the proposed takes too (the plan's ready items), so the user
     # can play the video with what is waiting for their Add it.
     with_proposals: bool = False
+    # 2026-10-20: "export" from the Export page; the editor's preview otherwise.
+    purpose: Literal["preview", "export"] = "preview"
 
 
 @app.post("/videos/{project_id}/export")
 @app.post("/projects/{project_id}/export", deprecated=True)
 def export_project(project_id: str, req: ExportRequest | None = None, owner: str = Depends(current_owner)) -> dict:
-    out = _export(_owned(project_id, owner), proposals=bool(req and req.with_proposals), request_id=req.request_id if req else None)
+    out = _export(_owned(project_id, owner), proposals=bool(req and req.with_proposals), request_id=req.request_id if req else None,
+                  purpose=req.purpose if req else "preview")
     return {**out, "request_id": req.request_id if req else None}
+
+
+@app.get("/videos/{project_id}/renders/latest")
+def latest_render(project_id: str, mode: Literal["final", "proposals"] = "final", owner: str = Depends(current_owner)) -> dict:
+    _owned(project_id, owner)
+    return _latest_render(project_id, mode)
+
+
+class RenderRequest(BaseModel):
+    mode: Literal["final", "proposals"] = "final"
+
+
+@app.post("/videos/{project_id}/renders", status_code=202)
+def start_render(project_id: str, req: RenderRequest, owner: str = Depends(current_owner)) -> dict:
+    """A preview render in the background ("Render now"): the job comes back at once."""
+    _owned(project_id, owner)
+    job = activity.create(project_id, "render_preview", turn_id=None, detail={"mode": req.mode})
+    _in_background(project_id, job.job_id,
+                   lambda: _export(repo.get(project_id), proposals=req.mode == "proposals", job_id=job.job_id))
+    return job.to_dict()
 
 
 @app.get("/videos/{project_id}/renders")
@@ -2700,12 +2928,79 @@ def _render_status(project_id: str, mode: str) -> dict:
             "mix": (done.get("manifest") or {}).get("mix") if done else repo.settings(project_id).get("mix_report")}
 
 
-def _export(record: ProjectRecord, proposals: bool = False, request_id: int | None = None) -> dict:
+# One processing model (2026-10-20): every render is a version the user can
+# name. A version number is given once per edit set (v1, v2...): the same edit
+# set rendered again is the same version; a render id names each render run.
+_rendering: dict[str, dict] = {}          # video id -> the render running now
+_versions_guard = threading.Lock()
+
+
+def _version_for(project_id: str, h: str) -> int:
+    with _versions_guard:
+        versions = dict(repo.settings(project_id).get("render_versions") or {})
+        if h not in versions:
+            versions[h] = max(versions.values(), default=0) + 1
+            repo.set_settings(project_id, render_versions=versions)
+        return int(versions[h])
+
+
+def _next_render_id(project_id: str) -> str:
+    with _versions_guard:
+        n = int(repo.settings(project_id).get("render_seq") or 0) + 1
+        repo.set_settings(project_id, render_seq=n)
+        return f"r{n}"
+
+
+def _includes(edits: Sequence[ApprovedEdit], previewed: Sequence[tuple[str, ApprovedEdit]]) -> dict:
+    """The takes a render carries: kept edits by edit id, proposals by item id."""
+    preview_ids = {e.edit_id for _, e in previewed}
+    return {"candidate_ids": sorted({e.candidate_id for e in edits if e.candidate_id}),
+            "edit_ids": sorted(e.edit_id for e in edits if e.edit_id not in preview_ids),
+            "item_ids": [item_id for item_id, _ in previewed]}
+
+
+def _latest_render(project_id: str, mode: str) -> dict:
+    """RenderState: the latest finished render of a mode, any render of it in
+    progress, and whether the edit set has moved past the latest."""
+    record = repo.get(project_id)
+    edits, previewed = _render_edits(project_id, mode == "proposals")
+    current = edit_set_hash(record, edits, mode)
+    renders = repo.settings(project_id).get("renders") or {}
+    mine = [(h, r) for h, r in renders.items() if r.get("mode") == mode and artifacts.find(project_id, r["render"]["sha256"]) is not None]
+    latest = None
+    if mine:
+        h, r = max(mine, key=lambda hr: hr[1]["at"])
+        latest = {"render_id": r.get("render_id"), "version": r.get("version") or _version_for(project_id, h),
+                  "edit_set_hash": h, "created_at": r["at"], "mode": mode, "render": r["render"],
+                  "manifest": {**r["manifest"], "edit_hash": h, "mode": mode}, "includes": r.get("includes")}
+    running = _rendering.get(project_id)
+    in_progress = None
+    if running and running["mode"] == mode:
+        job = activity.get(running["job_id"])
+        in_progress = {**{k: running[k] for k in ("render_id", "version", "edit_set_hash", "started_at", "job_id", "includes")},
+                       "eta_s": job.eta_s() if job else None}
+    stale = (in_progress is None and (latest["edit_set_hash"] if latest else None) != current
+             and (latest is not None or bool(edits) or bool(previewed)))
+    return {"mode": mode, "current_hash": current, "latest": latest, "in_progress": in_progress, "stale": stale}
+
+
+def _tell_render(project_id: str, mode: str) -> None:
+    if events.listeners(project_id):
+        try:
+            events.publish(project_id, "render.updated", _latest_render(project_id, mode))
+        except Exception:  # noqa: BLE001 - news, never the work
+            log.exception("render.updated for %s", project_id)
+
+
+def _export(record: ProjectRecord, proposals: bool = False, request_id: int | None = None,
+            purpose: str = "preview", job_id: str | None = None) -> dict:
     project_id = record.source.project_id
     mode = "proposals" if proposals else "final"
+    kind = "export" if purpose == "export" else "render_preview"
     edits, previewed = _render_edits(project_id, proposals)
     h = edit_set_hash(record, edits, mode)
     key = f"{project_id}:{h}"
+    includes = _includes(edits, previewed)
     started = time.time()
     render_log.info("render request video=%s mode=%s hash=%s request=%s edits=%d", project_id, mode, h, request_id, len(edits))
     # Same key in flight: wait for it and take its artifact. Another key for this video: wait our turn.
@@ -2715,8 +3010,32 @@ def _export(record: ProjectRecord, proposals: bool = False, request_id: int | No
             render_log.info("render reuse video=%s mode=%s hash=%s sha=%s request=%s", project_id, mode, h, done["render"]["sha256"][:12], request_id)
             if not proposals:
                 repo.set_settings(project_id, render={**done["record"], "at": done["at"]}, mix_report=done["manifest"].get("mix"))
-            return {**done["manifest"], "edit_hash": h, "mode": mode, "cached": True}
-        out = _render_now(record, edits, previewed, proposals)
+            version = done.get("version") or _version_for(project_id, h)
+            if job_id:
+                activity.start(job_id, f"v{version} is up to date")
+                activity.finish(job_id, step_label=f"v{version} ready", detail={"version": version, "mode": mode})
+            return {**done["manifest"], "edit_hash": h, "mode": mode, "cached": True, "render_id": done.get("render_id"),
+                    "version": version, "includes": done.get("includes") or includes}
+        version = _version_for(project_id, h)
+        render_id = _next_render_id(project_id)
+        word = "export" if kind == "export" else "preview"
+        detail = {"version": version, "mode": mode, "render_id": render_id, "includes": includes}
+        line_ids = [*includes["item_ids"], *includes["edit_ids"]]
+        if job_id:
+            activity.update(job_id, detail=detail, line_ids=line_ids)
+        else:
+            job_id = activity.create(project_id, kind, turn_id=current_turn.get(), line_ids=line_ids, detail=detail).job_id
+        activity.start(job_id, f"Rendering {word} v{version}")
+        _rendering[project_id] = {"render_id": render_id, "version": version, "edit_set_hash": h, "mode": mode,
+                                  "started_at": _now(), "job_id": job_id, "includes": includes}
+        _tell_render(project_id, mode)
+        try:
+            out = _render_now(record, edits, previewed, proposals)
+        except Exception as exc:
+            activity.fail(job_id, "render_failed", f"The render failed: {exc}")
+            raise
+        finally:
+            _rendering.pop(project_id, None)
         at = _now()
         record_ = {"sha256": out["render"]["sha256"], "duration": out["render"]["duration"],
                    "filename": f"{Path(record.source.filename).stem}-voltage.mp4"}
@@ -2725,14 +3044,18 @@ def _export(record: ProjectRecord, proposals: bool = False, request_id: int | No
             # with proposals in it is not the video the user takes away.
             repo.set_settings(project_id, render={**record_, "at": at, "edit_hash": h}, mix_report=out.get("mix"))
         renders = dict(repo.settings(project_id).get("renders") or {})
-        renders[h] = {"mode": mode, "at": at, "render": out["render"], "record": record_, "manifest": out}
+        renders[h] = {"mode": mode, "at": at, "render": out["render"], "record": record_, "manifest": out,
+                      "render_id": render_id, "version": version, "includes": includes}
         if len(renders) > RENDERS_KEPT:
             for old in sorted(renders, key=lambda k: renders[k]["at"])[: len(renders) - RENDERS_KEPT]:
                 renders.pop(old)
         repo.set_settings(project_id, renders=renders)
+        activity.finish(job_id, step_label=f"v{version} ready")
+        _tell_render(project_id, mode)
         render_log.info("render done video=%s mode=%s hash=%s sha=%s request=%s seconds=%.1f",
                         project_id, mode, h, out["render"]["sha256"][:12], request_id, time.time() - started)
-        return {**out, "edit_hash": h, "mode": mode, "cached": False}
+        return {**out, "edit_hash": h, "mode": mode, "cached": False, "render_id": render_id, "version": version,
+                "includes": includes}
 
 
 def _render_now(record: ProjectRecord, edits: list[ApprovedEdit], previewed: list[tuple[str, ApprovedEdit]], proposals: bool) -> dict:
@@ -3577,6 +3900,9 @@ def _reroled(project_id: str, source: EditCandidate, role: str, offset_db: float
         fit_notes=tuple(n for n in source.fit_notes if not n.startswith(("level", "role"))),
     )
     repo.save_candidate(project_id, candidate)
+    # One processing model: a mix change is a job too, over as soon as it starts.
+    activity.instant(project_id, "mix", "Mix changed", turn_id=current_turn.get(),
+                     detail={"role": role, "offset_db": offset, "candidate_id": candidate.candidate_id})
     return candidate
 
 
@@ -3765,7 +4091,7 @@ def _workbench() -> Workbench:
         speakers=repo.speakers, voice_for=_voice_for, remove_words=_remove_words, shift_words=_shift_by_pin, move_take=_moved,
         project=_project_view, suggest=_suggest_brief, help_search=lambda query: search_help_articles(query, limit=3),
         spend=lambda pid: _spend_summary(repo.get(pid).owner if repo.get(pid) else LOCAL_OWNER, video_id=pid),
-        measured=lambda: getattr(voice, "last_measure", None), held_take=_held_take,
+        measured=lambda: getattr(voice, "last_measure", None), held_take=_held_take, jobs=line_jobs,
     )
 
 
@@ -3893,6 +4219,15 @@ def _start_turn(project_id: str, record: ProjectRecord, text: str, owner: str, a
     since = (carry or {}).get("since") or started_at
     cap_usd = float((carry or {}).get("cap_usd") or prefs["turn_usd"])
     repo.set_settings(project_id, last_turn={"id": turn_id, "at": since, **({"cap_usd": cap_usd} if carry else {})})
+    # One processing model (2026-10-20): the turn as the editor shows it, and
+    # on a Go every line it will voice queued at once.
+    hash_before = _final_hash(project_id)
+    _stops.discard(turn_id)
+    if approve or carry:
+        _queue_lines(project_id, plan.plan_id, turn_id)
+    _set_turn(project_id, turn_id=turn_id, status="running", step="Thinking", started_at=_now(), finished_at=None,
+              spent_usd=0.0, lines_voiced=0, render=None)
+    held: dict = {}
     # The words the user picked, with the sentence under the label when there was one.
     picked = ""
     if asked and asked.get("details"):
@@ -3902,9 +4237,14 @@ def _start_turn(project_id: str, record: ProjectRecord, text: str, owner: str, a
 
     def work(report) -> dict:
         token = current_turn.set(turn_id)
+
+        def told(progress: float, step: str) -> None:
+            report(progress, step)
+            _set_turn(project_id, step=step)
         try:
-            out = turn_work(report)
-            return {**out, "spend": _spend_summary(owner, video_id=project_id)}
+            out = turn_work(told)
+            closed = _close_turn(project_id, plan.plan_id, turn_id, since, hash_before, held.get("turn"), out)
+            return {**out, **closed, "spend": _spend_summary(owner, video_id=project_id)}
         finally:
             current_turn.reset(token)
 
@@ -3922,7 +4262,9 @@ def _start_turn(project_id: str, record: ProjectRecord, text: str, owner: str, a
             budget_.excused = lambda: ledger.spent_usd_since(project_id, started_at, vendor="anthropic")
         turn = AgentTurn(project_id=project_id, record=record, plan_id=plan.plan_id, autonomy=autonomy,
                          spend_approved=approve or bool(carry) or autonomy == "draft", budget=budget_, started_at=since,
-                         report=report, commit_approved=approve, ask_before=prefs["ask_before"])
+                         report=report, commit_approved=approve, ask_before=prefs["ask_before"],
+                         stop_requested=lambda: turn_id in _stops)
+        held["turn"] = turn
         lines = _lines(record)
         names = [s.name for s in repo.speakers(project_id)]
         # 2026-10-20: the style line is shown before the first paid step: at the start of the first turn it is there.
@@ -3970,6 +4312,9 @@ def _start_turn(project_id: str, record: ProjectRecord, text: str, owner: str, a
             repo.update_plan(project_id, plan.plan_id, status="proposed")
             return {"type": "turn", "plan": _plan_dict(repo.get_plan(project_id, plan.plan_id)), "reply": sentence,
                     "question": None, "spent_usd": 0.0, "calls": 0, "stopped": "error", "error": why}
+        if outcome.stopped == agent_loop.STOPPED:
+            # The user's Stop: Voltage's closing words say what finished and what did not.
+            outcome = replace(outcome, reply=_stopped_words(project_id, turn_id), question=None)
         question = outcome.question
         status = "clarifying" if question else "done"
         # 2026-10-20: the closing words may end with the next chips; the user sees the words, the box the chips.
@@ -4023,9 +4368,51 @@ def _start_turn(project_id: str, record: ProjectRecord, text: str, owner: str, a
 
     def failed_turn() -> None:
         repo.update_plan(project_id, plan.plan_id, status="proposed")
+        _cancel_leftovers(project_id, turn_id, "The turn failed")
+        _stops.discard(turn_id)
+        _set_turn(project_id, status="failed", step="Failed", finished_at=_now())
 
     submitted = runner.submit(job, _guarded(work, failed_turn))
     return _job_dict(submitted)
+
+
+def _final_hash(project_id: str) -> str:
+    edits, _ = _render_edits(project_id, False)
+    return edit_set_hash(repo.get(project_id), edits, "final")
+
+
+def _stopped_words(project_id: str, turn_id: str) -> str:
+    steps = activity.of_turn(project_id, turn_id)
+    voiced = sum(1 for j in steps if j.kind == "voice_line" and j.status == "done")
+    cancelled = sum(1 for j in steps if j.kind == "voice_line" and j.status in ("cancelled", "queued"))
+    words = f"Stopped. {voiced} {'line' if voiced == 1 else 'lines'} voiced"
+    return words + (f", {cancelled} cancelled." if cancelled else ".")
+
+
+def _close_turn(project_id: str, plan_id: str, turn_id: str, since: str, hash_before: str, turn, out: dict) -> dict:
+    """The end of a turn (2026-10-20): a turn that voiced or shipped anything
+    renders a preview as its last step, so its lines are in the video the user
+    hears; the lines it queued and never voiced are cancelled; the turn's view
+    says what it spent and which version it made."""
+    render = None
+    voiced = turn is not None and bool(turn.takes)
+    if out.get("stopped") != "error" and (voiced or _final_hash(project_id) != hash_before):
+        plan_now = repo.get_plan(project_id, plan_id)
+        proposals = any(i.kind == "planned" and i.status == "ready" and i.candidate_id for i in (plan_now.items if plan_now else ()))
+        _set_turn(project_id, step="Rendering preview")
+        try:
+            made = _export(repo.get(project_id), proposals=proposals)
+            render = {"version": made["version"], "mode": made["mode"], "render_id": made["render_id"]}
+        except Exception:  # noqa: BLE001 - the render's job says it failed; the turn's work stands
+            log.exception("the turn's preview render failed for %s", project_id)
+    _cancel_leftovers(project_id, turn_id)
+    _stops.discard(turn_id)
+    turn_usd = round(ledger.spent_usd_since(project_id, since), 4)
+    steps = activity.of_turn(project_id, turn_id)
+    lines_voiced = sum(1 for j in steps if j.kind == "voice_line" and j.status == "done")
+    _set_turn(project_id, status="failed" if out.get("stopped") == "error" else "done", step="Done", finished_at=_now(),
+              spent_usd=turn_usd, lines_voiced=lines_voiced, render=render)
+    return {"turn_usd": turn_usd, "render": render}
 
 
 def _guarded(work, on_fail):
@@ -4044,6 +4431,141 @@ def list_messages(project_id: str, after: int = 0, owner: str = Depends(current_
     """The thread after a message (by `seq`): what Voltage said and did."""
     _owned(project_id, owner)
     return [_message_dict(m) for m in repo.messages(project_id, after)]
+
+
+# ── One processing model (2026-10-20): jobs, Stop, Retry, the live channel ──
+
+# A finished turn's steps stay in the active view this long, so a reload just
+# after "Done" still rebuilds the step list.
+RECENT_TURN_SECONDS = 600
+
+
+def _recent(at: str | None) -> bool:
+    if not at:
+        return False
+    try:
+        return (datetime.now(timezone.utc) - datetime.fromisoformat(at)).total_seconds() <= RECENT_TURN_SECONDS
+    except ValueError:
+        return False
+
+
+def _jobs_view(project_id: str, active: bool) -> dict:
+    view = _turn_view(project_id)
+    live = bool(view) and (view.get("status") in ("running", "stopping") or _recent(view.get("finished_at")))
+    if not active:
+        found = activity.list(project_id, limit=50)
+        return {"jobs": [j.to_dict() for j in found], "turn": view}
+    found = {j.job_id: j for j in activity.list(project_id, active=True, limit=200)}
+    if live and view.get("turn_id"):
+        for j in activity.of_turn(project_id, view["turn_id"]):
+            found.setdefault(j.job_id, j)
+    ordered = sorted(found.values(), key=lambda j: int(j.job_id[1:]), reverse=True)
+    return {"jobs": [j.to_dict() for j in ordered], "turn": view if live else None}
+
+
+@app.get("/videos/{project_id}/jobs")
+def list_jobs(project_id: str, active: int = 0, owner: str = Depends(current_owner)) -> dict:
+    """The video's jobs, newest first. `active=1`: what is queued or running,
+    plus the steps of the turn running now (or just finished), so a reload
+    restores the status strip, the row chips and the step list."""
+    _owned(project_id, owner)
+    return _jobs_view(project_id, bool(active))
+
+
+@app.post("/videos/{project_id}/jobs/{job_id}/retry", status_code=202)
+def retry_job(project_id: str, job_id: str, owner: str = Depends(current_owner)) -> dict:
+    """A failed line voiced again with the same words and voice, or a failed
+    render run again; a new job, through the same flow."""
+    _owned(project_id, owner)
+    job = activity.get(job_id)
+    if job is None or job.video_id != project_id:
+        raise HTTPException(status_code=404, detail="job not found")
+    if not job.to_dict()["retryable"]:
+        raise HTTPException(status_code=409, detail="Only a line or a render that failed can be tried again.")
+    if job.kind == "voice_line":
+        if not job.params or not job.line_ids:
+            raise HTTPException(status_code=409, detail="This line was never started, so there is nothing to try again. Ask Voltage for it.")
+        if activity.active_for_line(project_id, job.line_ids[0]) is not None:
+            raise HTTPException(status_code=409, detail="This line is already being voiced.")
+        fresh = activity.create(project_id, "voice_line", line_ids=job.line_ids,
+                                detail={**job.detail, "manual": True, "retry_of": job.job_id}, params=job.params)
+        _in_background(project_id, fresh.job_id, lambda: _retry_line(project_id, fresh.job_id))
+        return fresh.to_dict()
+    mode = job.detail.get("mode") or "final"
+    fresh = activity.create(project_id, job.kind, detail={"mode": mode, "manual": True, "retry_of": job.job_id})
+    _in_background(project_id, fresh.job_id, lambda: _export(repo.get(project_id), proposals=mode == "proposals",
+                                                             purpose="export" if job.kind == "export" else "preview",
+                                                             job_id=fresh.job_id))
+    return fresh.to_dict()
+
+
+@app.post("/videos/{project_id}/jobs/stop")
+def stop_jobs(project_id: str, owner: str = Depends(current_owner)) -> dict:
+    """Stop: every queued job is cancelled; running ones finish; the turn
+    ends after the step it is on."""
+    _owned(project_id, owner)
+    cancelled = 0
+    for job in activity.list(project_id, active=True, limit=200):
+        if job.status == "queued":
+            activity.cancel(job.job_id, "Stopped")
+            cancelled += 1
+    view = _turn_view(project_id)
+    if view and view.get("status") == "running" and view.get("turn_id"):
+        _stops.add(view["turn_id"])
+        _set_turn(project_id, status="stopping", step="Stopping after this step")
+    return {"cancelled": cancelled}
+
+
+PING_SECONDS = 15.0
+
+
+def _sse(event: str, data: dict) -> str:
+    return f"event: {event}\ndata: {json.dumps(data)}\n\n"
+
+
+@app.get("/videos/{project_id}/events")
+async def video_events(project_id: str, request: Request, limit: int | None = None,
+                       owner: str = Depends(current_owner)) -> StreamingResponse:
+    """The live channel: job.updated, turn.updated and render.updated as they
+    happen, opening with the state as it is now, and a ping every 15 s.
+    `limit` ends the stream after that many events (tests)."""
+    _owned(project_id, owner)
+    q = events.subscribe(project_id)
+
+    async def stream():
+        sent = 0
+        try:
+            state = await asyncio.to_thread(_jobs_view, project_id, True)
+            opening = [("job.updated", j) for j in reversed(state["jobs"])]
+            if state["turn"]:
+                opening.append(("turn.updated", state["turn"]))
+            for event, data in opening:
+                yield _sse(event, data)
+                sent += 1
+                if limit and sent >= limit:
+                    return
+            last = time.monotonic()
+            while True:
+                if await request.is_disconnected():
+                    return
+                try:
+                    event, data = await asyncio.to_thread(q.get, True, 1.0)
+                except queue.Empty:
+                    if time.monotonic() - last >= PING_SECONDS:
+                        last = time.monotonic()
+                        # The ping also sweeps: a hung job fails while someone is watching.
+                        await asyncio.to_thread(activity.sweep)
+                        yield ": ping\n\n"
+                    continue
+                yield _sse(event, data)
+                sent += 1
+                if limit and sent >= limit:
+                    return
+        finally:
+            events.unsubscribe(project_id, q)
+
+    return StreamingResponse(stream(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
 # ── Help, the tutorial, onboarding: the coordinator's routers ────────────────
