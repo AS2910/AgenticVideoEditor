@@ -101,6 +101,7 @@ def test_the_backfill_rewrites_old_rows_and_turns_a_boolean_consent_into_a_marke
     db = Database(path)
     c = db._conn
     c.execute("DELETE FROM meta WHERE key = 'times_v2'")      # an old database, never backfilled
+    c.execute("DELETE FROM schema_migrations WHERE version = 6")
     c.execute("INSERT INTO videos (id, owner, created_at, source, transcript, consent_at) VALUES ('p1', 'local', '2026-10-19T16:14:20.085114+00:00', '{}', '{}', '2026-10-19T16:15:41.042+00:00')")
     c.execute("INSERT INTO messages (project_id, seq, role, text, at) VALUES ('p1', 1, 'user', 'hi', '2026-10-19T16:15:41.042000+00:00')")
     c.execute("INSERT INTO meta (key, value) VALUES (?, ?)", ("my_voices:local", json.dumps([
