@@ -144,6 +144,15 @@ test.describe('the editor shell', () => {
     await expect(page.locator('[data-line-key="L20"]')).toBeFocused()
     await expect(page.locator('[data-line-key="L20"]')).toBeInViewport()
     expect(await mainTop()).toBe(start)                      // the column did not move
+    // Scrolling the list is not a move: no row starts a glide after the list scrolls and re-renders.
+    const glides = await page.evaluate(async () => {
+      const l = document.querySelector<HTMLElement>('[data-testid=transcript-list]')!
+      l.scrollTop += 300
+      window.dispatchEvent(new Event('resize'))
+      await new Promise((r) => setTimeout(r, 50))
+      return document.getAnimations().filter((a) => a.constructor.name === 'Animation' && (a.effect as KeyframeEffect | null)?.target?.closest('[data-testid=transcript-list]')).length
+    })
+    expect(glides).toBe(0)
     await page.getByRole('button', { name: 'Line 12', exact: true }).click()
     const row = page.locator('[data-line-key="L11"]')
     await expect(row).toBeInViewport()

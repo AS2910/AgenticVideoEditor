@@ -278,7 +278,8 @@ export function LineDoc({
     const seen = new Map<string, number>()
     for (const el of Array.from(root.querySelectorAll<HTMLElement>('[data-line-key]'))) {
       const key = el.dataset.lineKey!
-      const top = el.getBoundingClientRect().top - base
+      // Measured against the list's content, not its box: scrolling the list is not a move.
+      const top = el.getBoundingClientRect().top - base + root.scrollTop
       seen.set(key, top)
       const was = tops.current.get(key)
       if (!still && was !== undefined && Math.abs(was - top) > 1 && typeof el.animate === 'function') {
@@ -334,17 +335,28 @@ export function LineDoc({
   useEffect(() => {
     const go = (e: Event) => {
       const line = (e as CustomEvent<{ line: number }>).detail?.line
-      const row = list.current?.querySelector<HTMLElement>(`[data-line-key="L${line - 1}"]`)
-      if (!row) return
-      list.current?.scrollIntoView?.({ block: 'nearest' })
-      const box = list.current!
-      const r = row.getBoundingClientRect(), b = box.getBoundingClientRect()
-      if (listH !== null) box.scrollTop += r.top - b.top - (b.height - r.height) / 2
-      else row.scrollIntoView?.({ block: 'center' })
-      row.removeAttribute('data-flash')
-      void row.offsetWidth
-      row.setAttribute('data-flash', '')
-      window.setTimeout(() => row.removeAttribute('data-flash'), 1500)
+      const key = `L${line - 1}`
+      // The click that asked moved focus out of the transcript, so the rows may
+      // fold or unfold first: the row is found and centred once that has settled.
+      const bring = (flash: boolean) => {
+        const box = list.current
+        const row = box?.querySelector<HTMLElement>(`[data-line-key="${key}"]`)
+        if (!box || !row) return
+        box.scrollIntoView?.({ block: 'nearest' })
+        if (listH !== null) {
+          const r = row.getBoundingClientRect(), b = box.getBoundingClientRect()
+          box.scrollTop = box.scrollTop + (r.top - b.top) - (b.height - r.height) / 2
+        } else row.scrollIntoView?.({ block: 'center' })
+        if (flash) {
+          row.removeAttribute('data-flash')
+          void row.offsetWidth
+          row.setAttribute('data-flash', '')
+          window.setTimeout(() => row.removeAttribute('data-flash'), 1500)
+        }
+      }
+      bring(true)
+      requestAnimationFrame(() => requestAnimationFrame(() => bring(false)))
+      window.setTimeout(() => bring(false), 150)
     }
     window.addEventListener('voltage:goto-line', go)
     return () => window.removeEventListener('voltage:goto-line', go)
