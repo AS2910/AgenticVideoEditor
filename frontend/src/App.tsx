@@ -43,6 +43,9 @@ import type { Tour } from './tour/types'
 import { OnboardingProvider, useOnboarding } from './guides/onboarding'
 import { Checklist } from './guides/Checklist'
 import { Tip } from './guides/Tip'
+import { SendForReview } from './review/SendForReview'
+import { ReviewComments } from './review/Comments'
+import { useReviewComments } from './review/useReviewComments'
 import { useFlags } from './flags/useFlags'
 import { LanguageDialog, SyncChip } from './pages/LanguageVersions'
 import { StageWarning } from './pages/StageWarning'
@@ -334,6 +337,9 @@ function Studio() {
   }, [])
 
   const projectId = project?.video_id ?? null
+  // C2 (projects.review): the client's comments, as scrubber marks and a list under the transcript.
+  const review = useReviewComments(projectId, reviewOn)
+  const [reviewOpen, setReviewOpen] = useState(false)
   const signedIn = me !== null && (me.mode === 'off' || (me.user !== null && !signedOut))
 
   /** Re-reads what the project has spent; after anything that may have paid. */
@@ -1446,6 +1452,8 @@ function Studio() {
       ...readyItems.filter((i) => i.candidate).map((i) => ({ at: toRender(i.candidate!.plan.selection.start), tone: 'volt' as const, label: `Proposed: ${i.new_text}` })),
       ...needsYou.map((i) => ({ at: toRender(i.selection.start), tone: 'warn' as const, label: `Waiting on you: ${i.new_text}` })),
       ...(seen?.beats ?? []).filter((b) => b.kind !== 'cut').map((b) => ({ at: toRender(b.at), tone: 'beat' as const, label: `Beat: ${b.label}` })),
+      // C2: a client's open comment, at its time in the version they watched.
+      ...(review.comments ?? []).filter((c) => c.status === 'open').map((c) => ({ at: c.at_s, tone: 'comment' as const, label: `Comment from ${c.author_name}: ${c.text}` })),
     ]
     // A take in hand, not yet kept, is captioned with its words too: the picture
     // shows what you are about to hear.
@@ -1549,6 +1557,7 @@ function Studio() {
     const scanning = turnBusy ? strip.text : readingBusy ? 'Voltage is reading the clip' : null
     const isTutorial = !!project.settings?.tutorial
     const tipCandidates: { id: string; target: string; when: boolean }[] = [
+      { id: 'first-review-comment', target: 'scrubber', when: reviewOn && (review.comments ?? []).some((c) => c.status === 'open') },
       { id: 'first-failed-take', target: 'transcript-row', when: planItems.some((i) => i.status === 'failed') },
       { id: 'first-word-rule', target: 'transcript-row', when: consistency && planItems.some((i) => !!i.word_rule?.breaks?.length) },
       { id: 'first-ceiling', target: 'spend', when: !!error && /ceiling/i.test(error) },
@@ -1594,6 +1603,7 @@ function Studio() {
                   {folderOf && <span className="tag text-faint">{folderOf.video_count ?? 0} {folderOf.video_count === 1 ? 'video' : 'videos'}</span>}
                 </a>
                 <button type="button" role="menuitem" className="act justify-start gap-2.5" onClick={() => { setCrumbMenu(false); setMoving(true) }}><span aria-hidden="true" className="w-4 text-center">↗</span>Move to project…</button>
+                {reviewOn && <button type="button" role="menuitem" className="act justify-start gap-2.5" onClick={() => { setCrumbMenu(false); setReviewOpen(true) }} data-testid="menu-review"><span aria-hidden="true" className="w-4 text-center">✓</span>Send for review…</button>}
                 {batchOn && !project.master_id && <button type="button" role="menuitem" className="act justify-start gap-2.5" onClick={() => { setCrumbMenu(false); setLanguagesOpen(true) }} data-testid="menu-languages"><span aria-hidden="true" className="w-4 text-center">⇄</span>Make language versions…</button>}
                 <div className="mx-1 mt-1.5 mb-1 flex flex-col gap-1 rounded-lg bg-sunk p-2.5">
                   <span className="tag text-faint">Brief Voltage is using</span>
@@ -1635,6 +1645,8 @@ function Studio() {
           <AccountDot me={me} />
           {batchOn && languagesOpen && <LanguageDialog videoId={project.video_id} filename={project.filename} projectId={project.project_id} onClose={() => setLanguagesOpen(false)}
             onMade={(pid) => { setLanguagesOpen(false); if (pid) go({ page: 'folder', projectId: pid }) }} />}
+          {reviewOn && reviewOpen && <SendForReview target={{ kind: 'video', videoId: project.video_id, title: project.filename }} onClose={() => setReviewOpen(false)}
+            onSent={() => setProject((p) => (p ? { ...p, stage: 'in_review' } : p))} />}
           <WhatVoltageMayDo open={mayDoOpen} value={mayDo} onChange={(c) => void changeMayDo(c)} onClose={() => setMayDoOpen(false)} />
         </header>
         <StatusStrip state={strip} open={activityOpen} onOpen={openActivity} onStop={canStop ? () => void stopAll() : undefined} stopping={stopping} />
@@ -1753,6 +1765,18 @@ function Studio() {
               />
               {consistency && project.project_id && (
                 <LearnWord projectId={project.project_id} projectName={project.project_name} onAdded={(rule) => setProjectRules((r) => [...r, rule])} />
+              )}
+              {reviewOn && (
+                <div className="flex flex-wrap items-center gap-3 rounded-xl border-[1.5px] border-line2 bg-card px-4 py-3">
+                  <span className="flex-1 text-sm text-muted-foreground">{project.stage === 'in_review' ? 'In review. Comments from the review link show here and on the scrubber.' : 'Send a link so a client can watch, comment at a moment, and approve.'}</span>
+                  <button type="button" className="btn sm" onClick={() => setReviewOpen(true)} aria-haspopup="dialog" data-testid="send-review-open">Send for review</button>
+                </div>
+              )}
+              {reviewOn && (
+                <ReviewComments videoId={project.video_id} comments={review.comments} error={review.error} busy={turnBusy}
+                  onReload={review.reload} onChanged={review.replace}
+                  onSeek={(time) => { setSeekRequest((r) => ({ time, id: (r?.id ?? 0) + 1 })); setCurrentTime(time) }}
+                  onAsk={(goal) => void takeTurn(goal)} />
               )}
             </div>
           </main>

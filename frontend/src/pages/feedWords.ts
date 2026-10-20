@@ -17,6 +17,8 @@ export interface FeedItem { key: string; events: ProjectEvent[]; text: string; a
 
 const lines = (n: number) => `${n} ${n === 1 ? 'line' : 'lines'}`
 const GROUPED = new Set(['edit.shipped', 'edit.undone'])
+// C2: a reviewer's answer is said by its stage move; only a note of theirs is a line of its own.
+const QUIET = (e: ProjectEvent) => (e.verb === 'review.approved' || e.verb === 'review.changes_asked') && !e.payload.note
 
 function who(e: ProjectEvent): string {
   if (e.you) return 'You'
@@ -41,6 +43,8 @@ function stageSentence(e: ProjectEvent, by: string, video: string): string {
   if (to === 'exported' && /^exported/i.test(why)) return `${by} exported ${video}`
   return `${by} moved ${video} to ${label}`
 }
+
+const clockOf = (t: number) => `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, '0')}`
 
 /** One event (or a run of the same line events) as a sentence. */
 export function sentence(events: ProjectEvent[], nameOf: (videoId: string | null) => string | null): string {
@@ -84,6 +88,12 @@ export function sentence(events: ProjectEvent[], nameOf: (videoId: string | null
     case 'export.finished': return `An export finished: ${p.ready ?? 0} ready${p.failed ? `, ${p.failed} failed` : ''}`
     case 'share.created': return `${by} made a ${p.role === 'reviewer' ? 'review' : 'share'} link${p.scope === 'video' ? ` to ${video}` : ''}`
     case 'share.revoked': return `${by} turned off a link`
+    case 'review.commented': return `${by} commented on ${video}${typeof p.at_s === 'number' ? ` at ${clockOf(p.at_s)}` : ''}`
+    case 'review.approved': return `${by} approved ${video} with a note: "${String(p.note ?? '')}"`
+    case 'review.changes_asked': return `${by} asked for changes to ${video}: "${String(p.note ?? '')}"`
+    case 'review.replied': return `${by} replied to a comment on ${video}`
+    case 'review.resolved': return `${by} resolved a comment on ${video}`
+    case 'review.reopened': return `${by} opened a comment on ${video} again`
     default: return `${by} ${e.verb.replace(/[._]/g, ' ')}${e.video_id ? ` in ${video}` : ''}`
   }
 }
@@ -92,6 +102,7 @@ export function sentence(events: ProjectEvent[], nameOf: (videoId: string | null
 export function feedItems(events: ProjectEvent[], nameOf: (videoId: string | null) => string | null): FeedItem[] {
   const out: ProjectEvent[][] = []
   for (const e of events) {
+    if (QUIET(e)) continue
     const last = out[out.length - 1]
     const head = last?.[0]
     if (head && GROUPED.has(e.verb) && head.verb === e.verb && head.video_id === e.video_id

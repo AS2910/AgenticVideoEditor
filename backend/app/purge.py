@@ -105,6 +105,8 @@ def purge(db: Database, artifacts_root: str | Path, older_than_days: float = 30,
                     c.execute(f"DELETE FROM {table} WHERE project_id = ?", (vid,))
             c.execute("DELETE FROM project_events WHERE video_id = ?", (vid,))
             c.execute("DELETE FROM share_tokens WHERE scope = 'video' AND target = ?", (vid,))
+            c.execute("DELETE FROM review_comments WHERE video_id = ?", (vid,))
+            c.execute("DELETE FROM notify_queue WHERE video_id = ?", (vid,))
 
         for p in projects:
             pid = p["id"]
@@ -117,7 +119,8 @@ def purge(db: Database, artifacts_root: str | Path, older_than_days: float = 30,
             _tombstone(c, "project", pid, p["name"], p["owner"], None, p["workspace_id"], p["deleted_at"])
             c.execute("DELETE FROM projects WHERE id = ?", (pid,))
             for table in ("project_briefs", "project_rules", "project_events", "project_checks", "project_issues",
-                          "project_issue_ignores", "share_tokens", "export_presets"):
+                          "project_issue_ignores", "share_tokens", "export_presets", "review_comments",
+                          "notify_queue"):
                 c.execute(f"DELETE FROM {table} WHERE project_id = ?", (pid,))
             # B3: the project's batch exports (their files go with the project's folder).
             for export_id in _meta(c, f"exports:{pid}", []):

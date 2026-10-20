@@ -113,6 +113,11 @@ class Settings:
     # F6: the key share links are signed with; when unset, one is generated
     # once and kept in the data dir (`share_secret`).
     share_secret: str | None = None
+    # C2: who sends email (`outbox` = the fake provider: nothing leaves the
+    # machine, each email is a row in notify_outbox) and where the local
+    # owner's review digest goes (a signed-in owner's is their Google email).
+    email_provider: str = "outbox"
+    notify_owner_email: str | None = None
     # Step 0 (FLAGS): the owners every phase flag is on for by default.
     flag_owners: tuple[str, ...] = ("local",)
     # The origin the browser uses, for the OAuth redirect: https://voltage.example.com
@@ -198,6 +203,8 @@ def load_settings() -> Settings:
         google_client_secret=os.environ.get("GOOGLE_CLIENT_SECRET") or None,
         session_secret=os.environ.get("AVE_SESSION_SECRET") or None,
         share_secret=os.environ.get("AVE_SHARE_SECRET") or None,
+        email_provider=(os.environ.get("AVE_EMAIL_PROVIDER") or "outbox").strip().lower(),
+        notify_owner_email=os.environ.get("AVE_NOTIFY_OWNER_EMAIL") or None,
         public_url=(os.environ.get("AVE_PUBLIC_URL") or "http://localhost:5173").rstrip("/"),
         allowed_emails=tuple(e.strip() for e in os.environ.get("AVE_ALLOWED_EMAILS", "").split(",") if e.strip()),
         chaos=os.environ.get("AVE_CHAOS") or None,

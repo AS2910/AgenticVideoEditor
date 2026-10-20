@@ -26,7 +26,10 @@ VERBS = ("brief.saved", "rule.added", "rule.changed", "rule.removed", "stage.mov
          # A1: bringing videos up to date with a changed brief.
          "brief.update_started", "brief.video_current", "brief.update_finished",
          # B2: language versions made from a master, and a version brought back in step.
-         "language.versions_made", "language.sync_started", "language.synced")
+         "language.versions_made", "language.sync_started", "language.synced",
+         # C2: a review link's comments and answers (the reviewer as actor), the owner's replies.
+         "review.commented", "review.approved", "review.changes_asked", "review.replied",
+         "review.resolved", "review.reopened")
 MAX_PAGE = 200
 
 

@@ -771,6 +771,8 @@ export interface ShareLink {
   revoked_at: string | null
   state: 'live' | 'revoked' | 'expired'
   url: string
+  /** C2: a review link's settings (owner side only). */
+  data?: { allow_download?: boolean; email?: string | null; videos?: string[] }
 }
 export interface BatchExport {
   export_id: string
@@ -795,7 +797,55 @@ export interface PublicShare {
   title: string
   exported_at?: string
   files: { file_id: string; name: string; kind: string; size: number; duration: number | null; label?: string | null; video_id?: string }[]
+  /** C2: a review link's videos, versions, comments and the reviewer's answer. */
+  review?: PublicReview
 }
+
+// ── C2: client review ────────────────────────────────────────────────────────
+
+/** A reply under a comment ("The editor" for the owner's, on the public page). */
+export interface CommentReply { author?: string; author_kind?: 'user' | 'reviewer'; author_name?: string; text: string; at: string }
+/** A comment as the review page shows it. */
+export interface PublicComment {
+  comment_id: number
+  author: string
+  at_s: number
+  version: number | null
+  text: string
+  status: 'open' | 'resolved'
+  created_at: string
+  replies: CommentReply[]
+}
+export interface ReviewVersion { version: number; file_id: string; duration: number | null; created_at: string; against: string; changes: string[] }
+export interface ReviewAnswer { answer: 'approved' | 'changes_asked'; by: string; version: number | null; note: string | null; at: string }
+export interface ReviewVideo {
+  video_id: string
+  title: string
+  duration: number
+  current_version: number | null
+  versions: ReviewVersion[]
+  comments: PublicComment[]
+  answer: ReviewAnswer | null
+}
+export interface PublicReview { reviewer: string | null; allow_download: boolean; videos: ReviewVideo[] }
+/** A review comment as the owner sees it in the editor. */
+export interface ReviewComment {
+  comment_id: number
+  video_id: string
+  share_id: string | null
+  author_kind: 'user' | 'reviewer'
+  author_name: string
+  at_s: number
+  version: number | null
+  text: string
+  status: 'open' | 'resolved'
+  replies: CommentReply[]
+  created_at: string
+  resolved_at: string | null
+  resolved_by: string | null
+  link_name: string | null
+}
+export interface ReviewLinkRequest { name?: string; email?: string; days?: number; allow_download?: boolean }
 
 /** B2: one language version of a master, as a chip. */
 export interface LanguageChip { video_id: string; language: string | null; label: string | null; out_of_sync: boolean }

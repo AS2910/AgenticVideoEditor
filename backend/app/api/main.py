@@ -1,5 +1,6 @@
 import asyncio
 import io
+import contextlib
 import json
 import zipfile
 import re
@@ -66,6 +67,8 @@ from app.usage import (
 from app import auth
 from app.store import briefs, checks as checks_store, events as activity_log, rules, stages
 from app.store import shares as shares_store, presets as presets_store, languages as langs
+from app.store import comments as comments_store
+from app.notify import digest as digest_mod, email as email_mod
 from app.render import captions as captions_mod, deliver as deliver_mod
 from app.jobs import exports as exports_mod
 from app.agent import project_check as pcheck
@@ -435,6 +438,7 @@ def auth_callback(request: Request, code: str | None = None, state: str | None =
         raise HTTPException(status_code=502, detail=str(exc)) from exc
     if not auth.allowed(who, settings.allowed_emails):
         raise HTTPException(status_code=403, detail="This Voltage is private; that account is not on its list.")
+    email_mod.remember_address(database, who.owner, who.email)      # C2: where their review digest goes
     response = RedirectResponse(settings.public_url + "/", status_code=302)
     response.set_cookie(
         auth.SESSION_COOKIE,
@@ -1188,8 +1192,8 @@ def _summary(r: ProjectRecord) -> dict:
         "last_change": last,
         "variant_of": settings_.get("variant_of"),
         "stage": r.stage,
-        # C1: the board card's open comments; C2's review comments fill it.
-        "open_comments": 0,
+        # C1/C2: the review comments on it still open.
+        "open_comments": comments_store.open_counts(database, [pid]).get(pid, 0),
         # A1: the brief version its last shipped edit was made with, and whether the project's is newer.
         "made_with_brief": r.made_with_brief,
         "brief_changed": briefs.stale(r.made_with_brief, folder.brief_version if folder else None),
@@ -4833,6 +4837,8 @@ def _export(record: ProjectRecord, proposals: bool = False, request_id: int | No
         repo.set_settings(project_id, renders=renders)
         activity.finish(job_id, step_label=f"v{version} ready")
         _tell_render(project_id, mode)
+        if not proposals:
+            _tell_reviewers(project_id, version)              # C2: "a new version is ready" to reviewers who gave an email
         render_log.info("render done video=%s mode=%s hash=%s sha=%s request=%s seconds=%.1f",
                         project_id, mode, h, out["render"]["sha256"][:12], request_id, time.time() - started)
         return {**out, "edit_hash": h, "mode": mode, "cached": False, "render_id": render_id, "version": version,
@@ -6428,7 +6434,9 @@ def _project_share(share: shares_store.Share) -> dict:
     project = repo.get_project(share.target)
     if project is None:
         raise shares_store.ShareRefused("gone")
-    files = [f for f in (_render_file(r.source.project_id) for r in reversed(repo.list(project.owner, folder=project.project_id))) if f]
+    chosen = set(share.data.get("videos") or [])          # C2: a review link for some of the project's videos
+    files = [f for f in (_render_file(r.source.project_id) for r in reversed(repo.list(project.owner, folder=project.project_id))
+                         if not chosen or r.source.project_id in chosen) if f]
     return {"title": project.name, "files": files}
 
 
@@ -6441,7 +6449,10 @@ def _shared(token: str) -> tuple[shares_store.Share, dict]:
         share = shares_store.resolve(database, share_key, token)
         if share.project_id and repo.get_project(share.project_id) is None:
             raise shares_store.ShareRefused("gone")
-        return share, SHARE_CONTENTS[share.scope](share)
+        contents = SHARE_CONTENTS[share.scope](share)
+        if share.role == "reviewer":
+            contents = _review_contents(share, contents)     # C2: versions, comments, the reviewer's answer
+        return share, contents
     except shares_store.ShareRefused as refused:
         status = 410 if refused.code in ("expired", "revoked") else 404
         raise HTTPException(status_code=status, detail=refused.message, headers={"X-Share-Refused": refused.code})
@@ -6453,6 +6464,12 @@ class ShareRequest(BaseModel):
     role: Literal["viewer", "reviewer"] = "viewer"
     days: float = shares_store.DEFAULT_DAYS
     name: str | None = None
+    # C2 (a reviewer link): the reviewer's email (a new version is emailed to
+    # it), whether the page offers Download (off unless asked), and for a
+    # project link the videos it asks about (all when empty).
+    email: str | None = None
+    allow_download: bool = False
+    videos: list[str] | None = None
 
 
 def _check_share_target(project: Project, scope: str, target: str) -> None:
@@ -6475,14 +6492,32 @@ def create_share(project_id: str, req: ShareRequest, owner: str = Depends(curren
     project = _owned_project(project_id, owner)
     target = req.target or project_id
     _check_share_target(project, req.scope, target)
-    reviewing = review_videos(project, req.scope, target) if req.role == "reviewer" else []
+    if req.role != "reviewer":
+        reviewing: list[str] = []
+        data = None
+    else:
+        _review_flag(owner)
+        if req.scope == "export":
+            raise HTTPException(status_code=422, detail="A review link asks about a video or a project's videos.")
+        everything = review_videos(project, req.scope, target)
+        if req.scope == "project" and req.videos:
+            unknown = [v for v in req.videos if v not in everything]
+            if unknown:
+                raise HTTPException(status_code=404, detail="Some of those videos are not in this project.")
+        reviewing = [v for v in everything if not req.videos or req.scope != "project" or v in req.videos]
+        if not reviewing:
+            raise HTTPException(status_code=422, detail="Pick at least one video to send for review.")
+        data = _review_data(req, reviewing, project_scope=req.scope == "project" and bool(req.videos))
     try:
         with database.tx() as c:
-            share, _ = shares_store.create_in(c, share_key, owner=owner, project_id=project_id, scope=req.scope,
-                                              target=target, role=req.role, days=req.days, name=req.name, by=owner)
+            share, token = shares_store.create_in(c, share_key, owner=owner, project_id=project_id, scope=req.scope,
+                                                  target=target, role=req.role, days=req.days, name=req.name, by=owner,
+                                                  data=data)
             review_link_sent(c, reviewing, owner, req.name)
     except shares_store.ShareError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
+    if req.role == "reviewer":
+        _invite_reviewer(share, token, project.name)
     return _share_dict(share)
 
 
@@ -6527,23 +6562,466 @@ def _public_file(f: dict) -> dict:
 
 @app.get("/share/{token}")
 def open_share(token: str) -> dict:
-    """No account: what a live link shares, each file with its name and size."""
+    """No account: what a live link shares, each file with its name and size
+    (a review link adds `review`: each video's versions, comments and answer)."""
     share, contents = _shared(token)
     return {"scope": share.scope, "role": share.role, "name": share.name, "expires_at": share.expires_at,
             "title": contents["title"], "files": [_public_file(f) for f in contents["files"]],
-            **{k: v for k, v in contents.items() if k not in ("title", "files")}}
+            **{k: v for k, v in contents.items() if k not in ("title", "files") and not k.startswith("_")}}
 
 
 @app.get("/share/{token}/files/{file_id}")
 def shared_file(token: str, file_id: str, download: bool = False) -> FileResponse:
     """One shared file, played in place (range requests) or downloaded."""
-    _, contents = _shared(token)
-    found = next((f for f in contents["files"] if f["file_id"] == file_id), None)
+    share, contents = _shared(token)
+    found = next((f for f in contents.get("_all_files") or contents["files"] if f["file_id"] == file_id), None)
     if found is None or not Path(found["path"]).exists():
         raise HTTPException(status_code=404, detail="That file is not in this link.")
+    if download and share.role == "reviewer" and not share.data.get("allow_download"):
+        raise HTTPException(status_code=403, detail="Downloading is turned off for this link.")
     path = Path(found["path"])
     return FileResponse(path, media_type=_MEDIA_TYPES.get(path.suffix.lstrip("."), "application/octet-stream"),
                         filename=found["name"], content_disposition_type="attachment" if download else "inline")
+
+
+# ── C2: client review link ───────────────────────────────────────────────────
+#
+# A review link is an F6 share with role reviewer (a video, or a project with
+# the videos picked): no account; the page plays each video's latest final
+# render, lists its versions (the final renders kept) with what changed
+# between each and the one before, takes comments pinned to a time in a
+# version, and an answer (Approve, Ask for changes) that moves the stage
+# (stages.reviewer_approved / reviewer_asked_changes, under the reviewer's
+# name). What the page sees is only the renders and their line text: no
+# voice ids, no costs, no project data (`_review_contents`). Download is off
+# unless the link allows it (the page shows a watermark with the reviewer's
+# name over the player then; a watermark burned into the file is for later).
+# The owner reads comments in the editor (markers and a list), replies,
+# resolves, or hands one to Voltage. Email goes through app/notify: the owner
+# gets a digest at most every 10 minutes; a reviewer who gave an email hears
+# when a new version is ready.
+
+email_sender = email_mod.sender_for(settings.email_provider, database)
+REVIEW_COMMENTS_PER_LINK = 500
+TEAM_NAME = "The editor"
+
+
+def _final_versions(video_id: str) -> list[dict]:
+    """The video's kept final renders, one per version, oldest version first."""
+    best: dict[int, dict] = {}
+    for r in (repo.settings(video_id).get("renders") or {}).values():
+        version = r.get("version")
+        if r.get("mode") != "final" or not version or not (r.get("render") or {}).get("sha256"):
+            continue
+        if version in best and best[version]["at"] >= r["at"]:
+            continue
+        best[version] = {"version": int(version), "at": r["at"], "sha256": r["render"]["sha256"],
+                         "duration": r["render"].get("duration"), "edit_ids": (r.get("includes") or {}).get("edit_ids") or [],
+                         "filename": (r.get("record") or {}).get("filename")}
+    return [best[v] for v in sorted(best)]
+
+
+def _current_version(video_id: str) -> int | None:
+    """The version of the latest final render (what a reviewer plays first)."""
+    kept = [f for f in _final_versions(video_id) if artifacts.find(video_id, f["sha256"]) is not None]
+    return max(kept, key=lambda f: f["at"])["version"] if kept else None
+
+
+def _said_over(record: ProjectRecord, start: float, end: float) -> str:
+    return " ".join(w.text for w in record.transcript.words if w.start >= start - 0.05 and w.end <= end + 0.05).strip()
+
+
+def _what_changed(record: ProjectRecord, edits: dict, before: set[str], after: set[str]) -> list[str]:
+    """The lines that differ between two versions' edit sets, as plain sentences."""
+    added = sorted((edits[i] for i in after - before if i in edits), key=lambda e: e.plan.selection.start)
+    gone = sorted((edits[i] for i in before - after if i in edits), key=lambda e: e.plan.selection.start)
+    added_ids, gone_ids = {e.edit_id for e in added}, {e.edit_id for e in gone}
+    lines: list[str] = []
+    for e in added:
+        at, text = _clock(e.plan.selection.start), e.plan.new_text.strip()
+        if e.plan.mix == "remove":
+            if e.partner and e.partner in added_ids:
+                continue                                  # a moved line: its placed half says it
+            said = _said_over(record, e.plan.selection.start, e.plan.selection.end)
+            lines.append(f'Took out the line at {at}: "{said}"' if said else f"Took out the line at {at}.")
+        elif e.partner and e.partner in added_ids:
+            lines.append(f'Moved "{text}" to {at}.')
+        elif e.plan.mix == "replace":
+            lines.append(f'{at} now says "{text}"')
+        else:
+            lines.append(f'Added a line at {at}: "{text}"')
+    starts = [e.plan.selection.start for e in added]
+    for e in gone:
+        if any(abs(s - e.plan.selection.start) < 0.5 for s in starts):
+            continue                                      # a newer take of the same line, said above
+        if e.plan.mix == "remove" and e.partner and e.partner in gone_ids:
+            continue
+        at = _clock(e.plan.selection.start)
+        if e.plan.mix in ("replace", "remove"):
+            lines.append(f"{at} is back as shot.")
+        else:
+            lines.append(f'Took out the added line at {at}: "{e.plan.new_text.strip()}"')
+    return lines[:30]
+
+
+def _review_versions(video_id: str, record: ProjectRecord) -> list[dict]:
+    """Each kept final render as a version a reviewer can pick, newest first,
+    with what changed since the version before it (`_file`: the private file)."""
+    edits = {e.edit_id: e for e in repo.list_edits(video_id)}
+    out, prev = [], None
+    for f in _final_versions(video_id):
+        path = artifacts.find(video_id, f["sha256"])
+        if path is None:
+            continue
+        file_id = f"{video_id}-{f['sha256'][:12]}"
+        out.append({
+            "version": f["version"], "file_id": file_id, "duration": f["duration"], "created_at": f["at"],
+            "against": f"v{prev['version']}" if prev else "as shot",
+            "changes": _what_changed(record, edits, set(prev["edit_ids"]) if prev else set(), set(f["edit_ids"])),
+            "_file": {"file_id": file_id, "name": f["filename"] or f"{video_id}.mp4", "kind": "video",
+                      "size": path.stat().st_size, "duration": f["duration"], "video_id": video_id, "path": path},
+        })
+        prev = f
+    return out[::-1]
+
+
+def _review_ids(share: shares_store.Share) -> list[str]:
+    """The videos a review link asks about."""
+    if share.scope == "video":
+        return [share.target]
+    if share.scope == "project":
+        chosen = share.data.get("videos") or []
+        live = [r.source.project_id for r in reversed(repo.list(share.owner, folder=share.target))]
+        return [v for v in live if not chosen or v in chosen]
+    return []
+
+
+def _public_comment(c: comments_store.Comment) -> dict:
+    """A comment as the review page shows it: who, when, what; the team's replies unnamed."""
+    return {"comment_id": c.comment_id, "author": c.author_name if c.author_kind == "reviewer" else TEAM_NAME,
+            "at_s": c.at_s, "version": c.version, "text": c.text, "status": c.status, "created_at": c.created_at,
+            "replies": [{"author": r["author_name"] if r["author_kind"] == "reviewer" else TEAM_NAME, "text": r["text"], "at": r["at"]}
+                        for r in c.replies]}
+
+
+def _review_answer(share_id: str, video_id: str) -> dict | None:
+    """The reviewer's latest answer on this link for this video."""
+    with database.tx() as c:
+        row = c.execute("SELECT * FROM project_events WHERE target = ? AND video_id = ? AND verb IN ('review.approved', 'review.changes_asked') "
+                        "ORDER BY id DESC LIMIT 1", (share_id, video_id)).fetchone()
+    if row is None:
+        return None
+    payload = json.loads(row["payload"] or "{}")
+    return {"answer": "approved" if row["verb"] == "review.approved" else "changes_asked", "by": row["actor_name"],
+            "version": payload.get("version"), "note": payload.get("note"), "at": row["at"]}
+
+
+def _review_contents(share: shares_store.Share, contents: dict) -> dict:
+    """What a review link adds to its share: per video, its versions, the
+    comments made through this link and the reviewer's answer. `_all_files`
+    (private) lets every version's file play."""
+    videos, every = [], list(contents["files"])
+    for video_id in _review_ids(share):
+        record = repo.get(video_id)
+        if record is None:
+            continue
+        versions = _review_versions(video_id, record)
+        every += [v["_file"] for v in versions]
+        current = max(versions, key=lambda v: v["created_at"])["version"] if versions else None
+        videos.append({
+            "video_id": video_id, "title": record.source.filename, "duration": record.source.duration,
+            "current_version": current,
+            "versions": [{k: v[k] for k in ("version", "file_id", "duration", "created_at", "against", "changes")} for v in versions],
+            "comments": [_public_comment(c) for c in comments_store.for_share(database, share.share_id, video_id)],
+            "answer": _review_answer(share.share_id, video_id),
+        })
+    return {**contents, "_all_files": every,
+            "review": {"reviewer": share.name, "allow_download": bool(share.data.get("allow_download")), "videos": videos}}
+
+
+def _review_data(req, reviewing: list[str], project_scope: bool) -> dict:
+    """A review link's data: download allowed or not, the reviewer's email,
+    the version each video was on when sent (a newer one is emailed), and a
+    project link's chosen videos."""
+    address = (req.email or "").strip() or None
+    if address and not email_mod.valid_address(address):
+        raise HTTPException(status_code=422, detail="That email address does not look right.")
+    data: dict = {"allow_download": bool(req.allow_download), "email": address,
+                  "from_versions": {v: _current_version(v) for v in reviewing}}
+    if project_scope:
+        data["videos"] = reviewing
+    return data
+
+
+def _invite_reviewer(share: shares_store.Share, token: str, title: str) -> None:
+    address = share.data.get("email")
+    if not address:
+        return
+    try:
+        email_sender.send(email_mod.Email(
+            to=address, kind="review_invite", owner=share.owner,
+            subject=f"Please review {title}",
+            body="\n".join([f"Hi {share.name}," if share.name else "Hi,", "",
+                            f"You have been asked to review {title}. Watch it, leave comments at the moment they are about, "
+                            "then approve it or ask for changes. No account needed.", "",
+                            f"Open the review: {_share_url(token)}", "",
+                            f"The link works until {share.expires_at[:10]}."])))
+    except Exception:  # noqa: BLE001 - the link is made; the email is a courtesy
+        log.exception("review invite for %s", share.share_id)
+
+
+def _tell_reviewers(video_id: str, version: int) -> None:
+    """A new final version: email each live review link's reviewer (who gave
+    an email) once per version newer than the one they were sent."""
+    try:
+        record = repo.get(video_id)
+        if record is None:
+            return
+        for share in shares_store.list_for(database, record.owner):
+            if share.role != "reviewer" or share.state() != "live" or not share.data.get("email"):
+                continue
+            if video_id not in _review_ids(share):
+                continue
+            key = f"review_told:{share.share_id}:{video_id}"
+            told = max(int(repo.get_meta(key) or 0), int((share.data.get("from_versions") or {}).get(video_id) or 0))
+            if version <= told:
+                continue
+            repo.set_meta(key, str(version))
+            email_sender.send(email_mod.Email(
+                to=share.data["email"], kind="version_ready", owner=share.owner,
+                subject=f"v{version} of {record.source.filename} is ready to review",
+                body="\n".join([f"Hi {share.name}," if share.name else "Hi,", "",
+                                f"A new version (v{version}) of {record.source.filename} is ready. "
+                                "The review page shows what changed since the last one.", "",
+                                f"Open the review: {_share_url(shares_store.token_for(share_key, share))}"])))
+    except Exception:  # noqa: BLE001 - news, never the render
+        log.exception("new version email for %s", video_id)
+
+
+def flush_review_digests(now: datetime | None = None) -> list:
+    """Send every owner's digest that is due (C2; the scheduler calls this each minute)."""
+    def link_for(item: dict) -> str | None:
+        if item.get("project_id"):
+            return f"{settings.public_url}/#p/{item['project_id']}"
+        return f"{settings.public_url}/#v/{item['video_id']}" if item.get("video_id") else None
+    return digest_mod.flush(
+        database, email_sender, now or digest_mod.utcnow(),
+        lambda owner: email_mod.address_for(database, owner, settings.notify_owner_email if owner == LOCAL_OWNER else None),
+        link_for)
+
+
+review_digests = digest_mod.DigestScheduler(flush_review_digests, every=60)
+
+
+_lifespan_before_c2 = app.router.lifespan_context
+
+
+@contextlib.asynccontextmanager
+async def _lifespan_with_digests(a):
+    """The running server sends due digests once a minute (a TestClient used without `with` never starts it)."""
+    review_digests.start()
+    async with _lifespan_before_c2(a) as state:
+        yield state
+
+
+app.router.lifespan_context = _lifespan_with_digests
+
+
+# The reviewer's side (no account; the link is the key).
+
+def _reviewing(token: str, video_id: str) -> tuple[shares_store.Share, dict]:
+    share, contents = _shared(token)
+    if share.role != "reviewer":
+        raise HTTPException(status_code=403, detail="This link is for watching only.")
+    video = next((v for v in contents["review"]["videos"] if v["video_id"] == video_id), None)
+    if video is None:
+        raise HTTPException(status_code=404, detail="That video is not in this link.")
+    return share, video
+
+
+def _reviewer_name(share: shares_store.Share, given: str | None) -> str:
+    return share.name or comments_store.clean_name(given) or "A reviewer"
+
+
+class ReviewCommentRequest(BaseModel):
+    video_id: str
+    at_s: float
+    text: str
+    version: int | None = None
+    name: str | None = None          # when the link names no one, the reviewer may
+
+
+@app.post("/share/{token}/comments", status_code=201)
+def review_comment(token: str, req: ReviewCommentRequest) -> dict:
+    """A reviewer's comment, pinned to a time in a version."""
+    share, video = _reviewing(token, req.video_id)
+    if comments_store.count_for_share(database, share.share_id) >= REVIEW_COMMENTS_PER_LINK:
+        raise HTTPException(status_code=429, detail="This link has taken as many comments as it can. Ask for a new link.")
+    picked = next((v for v in video["versions"] if v["version"] == req.version), None)
+    if req.version is not None and picked is None:
+        raise HTTPException(status_code=422, detail="That version is not in this link.")
+    length = (picked or {}).get("duration") or video["duration"] or 0
+    if not (0 <= req.at_s <= float(length) + 0.5):
+        raise HTTPException(status_code=422, detail="That time is not in the video.")
+    name = _reviewer_name(share, req.name)
+    try:
+        with database.tx() as c:
+            comment = comments_store.add_in(c, video_id=req.video_id, author_name=name, at_s=req.at_s, text=req.text,
+                                            version=req.version, share_id=share.share_id)
+            activity_log.record(c, "review.commented", Actor("reviewer", name), video_id=req.video_id, target=share.share_id,
+                                payload={"comment_id": comment.comment_id, "at_s": comment.at_s, "version": req.version})
+            digest_mod.queue_in(c, share.owner, "comment", project_id=comment.project_id, video_id=req.video_id,
+                                payload={"by": name, "video": video["title"], "at_s": comment.at_s, "version": req.version,
+                                         "text": comment.text})
+    except comments_store.CommentError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    return _public_comment(comment)
+
+
+class ReviewAnswerRequest(BaseModel):
+    video_id: str
+    version: int | None = None
+    note: str | None = None
+    name: str | None = None
+
+
+def _answer_review(token: str, req: ReviewAnswerRequest, approved: bool) -> dict:
+    share, video = _reviewing(token, req.video_id)
+    name = _reviewer_name(share, req.name)
+    note = (req.note or "").strip()[: comments_store.MAX_TEXT] or None
+    version = req.version or video["current_version"]
+    folder = (repo.get(req.video_id) or None)
+    with database.tx() as c:
+        if approved:
+            stages.reviewer_approved_in(c, req.video_id, name, version)
+        else:
+            stages.reviewer_asked_changes_in(c, req.video_id, name, f'{name} asked for changes: "{note}"' if note else "")
+        verb = "review.approved" if approved else "review.changes_asked"
+        activity_log.record(c, verb, Actor("reviewer", name), video_id=req.video_id, target=share.share_id,
+                            payload={"version": version, "note": note})
+        digest_mod.queue_in(c, share.owner, "approved" if approved else "changes_asked",
+                            project_id=folder.folder_id if folder else None, video_id=req.video_id,
+                            payload={"by": name, "video": video["title"], "version": version, "note": note})
+    return {"video_id": req.video_id, "answer": _review_answer(share.share_id, req.video_id)}
+
+
+@app.post("/share/{token}/approve")
+def review_approve(token: str, req: ReviewAnswerRequest) -> dict:
+    """The reviewer approves: the video moves to Approved, logged under their name."""
+    return _answer_review(token, req, approved=True)
+
+
+@app.post("/share/{token}/changes")
+def review_ask_changes(token: str, req: ReviewAnswerRequest) -> dict:
+    """The reviewer asks for changes: the video moves to Changes asked."""
+    return _answer_review(token, req, approved=False)
+
+
+# The owner's side (behind `projects.review`).
+
+def _owned_comment(video_id: str, comment_id: int) -> comments_store.Comment:
+    found = comments_store.get(database, comment_id)
+    if found is None or found.video_id != video_id:
+        raise HTTPException(status_code=404, detail="That comment is not on this video.")
+    return found
+
+
+@app.get("/videos/{video_id}/comments")
+def list_review_comments(video_id: str, owner: str = Depends(current_owner)) -> dict:
+    """Every review comment on the video in time order, with the link it came through."""
+    _review_flag(owner)
+    _owned(video_id, owner)
+    names = {s.share_id: s.name for s in shares_store.list_for(database, owner)}
+    found = comments_store.for_video(database, video_id)
+    return {"comments": [{**c.to_dict(), "link_name": names.get(c.share_id or "")} for c in found],
+            "open": sum(1 for c in found if c.status == "open")}
+
+
+class CommentReplyRequest(BaseModel):
+    text: str
+
+
+@app.post("/videos/{video_id}/comments/{comment_id}/replies")
+def reply_review_comment(video_id: str, comment_id: int, req: CommentReplyRequest, owner: str = Depends(current_owner)) -> dict:
+    """The owner's reply; the reviewer sees it under their comment."""
+    _review_flag(owner)
+    _owned(video_id, owner)
+    _owned_comment(video_id, comment_id)
+    try:
+        with database.tx() as c:
+            comment = comments_store.reply_in(c, comment_id, "user", owner, req.text)
+            activity_log.record(c, "review.replied", user_actor(owner), video_id=video_id, target=str(comment_id))
+    except comments_store.CommentError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    return comment.to_dict()
+
+
+class CommentStatusRequest(BaseModel):
+    resolved: bool = True
+
+
+@app.post("/videos/{video_id}/comments/{comment_id}/resolve")
+def resolve_review_comment(video_id: str, comment_id: int, req: CommentStatusRequest | None = None,
+                           owner: str = Depends(current_owner)) -> dict:
+    """Resolve a comment (or open it again with `resolved: false`)."""
+    _review_flag(owner)
+    _owned(video_id, owner)
+    _owned_comment(video_id, comment_id)
+    resolved = req.resolved if req else True
+    with database.tx() as c:
+        comment = comments_store.set_status_in(c, comment_id, resolved, owner)
+        activity_log.record(c, "review.resolved" if resolved else "review.reopened", user_actor(owner),
+                            video_id=video_id, target=str(comment_id))
+    return comment.to_dict()
+
+
+class ReviewLinkRequest(BaseModel):
+    name: str | None = None
+    email: str | None = None
+    days: float = shares_store.DEFAULT_DAYS
+    allow_download: bool = False
+
+
+def _video_review_links(record: ProjectRecord, owner: str) -> list[shares_store.Share]:
+    video_id = record.source.project_id
+    return [s for s in shares_store.list_for(database, owner)
+            if s.role == "reviewer" and video_id in (_review_ids(s) if s.scope != "video" else [s.target])]
+
+
+@app.get("/videos/{video_id}/review-links")
+def list_review_links(video_id: str, owner: str = Depends(current_owner)) -> dict:
+    """The review links that ask about this video (its own and its project's), newest first."""
+    _review_flag(owner)
+    record = _owned(video_id, owner)
+    return {"links": [_share_dict(s) for s in _video_review_links(record, owner)]}
+
+
+@app.post("/videos/{video_id}/review-links", status_code=201)
+def create_review_link(video_id: str, req: ReviewLinkRequest, owner: str = Depends(current_owner)) -> dict:
+    """Send for review from the editor: a reviewer link to this video (in a project or not); it moves In review."""
+    _review_flag(owner)
+    record = _owned(video_id, owner)
+    data = _review_data(req, [video_id], project_scope=False)
+    try:
+        with database.tx() as c:
+            share, token = shares_store.create_in(c, share_key, owner=owner, project_id=record.folder_id, scope="video",
+                                                  target=video_id, role="reviewer", days=req.days, name=req.name, by=owner,
+                                                  data=data)
+            review_link_sent(c, [video_id], owner, req.name)
+    except shares_store.ShareError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    _invite_reviewer(share, token, record.source.filename)
+    return _share_dict(share)
+
+
+@app.delete("/videos/{video_id}/review-links/{share_id}")
+def revoke_review_link(video_id: str, share_id: str, owner: str = Depends(current_owner)) -> dict:
+    """Turn a review link off: whoever opens it is told so; their comments stay."""
+    _review_flag(owner)
+    record = _owned(video_id, owner)
+    if share_id not in {s.share_id for s in _video_review_links(record, owner)}:
+        raise HTTPException(status_code=404, detail="That link is not for this video.")
+    return _share_dict(shares_store.revoke(database, share_id, owner))  # type: ignore[arg-type]
 
 
 # ── B3: batch export ─────────────────────────────────────────────────────────

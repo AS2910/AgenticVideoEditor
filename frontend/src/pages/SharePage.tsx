@@ -6,10 +6,12 @@ import { clock } from '../transcript/format'
 import { said } from './fmt'
 import { Wordmark } from './Shell'
 import { fileSize } from '../lib/exports'
+import { ReviewPage } from '../review/ReviewPage'
 
 /** F6/B3: what a share link opens, with no account: every file with a
  *  preview player and Download, Download all (.zip), when the link expires.
- *  An expired, turned-off or broken link says so plainly. */
+ *  A review link (C2) opens the review page instead. An expired, turned-off
+ *  or broken link says so plainly. */
 export function SharePage({ token }: { token: string }) {
   const [share, setShare] = useState<PublicShare | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -27,7 +29,7 @@ export function SharePage({ token }: { token: string }) {
     <div className="min-h-dvh bg-background text-foreground">
       <header className="flex min-h-[62px] items-center gap-4 border-b-[1.5px] border-foreground bg-card px-4 py-2.5 sm:px-6">
         <Wordmark href={null} />
-        <span className="tag text-faint">Shared files</span>
+        <span className="tag text-faint">{share?.review ? 'Review' : 'Shared files'}</span>
       </header>
       <main className="mx-auto flex w-full max-w-[960px] flex-col gap-6 px-4 pt-9 pb-20 sm:px-6">
         {!share && !error && <p className="m-0 text-muted-foreground" role="status">Opening the link…</p>}
@@ -38,7 +40,8 @@ export function SharePage({ token }: { token: string }) {
             <button type="button" className="btn sm" onClick={() => setTick((t) => t + 1)}>Try again</button>
           </div>
         )}
-        {share && (
+        {share?.review && <ReviewPage token={token} share={{ ...share, review: share.review }} />}
+        {share && !share.review && (
           <>
             <div className="flex flex-col gap-1.5">
               <h1 className="disp m-0 text-[clamp(30px,4.5vw,46px)] leading-none font-bold">{share.title}</h1>

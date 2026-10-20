@@ -23,6 +23,8 @@ import { ExportPresets } from './ExportPresets'
 import type { ExportPreset } from '../types'
 import { LanguageDialog, SyncChip } from './LanguageVersions'
 import { ProjectBoard } from './ProjectBoard'
+import { SendForReview } from '../review/SendForReview'
+import { STAGE_LABEL } from './feedWords'
 import { ProjectFeed } from './ProjectFeed'
 import type { Stage } from '../types'
 
@@ -81,6 +83,8 @@ export function ProjectPage({ me, projectId, onUpload, uploading, error, onDelet
   const [exportPresets, setExportPresets] = useState<ExportPreset[] | null>(null)
   // B2 (projects.batch): the master whose language versions are being made, and the batch board's re-read.
   const [langFor, setLangFor] = useState<ProjectSummary | null>(null)
+  // C2: Send for review for the picked videos of this project.
+  const [reviewing, setReviewing] = useState(false)
   const [batchTick, setBatchTick] = useState(0)
   // C1 (projects.review): Grid or Board, and the feed's re-read after a move.
   const reviewOn = enabled('projects.review')
@@ -288,6 +292,8 @@ export function ProjectPage({ me, projectId, onUpload, uploading, error, onDelet
                 {(['grid', 'board'] as const).map((v) => <button key={v} type="button" className="seg" aria-pressed={view === v} onClick={() => chooseView(v)}>{v === 'grid' ? 'Grid' : 'Board'}</button>)}
               </div>
             )}
+            {reviewOn && <span className="flex-1" />}
+            {reviewOn && <button type="button" className="btn sm" onClick={() => setReviewing(true)} disabled={detail.videos.length === 0} aria-haspopup="dialog" data-testid="send-review-open">Send for review</button>}
           </div>
           {consistency && <StaleLine projectId={projectId} count={project.stale_count ?? 0} version={project.brief_version} onChanged={() => void load()} />}
           {consistency && (project.stale_count ?? 0) > 0 && <Tip id="first-brief-changed" target="stale-line" />}
@@ -356,6 +362,11 @@ export function ProjectPage({ me, projectId, onUpload, uploading, error, onDelet
               onMade={() => { setLangFor(null); setBatchTick((t) => t + 1); void load(); document.querySelector('[data-testid="batch"]')?.scrollIntoView({ behavior: 'smooth', block: 'start' }) }} />
           )}
           {batchOn && detail.videos.some((v) => v.out_of_sync) && <Tip id="first-language-sync" target="out-of-sync" />}
+          {reviewOn && reviewing && (
+            <SendForReview
+              target={{ kind: 'project', projectId, title: project.name, videos: detail.videos.map((v) => ({ video_id: v.video_id, filename: v.filename, stage_label: STAGE_LABEL[v.stage as keyof typeof STAGE_LABEL] })) }}
+              onClose={() => setReviewing(false)} onSent={() => { void load(); setFeedTick((t) => t + 1) }} />
+          )}
         </section>
 
         <aside aria-label="Shared with every video" className="flex min-w-0 flex-[1_1_340px] flex-col gap-3.5">

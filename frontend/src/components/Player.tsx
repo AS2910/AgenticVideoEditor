@@ -4,7 +4,7 @@ import { Pause, Play } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 /** A mark on the scrubber: a proposal (volt), a line in the video (ink), a step waiting on you (warn). */
-export interface Marker { at: number; tone: 'volt' | 'ink' | 'warn' | 'beat'; label: string }
+export interface Marker { at: number; tone: 'volt' | 'ink' | 'warn' | 'beat' | 'comment'; label: string }
 
 interface PlayerProps {
   src: string
@@ -131,6 +131,8 @@ export function Player({
     volt: 'bg-volt border-ink', ink: 'bg-foreground border-foreground', warn: 'bg-warn border-ink',
     // 2026-10-20: a beat of the video (a cut, a peak, a moment), a thin tick under the track.
     beat: 'bg-muted-foreground border-transparent',
+    // C2: a reviewer's open comment, a round mark.
+    comment: 'bg-card border-ink rounded-full',
   }
   return (
     <section className="mx-auto flex w-full max-w-[720px] flex-col gap-3.5" aria-label="Monitor">
@@ -208,13 +210,13 @@ export function Player({
         </span>
         {/* The scrubber: a hairline track, the played part in ink, markers, the playhead,
             and the real range input laid invisibly over it so it stays a slider. */}
-        <div className="relative h-7 min-w-0 flex-1">
+        <div className="relative h-7 min-w-0 flex-1" data-tour="scrubber">
           <div className="absolute inset-x-0 top-3 h-1 rounded-sm bg-line" aria-hidden="true" />
           <div className="absolute top-3 left-0 h-1 rounded-sm bg-foreground" style={{ width: `${head}%` }} aria-hidden="true" />
           {markers.filter((m) => m.at >= 0 && m.at <= length).map((m, i) => (
             <span
               key={i}
-              className={cn('pointer-events-none absolute -ml-[5px] rounded-[3px] border-[1.5px]', TONE[m.tone], m.tone === 'beat' ? 'top-[17px] h-1.5 w-0.5 -ml-px rounded-none border-0' : m.tone === 'ink' ? 'top-[9px] h-2.5 w-1.5 -ml-[3px]' : 'top-[7px] h-3.5 w-2.5')}
+              className={cn('pointer-events-none absolute -ml-[5px] rounded-[3px] border-[1.5px]', TONE[m.tone], m.tone === 'beat' ? 'top-[17px] h-1.5 w-0.5 -ml-px rounded-none border-0' : m.tone === 'ink' ? 'top-[9px] h-2.5 w-1.5 -ml-[3px]' : m.tone === 'comment' ? 'top-[8px] size-3 -ml-1.5' : 'top-[7px] h-3.5 w-2.5')}
               data-testid="marker"
               data-tone={m.tone}
               title={m.label}

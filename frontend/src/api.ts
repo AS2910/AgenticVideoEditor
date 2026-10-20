@@ -8,6 +8,7 @@ import type {
   ProjectSettings, Autonomy, Effort, Plan, Mix, Selection, Candidate, Reading, Sight, ChatMessage,
   ProjectFolder, ProjectDetailFolder, ProjectFile, HelpArticle, Onboarding, ProjectVoice,
   ActivityJob, TurnView, RenderState, BriefVersion, BriefChange, BriefUpdateRun, ProjectRule, RuleKind, RuleData, CheckPage, Batch, ExportPreset, ExportPresetPage, ExportPresetChange, Preflight, BatchExport, ShareLink, PublicShare,
+  PublicComment, ReviewAnswer, ReviewComment, ReviewLinkRequest,
 } from './types'
 
 const BASE = '/api'
@@ -193,6 +194,21 @@ export const exportFileUrl = (id: string, exportId: string, index: number, downl
 export const openShare = (token: string) => get<PublicShare>(`/share/${encodeURIComponent(token)}`)
 export const sharedFileUrl = (token: string, fileId: string, download = false) => `${BASE}/share/${encodeURIComponent(token)}/files/${encodeURIComponent(fileId)}${download ? '?download=true' : ''}`
 export const sharedZipUrl = (token: string) => `${BASE}/share/${encodeURIComponent(token)}/zip`
+// C2 (projects.review): review links, the reviewer's page (no account) and the owner's comments.
+export const createProjectReviewLink = (id: string, body: ReviewLinkRequest & { videos: string[] }) =>
+  post<ShareLink>(`/projects/${id}/shares`, { scope: 'project', role: 'reviewer', ...body })
+export const listProjectShares = (id: string) => get<{ shares: ShareLink[] }>(`/projects/${id}/shares`)
+export const listReviewLinks = (videoId: string) => get<{ links: ShareLink[] }>(`/videos/${videoId}/review-links`)
+export const createReviewLink = (videoId: string, body: ReviewLinkRequest) => post<ShareLink>(`/videos/${videoId}/review-links`, body)
+export const revokeReviewLink = (videoId: string, shareId: string) => del(`/videos/${videoId}/review-links/${shareId}`)
+const shareBase = (token: string) => `/share/${encodeURIComponent(token)}`
+export const reviewComment = (token: string, body: { video_id: string; at_s: number; text: string; version: number | null; name?: string }) =>
+  post<PublicComment>(`${shareBase(token)}/comments`, body)
+export const reviewAnswer = (token: string, answer: 'approve' | 'changes', body: { video_id: string; version: number | null; note?: string; name?: string }) =>
+  post<{ video_id: string; answer: ReviewAnswer }>(`${shareBase(token)}/${answer}`, body)
+export const listReviewComments = (videoId: string) => get<{ comments: ReviewComment[]; open: number }>(`/videos/${videoId}/comments`)
+export const replyReviewComment = (videoId: string, commentId: number, text: string) => post<ReviewComment>(`/videos/${videoId}/comments/${commentId}/replies`, { text })
+export const resolveReviewComment = (videoId: string, commentId: number, resolved: boolean) => post<ReviewComment>(`/videos/${videoId}/comments/${commentId}/resolve`, { resolved })
 
 /** Help and onboarding (2026-10-19). */
 export const listHelp = async () => (await get<{ articles: HelpArticle[] }>('/help')).articles
