@@ -6,7 +6,7 @@ import type {
   Project, ExportManifest, Job, ProjectSummary, ProjectDetail, Usage, Voice, Speaker,
   ProjectSettings, Autonomy, Effort, Plan, Mix, Selection, Candidate, Reading, Sight, ChatMessage,
   ProjectFolder, ProjectDetailFolder, ProjectFile, HelpArticle, Onboarding, ProjectVoice,
-  ActivityJob, TurnView, RenderState, BriefVersion, BriefChange, BriefUpdateRun, ProjectRule, RuleKind, RuleData, CheckPage,
+  ActivityJob, TurnView, RenderState, BriefVersion, BriefChange, BriefUpdateRun, ProjectRule, RuleKind, RuleData, CheckPage, Batch,
 } from './types'
 
 const BASE = '/api'
@@ -158,6 +158,14 @@ export const startProjectCheck = (id: string, mode: 'full' | 'rules') => post<Ch
 export const ignoreCheckIssue = (id: string, issueId: number) => post<CheckPage>(`/projects/${id}/check/issues/${issueId}/ignore`, {})
 export const fixCheckIssue = (id: string, issueId: number, videoId: string) => post<{ video_id: string; job_id: string; t: number | null }>(`/projects/${id}/check/issues/${issueId}/fix`, { video_id: videoId })
 export const fixCheckIssueEverywhere = (id: string, issueId: number) => post<CheckPage>(`/projects/${id}/check/issues/${issueId}/fix-all`, {})
+// F4/B1 (projects.batch): one goal across the project's videos, one gate, a board.
+export const listBatches = (id: string) => get<{ batches: Batch[] }>(`/projects/${id}/batches`)
+export const planBatch = (id: string, body: { source: 'ask' | 'fix'; goal?: string; issue_id?: number; video_ids?: string[] }) => post<Batch>(`/projects/${id}/batches`, body)
+export const goBatch = (id: string, batchId: string) => post<Batch>(`/projects/${id}/batches/${batchId}/go`)
+export const cancelBatch = (id: string, batchId: string) => post<Batch>(`/projects/${id}/batches/${batchId}/cancel`)
+export const answerBatchVideo = (id: string, batchId: string, videoId: string, text: string) => post<Batch>(`/projects/${id}/batches/${batchId}/videos/${videoId}/answer`, { text })
+export const addAllBatch = (id: string, batchId: string) => post<Batch>(`/projects/${id}/batches/${batchId}/add-all`)
+export const undoBatchAdd = (id: string, batchId: string, videoId: string) => post<Batch>(`/projects/${id}/batches/${batchId}/videos/${videoId}/undo-add`)
 
 /** Help and onboarding (2026-10-19). */
 export const listHelp = async () => (await get<{ articles: HelpArticle[] }>('/help')).articles

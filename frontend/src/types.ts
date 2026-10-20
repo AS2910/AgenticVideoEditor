@@ -328,6 +328,8 @@ export interface ProjectSummary {
   /** UX-3: the source media (for a frame), where the project stands, its last change. */
   media?: MediaArtifact
   state?: 'new' | 'draft' | 'shipped'
+  /** F5: draft | in_review | changes_asked | approved | exported. */
+  stage?: string
   last_change?: string
   variant_of?: string | null
   /** A1: the brief version its last shipped edit was made with (0: before this project's brief; null: nothing shipped). */
@@ -664,4 +666,26 @@ export interface RenderState {
   latest: RenderRecord | null
   in_progress: RenderInProgress | null
   stale: boolean
+}
+
+/** F4/B1: a batch turn across a project's videos, as `GET /projects/{id}/batches` shows it. */
+export type BatchRowState = 'planned' | 'queued' | 'working' | 'ready' | 'nothing' | 'failed' | 'waiting' | 'cancelled' | 'added'
+export interface BatchRow {
+  video_id: string; filename: string; stage: string; stage_label: string
+  /** Lines the goal names in this video; null when Voltage decides. */
+  lines: number | null; est_usd: number | null; cap_usd: number; job_id: string | null
+  state: BatchRowState; label: string; why: string | null
+  question: { text: string; options: string[] } | null
+  ready: number; spent_usd: number
+  added: { edit_ids: string[]; at: string; undone_at: string | null } | null
+  answers: { text: string; turn_job_id: string; at: string; spent_usd: number; status?: string }[]
+}
+export interface Batch {
+  batch_id: string; project_id: string; source: 'ask' | 'fix' | 'brief'; goal: string
+  phase: 'gate' | 'running' | 'finished' | 'cancelled'; status: string; step: string
+  created_at: string; started_at: string | null; finished_at: string | null
+  /** Each total is null when it could not be worked out from something measured. */
+  totals: { videos: number; lines: number | null; est_usd: number | null; est_s: number | null; cap_usd: number }
+  summary: { finished: string[]; waiting: string[]; failed: string[]; cancelled: string[]; spent_usd: number } | null
+  rows: BatchRow[]; counts: Record<string, number>; spent_usd: number; can_add: boolean
 }

@@ -3340,6 +3340,79 @@ def answer_batch_video(project_id: str, batch_id: str, video_id: str, req: Batch
     return _batch_view(batch_id)
 
 
+def _passing_items(video_id: str) -> tuple[Plan | None, list[str]]:
+    """B1: a video's proposals that passed: ready, their take passed its
+    check and breaks no word rule."""
+    plan = repo.latest_plan(video_id)
+    ids = []
+    for item in (plan.items if plan else ()):
+        if item.kind != "planned" or item.status != "ready" or not item.candidate_id:
+            continue
+        candidate = repo.get_candidate(video_id, item.candidate_id)
+        if candidate is None or not candidate.continuity.passed or (item.word_rule or {}).get("breaks"):
+            continue
+        ids.append(item.item_id)
+    return plan, ids
+
+
+@app.post("/projects/{project_id}/batches/{batch_id}/add-all")
+def add_all_batch(project_id: str, batch_id: str, owner: str = Depends(current_owner)) -> dict:
+    """B1: Add all that passed. Every video of the batch with proposals that
+    passed is shipped as its own Add all (its own render), and what each
+    added is kept so it can be undone in one step per video."""
+    record = _owned_batch(project_id, batch_id, owner)
+    if record["phase"] == "gate":
+        raise HTTPException(status_code=409, detail="Nothing has run yet. Go first.")
+    added: dict[str, dict] = {}
+    for child in record["children"]:
+        video = repo.get(child["video_id"])
+        if video is None or video.owner != owner:
+            continue
+        plan, ids = _passing_items(child["video_id"])
+        if plan is None or not ids:
+            continue
+        result = _ship(child["video_id"], video, plan.plan_id, ids)
+        edit_ids = [a["edit_id"] for a in result["approved"]]
+        if edit_ids:
+            added[child["video_id"]] = {"edit_ids": [*((child.get("added") or {}).get("edit_ids") or []), *edit_ids],
+                                        "at": _now(), "undone_at": None}
+    if not added:
+        raise HTTPException(status_code=409, detail="No proposal in this batch passed its checks. Open a video to hear its lines.")
+
+    def note(rec: dict) -> None:
+        for c in rec["children"]:
+            if c["video_id"] in added:
+                c["added"] = added[c["video_id"]]
+    batch_engine.update(batch_id, note)
+    with database.tx() as c:
+        activity_log.record(c, "batch.added_all", user_actor(owner), project_id=project_id, target=batch_id,
+                            payload={"videos": {v: len(a["edit_ids"]) for v, a in added.items()}})
+    return _batch_view(batch_id)
+
+
+@app.post("/projects/{project_id}/batches/{batch_id}/videos/{video_id}/undo-add")
+def undo_batch_add(project_id: str, batch_id: str, video_id: str, owner: str = Depends(current_owner)) -> dict:
+    """B1: the one undo per video for what Add all that passed added there:
+    each line goes back to a proposal, as Take it out does."""
+    record = _owned_batch(project_id, batch_id, owner)
+    child = next((c for c in record["children"] if c["video_id"] == video_id), None)
+    if child is None or not child.get("added") or child["added"].get("undone_at"):
+        raise HTTPException(status_code=409, detail="Nothing the batch added here is left to undo.")
+    _owned(video_id, owner)
+    for edit_id in child["added"]["edit_ids"]:
+        _revert(video_id, edit_id)
+
+    def note(rec: dict) -> None:
+        for c in rec["children"]:
+            if c["video_id"] == video_id:
+                c["added"] = {**c["added"], "undone_at": _now()}
+    batch_engine.update(batch_id, note)
+    with database.tx() as c:
+        activity_log.record(c, "batch.add_undone", user_actor(owner), video_id=video_id, project_id=project_id, target=batch_id,
+                            payload={"edit_ids": child["added"]["edit_ids"]})
+    return _batch_view(batch_id)
+
+
 @app.delete("/projects/{project_id}", status_code=204)
 def delete_folder(project_id: str, videos: Literal["delete", "keep"], owner: str = Depends(current_owner)) -> Response:
     """Delete a project (F8): it goes to the Bin with its videos (`delete`),

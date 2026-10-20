@@ -58,10 +58,11 @@ function Issue({ issue, busy, onFix, onFixAll, onIgnore }: { issue: CheckIssue; 
  *  project" with the text pass's price beside it and a free Rules only; the
  *  run is an Activity job (kind "check"), read here while it works; then the
  *  Issues: each names its videos and times, with Fix in this video, Fix in
- *  all (one video after another until the batch turn, F4) and Ignore.
+ *  all (one video after another; with projects.batch, `onFixAll` hands it to
+ *  the batch panel, B1) and Ignore.
  *  `briefVersion` reads it again after a brief change (which runs the free
  *  checks on the server). */
-export function ProjectCheck({ projectId, briefVersion }: { projectId: string; briefVersion?: number | null }) {
+export function ProjectCheck({ projectId, briefVersion, onFixAll }: { projectId: string; briefVersion?: number | null; onFixAll?: (issue: CheckIssue) => void }) {
   const [page, setPage] = useState<CheckPage | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [note, setNote] = useState<string | null>(null)
@@ -95,7 +96,8 @@ export function ProjectCheck({ projectId, briefVersion }: { projectId: string; b
   }
   const run = (mode: 'full' | 'rules') => act(`run-${mode}`, () => startProjectCheck(projectId, mode), 'Could not start the check.')
   const ignore = (issue: CheckIssue) => act(`ignore-${issue.issue_id}`, () => ignoreCheckIssue(projectId, issue.issue_id), 'Could not ignore that issue.')
-  const fixAll = (issue: CheckIssue) => act(`all-${issue.issue_id}`, () => fixCheckIssueEverywhere(projectId, issue.issue_id), 'Could not start fixing it in every video.')
+  // B1 (projects.batch): Fix in all opens the batch's gate on the project page instead.
+  const fixAll = (issue: CheckIssue) => onFixAll ? onFixAll(issue) : act(`all-${issue.issue_id}`, () => fixCheckIssueEverywhere(projectId, issue.issue_id), 'Could not start fixing it in every video.')
   const fix = async (issue: CheckIssue, videoId: string) => {
     setBusy(`fix-${issue.issue_id}-${videoId}`)
     setNote(null)

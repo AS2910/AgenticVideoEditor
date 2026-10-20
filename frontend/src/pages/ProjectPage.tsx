@@ -16,6 +16,8 @@ import { BriefHistory, BriefMeta, StaleLine } from './BriefVersions'
 import { Tip } from '../guides/Tip'
 import { ProjectWords } from './ProjectWords'
 import { ProjectCheck } from './ProjectCheck'
+import { BatchPanel } from './BatchPanel'
+import type { FixRequest } from './BatchPanel'
 
 interface ProjectPageProps {
   me: Me | null
@@ -62,6 +64,9 @@ export function ProjectPage({ me, projectId, onUpload, uploading, error, onDelet
   const [history, setHistory] = useState(false)
   const { enabled } = useFlags()
   const consistency = enabled('projects.consistency')
+  // B1 (projects.batch): one goal across every video; a Fix in all from the check lands here.
+  const batchOn = enabled('projects.batch')
+  const [fixAll, setFixAll] = useState<FixRequest | null>(null)
   const fileInput = useRef<HTMLInputElement>(null)
   const refInput = useRef<HTMLInputElement>(null)
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -279,11 +284,14 @@ export function ProjectPage({ me, projectId, onUpload, uploading, error, onDelet
               <span><span className="disp block text-lg font-bold text-foreground">Drop a video here</span>It joins {project.name} with its brief and voices.</span>
             </div>
           </div>
-          <div className="flex items-center gap-3 rounded-xl bg-pane px-4 py-3.5 text-ptext">
-            <span className="tag text-volt">Later</span>
-            <span className="flex-1 text-sm">One goal across every video here, like “make all three 25% off”, is planned as a batch turn.</span>
-          </div>
-          {consistency && <ProjectCheck projectId={projectId} briefVersion={project.brief_version} />}
+          {batchOn ? <BatchPanel projectId={projectId} videos={detail.videos} fix={fixAll} onFixHandled={() => setFixAll(null)} /> : (
+            <div className="flex items-center gap-3 rounded-xl bg-pane px-4 py-3.5 text-ptext">
+              <span className="tag text-volt">Later</span>
+              <span className="flex-1 text-sm">One goal across every video here, like “make all three 25% off”, is planned as a batch turn.</span>
+            </div>
+          )}
+          {consistency && <ProjectCheck projectId={projectId} briefVersion={project.brief_version}
+            onFixAll={batchOn ? (issue) => { setFixAll({ issueId: issue.issue_id, message: issue.message, videoIds: [...new Set(issue.places.map((p) => p.video_id))] }); document.querySelector('[data-testid="batch"]')?.scrollIntoView({ behavior: 'smooth', block: 'start' }) } : undefined} />}
           {consistency && <ProjectWords projectId={projectId} />}
         </section>
 
