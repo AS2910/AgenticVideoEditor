@@ -82,7 +82,7 @@ export function LinkImport({ projectId, disabled, onDone }: {
         </button>
       </div>
       <span id="import-note" className="text-[13px] text-muted-foreground">
-        Shared with anyone who has the link, up to 2 GB and 3 minutes.{off.length > 0 ? ` ${off.map((s) => s.label).join(', ')} is not available yet.` : ''}
+        Shared with anyone who has the link, up to 2 GB and 10 minutes.{off.length > 0 ? ` ${off.map((s) => s.label).join(', ')} is not available yet.` : ''}
       </span>
       {jobId && job && (
         <div className="flex items-center gap-3" role="status" data-testid="import-progress">

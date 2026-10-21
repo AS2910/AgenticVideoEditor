@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 import app.api.main as main
 from app.api.main import app, repo, jobs
 from tests.api.test_endpoints import _agent_on, take
+from tests.factories import media_get
 
 
 @pytest.fixture(autouse=True)
@@ -34,7 +35,7 @@ def test_full_journey_ingest_turn_approve_export(sample_video, monkeypatch):
     assert created["consent_granted_at"] is not None
 
     # The uploaded video is served straight back, seekable
-    media = client.get(f"/videos/{project_id}/artifacts/{created['media']['sha256']}")
+    media = media_get(client, f"/videos/{project_id}/artifacts/{created['media']['sha256']}")
     assert media.status_code == 200
 
     # 2. Say what you want; Voltage voices the line through its tools (Just do it)

@@ -210,7 +210,9 @@ def _request_kwargs(route: APIRoute) -> dict:
 def test_a_second_user_gets_404(world, method, route):
     bo = _client("bo")
     path = _fill(route.path, world, route)
-    resp = bo.request(method, path, headers=H, params=_params(route, world), **_request_kwargs(route))
+    # Bo's own signed media token rides along, so media routes judge ownership, not the missing token.
+    params = {**_params(route, world), "mt": main.mint_media_token(BO)["token"]}
+    resp = bo.request(method, path, headers=H, params=params, **_request_kwargs(route))
     assert resp.status_code == 404, f"{method} {path} -> {resp.status_code}: {resp.text[:300]}"
 
 

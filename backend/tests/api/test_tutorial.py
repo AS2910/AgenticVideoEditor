@@ -7,6 +7,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.api.main import app, repo, jobs
+from tests.factories import media_get
 
 
 @pytest.fixture(autouse=True)
@@ -75,7 +76,7 @@ def test_the_tutorial_replays_the_recorded_run_without_spending(client):
     assert plan["status"] == "done" and item["status"] == "ready" and item["candidate"]["audio"]["container"] == "wav"
     assert item["new_text"] == "Get 30% off today only."
     assert "in a stock voice (Sarah)" in done["result"]["reply"]
-    audio = client.get(f"/videos/{vid}/artifacts/{item['candidate']['audio']['sha256']}")
+    audio = media_get(client, f"/videos/{vid}/artifacts/{item['candidate']['audio']['sha256']}")
     assert audio.status_code == 200 and len(audio.content) > 1000
     assert client.get(f"/videos/{vid}/usage").json()["spent_usd"] == 0
 

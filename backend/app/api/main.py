@@ -45,7 +45,7 @@ from app.media import understand as understand_mod
 from app import arrange
 from app.media import frames as frames_mod, motion, shots
 from app.media import stems as stems_module
-from app.media import ffmpeg, ingest
+from app.media import ffmpeg, ingest, sniff
 from app.adapters.base import VendorError
 from app.adapters.mock import MockLipSyncAdapter
 from app.adapters.openai_whisper import TranscriptionError
@@ -113,12 +113,17 @@ try:
 except ImportError:  # pragma: no cover - until app.tutorial lands
     is_tutorial = replay_turn = None  # type: ignore[assignment]
 
-app = FastAPI(title="Agentic Video Editor")
-log = logging.getLogger(__name__)
-
 # Media lands under `backend/var/artifacts` unless AVE_DATA_DIR overrides it
 # (tests point that at a temp dir; deployment points it at real storage).
 settings = load_settings()
+# Launch item 2: in production a missing secret stops the start, all named at once.
+from app.config import ensure_production_ready  # noqa: E402
+ensure_production_ready(settings)
+
+# No API docs in production (they list every route); never debug pages.
+app = FastAPI(title="Agentic Video Editor", debug=False,
+              **({"docs_url": None, "redoc_url": None, "openapi_url": None} if settings.production else {}))
+log = logging.getLogger(__name__)
 
 # Wiring (module-level singletons for this in-memory slice).
 database = Database(settings.data_dir / "ave.db")
@@ -278,15 +283,41 @@ def _candidate_dict(candidate: EditCandidate) -> dict:
     }
 
 
-async def _spool(upload: UploadFile, dest: Path) -> None:
-    """Stream an upload to disk, refusing anything absurdly large."""
-    written = 0
+# Launch item 2: what each kind of upload may weigh (a video's cap is ingest.MAX_SOURCE_BYTES).
+MAX_AUDIO_UPLOAD_BYTES = 100 << 20
+
+
+def _too_big(kind: str) -> str:
+    if kind == "video":
+        return (f"That video is over {_size(ingest.MAX_SOURCE_BYTES)}. Videos can be up to {_size(ingest.MAX_SOURCE_BYTES)} "
+                f"and {int(ingest.MAX_SOURCE_SECONDS // 60)} minutes.")
+    return f"That recording is over {_size(MAX_AUDIO_UPLOAD_BYTES)}. A minute or two of clear speech is plenty."
+
+
+def _size(n: int) -> str:
+    return f"{n / (1 << 30):g} GB" if n >= 1 << 30 else f"{n >> 20} MB"
+
+
+async def _spool(upload: UploadFile, dest: Path, kind: str = "video") -> str:
+    """Stream an upload to disk, refusing too large a file and, from its first
+    bytes, anything that is not the kind asked for (`video`, `audio`).
+    Returns the format the bytes say it is."""
+    cap = ingest.MAX_SOURCE_BYTES if kind == "video" else MAX_AUDIO_UPLOAD_BYTES
+    written, found = 0, ""
     with dest.open("wb") as out:
         while chunk := await upload.read(1 << 20):
+            if not written:
+                try:
+                    found = sniff.video(chunk[:sniff.HEAD_BYTES]) if kind == "video" else sniff.audio(chunk[:sniff.HEAD_BYTES])
+                except sniff.SniffError as exc:
+                    raise HTTPException(status_code=415, detail=str(exc)) from None
             written += len(chunk)
-            if written > ingest.MAX_SOURCE_BYTES:
-                raise HTTPException(status_code=413, detail="That file is too large.")
+            if written > cap:
+                raise HTTPException(status_code=413, detail=_too_big(kind))
             out.write(chunk)
+    if not written:
+        raise HTTPException(status_code=422, detail="That file is empty.")
+    return found
 
 
 def _now() -> str:
@@ -375,6 +406,37 @@ def current_owner(request: Request) -> str:
     if me is not None and me.user == who.owner:
         return me.owner
     return who.owner
+
+
+# ── Launch item 2: media and exports only through signed, expiring URLs ─────
+# A media route takes no cookie: the URL carries `mt`, a token this server
+# signed for one owner that expires after MEDIA_SECONDS. The app fetches one
+# (`GET /me/media-token`) and adds it to every media address it builds; a
+# link copied out of the app stops working when its token expires.
+
+MEDIA_SECONDS = 12 * 3600
+MEDIA_KIND = "media"
+
+
+def mint_media_token(owner: str, now: float | None = None) -> dict:
+    issued = int(now if now is not None else time.time())
+    token = auth.sign({"k": MEDIA_KIND, "o": owner}, share_key, now=issued)
+    return {"token": token, "expires_at": iso(datetime.fromtimestamp(issued + MEDIA_SECONDS, timezone.utc)),
+            "expires_in": MEDIA_SECONDS}
+
+
+def media_owner(request: Request, mt: str | None = None) -> str:
+    """Whose media a signed URL opens. A missing, altered or expired token is 403."""
+    payload = auth.verify(mt, share_key, max_age=MEDIA_SECONDS)
+    if not payload or payload.get("k") != MEDIA_KIND or not isinstance(payload.get("o"), str):
+        raise HTTPException(status_code=403, detail="This media link has expired. Reload the page to get a fresh one.")
+    return payload["o"]
+
+
+@app.get("/me/media-token")
+def get_media_token(owner: str = Depends(current_owner)) -> dict:
+    """A fresh signed token for the caller's media addresses (`?mt=`)."""
+    return mint_media_token(owner)
 
 
 def _ensure_spend(project_id: str) -> None:
@@ -679,7 +741,7 @@ def list_frames(project_id: str, owner: str = Depends(current_owner)) -> list[di
 
 @app.get("/videos/{project_id}/frames/{index}")
 @app.get("/projects/{project_id}/frames/{index}", deprecated=True)
-def get_frame(project_id: str, index: int, owner: str = Depends(current_owner)) -> FileResponse:
+def get_frame(project_id: str, index: int, owner: str = Depends(media_owner)) -> FileResponse:
     record = _owned(project_id, owner)
     frames = _frames(record)
     if not 0 <= index < len(frames):
@@ -894,7 +956,13 @@ def _ingest_staged(staged: Path, filename: str, consent: bool, folder: Project |
     """A file on disk becomes a video: probed (refused before an id is
     given, so a refusal leaves no trace), stored, transcribed, charged.
     Shared by the upload and G1's import from a link."""
-    container = (Path(filename).suffix.lstrip(".") or "mp4").lower()
+    try:
+        # Launch item 2: the bytes say what it is (an upload was sniffed while spooling; a link import here).
+        container = sniff.video(sniff.head_of(staged))
+    except sniff.SniffError as exc:
+        raise HTTPException(status_code=415, detail=str(exc)) from None
+    if staged.stat().st_size > ingest.MAX_SOURCE_BYTES:
+        raise HTTPException(status_code=413, detail=_too_big("video"))
     try:
         probed = ingest.probe_source(staged)
     except ingest.IngestError as exc:
@@ -1204,7 +1272,7 @@ async def add_my_voice(
     filename = Path(file.filename or "voice.wav").name
     with tempfile.TemporaryDirectory() as tmp:
         staged = Path(tmp) / filename
-        await _spool(file, staged)
+        await _spool(file, staged, "audio")
         try:
             wav, seconds = ffmpeg.extract_audio(staged, Path(tmp) / "voice.wav", sample_rate=44100)
         except Exception:  # noqa: BLE001 — a file ffmpeg cannot read is the user's to replace
@@ -1225,7 +1293,7 @@ async def add_my_voice(
 
 
 @app.get("/voices/sample/{sha256}")
-def get_voice_sample(sha256: str, owner: str = Depends(current_owner)) -> FileResponse:
+def get_voice_sample(sha256: str, owner: str = Depends(media_owner)) -> FileResponse:
     """The recording behind one of the caller's voices, or one of their
     designed previews, with range requests. Only their own are served."""
     allowed = {v.get("sample_sha") for v in _my_voices(owner)} | {d.get("sha256") for d in _designs(owner).values()}
@@ -2624,7 +2692,7 @@ async def add_word_audio(project_id: str, rule_id: int, file: UploadFile = File(
     filename = Path(file.filename or "word.wav").name
     with tempfile.TemporaryDirectory() as tmp:
         staged = Path(tmp) / filename
-        await _spool(file, staged)
+        await _spool(file, staged, "audio")
         if staged.stat().st_size > MAX_WORD_CLIP_BYTES:
             raise HTTPException(status_code=422, detail="That clip is too big. A few seconds of audio is all a word needs.")
         try:
@@ -2639,7 +2707,7 @@ async def add_word_audio(project_id: str, rule_id: int, file: UploadFile = File(
 
 
 @app.get("/projects/{project_id}/rules/{rule_id}/audio")
-def get_word_audio(project_id: str, rule_id: int, owner: str = Depends(current_owner)) -> FileResponse:
+def get_word_audio(project_id: str, rule_id: int, owner: str = Depends(media_owner)) -> FileResponse:
     _owned_project(project_id, owner)
     rule = _pronounce_rule_or_404(project_id, rule_id)
     sha = rule.data.get("audio")
@@ -4717,6 +4785,10 @@ async def add_folder_file(project_id: str, file: UploadFile = File(...), owner: 
         raise HTTPException(status_code=413, detail="That file is too large (20 MB at most).")
     if not data:
         raise HTTPException(status_code=422, detail="That file is empty.")
+    try:
+        sniff.document(data[:sniff.HEAD_BYTES], name)
+    except sniff.SniffError as exc:
+        raise HTTPException(status_code=415, detail=str(exc)) from None
     import hashlib
     sha256 = hashlib.sha256(data).hexdigest()
     folder = _files_dir(project_id)
@@ -4733,7 +4805,7 @@ async def add_folder_file(project_id: str, file: UploadFile = File(...), owner: 
 
 
 @app.get("/projects/{project_id}/files/{sha256}")
-def get_folder_file(project_id: str, sha256: str, owner: str = Depends(current_owner)) -> FileResponse:
+def get_folder_file(project_id: str, sha256: str, owner: str = Depends(media_owner)) -> FileResponse:
     _owned_project(project_id, owner)
     entry = next((f for f in _project_files(project_id) if f["sha256"] == sha256), None)
     path = _files_dir(project_id) / sha256
@@ -4968,7 +5040,7 @@ def grant_consent(project_id: str, req: ConsentRequest | None = None, owner: str
 
 @app.get("/videos/{project_id}/artifacts/{sha256}")
 @app.get("/projects/{project_id}/artifacts/{sha256}", deprecated=True)
-def get_artifact(project_id: str, sha256: str, owner: str = Depends(current_owner)) -> FileResponse:
+def get_artifact(project_id: str, sha256: str, owner: str = Depends(media_owner)) -> FileResponse:
     """Serve stored media by content address, with range requests.
 
     Scoped to the project so one project's id cannot be used to read another's
@@ -8340,7 +8412,7 @@ def _export_files(record: dict) -> list[dict]:
 
 @app.get("/projects/{project_id}/exports/{export_id}/files/{index}")
 def batch_export_file(project_id: str, export_id: str, index: str, download: bool = False,
-                      owner: str = Depends(current_owner)) -> FileResponse:
+                      owner: str = Depends(media_owner)) -> FileResponse:
     _batch_flag(owner)
     _owned_project(project_id, owner)
     found = next((f for f in _export_files(_export_or_404(project_id, export_id)) if f["file_id"] == index), None)
@@ -8391,7 +8463,7 @@ def _zip_response(files: list[dict], title: str) -> StreamingResponse:
 
 
 @app.get("/projects/{project_id}/exports/{export_id}/zip")
-def batch_export_zip(project_id: str, export_id: str, owner: str = Depends(current_owner)) -> StreamingResponse:
+def batch_export_zip(project_id: str, export_id: str, owner: str = Depends(media_owner)) -> StreamingResponse:
     """Every made file as one zip, built on demand while it downloads."""
     _batch_flag(owner)
     project = _owned_project(project_id, owner)
@@ -8692,7 +8764,7 @@ def _provenance_export(record: ProjectRecord, out: dict) -> dict:
 
 
 @app.get("/videos/{video_id}/artifacts/{sha256}/c2pa")
-def get_c2pa(video_id: str, sha256: str, owner: str = Depends(current_owner)) -> dict:
+def get_c2pa(video_id: str, sha256: str, owner: str = Depends(media_owner)) -> dict:
     """G6: the C2PA-style manifest beside an exported file."""
     _owned(video_id, owner)
     path = artifacts.find(video_id, sha256)
@@ -8760,6 +8832,30 @@ def _reviewer_filter() -> tuple[set[str], set[str]] | None:
     return videos, projects
 
 
+# ── Launch item 2: rate limits per user ──────────────────────────────────────
+# Defined before the roles middleware, so it runs inside it and knows who is acting.
+
+from app.ratelimit import Limits, refusal as limit_refusal  # noqa: E402
+
+rate_limits = Limits()
+
+
+def _client_ip(request: Request) -> str:
+    return request.client.host if request.client else "unknown"
+
+
+@app.middleware("http")
+async def _rate_limited(request: Request, call_next):
+    me = acting.get()
+    over = rate_limits.check(request.method, request.url.path, me.user if me else None, _client_ip(request))
+    if over:
+        window = rate_limits.window(over)
+        analytics.track("rate_limited", me.user if me else None, {"bucket": over})
+        return JSONResponse(status_code=429, content={"detail": limit_refusal(over, window), "code": "rate_limited"},
+                            headers={"Retry-After": str(int(window))})
+    return await call_next(request)
+
+
 # ── G2: roles ────────────────────────────────────────────────────────────────
 # Defined last so it is the outermost middleware: who is acting is known
 # before any other middleware or route runs (app/workspace_api.py).
@@ -8798,3 +8894,36 @@ def _mount_optional_routers() -> None:
 
 
 _mount_optional_routers()
+
+
+# ── Launch item 2: the edges ─────────────────────────────────────────────────
+# A failure nothing caught answers one sentence (no stack trace, no
+# exception text); the details go to the log and the error reporter. Every
+# response says not to sniff types or be framed. CORS lets only Voltage's
+# own address call the API with cookies (AVE_CORS_ORIGINS, default the public URL).
+
+from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
+
+SERVER_FAULT = "Something went wrong on our side. It has been reported; please try again."
+
+
+@app.exception_handler(Exception)
+async def _no_stack_traces(request: Request, exc: Exception) -> JSONResponse:
+    log.error("unhandled error on %s %s", request.method, request.url.path, exc_info=exc)
+    return JSONResponse(status_code=500, content={"detail": SERVER_FAULT})
+
+
+@app.middleware("http")
+async def _security_headers(request: Request, call_next):
+    response = await call_next(request)
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("Referrer-Policy", "same-origin")
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    return response
+
+
+app.add_middleware(
+    CORSMiddleware, allow_origins=list(settings.cors_origins), allow_credentials=True,
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
+    allow_headers=["content-type", "x-requested-with", "range"], max_age=600,
+)

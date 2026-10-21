@@ -6,18 +6,17 @@ manifest are all built on `duration` and a wrong one corrupts all three.
 """
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from pathlib import Path
 
 from app.media import ffmpeg
 
-# Design spec §2: short-form only, ~2–3 minutes, to hold quality and keep
-# cost and latency sane once real vendors are in the loop.
-MAX_SOURCE_SECONDS = 180.0
-
-# A blunt guard against filling the disk. The duration cap is the real limit;
-# this only catches absurd files before we finish writing them.
-MAX_SOURCE_BYTES = 500 * 1024 * 1024
+# Launch (2026-11-04): up to 10 minutes and 2 GB a video. Both can be set
+# (AVE_MAX_UPLOAD_SECONDS, AVE_MAX_UPLOAD_MB); every number comes from ffprobe
+# and the bytes on disk, never from what the client says.
+MAX_SOURCE_SECONDS = float(os.environ.get("AVE_MAX_UPLOAD_SECONDS") or 600.0)
+MAX_SOURCE_BYTES = int(float(os.environ.get("AVE_MAX_UPLOAD_MB") or 2048) * 1024 * 1024)
 
 
 class IngestError(ValueError):
@@ -45,6 +44,12 @@ def _fps(rate: str | None) -> float:
         return 0.0
 
 
+def _length(seconds: float) -> str:
+    """4 min 05 s, or 45 s."""
+    whole = int(round(seconds))
+    return f"{whole // 60} min {whole % 60:02d} s" if whole >= 60 else f"{whole} s"
+
+
 def probe_source(path: str | Path) -> ProbedSource:
     """Measure an uploaded file, or raise IngestError explaining the refusal."""
     try:
@@ -68,8 +73,8 @@ def probe_source(path: str | Path) -> ProbedSource:
         raise IngestError("That video has no readable duration.")
     if duration > MAX_SOURCE_SECONDS:
         raise IngestError(
-            f"That video is {duration:.0f}s long. "
-            f"The limit is {MAX_SOURCE_SECONDS:.0f}s for now."
+            f"That video is {_length(duration)} long. Videos can be up to {_length(MAX_SOURCE_SECONDS)} for now; "
+            "trim it and upload it again."
         )
 
     if not any(s.get("codec_type") == "audio" for s in streams):

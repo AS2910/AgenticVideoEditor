@@ -21,6 +21,7 @@ from app.media import ffmpeg
 from app.notify.email import outbox
 from app.safety import figures
 from tests.api.test_folders import upload_into
+from tests.factories import media_get
 
 pytestmark = pytest.mark.skipif(not ffmpeg.available(), reason="ffmpeg/ffprobe not installed")
 
@@ -60,7 +61,7 @@ def test_consent_needs_the_sentence_read_aloud(client, video, sample_video):
     again = client.post(f"/videos/p1/liveness/{start['attempt_id']}", files={"file": ("me.mp4", io.BytesIO(b"x"), "video/mp4")})
     assert again.status_code == 409                                       # one recording per sentence
     bad = client.post("/videos/p1/liveness", json={}).json()
-    failed = client.post(f"/videos/p1/liveness/{bad['attempt_id']}", files={"file": ("x.webm", io.BytesIO(b"nope"), "audio/webm")}).json()
+    failed = client.post(f"/videos/p1/liveness/{bad['attempt_id']}", files={"file": ("x.webm", io.BytesIO(b"\x1a\x45\xdf\xa3nope"), "audio/webm")}).json()
     assert failed["status"] == "failed"
     assert client.post("/videos/p1/consent", json={"liveness_id": bad["attempt_id"]}).status_code == 422
     ok = client.post("/videos/p1/consent", json={"liveness_id": start["attempt_id"]})
@@ -112,12 +113,12 @@ def test_your_data_export_is_a_job_with_a_zip_and_deletion_is_recorded(client, v
     assert made["kind"] == "export" and made["status"] == "done" and made["job"]["status"] == "done"
     listed = client.get("/me/data-export").json()["requests"]
     assert listed[0]["job"]["kind"] == "data_export"
-    got = client.get(f"/me/data-export/{made['job_id']}/download")
+    got = media_get(client, f"/me/data-export/{made['job_id']}/download")
     assert got.status_code == 200
     with zipfile.ZipFile(io.BytesIO(got.content)) as z:
         assert [v["id"] for v in json.loads(z.read("videos.json"))] == ["p1"]
         assert any(m["store"] == "p1" for m in json.loads(z.read("media.json")))
-    assert client.get("/me/data-export/nope/download").status_code == 404
+    assert media_get(client, "/me/data-export/nope/download").status_code == 404
     assert client.delete("/account").status_code == 204
     with database.tx() as c:
         kinds = [r[0] for r in c.execute("SELECT kind FROM data_requests WHERE owner = 'local' ORDER BY id")]
@@ -130,7 +131,7 @@ def test_the_export_carries_the_mark_and_a_manifest(client, video):
     assert out["provenance"]["mark"] and out["provenance"]["source_sha256"] != marked
     path = main.artifacts.find("p1", marked)
     assert main.watermarker.read(Path(path)) == out["provenance"]["mark"]
-    manifest = client.get(f"/videos/p1/artifacts/{marked}/c2pa").json()
+    manifest = media_get(client, f"/videos/p1/artifacts/{marked}/c2pa").json()
     assert manifest["manifest"]["asset"]["sha256"] == marked and manifest["signature"]["test_mode"]
     assert client.get(f"/exports/provenance/{out['provenance']['mark']}").json()["video_id"] == "p1"
     again = client.post("/videos/p1/export", json={"purpose": "export"}).json()

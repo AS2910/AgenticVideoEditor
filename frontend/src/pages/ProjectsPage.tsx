@@ -375,7 +375,7 @@ export function ProjectsPage({ me, projects, folders = [], onOpen, onUpload, onS
               </span>
               <span className="flex flex-1 basis-[240px] flex-col gap-0.5">
                 <span className="disp text-xl font-bold">Drop a video, or choose one</span>
-                <span className="text-muted-foreground">Up to 3 minutes. It lands where you choose.</span>
+                <span className="text-muted-foreground">Up to 10 minutes and 2 GB. It lands where you choose.</span>
               </span>
               <label className="flex flex-col gap-1">
                 <span className="tag text-faint">Add to</span>

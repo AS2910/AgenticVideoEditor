@@ -22,3 +22,10 @@ def make_source(
         duration=duration,
         media=media or SOURCE_MEDIA,
     )
+
+
+def media_get(client, path: str, owner: str = "local", **kwargs):
+    """GET a media route the way the app does: with a signed media token (launch item 2)."""
+    from app.api.main import mint_media_token
+    token = mint_media_token(owner)["token"]
+    return client.get(path + ("&" if "?" in path else "?") + "mt=" + token, **kwargs)

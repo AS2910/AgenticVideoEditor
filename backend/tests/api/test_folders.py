@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 from app.api.main import app, repo, jobs
 from app.media import ffmpeg
 from tests.api.test_endpoints import _agent_on, await_job, generate, take, upload
+from tests.factories import media_get
 
 pytestmark = pytest.mark.skipif(
     not ffmpeg.available(), reason="ffmpeg/ffprobe not installed (`brew install ffmpeg`)",
@@ -271,12 +272,12 @@ def test_reference_files_keep_their_text_where_it_can_be_read(client, folder):
     assert [f["name"] for f in page["files"]] == ["brief.txt", "notes.docx", "deck.pdf"] and all("text" not in f for f in page["files"])
     assert client.get("/projects").json()["projects"][0]["files"] == 3
 
-    served = client.get(f"/projects/f1/files/{entry['sha256']}")
+    served = media_get(client, f"/projects/f1/files/{entry['sha256']}")
     assert served.status_code == 200 and served.content == b"Say the price first. Always 30% off." and served.headers["content-type"].startswith("text/plain")
-    assert client.get("/projects/f1/files/" + "0" * 64).status_code == 404
+    assert media_get(client, "/projects/f1/files/" + "0" * 64).status_code == 404
     assert client.delete(f"/projects/f1/files/{entry['sha256']}").status_code == 204
     assert client.delete(f"/projects/f1/files/{entry['sha256']}").status_code == 404
-    assert client.get(f"/projects/f1/files/{entry['sha256']}").status_code == 404
+    assert media_get(client, f"/projects/f1/files/{entry['sha256']}").status_code == 404
     assert [f["name"] for f in main._project_files("f1")] == ["notes.docx", "deck.pdf"]
 
 

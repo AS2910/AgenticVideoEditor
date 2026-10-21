@@ -11,6 +11,7 @@ from app.domain.models import Word
 from app.media import ffmpeg
 from tests.api.test_endpoints import send, take, _agent_on
 from tests.api.test_folders import upload_into
+from tests.factories import media_get
 
 pytestmark = pytest.mark.skipif(not ffmpeg.available(), reason="ffmpeg/ffprobe not installed")
 
@@ -50,12 +51,12 @@ def test_a_word_takes_an_example_clip_kept_with_the_project(client, sample_video
         got = client.post(f"/projects/f1/rules/{word['rule_id']}/audio", files={"file": ("say.wav", handle, "audio/wav")})
     assert got.status_code == 200, got.text
     assert len(got.json()["data"]["audio"]) == 64 and got.json()["data"]["respell"] == "Bah jee cam"
-    assert client.get(f"/projects/f1/rules/{word['rule_id']}/audio").headers["content-type"] == "audio/wav"
+    assert media_get(client, f"/projects/f1/rules/{word['rule_id']}/audio").headers["content-type"] == "audio/wav"
     long, _ = ffmpeg.generate_tone(tmp_path / "long.wav", 12.0, 440)
     with open(long, "rb") as handle:
         assert client.post(f"/projects/f1/rules/{word['rule_id']}/audio", files={"file": ("long.wav", handle, "audio/wav")}).status_code == 422
     assert "audio" not in client.delete(f"/projects/f1/rules/{word['rule_id']}/audio").json()["data"]
-    assert client.get(f"/projects/f1/rules/{word['rule_id']}/audio").status_code == 404
+    assert media_get(client, f"/projects/f1/rules/{word['rule_id']}/audio").status_code == 404
     flags.set("projects.consistency", "local", False)
     with open(clip, "rb") as handle:
         assert client.post(f"/projects/f1/rules/{word['rule_id']}/audio", files={"file": ("say.wav", handle, "audio/wav")}).status_code == 404

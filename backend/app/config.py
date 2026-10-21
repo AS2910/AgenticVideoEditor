@@ -148,6 +148,11 @@ class Settings:
     # The chaos pass: faults to inject at the vendor seams (see app/chaos.py); never with sign-in on unless forced.
     chaos: str | None = None
     chaos_force: bool = False
+    # Launch item 2: AVE_ENV=production reads secrets only from the real
+    # environment (never backend/.env) and refuses to start without them.
+    production: bool = False
+    # Origins the browser may call the API from (CORS); the public URL by default.
+    cors_origins: tuple[str, ...] = ()
 
     @property
     def has_anthropic(self) -> bool:
@@ -189,8 +194,13 @@ def _amount(name: str, default: float) -> float:
 
 
 def load_settings() -> Settings:
-    load_dotenv()
+    production = (os.environ.get("AVE_ENV") or "").strip().lower() == "production"
+    if not production:
+        load_dotenv()
+    public_url = (os.environ.get("AVE_PUBLIC_URL") or "http://localhost:5173").rstrip("/")
     return Settings(
+        production=production,
+        cors_origins=tuple(o.strip().rstrip("/") for o in (os.environ.get("AVE_CORS_ORIGINS") or public_url).split(",") if o.strip()),
         openai_api_key=os.environ.get("OPENAI_API_KEY") or None,
         data_dir=Path(os.environ.get("AVE_DATA_DIR", BACKEND_ROOT / "var")),
         elevenlabs_api_key=os.environ.get("ELEVENLABS_API_KEY") or None,
@@ -257,3 +267,46 @@ def _auth_mode() -> str:
         if missing:
             raise ValueError(f"AVE_AUTH=google needs {', '.join(missing)}")
     return mode
+
+
+# Launch item 2: what production cannot start without. Each entry: the
+# variable, and why. Sign-in and the signing keys keep accounts and links
+# safe; the vendor keys are the product; email carries sign-in links.
+REQUIRED_IN_PRODUCTION = (
+    ("AVE_SESSION_SECRET", "signs sign-in sessions"),
+    ("AVE_SHARE_SECRET", "signs share links and media URLs (a generated file is not used in production)"),
+    ("AVE_PUBLIC_URL", "the https address people open; links and sign-in redirects use it"),
+    ("ANTHROPIC_API_KEY", "Voltage itself"),
+    ("ELEVENLABS_API_KEY", "voicing lines"),
+    ("OPENAI_API_KEY", "transcription"),
+    ("AVE_EMAIL_PROVIDER", "sign-in, verification and reset emails (not the outbox)"),
+)
+
+
+def production_problems(env: dict[str, str] | None = None) -> list[str]:
+    """Why production must not start, one sentence each (empty when it may)."""
+    env = dict(os.environ if env is None else env)
+    problems = [f"{name} is missing ({why})." for name, why in REQUIRED_IN_PRODUCTION if not (env.get(name) or "").strip()]
+    if (env.get("AVE_PUBLIC_URL") or "").strip() and not env["AVE_PUBLIC_URL"].startswith("https://"):
+        problems.append("AVE_PUBLIC_URL must be an https:// address.")
+    if (env.get("AVE_EMAIL_PROVIDER") or "").strip().lower() == "outbox":
+        problems.append("AVE_EMAIL_PROVIDER is outbox, which sends nothing.")
+    for name in ("AVE_SESSION_SECRET", "AVE_SHARE_SECRET"):
+        if 0 < len((env.get(name) or "").strip()) < 32:
+            problems.append(f"{name} is too short (32 characters at least).")
+    if (env.get("AVE_AUTH") or "off").strip().lower() == "off":
+        problems.append("AVE_AUTH is off, so anyone could use the one local account.")
+    if (env.get("AVE_CHAOS") or "").strip():
+        problems.append("AVE_CHAOS injects faults; unset it.")
+    if (env.get("AVE_DRY_RUN") or "").strip().lower() in _TRUTHY:
+        problems.append("AVE_DRY_RUN is on, so no paid step would run.")
+    return problems
+
+
+def ensure_production_ready(settings: Settings) -> None:
+    """Fail fast: raise with every problem at once."""
+    if not settings.production:
+        return
+    problems = production_problems()
+    if problems:
+        raise RuntimeError("Voltage will not start in production:\n- " + "\n- ".join(problems))

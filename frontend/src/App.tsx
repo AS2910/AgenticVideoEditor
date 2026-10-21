@@ -78,6 +78,7 @@ import type {
   Plan, PlanItem, Autonomy, Reading, Piece, ProjectDetail, ApprovedEditSummary, MyVoice, ProjectFolder, ExportManifest, MixReport, Suggestion, Understanding,
   ActivityJob, PlanQuestion, RenderIncludes, RenderRecord, ProjectRule,
 } from './types'
+import { useMediaToken } from './lib/media'
 import { piecesFromInserts, renderTimeFrom, sourceTimeFrom } from './timeline/selection'
 
 /** What a render is (2026-10-20): its version, when it was made, and the takes it carries. */
@@ -103,6 +104,8 @@ interface ShippedNote { count: number; held: number; spendUsd: number }
 /** The app (Tutorial map and Help, 2026-10-19): what a person has met so
  *  far, and the tour engine shared by the guided run and every Show me. */
 export default function App() {
+  // Launch item 2: every media address carries a signed token; re-render when it arrives or is renewed.
+  useMediaToken()
   return (
     <OnboardingProvider>
       <ToursSaved />

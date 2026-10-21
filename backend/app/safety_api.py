@@ -88,7 +88,7 @@ async def check_liveness(video_id: str, attempt_id: str, file: UploadFile = File
         raise HTTPException(status_code=409, detail="That sentence was used already. Start again for a new one.")
     with tempfile.TemporaryDirectory() as tmp:
         staged = Path(tmp) / Path(file.filename or "liveness.webm").name
-        await api._spool(file, staged)
+        await api._spool(file, staged, "audio")
         if staged.stat().st_size > MAX_RECORDING_BYTES:
             raise HTTPException(status_code=422, detail="That recording is too long. Just the sentence is enough.")
         result = api.liveness.verify(staged, row["sentence"])
@@ -186,7 +186,8 @@ def list_exports(owner: str = Depends(_owner)) -> dict:
 
 
 @router.get("/me/data-export/{job_id}/download")
-def download_export(job_id: str, owner: str = Depends(_owner)) -> FileResponse:
+def download_export(job_id: str, request: Request, mt: str | None = None) -> FileResponse:
+    owner = _api().media_owner(request, mt)   # launch item 2: a signed, expiring URL
     api = _api()
     job = api.activity.get(job_id)
     if job is None or job.kind != "data_export" or job.detail.get("owner") != owner or job.status != "done":

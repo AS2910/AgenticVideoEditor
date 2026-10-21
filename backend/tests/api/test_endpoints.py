@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 from app.adapters.mock import MockVoiceAdapter
 from app.api.main import app, repo, jobs
 from app.media import ffmpeg, ingest
+from tests.factories import media_get
 
 pytestmark = pytest.mark.skipif(
     not ffmpeg.available(), reason="ffmpeg/ffprobe not installed (`brew install ffmpeg`)",
@@ -149,8 +150,9 @@ def test_upload_returns_id_transcript_and_probed_duration(project):
 
 def test_upload_without_a_video_track_is_rejected(client, sample_audio_only):
     resp = upload(client, sample_audio_only, name="voice.wav", content_type="audio/wav")
-    assert resp.status_code == 422
-    assert "no video track" in resp.json()["detail"]
+    # Launch item 2: an audio file is known by its bytes before ffprobe is asked.
+    assert resp.status_code == 415
+    assert "not a video" in resp.json()["detail"]
 
 
 def test_upload_without_an_audio_track_is_rejected(client, sample_video_without_audio):
@@ -180,7 +182,7 @@ def test_upload_of_a_non_media_file_is_rejected(client, tmp_path):
     junk = tmp_path / "notes.mp4"
     junk.write_bytes(b"this is not a video")
     resp = upload(client, junk)
-    assert resp.status_code == 422
+    assert resp.status_code == 415
     assert "not a video" in resp.json()["detail"]
 
 
@@ -191,7 +193,7 @@ def test_upload_over_the_length_cap_is_rejected(client, tmp_path, monkeypatch):
 
     resp = upload(client, long_clip)
     assert resp.status_code == 422
-    assert "limit is 1s" in resp.json()["detail"]
+    assert "up to 1 s" in resp.json()["detail"]
 
 
 def test_a_rejected_upload_allocates_no_project(client, sample_audio_only):
@@ -261,7 +263,7 @@ def test_consent_for_an_unknown_project_is_404(client):
 
 def test_source_media_is_served_back(client, project):
     sha = project["media"]["sha256"]
-    resp = client.get(f"/videos/p1/artifacts/{sha}")
+    resp = media_get(client, f"/videos/p1/artifacts/{sha}")
     assert resp.status_code == 200
     assert resp.headers["content-type"] == "video/mp4"
     assert len(resp.content) > 0
@@ -269,24 +271,24 @@ def test_source_media_is_served_back(client, project):
 
 def test_media_supports_range_requests_so_the_player_can_seek(client, project):
     sha = project["media"]["sha256"]
-    resp = client.get(f"/videos/p1/artifacts/{sha}", headers={"Range": "bytes=0-99"})
+    resp = media_get(client, f"/videos/p1/artifacts/{sha}", headers={"Range": "bytes=0-99"})
     assert resp.status_code == 206
     assert len(resp.content) == 100
     assert resp.headers["content-range"].startswith("bytes 0-99/")
 
 
 def test_unknown_artifact_is_404(client, project):
-    assert client.get(f"/videos/p1/artifacts/{'a' * 64}").status_code == 404
+    assert media_get(client, f"/videos/p1/artifacts/{'a' * 64}").status_code == 404
 
 
 def test_artifact_of_an_unknown_project_is_404(client, project):
     sha = project["media"]["sha256"]
-    assert client.get(f"/videos/nope/artifacts/{sha}").status_code == 404
+    assert media_get(client, f"/videos/nope/artifacts/{sha}").status_code == 404
 
 
 @pytest.mark.parametrize("bad", ["../../etc/passwd", "not-hex", "A" * 64, "a" * 63])
 def test_malformed_artifact_addresses_are_refused(client, project, bad):
-    assert client.get(f"/videos/p1/artifacts/{bad}").status_code == 404
+    assert media_get(client, f"/videos/p1/artifacts/{bad}").status_code == 404
 
 
 # ── edit lifecycle ───────────────────────────────────────────────────────────
@@ -310,7 +312,7 @@ def test_preview_returns_addressable_artifacts_without_leaking_paths(client, pro
 
 def test_candidate_media_is_servable(client, project):
     body = generate()
-    resp = client.get(f"/videos/p1/artifacts/{body['frames']['sha256']}")
+    resp = media_get(client, f"/videos/p1/artifacts/{body['frames']['sha256']}")
     assert resp.status_code == 200
     assert resp.headers["content-type"] == "video/mp4"
 
@@ -771,7 +773,7 @@ def test_export_renders_a_real_mp4_you_can_download(client, project):
     assert rendered["kind"] == "video" and rendered["container"] == "mp4"
     assert rendered["duration"] == pytest.approx(project["duration"], abs=0.05)
 
-    download = client.get(f"/videos/p1/artifacts/{rendered['sha256']}")
+    download = media_get(client, f"/videos/p1/artifacts/{rendered['sha256']}")
     assert download.status_code == 200
     assert download.headers["content-type"] == "video/mp4"
 
@@ -961,9 +963,9 @@ def test_a_silent_clip_shows_its_frames_where_the_transcript_would_be(client, pr
     frames = client.get("/videos/p1/frames").json()
     assert [f["index"] for f in frames] == [0, 1, 2]
     assert frames[0]["at"] == pytest.approx(0.3)
-    frame = client.get("/videos/p1/frames/0")
+    frame = media_get(client, "/videos/p1/frames/0")
     assert frame.status_code == 200 and frame.headers["content-type"] == "image/jpeg"
-    assert client.get("/videos/p1/frames/9").status_code == 404
+    assert media_get(client, "/videos/p1/frames/9").status_code == 404
     assert client.get("/videos/p1").json()["frames"] == frames
 
 
@@ -1487,7 +1489,7 @@ def test_a_variant_is_the_same_clip_with_the_plan_as_a_draft(client, project, mo
         ("Get 30% off today only.", "planned", None, None)]
     assert plan["estimate"]["items"] == 1
     assert plan["log"][-1]["text"] == "Made as a variant of ad.mp4, with its plan as a draft"
-    assert client.get("/videos/p2/artifacts/" + variant["media"]["sha256"]).status_code == 200
+    assert media_get(client, "/videos/p2/artifacts/" + variant["media"]["sha256"]).status_code == 200
     listed = client.get("/videos").json()["videos"]
     assert [(p["video_id"], p["state"], p["variant_of"]) for p in listed] == [("p2", "draft", "p1"), ("p1", "shipped", None)]
     # The original is untouched.
@@ -1495,7 +1497,7 @@ def test_a_variant_is_the_same_clip_with_the_plan_as_a_draft(client, project, mo
     assert client.get(f"/videos/p1/plans/{done['plan']['plan_id']}").json()["items"][0]["status"] == "approved"
     # Deleting the variant leaves the original's media alone.
     client.delete("/videos/p2")
-    assert client.get("/videos/p1/artifacts/" + project["media"]["sha256"]).status_code == 200
+    assert media_get(client, "/videos/p1/artifacts/" + project["media"]["sha256"]).status_code == 200
 
 
 # ── Phase 9c: sign-in ────────────────────────────────────────────────────────
@@ -2021,15 +2023,11 @@ def test_voices_carry_a_preview_a_kind_a_sample_and_the_slots(client, project, t
     assert (made["kind"], made["description"], made["used_in"]) == ("recorded", None, 0) and len(made["sample_sha"]) == 64
     [mine] = client.get("/voices").json()["mine"]
     assert (mine["kind"], mine["sample_sha"], mine["used_in"]) == ("recorded", made["sample_sha"], 0)
-    sample = client.get(f"/voices/sample/{made['sample_sha']}")
+    sample = media_get(client, f"/voices/sample/{made['sample_sha']}")
     assert sample.status_code == 200 and sample.headers["content-type"] == "audio/wav"
-    assert client.get(f"/voices/sample/{made['sample_sha']}", headers={"Range": "bytes=0-99"}).status_code == 206
-    assert client.get("/voices/sample/" + "0" * 64).status_code == 404
-    main.app.dependency_overrides[main.current_owner] = lambda: "someone-else"
-    try:
-        assert client.get(f"/voices/sample/{made['sample_sha']}").status_code == 404
-    finally:
-        main.app.dependency_overrides.clear()
+    assert media_get(client, f"/voices/sample/{made['sample_sha']}", headers={"Range": "bytes=0-99"}).status_code == 206
+    assert media_get(client, "/voices/sample/" + "0" * 64).status_code == 404
+    assert media_get(client, f"/voices/sample/{made['sample_sha']}", owner="someone-else").status_code == 404
     # A take in the voice counts the project as using it.
     voiced(client, monkeypatch, voice_id=made["voice_id"])
     assert client.get("/voices").json()["mine"][0]["used_in"] == 1
@@ -2059,11 +2057,11 @@ def test_a_speaker_with_enough_speech_can_become_one_of_my_voices(client, tmp_pa
     assert made.status_code == 201, made.text
     body = made.json()
     assert (body["kind"], body["name"], body["seconds"]) == ("cloned", "Presenter", 10.9) and body["voice_id"].startswith("mock-clone-")
-    assert client.get(f"/voices/sample/{body['sample_sha']}").status_code == 200
+    assert media_get(client, f"/voices/sample/{body['sample_sha']}").status_code == 200
     assert client.post("/voices/mine/from-speaker", json=ask).status_code == 409
     # The sample is the owner's now: the project can go.
     client.delete("/videos/p1")
-    assert client.get(f"/voices/sample/{body['sample_sha']}").status_code == 200
+    assert media_get(client, f"/voices/sample/{body['sample_sha']}").status_code == 200
 
 
 class Remembering(MockVoiceAdapter):
@@ -2123,7 +2121,7 @@ def test_a_voice_is_designed_outside_any_project_and_a_preview_kept_as_mine(clie
     previews = resp.json()["previews"]
     assert len(previews) == 3 and all(len(p["sha256"]) == 64 and p["duration"] == 1.0 and p["text"] for p in previews)
     assert previews[0]["generated_voice_id"].startswith("mock-preview-")
-    assert client.get(f"/voices/sample/{previews[1]['sha256']}").status_code == 200
+    assert media_get(client, f"/voices/sample/{previews[1]['sha256']}").status_code == 200
     keep = {"generated_voice_id": previews[1]["generated_voice_id"], "name": "Dusk", "sha256": previews[1]["sha256"],
             "description": "", "consent": True}
     assert client.post("/voices/mine/from-preview", json={**keep, "consent": False}).status_code == 403
@@ -2151,7 +2149,7 @@ def test_deleting_the_account_removes_every_project_voice_and_default(client, pr
     assert client.delete("/account").status_code == 204
     assert client.get("/videos").json()["videos"] == [] and client.get("/videos/p1").status_code == 404
     assert client.get("/voices").json()["mine"] == [] and deleted == [mine["voice_id"]]
-    assert client.get(f"/voices/sample/{mine['sample_sha']}").status_code == 404
+    assert media_get(client, f"/voices/sample/{mine['sample_sha']}").status_code == 404
     assert client.get("/me/settings").json()["autonomy"] == "ask"
     assert not (main.artifacts.root / "user-local").exists() and not (main.artifacts.root / "p1").exists()
 
@@ -2170,7 +2168,7 @@ def test_the_receipt_sums_up_the_project_for_the_export_page(client, project, mo
     assert receipt["changes"] == [{"edit_id": "e1", "start": 0.0, "text": "Get 30% off today only.", "kind": "changed", "note": "in Test tone's voice"}]
     render = receipt["render"]
     assert render["filename"] == "ad-voltage.mp4" and len(render["sha256"]) == 64 and render["duration"] > 0 and render["at"]
-    assert client.get(f"/videos/p1/artifacts/{render['sha256']}").status_code == 200
+    assert media_get(client, f"/videos/p1/artifacts/{render['sha256']}").status_code == 200
     # A removal is a draft until it ships, and never a take; a preview render is not the render.
     removed = client.post("/videos/p1/lines/remove", json={"start": 1.3, "end": 1.8}).json()
     client.post("/videos/p1/export", json={"with_proposals": True})

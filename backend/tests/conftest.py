@@ -132,3 +132,13 @@ def _g6_off_unless_asked(monkeypatch):
     original = main.flags._default
     monkeypatch.setattr(main.flags, "_default", lambda flag, owner: False if flag == "golive.g6" else original(flag, owner))
     yield
+
+
+@pytest.fixture(autouse=True)
+def _rate_limits_fresh():
+    """Launch item 2: each test starts with empty rate-limit buckets."""
+    import sys
+    main = sys.modules.get("app.api.main")
+    if main is not None and hasattr(main, "rate_limits"):
+        main.rate_limits.reset()
+    yield

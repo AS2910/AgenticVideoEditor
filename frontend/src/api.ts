@@ -1,3 +1,4 @@
+import { signed } from './lib/media'
 import type { Arrangement } from './transcript/arrange'
 import type {
   LanguageSet, LanguagesMade, SyncStarted, Stage, StageMoved, EventPage,
@@ -130,7 +131,7 @@ export async function uploadFolderFile(id: string, file: File): Promise<ProjectF
   return request<ProjectFile>(`/projects/${id}/files`, { method: 'POST', body })
 }
 export const deleteFolderFile = (id: string, sha: string) => del(`/projects/${id}/files/${sha}`)
-export const folderFileUrl = (id: string, sha: string) => `${BASE}/videos/${id}/files/${sha}`
+export const folderFileUrl = (id: string, sha: string) => signed(`${BASE}/projects/${id}/files/${sha}`)
 export const shareVoice = (id: string, voiceId: string) => post<ProjectDetailFolder['voices']>(`/projects/${id}/voices`, { voice_id: voiceId })
 export const unshareVoice = (id: string, voiceId: string) => del(`/projects/${id}/voices/${voiceId}`)
 export const answerSuggestion = (id: string, sid: string, answer: 'accept' | 'dismiss') => post<ProjectDetailFolder>(`/projects/${id}/suggestions/${sid}/${answer}`, {})
@@ -153,7 +154,7 @@ export async function uploadRuleAudio(id: string, ruleId: number, file: File): P
 }
 export const deleteRuleAudio = (id: string, ruleId: number) => request<ProjectRule>(`/projects/${id}/rules/${ruleId}/audio`, { method: 'DELETE' })
 /** The clip's address; `v` (the clip's hash) makes a new clip a new address. */
-export const ruleAudioUrl = (id: string, ruleId: number, v = '') => `${BASE}/projects/${id}/rules/${ruleId}/audio${v ? `?v=${v.slice(0, 12)}` : ''}`
+export const ruleAudioUrl = (id: string, ruleId: number, v = '') => signed(`${BASE}/projects/${id}/rules/${ruleId}/audio${v ? `?v=${v.slice(0, 12)}` : ''}`)
 
 /** A2: the project check: the latest run and its issues, running one (full adds the priced text pass), and an issue's verbs. */
 export const getProjectCheck = (id: string) => get<CheckPage>(`/projects/${id}/check`)
@@ -189,8 +190,8 @@ export const startBatchExport = (id: string, body: { video_ids: string[]; preset
 export const listBatchExports = (id: string) => get<{ exports: BatchExport[] }>(`/projects/${id}/exports`)
 export const shareBatchExport = (id: string, exportId: string) => post<ShareLink>(`/projects/${id}/exports/${exportId}/share`, {})
 export const revokeShare = (id: string, shareId: string) => del(`/projects/${id}/shares/${shareId}`)
-export const exportZipUrl = (id: string, exportId: string) => `${BASE}/projects/${id}/exports/${exportId}/zip`
-export const exportFileUrl = (id: string, exportId: string, index: number, download = false) => `${BASE}/projects/${id}/exports/${exportId}/files/${index}${download ? '?download=true' : ''}`
+export const exportZipUrl = (id: string, exportId: string) => signed(`${BASE}/projects/${id}/exports/${exportId}/zip`)
+export const exportFileUrl = (id: string, exportId: string, index: number, download = false) => signed(`${BASE}/projects/${id}/exports/${exportId}/files/${index}${download ? '?download=true' : ''}`)
 // F6: a share link opened with no account.
 export const openShare = (token: string) => get<PublicShare>(`/share/${encodeURIComponent(token)}`)
 export const sharedFileUrl = (token: string, fileId: string, download = false) => `${BASE}/share/${encodeURIComponent(token)}/files/${encodeURIComponent(fileId)}${download ? '?download=true' : ''}`
@@ -263,7 +264,7 @@ export async function deleteProject(id: string): Promise<void> {
 
 /** URL the browser can play a stored artifact from; supports range requests. */
 export const artifactUrl = (projectId: string, sha256: string) =>
-  `${BASE}/videos/${projectId}/artifacts/${sha256}`
+  signed(`${BASE}/videos/${projectId}/artifacts/${sha256}`)
 
 export async function getJob(jobId: string): Promise<Job> {
   const res = await fetch(`${BASE}/jobs/${jobId}`)
@@ -389,7 +390,7 @@ export const getPlan = (id: string, planId: string) => get<Plan>(`/videos/${id}/
 export const confirmPlace = (id: string, place: string) => put<Sight>(`/videos/${id}/sight`, { place })
 
 /** A frame of the picture (UX-5), for a clip with no speech. */
-export const frameUrl = (projectId: string, index: number) => `${BASE}/videos/${projectId}/frames/${index}`
+export const frameUrl = (projectId: string, index: number) => signed(`${BASE}/videos/${projectId}/frames/${index}`)
 
 export interface PlanApproval {
   approved: { item_id: string; edit_id: string; overridden: boolean }[]
@@ -561,7 +562,7 @@ export const designVoicePreviews = (description: string) => post<{ previews: Des
 export const keepDesignedVoice = (generatedVoiceId: string, name: string, sha256: string, description: string) =>
   post<MyVoice>('/voices/mine/from-preview', { generated_voice_id: generatedVoiceId, name, sha256, description, consent: true })
 /** A sample of one of your voices, or a designed preview, playable. */
-export const voiceSampleUrl = (sha256: string) => `${BASE}/voices/sample/${sha256}`
+export const voiceSampleUrl = (sha256: string) => signed(`${BASE}/voices/sample/${sha256}`)
 
 // ── 2026-10-20: chips from this video, and what Voltage sees in it ───────────
 export const getSuggestions = (id: string) => get<{ suggestions: Suggestion[]; source: 'turn' | 'reading' | 'generic' }>(`/videos/${id}/suggestions`)
@@ -639,4 +640,4 @@ export const reportAbuse = (r: { location: string; kind: string; details: string
 export interface DataRequest { id: number; kind: 'export' | 'deletion'; status: string; job_id: string | null; created_at: string; done_at: string | null; job: ActivityJob | null }
 export const startDataExport = () => post<{ request: DataRequest }>('/me/data-export')
 export const listDataRequests = () => get<{ requests: DataRequest[] }>('/me/data-export')
-export const dataExportUrl = (jobId: string) => `${BASE}/me/data-export/${jobId}/download`
+export const dataExportUrl = (jobId: string) => signed(`${BASE}/me/data-export/${jobId}/download`)

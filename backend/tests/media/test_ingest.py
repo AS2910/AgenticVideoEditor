@@ -43,7 +43,7 @@ def test_a_video_over_the_cap_is_refused(tmp_path, monkeypatch):
     long_clip = tmp_path / "long.mp4"
     ffmpeg.generate_solid_video(long_clip, 2.0)
 
-    with pytest.raises(ingest.IngestError, match="limit is 1s"):
+    with pytest.raises(ingest.IngestError, match="up to 1 s"):
         ingest.probe_source(long_clip)
 
 
@@ -58,7 +58,7 @@ def test_the_length_check_runs_before_the_audio_check(tmp_path, monkeypatch):
     monkeypatch.setattr(ingest, "MAX_SOURCE_SECONDS", 1.0)
     long_silent = tmp_path / "long.mp4"
     ffmpeg.generate_solid_video(long_silent, 2.0)
-    with pytest.raises(ingest.IngestError, match="limit is 1s"):
+    with pytest.raises(ingest.IngestError, match="up to 1 s"):
         ingest.probe_source(long_silent)
 
 

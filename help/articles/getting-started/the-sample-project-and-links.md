@@ -12,7 +12,7 @@ Your Home starts with a sample project, and a video can come from a share link a
 - **Google Drive**: open the file, choose Share, set it to anyone with the link, then copy the link.
 - **Dropbox**: choose Share, then Copy link.
 
-The file can be up to 2 GB and, like any upload, up to 3 minutes long. While it comes down you see how much has arrived. When it is in, the video opens.
+The file can be up to 2 GB and, like any upload, up to 10 minutes long. While it comes down you see how much has arrived. When it is in, the video opens.
 
 **When an import fails** it says why: the link opens a page instead of a file (usually the file is not shared with anyone who has the link), the file is too big, it is not a video, or the service could not be reached. Fix the sharing and import again.
 

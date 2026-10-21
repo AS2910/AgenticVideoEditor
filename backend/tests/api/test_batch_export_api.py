@@ -19,6 +19,7 @@ from app.store import stages
 from app.store.actors import user
 from tests.api.test_folders import upload_into
 from tests.render.test_deliver import clip
+from tests.factories import media_get
 
 pytestmark = pytest.mark.skipif(not ffmpeg.available(), reason="ffmpeg/ffprobe not installed")
 
@@ -102,9 +103,9 @@ def test_export_flow_files_stages_zip_and_share(client, sample_video):
     assert parent.kind == "export" and parent.status == "done" and parent.detail["batch_export"] and parent.step_label == "4 of 4 files ready"
     assert {main.activity.get(f["job_id"]).detail["parent_id"] for f in body["files"]} == {eid}
     assert stages.current(main.database, "p1") == "exported" and stages.current(main.database, "p2") == "exported"
-    one = client.get(f"/projects/f1/exports/{eid}/files/{reels['index']}?download=true")
+    one = media_get(client, f"/projects/f1/exports/{eid}/files/{reels['index']}?download=true")
     assert one.status_code == 200 and one.headers["content-disposition"].startswith("attachment")
-    z = client.get(f"/projects/f1/exports/{eid}/zip")
+    z = media_get(client, f"/projects/f1/exports/{eid}/zip")
     assert z.status_code == 200 and z.headers["content-type"] == "application/zip"
     assert 'filename="Diwali-Sale-export.zip"' in z.headers["content-disposition"]
     with zipfile.ZipFile(io.BytesIO(z.content)) as zf:
