@@ -128,3 +128,34 @@ def test_captions_follow_the_video_as_edited():
     assert len(long) > 1 and all(len(c.lines) <= 2 and all(len(x) <= 42 for x in c.lines) for c in long)
     assert long[0].start == 0.0 and abs(long[-1].end - 8.0) < 0.01
     assert captions.srt(made).startswith("1\n00:00:00,200 --> 00:00:01,800\nHello there\n\n2\n")
+
+
+# ── 9c: libass detection; non-Latin captions without it are left off, said so ──
+
+def _filters(monkeypatch, listing):
+    monkeypatch.setattr(deliver, "_ffmpeg_lists", lambda: ("V..... libx264 H.264\n", listing))
+
+
+def test_libass_is_detected_from_ffmpegs_filter_list(monkeypatch):
+    _filters(monkeypatch, " ... ass               V->V       Render ASS subtitles\n")
+    assert deliver.has_libass() and deliver.caption_renderer() == "libass"
+    _filters(monkeypatch, " ... subtitles         V->V       Render text subtitles\n")
+    assert deliver.has_libass()
+    _filters(monkeypatch, " ... scale             V->V       Scale the input video size\n")
+    assert not deliver.has_libass() and deliver.caption_renderer() != "libass"
+
+
+def test_latin_only_allows_accents_and_refuses_other_scripts():
+    assert captions.latin_only(["Get 20% off", "Café crème, ¡olé!"])
+    assert not captions.latin_only(["आज 20% छूट"]) and not captions.latin_only(["Ok", "இன்று"])
+
+
+def test_non_latin_captions_without_libass_are_left_off_with_a_note(tmp_path, monkeypatch):
+    _filters(monkeypatch, " ... scale             V->V       Scale the input video size\n")
+    src = clip(tmp_path, seconds=2.0)
+    cues = captions.cues([captions.Passage("आज 20% छूट", 0.5, 1.5)])
+    report = deliver.deliver(src, tmp_path / "out.mp4", platform="feed", cues=cues)
+    assert report["captions"] == 0 and report["captions_renderer"] is None
+    assert report["captions_note"] == deliver.NEEDS_LIBASS and "libass" in report["captions_note"]
+    plain = deliver.deliver(src, tmp_path / "plain.mp4", platform="feed")
+    assert "captions_note" not in plain

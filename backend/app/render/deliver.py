@@ -15,8 +15,9 @@ Loudness: the render's audio is normalised with the mix's own BS.1770 code
 the file as written.
 Captions: ffmpeg's subtitles filter (libass) when this ffmpeg has it; else
 OpenCV's Hershey font drawn into PNGs and overlaid at their times (Latin
-letters only: other scripts need libass); with neither, the file fails with
-a sentence saying so.
+letters only: other scripts need libass, and without it the file is made
+without captions and the report's `captions_note` says why); with neither,
+the file fails with a sentence saying so.
 """
 from __future__ import annotations
 
@@ -74,12 +75,21 @@ def codecs() -> list[str]:
     return [k for k, c in CODECS.items() if re.search(rf"\s{c['encoder']}\s", encoders)] or ["h264"]
 
 
-def caption_renderer() -> str | None:
+def has_libass() -> bool:
+    """9c: this ffmpeg can draw text in any script (its subtitles/ass filters are libass)."""
     try:
         _, filters = _ffmpeg_lists()
     except ffmpeg.FFmpegError:
-        filters = ""
-    if re.search(r"\ssubtitles\s", filters):
+        return False
+    return bool(re.search(r"\s(subtitles|ass)\s", filters))
+
+
+NEEDS_LIBASS = ("Captions not burned in: they are not in Latin letters, and this server's ffmpeg has no libass "
+                "to draw them. The file was made without captions.")
+
+
+def caption_renderer() -> str | None:
+    if has_libass():
         return "libass"
     try:
         import cv2  # noqa: F401
@@ -199,6 +209,10 @@ def deliver(src: str | Path, dest: str | Path, *, platform: str, codec: str = "h
     w, h, framing = fit(sw, sh, frame)
     duration = ffmpeg.duration_of(src)
     renderer = caption_renderer() if cues else None
+    note = None
+    if cues and renderer != "libass" and not captions_mod.latin_only(c.text for c in cues):
+        # 9c: OpenCV draws Latin letters only; anything else would be boxes. Made without, said so.
+        cues, renderer, note = None, None, NEEDS_LIBASS
     if cues and renderer is None:
         raise DeliverError("Burned-in captions need ffmpeg built with libass, or OpenCV, on the server.")
     dest.parent.mkdir(parents=True, exist_ok=True)
@@ -241,5 +255,5 @@ def deliver(src: str | Path, dest: str | Path, *, platform: str, codec: str = "h
         "framing": framing, "loudness_target": target, "true_peak_ceiling": ceiling,
         "loudness_lufs": measured["lufs"], "true_peak_db": measured["true_peak_db"], "loudness_code_lufs": code_lufs,
         "captions": len(cues or ()), "captions_renderer": renderer, "duration": round(ffmpeg.duration_of(dest), 3),
-        "size": dest.stat().st_size,
+        "size": dest.stat().st_size, **({"captions_note": note} if note else {}),
     }

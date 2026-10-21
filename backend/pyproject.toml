@@ -10,6 +10,7 @@ dependencies = [
     "httpx>=0.27",              # vendor HTTP calls (OpenAI, ElevenLabs)
     "numpy>=2.0",               # continuity signal analysis, audio splicing
     "anthropic>=1.8",           # Claude reads free-form edit requests (Phase 8)
+    "opencv-python-headless>=4.8",  # burned-in captions when ffmpeg has no libass (B3, 9c)
 ]
 
 [project.optional-dependencies]

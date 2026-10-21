@@ -8519,7 +8519,26 @@ def export_preflight(project_id: str, owner: str = Depends(current_owner)) -> di
     except Exception:  # noqa: BLE001 - a check that fails never stops an export
         log.exception("pre-flight check for %s", project_id)
         warnings = []
+    warnings += _caption_warnings(repo.list(owner, folder=project_id), presets_store.list_presets(database, project_id, owner, seed=False))
     return {"videos": videos, "warnings": warnings}
+
+
+def _caption_warnings(records: list, presets: list) -> list[dict]:
+    """9c: captions not in Latin letters need ffmpeg with libass; without it they are left off, said before export."""
+    if not any(p.captions for p in presets) or deliver_mod.has_libass():
+        return []
+    try:
+        places = [{"video_id": r.source.project_id, "filename": r.source.filename, "t": None, "text": ""} for r in records
+                  if not captions_mod.latin_only(p.text for p in _caption_passages(r.source.project_id, r))]
+    except Exception:  # noqa: BLE001 - a warning that fails never stops an export
+        log.exception("caption warning")
+        return []
+    if not places:
+        return []
+    names = ", ".join(p["filename"] for p in places)
+    return [{"kind": "captions", "places": places, "fingerprint": "captions:no-libass",
+             "message": f"Captions for {names} are not in Latin letters, and this server's ffmpeg has no libass to draw "
+                        "them. Those files will be made without burned-in captions."}]
 
 
 class ExportBatchRequest(BaseModel):
@@ -8551,6 +8570,7 @@ def start_batch_export(project_id: str, req: ExportBatchRequest, owner: str = De
         warnings = project_check_warnings(project_id)
     except Exception:  # noqa: BLE001
         warnings = []
+    warnings += _caption_warnings(videos, chosen)
     items = []
     for record in videos:
         stage = stages.current(database, record.source.project_id) or "draft"

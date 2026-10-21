@@ -11,8 +11,9 @@ Burning them in is app/render/deliver.py's job.
 """
 from __future__ import annotations
 
+import unicodedata
 from dataclasses import dataclass
-from typing import Sequence
+from typing import Iterable, Sequence
 
 # About two lines of a phone-width caption.
 MAX_CHARS = 42
@@ -129,3 +130,13 @@ def _stamp(t: float) -> str:
 
 def srt(items: Sequence[Cue]) -> str:
     return "".join(f"{n}\n{_stamp(c.start)} --> {_stamp(c.end)}\n{c.text}\n\n" for n, c in enumerate(items, 1))
+
+
+def latin_only(texts: Iterable[str]) -> bool:
+    """9c: every letter is a Latin one (accents allowed). Hindi, Tamil and
+    other scripts need libass to be drawn; OpenCV's font would draw boxes."""
+    for text in texts:
+        for ch in text:
+            if ch.isalpha() and not unicodedata.name(ch, "").startswith("LATIN"):
+                return False
+    return True

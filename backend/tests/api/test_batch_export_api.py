@@ -177,3 +177,26 @@ def test_requests_that_cannot_run_are_refused(client, sample_video):
     assert client.get("/projects/f1/exports/J999").status_code == 404
     assert client.post("/projects/f1/shares", json={"scope": "export", "target": "J999"}).status_code == 404
     assert client.get("/projects/f1/exports").json() == {"exports": []}
+
+
+def test_non_latin_captions_without_libass_are_a_warning_before_export(client, sample_video, monkeypatch):
+    """9c: a preset that burns in captions, a video whose captions are not in
+    Latin letters, and an ffmpeg without libass: the pre-flight and the export
+    say the file will be made without captions."""
+    import app.api.main as main
+    from app.render import captions as captions_mod
+    project_with(client, sample_video, ["ad.mp4"])
+    reels = presets_by_name(client)["Reels 9:16"]
+    preflight = lambda: client.get("/projects/f1/exports/preflight").json()["warnings"]   # noqa: E731
+    monkeypatch.setattr(main.deliver_mod, "has_libass", lambda: False)
+    monkeypatch.setattr(main, "_caption_passages", lambda vid, rec: [captions_mod.Passage("आज 20% छूट", 0.0, 1.0)])
+    assert [w for w in preflight() if w["kind"] == "captions"] == []          # no preset burns captions yet
+    client.patch(f"/projects/f1/export-presets/{reels['preset_id']}", json={"captions": True})
+    got = [w for w in preflight() if w["kind"] == "captions"]
+    assert len(got) == 1 and "libass" in got[0]["message"] and got[0]["places"][0]["filename"] == "ad.mp4"
+    assert "\u2014" not in got[0]["message"]
+    monkeypatch.setattr(main.deliver_mod, "has_libass", lambda: True)
+    assert [w for w in preflight() if w["kind"] == "captions"] == []
+    monkeypatch.setattr(main.deliver_mod, "has_libass", lambda: False)
+    monkeypatch.setattr(main, "_caption_passages", lambda vid, rec: [captions_mod.Passage("Get 20% off", 0.0, 1.0)])
+    assert [w for w in preflight() if w["kind"] == "captions"] == []
