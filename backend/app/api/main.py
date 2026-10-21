@@ -131,7 +131,7 @@ log = logging.getLogger(__name__)
 database = Database(database_location(settings.data_dir / "ave.db"))
 repo = ProjectRepository(database)
 # Step 0 (FLAGS): every phase of the projects plan ships behind a flag, on per owner.
-flags = FlagStore(database, settings.flag_owners)
+flags = FlagStore(database, settings.flag_owners, settings.launch_profile)
 # G7: every tracked step lands in this database's analytics_events.
 analytics.configure(database)
 # G8: the error-reporting hook (log provider; SENTRY_DSN is read but not connected).
@@ -566,6 +566,34 @@ def set_paid_pause(req: PauseRequest, request: Request) -> dict:
     log.warning("paid work %s by %s", "paused" if req.paused else "resumed", who)
     analytics.track("paid.switch", who, {"paused": req.paused})
     return get_admin_spend(request)
+
+
+@app.get("/admin/flags")
+def get_admin_flags(request: Request, owner: str) -> dict:
+    """Admins (launch item 10): every feature flag for one person, on or off and why."""
+    _admin_or_404(request)
+    return {"owner": owner, "profile": settings.launch_profile, "flags": flags.explain(owner)}
+
+
+class FlagChange(BaseModel):
+    owner: str
+    flag: str
+    enabled: bool | None = None       # None: back to the profile's default
+
+
+@app.put("/admin/flags")
+def set_admin_flag(req: FlagChange, request: Request) -> dict:
+    """Admins: turn a feature on or off for one person (or `*` for everyone), or clear it."""
+    who = _admin_or_404(request)
+    from app.flags import is_known
+    if not is_known(req.flag) or not req.owner.strip():
+        raise HTTPException(status_code=422, detail="Name a known flag and an owner id (or * for everyone).")
+    if req.enabled is None:
+        flags.clear(req.flag, req.owner.strip())
+    else:
+        flags.set(req.flag, req.owner.strip(), req.enabled)
+    log.warning("flag %s for %s set to %s by %s", req.flag, req.owner, req.enabled, who)
+    return get_admin_flags(request, req.owner.strip())
 
 
 def _ensure_owner_spend(owner: str) -> None:
@@ -2914,6 +2942,13 @@ def _consistency_on(owner: str) -> None:
         raise HTTPException(status_code=404, detail="Not found")
 
 
+def _check_on(owner: str) -> None:
+    """A2 (the project check) also needs `projects.check` (launch item 10: off for the public)."""
+    _consistency_on(owner)
+    if not flags.enabled("projects.check", owner):
+        raise HTTPException(status_code=404, detail="Not found")
+
+
 BRIEF_RUN_KEY = "brief_update:{}"
 # How long one video's turn may run before the loop stops waiting on it.
 BRIEF_TURN_WAIT_S = 1800.0
@@ -3320,7 +3355,7 @@ def _auto_check(project_id: str, owner: str) -> None:
     the text pass). Quietly skipped with the flag off, with no videos, or
     while a check runs; never fails the save it follows."""
     try:
-        if not flags.enabled("projects.consistency", owner):
+        if not (flags.enabled("projects.consistency", owner) and flags.enabled("projects.check", owner)):
             return
         project = repo.get_project(project_id)
         if project is None or not repo.list(project.owner, folder=project_id):
@@ -3391,7 +3426,7 @@ class CheckRequest(BaseModel):
 @app.get("/projects/{project_id}/check")
 def get_project_check(project_id: str, owner: str = Depends(current_owner)) -> dict:
     """A2: the latest project check (null before the first) and its issues."""
-    _consistency_on(owner)
+    _check_on(owner)
     return _check_page(_owned_project(project_id, owner))
 
 
@@ -3399,7 +3434,7 @@ def get_project_check(project_id: str, owner: str = Depends(current_owner)) -> d
 def start_project_check(project_id: str, req: CheckRequest, owner: str = Depends(current_owner)) -> dict:
     """A2: check the project. `full` adds the Claude text pass (its cost is
     shown before; refused past a ceiling or with no key); `rules` is free."""
-    _consistency_on(owner)
+    _check_on(owner)
     project = _owned_project(project_id, owner)
     if req.mode == "full":
         if _check_reader_for() is None:
@@ -3427,7 +3462,7 @@ def _issue_or_404(project_id: str, issue_id: int) -> dict:
 @app.post("/projects/{project_id}/check/issues/{issue_id}/ignore")
 def ignore_check_issue(project_id: str, issue_id: int, owner: str = Depends(current_owner)) -> dict:
     """A2: ignore an issue until the text it was found in changes."""
-    _consistency_on(owner)
+    _check_on(owner)
     project = _owned_project(project_id, owner)
     found = _issue_or_404(project_id, issue_id)
     checks_store.ignore(database, project_id, found["fingerprint"], owner)
@@ -3452,7 +3487,7 @@ class FixRequest(BaseModel):
 @app.post("/projects/{project_id}/check/issues/{issue_id}/fix", status_code=202)
 def fix_check_issue(project_id: str, issue_id: int, req: FixRequest, owner: str = Depends(current_owner)) -> dict:
     """A2: Fix in this video: a normal turn in that video with the issue as its goal."""
-    _consistency_on(owner)
+    _check_on(owner)
     _owned_project(project_id, owner)
     found = _issue_or_404(project_id, issue_id)
     if req.video_id not in {p["video_id"] for p in found["places"]}:
@@ -3574,7 +3609,7 @@ def _fix_all_loop(project_id: str, owner: str) -> None:
 @app.post("/projects/{project_id}/check/issues/{issue_id}/fix-all", status_code=202)
 def fix_check_issue_everywhere(project_id: str, issue_id: int, owner: str = Depends(current_owner)) -> dict:
     """A2: Fix in all: every video the issue names, one after another, each an ordinary turn."""
-    _consistency_on(owner)
+    _check_on(owner)
     project = _owned_project(project_id, owner)
     found = _issue_or_404(project_id, issue_id)
     if not _agent_on():

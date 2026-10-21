@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { AdminAnalytics } from '../types'
 import type { Me } from '../api'
-import { getAdminAnalytics, getAdminSpend, setPaidPause } from '../api'
-import type { AdminSpend } from '../api'
+import { getAdminAnalytics, getAdminFlags, getAdminSpend, setAdminFlag, setPaidPause } from '../api'
+import type { AdminFlags, AdminSpend } from '../api'
 import { track } from '../lib/analytics'
 import { usd } from '../lib/money'
 import { Shell, SideNav } from './Shell'
@@ -42,6 +42,7 @@ export function AdminPage({ me }: { me: Me | null }) {
         )}
         {!error && !data && <p className="m-0 text-muted-foreground" role="status" aria-busy="true">Adding up…</p>}
         <SpendCard card={card} />
+        <FlagsCard card={card} />
         {data && (
           <>
             <section className={`${card} flex flex-col gap-3`} aria-labelledby="funnel-h" data-testid="admin-funnel">
@@ -183,6 +184,49 @@ function SpendCard({ card }: { card: string }) {
             </button>
           </div>
         </>
+      )}
+    </section>
+  )
+}
+
+const SOURCE_WORDS: Record<AdminFlags['flags'][number]['source'], string> = {
+  owner: 'set for them', everyone: 'set for everyone', profile: 'launch profile', default_owner: 'default owner', off: 'off by default',
+}
+
+/** Launch item 10: turn a feature on or off for one person (their owner id,
+ *  e.g. acct:1a2b or google:123), on top of the launch profile. */
+function FlagsCard({ card }: { card: string }) {
+  const [owner, setOwner] = useState('')
+  const [view, setView] = useState<AdminFlags | null>(null)
+  const [busy, setBusy] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const act = async (key: string, run: () => Promise<AdminFlags>) => {
+    setBusy(key)
+    setError(null)
+    try { const v = await run(); if (Array.isArray(v?.flags)) setView(v) } catch (e) { setError(said(e, 'That did not work.')) } finally { setBusy(null) }
+  }
+  return (
+    <section className={`${card} flex flex-col gap-3`} aria-labelledby="flags-h" data-testid="admin-flags">
+      <div className="flex flex-wrap items-baseline gap-2.5"><h2 id="flags-h" className="disp m-0 text-[22px] font-bold">Features for one person</h2><span className="tag text-faint">on top of the launch profile</span></div>
+      <form className="flex flex-wrap items-end gap-2.5" onSubmit={(e) => { e.preventDefault(); if (owner.trim()) void act('look', () => getAdminFlags(owner.trim())) }}>
+        <label className="flex min-w-0 flex-[1_1_240px] flex-col gap-1"><span className="text-[13px] font-semibold">Owner id</span>
+          <input className="box-border h-10 min-w-0 rounded-lg border-[1.5px] border-foreground bg-card px-2.5 font-mono text-sm outline-none focus-visible:ring-[3px] focus-visible:ring-volt" value={owner} onChange={(e) => setOwner(e.target.value)} placeholder="acct:1a2b3c or google:123" />
+        </label>
+        <button type="submit" className="btn sm" disabled={!owner.trim() || busy !== null}>{busy === 'look' ? 'Looking…' : 'Look up'}</button>
+      </form>
+      {error && <p className="m-0 text-sm text-destructive" role="alert">{error}</p>}
+      {view && (
+        <ul className="m-0 flex list-none flex-col p-0">
+          {view.flags.map((f) => (
+            <li key={f.flag} className="flex flex-wrap items-center gap-3 border-t border-line py-2" data-testid="flag-row">
+              <span className="min-w-0 flex-1 font-mono text-sm">{f.flag}</span>
+              <span className={f.on ? 'stamp' : 'stamp quiet'}>{f.on ? 'On' : 'Off'}</span>
+              <span className="w-32 text-[13px] text-muted-foreground">{SOURCE_WORDS[f.source]}</span>
+              <button type="button" className="btn sm" disabled={busy !== null} onClick={() => void act(f.flag, () => setAdminFlag(view.owner, f.flag, !f.on))}>{f.on ? 'Turn off' : 'Turn on'}</button>
+              {f.source === 'owner' && <button type="button" className="act" disabled={busy !== null} onClick={() => void act(f.flag, () => setAdminFlag(view.owner, f.flag, null))}>Reset</button>}
+            </li>
+          ))}
+        </ul>
       )}
     </section>
   )

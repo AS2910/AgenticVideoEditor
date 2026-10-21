@@ -7,6 +7,7 @@ export type Flag =
   | 'projects.batch'
   | 'projects.review'
   | 'projects.reuse'
+  | 'projects.check'
   | `golive.${string}`
 
 export interface Flags {

@@ -551,6 +551,10 @@ export const getAdminAnalytics = () => get<AdminAnalytics>('/admin/analytics')
 export interface AdminSpend { paused: boolean; reason: 'switch' | 'daily_cap' | null; switch: boolean; today_usd: number; cap_usd: number | null; resumes_at: string | null; by_vendor: Record<string, number> }
 export const getAdminSpend = () => get<AdminSpend>('/admin/spend')
 export const setPaidPause = (paused: boolean) => put<AdminSpend>('/admin/paid-pause', { paused })
+/** Launch item 10: one person's feature flags, and turning one on or off (null: back to the default). */
+export interface AdminFlags { owner: string; profile: string | null; flags: { flag: string; on: boolean; source: 'owner' | 'everyone' | 'profile' | 'default_owner' | 'off' }[] }
+export const getAdminFlags = (owner: string) => get<AdminFlags>(`/admin/flags?owner=${encodeURIComponent(owner)}`)
+export const setAdminFlag = (owner: string, flag: string, enabled: boolean | null) => put<AdminFlags>('/admin/flags', { owner, flag, enabled })
 export const getMyFlags = async () => (await get<{ flags: string[] }>('/me/flags')).flags
 /** Everything of yours: every project, take and voice, and the consent records. */
 export async function deleteAccount(): Promise<void> {

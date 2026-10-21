@@ -165,6 +165,8 @@ class Settings:
     # Launch item 3: what everyone together may spend in a UTC day before new
     # paid work pauses on its own (None: no cap).
     daily_cap_usd: float | None = 50.0
+    # Launch item 10: "public" turns the launch's features on for everyone (app/flags.py PROFILES).
+    launch_profile: str | None = None
     # Origins the browser may call the API from (CORS); the public URL by default.
     cors_origins: tuple[str, ...] = ()
 
@@ -214,6 +216,7 @@ def load_settings() -> Settings:
     public_url = (os.environ.get("AVE_PUBLIC_URL") or "http://localhost:5173").rstrip("/")
     return Settings(
         production=production,
+        launch_profile=_launch_profile(),
         daily_cap_usd=(None if (os.environ.get("AVE_DAILY_SPEND_CAP_USD") or "").strip().lower() in ("none", "off")
                        else _amount("AVE_DAILY_SPEND_CAP_USD", 50.0)),
         cors_origins=tuple(o.strip().rstrip("/") for o in (os.environ.get("AVE_CORS_ORIGINS") or public_url).split(",") if o.strip()),
@@ -271,6 +274,13 @@ def load_settings() -> Settings:
         purge_daily=os.environ.get("AVE_PURGE_DAILY", "").strip().lower() in _TRUTHY,
         lang_master_context=os.environ.get("AVE_LANG_MASTER_CONTEXT", "").strip().lower() in _TRUTHY,
     )
+
+
+def _launch_profile() -> str | None:
+    name = (os.environ.get("AVE_LAUNCH_PROFILE") or "").strip().lower()
+    if name not in ("", "public"):
+        raise ValueError(f"AVE_LAUNCH_PROFILE must be 'public' or empty, got {name!r}")
+    return name or None
 
 
 def _voice_route() -> str:

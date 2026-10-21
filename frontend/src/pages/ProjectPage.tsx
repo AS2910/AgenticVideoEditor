@@ -392,7 +392,7 @@ export function ProjectPage({ me, projectId, onUpload, uploading, error, onDelet
             </div>
           )}
           {batchOn && <BatchExport projectId={projectId} presets={exportPresets} />}
-          {consistency && <ProjectCheck projectId={projectId} briefVersion={project.brief_version}
+          {consistency && enabled('projects.check') && <ProjectCheck projectId={projectId} briefVersion={project.brief_version}
             onFixAll={batchOn ? (issue) => { setFixAll({ issueId: issue.issue_id, message: issue.message, videoIds: [...new Set(issue.places.map((p) => p.video_id))] }); document.querySelector('[data-testid="batch"]')?.scrollIntoView({ behavior: 'smooth', block: 'start' }) } : undefined} />}
           {consistency && <ProjectWords projectId={projectId} languages={batchOn} />}
           {batchOn && langFor && (
