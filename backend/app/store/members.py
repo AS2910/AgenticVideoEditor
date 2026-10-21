@@ -14,6 +14,8 @@
 """
 from __future__ import annotations
 
+import json
+
 import base64
 import hashlib
 import hmac
@@ -148,15 +150,17 @@ def set_role(db: Database, workspace_id: str, user: str, role: str | None = None
 
 def remove(db: Database, workspace_id: str, user: str) -> bool:
     with db.tx() as c:
+        c.execute("DELETE FROM member_shares WHERE workspace_id = ? AND member = ?", (workspace_id, user))
         return c.execute("DELETE FROM workspace_members WHERE workspace_id = ? AND member = ?", (workspace_id, user)).rowcount > 0
 
 
 # ── invites ──
 
 def invite(db: Database, key: str, workspace_id: str, email: str, role: str, by: str,
-           spend_limit_usd: float | None = None) -> tuple[dict, str]:
+           spend_limit_usd: float | None = None, shares: dict | None = None) -> tuple[dict, str]:
     """A new invite and its link token. One live invite per address: a new
-    one turns the older off."""
+    one turns the older off. `shares` ({"projects": [...], "videos": [...]})
+    is what a Reviewer will see once they accept (launch item 1)."""
     if role not in MEMBER_ROLES:
         raise MemberError("Invite someone as an Editor or a Reviewer.")
     address = clean_email(email)
@@ -171,8 +175,9 @@ def invite(db: Database, key: str, workspace_id: str, email: str, role: str, by:
         c.execute("UPDATE workspace_invites SET revoked_at = ? WHERE workspace_id = ? AND email = ? "
                   "AND accepted_at IS NULL AND revoked_at IS NULL", (now, workspace_id, address))
         invite_id = "i" + secrets.token_hex(8)
-        c.execute("INSERT INTO workspace_invites (id, workspace_id, email, role, spend_limit_usd, invited_by, created_at, expires_at) "
-                  "VALUES (?, ?, ?, ?, ?, ?, ?, ?)", (invite_id, workspace_id, address, role, limit, by, now, _later(days=INVITE_DAYS)))
+        c.execute("INSERT INTO workspace_invites (id, workspace_id, email, role, spend_limit_usd, invited_by, created_at, expires_at, shares) "
+                  "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", (invite_id, workspace_id, address, role, limit, by, now, _later(days=INVITE_DAYS),
+                                                         json.dumps(_clean_shares(shares))))
     row = get_invite(db, invite_id)
     return row, invite_token(key, row)   # type: ignore[arg-type]
 
@@ -237,7 +242,59 @@ def accept(db: Database, key: str, token: str | None, user: str, email: str | No
                   (row["workspace_id"], user, (email or row["email"]).lower(), name, row["role"], row["spend_limit_usd"],
                    row["invited_by"], now_iso()))
         c.execute("UPDATE workspace_invites SET accepted_at = ?, accepted_by = ? WHERE id = ?", (now_iso(), user, row["id"]))
+        _add_shares_in(c, row["workspace_id"], user, json.loads(row.get("shares") or "{}"), row["invited_by"])
     return member(db, row["workspace_id"], user)  # type: ignore[return-value]
+
+
+# ── what a member was shared (launch item 1) ──
+
+def _clean_shares(shares: dict | None) -> dict:
+    shares = shares or {}
+    return {"projects": sorted({str(x) for x in shares.get("projects") or [] if x}),
+            "videos": sorted({str(x) for x in shares.get("videos") or [] if x})}
+
+
+def _add_shares_in(c, workspace_id: str, user: str, shares: dict, by: str | None) -> None:
+    clean = _clean_shares(shares)
+    for kind, ids in (("project", clean["projects"]), ("video", clean["videos"])):
+        for item in ids:
+            c.execute("INSERT OR IGNORE INTO member_shares (workspace_id, member, kind, item_id, shared_by, created_at) "
+                      "VALUES (?, ?, ?, ?, ?, ?)", (workspace_id, user, kind, item, by, now_iso()))
+
+
+def shares(db: Database, workspace_id: str, user: str) -> dict:
+    """{"projects": [...], "videos": [...]} shared with this member."""
+    with db.tx() as c:
+        rows = c.execute("SELECT kind, item_id FROM member_shares WHERE workspace_id = ? AND member = ? ORDER BY item_id",
+                         (workspace_id, user)).fetchall()
+    return {"projects": [r["item_id"] for r in rows if r["kind"] == "project"],
+            "videos": [r["item_id"] for r in rows if r["kind"] == "video"]}
+
+
+def set_shares(db: Database, workspace_id: str, user: str, new: dict, by: str) -> dict:
+    """Replace what is shared with a member."""
+    with db.tx() as c:
+        if not c.execute("SELECT 1 FROM workspace_members WHERE workspace_id = ? AND member = ?", (workspace_id, user)).fetchone():
+            raise MemberError("That person is not in this workspace.")
+        c.execute("DELETE FROM member_shares WHERE workspace_id = ? AND member = ?", (workspace_id, user))
+        _add_shares_in(c, workspace_id, user, new, by)
+    return shares(db, workspace_id, user)
+
+
+def can_see(db: Database, workspace_id: str, user: str, *, video_id: str | None = None, project_id: str | None = None) -> bool:
+    """Whether a Reviewer may read this video (shared itself, or its project
+    is) or this project (shared itself)."""
+    with db.tx() as c:
+        if project_id is not None:
+            return c.execute("SELECT 1 FROM member_shares WHERE workspace_id = ? AND member = ? AND kind = 'project' AND item_id = ?",
+                             (workspace_id, user, project_id)).fetchone() is not None
+        if video_id is None:
+            return False
+        return c.execute(
+            "SELECT 1 FROM member_shares s WHERE s.workspace_id = ? AND s.member = ? AND ("
+            "(s.kind = 'video' AND s.item_id = ?) OR "
+            "(s.kind = 'project' AND s.item_id = (SELECT project_id FROM videos WHERE id = ?)))",
+            (workspace_id, user, video_id, video_id)).fetchone() is not None
 
 
 # ── login links (email sign-in) ──

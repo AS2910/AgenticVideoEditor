@@ -1319,12 +1319,12 @@ def add_my_voice_from_speaker(req: FromSpeakerRequest, owner: str = Depends(curr
     """One of your own voices from a speaker in one of your clips: their
     speech, joined, cloned once under your name. Consent is your word that
     the voice is yours or one you may use."""
+    record = _owned(req.video_id, owner)        # someone else's video is not found, before anything else is said
     if not req.consent:
         raise HTTPException(status_code=403, detail="Say it is your voice, or one you have the right to use.")
     _voices_can_be_made()
     label = _voice_name_or_422(req.name)
     _no_voice_called(owner, label)
-    record = _owned(req.video_id, owner)
     spk = next((s for s in repo.speakers(req.video_id) if s.label == req.label), None)
     if spk is None:
         raise HTTPException(status_code=404, detail="speaker not found")
@@ -1444,6 +1444,9 @@ def list_projects(project: str | None = None, recent: int | None = None, owner: 
     elif project:
         folder = _owned_project(project, owner).project_id
     found = repo.list(owner, folder=folder)
+    seen = _reviewer_filter()
+    if seen is not None:
+        found = [r for r in found if r.source.project_id in seen[0]]
     if recent is not None:
         found = found[:max(0, recent)]
     return {"videos": [_summary(r) for r in found]}
@@ -2498,6 +2501,9 @@ def list_folders(archived: bool = False, owner: str = Depends(current_owner)) ->
     found = repo.list_projects(owner)
     if flags.enabled("projects.reuse", owner):
         found = [p for p in found if bool(p.archived_at) == archived]
+    seen = _reviewer_filter()
+    if seen is not None:
+        found = [p for p in found if p.project_id in seen[1]]
     return {"projects": [_project_summary(p) for p in found]}
 
 
@@ -4629,7 +4635,10 @@ def add_pin(kind: Literal["project", "video"], item_id: str, owner: str = Depend
 @app.delete("/pins/{kind}/{item_id}")
 def remove_pin(kind: Literal["project", "video"], item_id: str, owner: str = Depends(current_owner)) -> dict:
     _reuse_flag(owner)
-    return {"pinned": False, "changed": home_store.unpin(database, owner, kind, item_id)}
+    try:
+        return {"pinned": False, "changed": home_store.unpin(database, owner, kind, item_id)}
+    except home_store.NotFound:
+        raise HTTPException(status_code=404, detail="Nothing of yours to unpin there.") from None
 
 
 @app.get("/search")
@@ -8490,8 +8499,10 @@ def _job_notice(job) -> None:
             title, body, kind = f"{what}{of} failed.", job.error_text or "", "job_failed"
         else:
             title, body, kind = f"{what}{of} is done.", job.step_label or "", "job_done"
+        # Launch item 1: the notice goes to whoever started the work (a member), else the owner.
+        to = job.detail.get("started_by") or owner
         with database.tx() as c:
-            inbox.add_in(c, owner, kind, title, body=body, link=link,
+            inbox.add_in(c, to, kind, title, body=body, link=link,
                          video_id=job.video_id if (link or "").startswith("#v/") else None,
                          project_id=job.video_id if (link or "").startswith("#p/") else None)
     except Exception:  # noqa: BLE001 - a notice never breaks the work it reports
@@ -8521,14 +8532,18 @@ def _after_charge(video_id: str | None, folder_id: str | None) -> None:
             hit = inbox.crossed(float(s["spent_usd"]), float(s["ceiling_usd"]))
             if hit is None:
                 continue
-            with database.tx() as c:
-                if not inbox.spend_alert_once(c, owner, scope, scope_id, f"{period}:{s['ceiling_usd']}", hit):
-                    continue
-                said = (f"You have used {hit}% of {whose} ({money(float(s['spent_usd']))} of {money(float(s['ceiling_usd']))})."
-                        if hit < 100 else f"You have reached {whose} ({money(float(s['ceiling_usd']))}). Paid steps stop until it is raised.")
-                inbox.add_in(c, owner, "spend_alert", said, link=link,
-                             video_id=video_id if scope == "video" else None,
-                             project_id=scope_id if scope == "project" else None)
+            # Launch item 1: the owner always, and the member whose step made the charge.
+            for to in dict.fromkeys(r for r in (owner, current_actor.get()) if r):
+                with database.tx() as c:
+                    if not inbox.spend_alert_once(c, to, scope, scope_id, f"{period}:{s['ceiling_usd']}", hit):
+                        continue
+                    said = (f"You have used {hit}% of {whose} ({money(float(s['spent_usd']))} of {money(float(s['ceiling_usd']))})."
+                            if hit < 100 else f"You have reached {whose} ({money(float(s['ceiling_usd']))}). Paid steps stop until it is raised.")
+                    if to != owner:
+                        said = said.replace("You have used", "This workspace has used").replace("You have reached", "This workspace has reached").replace("your monthly", "its monthly")
+                    inbox.add_in(c, to, "spend_alert", said, link=link,
+                                 video_id=video_id if scope == "video" else None,
+                                 project_id=scope_id if scope == "project" else None)
     except Exception:  # noqa: BLE001 - an alert never breaks a charge
         log.exception("spend alert after a charge")
 
@@ -8702,6 +8717,49 @@ async def _report_errors(request: Request, call_next):
         raise
 
 
+# ── Launch item 1: a Reviewer sees only what was shared with them ────────────
+# The role middleware (below) has already refused a Reviewer's writes other
+# than comments. Here, reads: the lists (/videos, /projects) are filtered in
+# their routes; a video or project not shared, and every account-wide page
+# (usage, voices, templates, the Bin, search...), answers 404 as if it were not there.
+
+_REVIEWER_OPEN = re.compile(r"^/(auth/|me(/|$)|invites/|help(/|$)|workspace(/switch)?$|videos$|projects$|health$|ready$|media/)")
+_REVIEWER_VIDEO = re.compile(r"^/videos/([^/]+)(/|$)")
+_REVIEWER_PROJECT = re.compile(r"^/projects/([^/]+)(/|$)")
+_REVIEWER_JOB = re.compile(r"^/jobs/([^/]+)$")
+
+
+def _reviewer_may_read(me: Acting, path: str) -> bool:
+    path = path[4:] if path.startswith("/api/") else path
+    if _REVIEWER_OPEN.match(path):
+        return True
+    wid = me.workspace_id or members_store.workspace_of(database, me.owner)
+    hit = _REVIEWER_VIDEO.match(path)
+    if hit:
+        return members_store.can_see(database, wid, me.user, video_id=hit.group(1))
+    hit = _REVIEWER_PROJECT.match(path)
+    if hit:
+        return members_store.can_see(database, wid, me.user, project_id=hit.group(1))
+    hit = _REVIEWER_JOB.match(path)
+    if hit:
+        job = jobs.get(hit.group(1))
+        return job is not None and members_store.can_see(database, wid, me.user, video_id=job.project_id)
+    return False
+
+
+def _reviewer_filter() -> tuple[set[str], set[str]] | None:
+    """(video ids, project ids) a Reviewer may list, or None for everyone else."""
+    me = acting.get()
+    if me is None or me.role != "reviewer":
+        return None
+    wid = me.workspace_id or members_store.workspace_of(database, me.owner)
+    got = members_store.shares(database, wid, me.user)
+    projects = set(got["projects"])
+    from app.store.repository import ANY_FOLDER
+    videos = set(got["videos"]) | {r.source.project_id for r in repo.list(me.owner, folder=ANY_FOLDER) if r.folder_id in projects}
+    return videos, projects
+
+
 # ── G2: roles ────────────────────────────────────────────────────────────────
 # Defined last so it is the outermost middleware: who is acting is known
 # before any other middleware or route runs (app/workspace_api.py).
@@ -8716,6 +8774,8 @@ async def _roles(request: Request, call_next):
             refusal = role_refusal(me.role, request.method, request.url.path)
             if refusal:
                 return JSONResponse(status_code=403, content={"detail": refusal, "code": "role"})
+            if me.role == "reviewer" and not await asyncio.to_thread(_reviewer_may_read, me, request.url.path):
+                return JSONResponse(status_code=404, content={"detail": "Not found"})
         return await call_next(request)
     finally:
         acting.reset(a)

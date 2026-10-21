@@ -69,8 +69,12 @@ def pin(db: Database, owner: str, kind: str, item_id: str) -> bool:
 
 
 def unpin(db: Database, owner: str, kind: str, item_id: str) -> bool:
+    """Unpin; NotFound for something the owner neither pinned nor owns (launch item 1)."""
     with db.tx() as c:
-        return c.execute("DELETE FROM pins WHERE owner = ? AND kind = ? AND item_id = ?", (owner, kind, item_id)).rowcount > 0
+        gone = c.execute("DELETE FROM pins WHERE owner = ? AND kind = ? AND item_id = ?", (owner, kind, item_id)).rowcount > 0
+        if not gone and (kind not in KINDS or not _owns(c, owner, kind, item_id)):
+            raise NotFound(item_id)
+        return gone
 
 
 # ── archive ──

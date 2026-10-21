@@ -68,7 +68,7 @@ test('G2: members, roles, limits and an invite', async ({ page, context }) => {
   await waiting.getByRole('button', { name: 'Copy link' }).click()
   await expect(waiting.getByRole('button', { name: 'Copied' })).toBeVisible()
   if (SHOTS) await page.screenshot({ path: `${SHOTS}/g2-members.png`, fullPage: true })
-  expect(writes).toContain('POST /api/workspace/invites {"email":"dev@client.com","role":"reviewer","spend_limit_usd":null}')
+  expect(writes).toContain('POST /api/workspace/invites {"email":"dev@client.com","role":"reviewer","spend_limit_usd":null,"project_ids":[]}')
   expect(writes).toContain('PATCH /api/workspace/members/google%3Ap {"spend_limit_usd":35}')
 
   await page.goto('/#invite/i1.abc')

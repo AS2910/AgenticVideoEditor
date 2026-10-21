@@ -45,8 +45,9 @@ def as_user(sub: str, email: str) -> TestClient:
     return client
 
 
-def invite_and_join(owner: TestClient, member: TestClient, email: str, role: str, limit=None) -> str:
-    out = owner.post("/workspace/invites", json={"email": email, "role": role, "spend_limit_usd": limit}, headers=H)
+def invite_and_join(owner: TestClient, member: TestClient, email: str, role: str, limit=None, videos=()) -> str:
+    out = owner.post("/workspace/invites", json={"email": email, "role": role, "spend_limit_usd": limit,
+                                                 "video_ids": list(videos)}, headers=H)
     assert out.status_code == 201, out.text
     [mail] = email_mod.outbox(database, kind="workspace_invite", to=email)
     token = re.search(r"#invite/(\S+)", mail["body"]).group(1)
@@ -83,7 +84,7 @@ def test_a_reviewer_reads_and_comments_and_nothing_else(sign_in_on, sample_video
     a, c = as_user("a", "a@x.io"), as_user("c", "c@x.io")
     with open(sample_video, "rb") as handle:
         vid = a.post("/videos", files={"file": ("ad.mp4", handle, "video/mp4")}, data={"consent": "true"}, headers=H).json()["video_id"]
-    invite_and_join(a, c, "c@x.io", "reviewer")
+    invite_and_join(a, c, "c@x.io", "reviewer", videos=[vid])         # launch item 1: a Reviewer sees what was shared
     assert c.get(f"/videos/{vid}").status_code == 200
     no = c.post("/projects", json={"name": "Nope"}, headers=H)
     assert no.status_code == 403 and "As a Reviewer you can watch and comment" in no.json()["detail"]

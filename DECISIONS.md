@@ -16,6 +16,11 @@ Each: what, why, how to undo. The projects-plan decisions from the night before 
 - 0: Credits: spend comes out of the grant that lapses soonest (this month's plan first, then top-ups by age, the free trial last; the trial never lapses). Spend beyond all credits is owed from the next grant. Credits already used before this change are re-read under the new rule, so an existing account may show some October credits as lapsed on 1 Nov. Top-up expiry uses the purchase day, capped at the 28th. Undo: `balance` in `backend/app/billing/__init__.py`.
 - 0: Prices, plans, top-up packs, the markup, the INR rate, top-up lifetime and the trial credits live in `backend/app/billing/prices.py` (placeholders). `AVE_TRIAL_CREDITS` overrides the trial (default 5).
 - 0: `playwright.config.ts` takes `PW_PORT` so two worktrees can run the layout tests at once (with PW_PORT set, it never reuses a server it did not start).
+- 1: "Scoped to the caller's workspace" is met by the existing owner scoping: each owner has one workspace and a member acting in it acts for its owner, so every `_owned`/`_owned_project` check is a workspace check. Reads do not filter on `workspace_id` columns yet; that becomes necessary only when an owner can have several workspaces (Postgres RLS in item 6 uses the column).
+- 1: A cross-workspace request answers 404 (never 403), including capability-free routes that used to answer 200 with nothing done (unpin).
+- 1: Reviewers see only what is shared with them: projects (with every video in them) or single videos, chosen at invite time or on the Members page. A Reviewer with nothing shared sees an empty workspace. Account-wide pages (usage, spend, voices, templates, Bin, search, pins, imports) answer 404 to Reviewers. Existing Reviewers (made before tonight) see nothing until the owner shares something with them. Undo: drop the `_reviewer_may_read` check in the `_roles` middleware.
+- 1: The Members page shares projects only (not single videos) to keep the form short; the API takes `video_ids` too.
+- 1: Job notices go to the member who started the job (`detail.started_by`, from the request's signed-in person), not the owner; spend alerts go to the owner and that member, each once per threshold. A job started with sign-in off or by the owner goes to the owner as before.
 
 ---
 

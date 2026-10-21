@@ -43,8 +43,32 @@ describe('G2: Members', () => {
     expect(buttons[buttons.length - 1]).toHaveTextContent('Send invite')        // the next action last
     await userEvent.click(within(form).getByRole('button', { name: 'Send invite' }))
     expect(await screen.findByTestId('invites')).toHaveTextContent('dev@x.io')
-    expect(calls).toContain('POST /api/workspace/invites {"email":"dev@x.io","role":"reviewer","spend_limit_usd":null}')
+    expect(calls).toContain('POST /api/workspace/invites {"email":"dev@x.io","role":"reviewer","spend_limit_usd":null,"project_ids":[]}')
     expect(screen.getAllByRole('status').some((s) => s.textContent === 'Invite sent to dev@x.io.')).toBe(true)
+  })
+
+  it('shares chosen projects with a Reviewer at the invite, and changes them later (launch item 1)', async () => {
+    const calls: string[] = []
+    const RAE = { member: 'google:r', email: 'rae@x.io', name: null, role: 'reviewer', role_word: 'Reviewer', spent_usd: 0, shares: { projects: ['f1'], videos: [] } }
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      calls.push(`${init?.method ?? 'GET'} ${url} ${init?.body ?? ''}`.trim())
+      if (url.endsWith('/workspace')) return ok(VIEW())
+      if (url.endsWith('/projects')) return ok({ projects: [{ project_id: 'f1', name: 'Diwali' }, { project_id: 'f2', name: 'Holi' }] })
+      if (url.includes('/me/flags')) return ok({ flags: ['golive.g2'] })
+      return ok(PAGE({ members: [RAE] }))
+    }))
+    render(<MembersPage me={null} />)
+    expect(await screen.findByTestId('member-sees')).toHaveTextContent('Sees Diwali')
+    const form = screen.getByTestId('invite-form')
+    await userEvent.type(within(form).getByLabelText('Email'), 'dev@x.io')
+    await userEvent.click(within(form).getByRole('radio', { name: 'Reviewer' }))
+    await userEvent.click(within(form).getByRole('checkbox', { name: 'Holi' }))
+    await userEvent.click(within(form).getByRole('button', { name: 'Send invite' }))
+    await waitFor(() => expect(calls).toContain('POST /api/workspace/invites {"email":"dev@x.io","role":"reviewer","spend_limit_usd":null,"project_ids":["f2"]}'))
+    await userEvent.click(within(screen.getByTestId('member-row')).getByRole('button', { name: 'Change' }))
+    await userEvent.click(within(screen.getByTestId('member-row')).getByRole('checkbox', { name: 'Holi' }))
+    await userEvent.click(within(screen.getByTestId('member-row')).getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(calls).toContain('PUT /api/workspace/members/google%3Ar/shares {"project_ids":["f1","f2"]}'))
   })
 
   it('refuses a bad limit in place, and changes a role', async () => {

@@ -514,7 +514,11 @@ export const getImport = (jobId: string) => get<ActivityJob>(`/imports/${encodeU
 // G2: the workspace, members and invites, email sign-in.
 export const getWorkspace = () => get<WorkspaceView>('/workspace')
 export const listMembers = () => get<MembersPage>('/workspace/members')
-export const sendInvite = (email: string, role: MemberRole, spendLimit: number | null) => post<MembersPage>('/workspace/invites', { email, role, spend_limit_usd: spendLimit })
+export const sendInvite = (email: string, role: MemberRole, spendLimit: number | null, projectIds: string[] = []) =>
+  post<MembersPage>('/workspace/invites', { email, role, spend_limit_usd: spendLimit, ...(role === 'reviewer' ? { project_ids: projectIds } : {}) })
+/** Launch item 1: the projects a Reviewer sees (replaces what was shared). */
+export const setMemberShares = (member: string, projectIds: string[]) =>
+  put<MembersPage>(`/workspace/members/${encodeURIComponent(member)}/shares`, { project_ids: projectIds })
 export const revokeInvite = (id: string) => request<MembersPage>(`/workspace/invites/${encodeURIComponent(id)}`, { method: 'DELETE' })
 export const changeMember = (member: string, change: { role?: MemberRole; spend_limit_usd?: number | null }) => patch<MembersPage>(`/workspace/members/${encodeURIComponent(member)}`, change)
 export const removeMember = (member: string) => request<MembersPage>(`/workspace/members/${encodeURIComponent(member)}`, { method: 'DELETE' })

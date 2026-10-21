@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useState } from 'react'
 import { track } from '../lib/analytics'
-import type { MembersPage as Page, MemberRole, WorkspaceMember, WorkspaceView } from '../types'
+import type { MembersPage as Page, MemberRole, ProjectFolder, WorkspaceMember, WorkspaceView } from '../types'
 import type { Me } from '../api'
-import { ApiError, changeMember, getWorkspace, listMembers, removeMember, revokeInvite, sendInvite, switchWorkspace } from '../api'
+import { ApiError, changeMember, getWorkspace, listFolders, listMembers, removeMember, revokeInvite, sendInvite, setMemberShares, switchWorkspace } from '../api'
 import { cn } from '@/lib/utils'
 import { Shell, SideNav } from './Shell'
 import { said, usd } from './fmt'
@@ -42,6 +42,9 @@ export function MembersPage({ me }: { me: Me | null }) {
   const [limit, setLimit] = useState('')
   const [formError, setFormError] = useState<string | null>(null)
   const [copied, setCopied] = useState<string | null>(null)
+  // Launch item 1: the projects a Reviewer will see.
+  const [folders, setFolders] = useState<ProjectFolder[]>([])
+  const [sharing, setSharing] = useState<string[]>([])
 
   const load = useCallback(async () => {
     setError(null)
@@ -49,6 +52,7 @@ export function MembersPage({ me }: { me: Me | null }) {
       const v = await getWorkspace()
       setView(v)
       setPage(v.you.role === 'owner' ? await listMembers() : null)
+      if (v.you.role === 'owner') setFolders((await listFolders().catch(() => [])) ?? [])
     } catch (e) {
       setError(said(e, 'Members could not be read.'))
     }
@@ -74,7 +78,7 @@ export function MembersPage({ me }: { me: Me | null }) {
     setFormError(null)
     setBusy('invite')
     try {
-      const out = await sendInvite(email.trim(), role, cap)
+      const out = await sendInvite(email.trim(), role, cap, sharing)
       setPage(out)
       setEmail('')
       setLimit('')
@@ -144,7 +148,8 @@ export function MembersPage({ me }: { me: Me | null }) {
               </div>
               {page.members.length === 0 && <p className="m-0 border-t border-line py-3.5 text-muted-foreground">Only you so far. Invite someone below.</p>}
               {page.members.map((m) => (
-                <MemberRow key={m.member} m={m} busy={busy === m.member} roles={page.roles}
+                <MemberRow key={m.member} m={m} busy={busy === m.member} roles={page.roles} folders={folders}
+                  onShares={(ids) => void act(m.member, () => setMemberShares(m.member, ids), `${m.email ?? m.member} now sees ${ids.length} ${ids.length === 1 ? 'project' : 'projects'}.`)}
                   onRole={(r) => void act(m.member, () => changeMember(m.member, { role: r }), `${m.email ?? m.member} is now ${r === 'editor' ? 'an Editor' : 'a Reviewer'}.`)}
                   onLimit={(v) => void act(m.member, () => changeMember(m.member, { spend_limit_usd: v }), v == null ? 'Limit removed.' : `Limit set to ${usd(v)} a month.`)}
                   onRemove={() => void act(m.member, () => removeMember(m.member), `${m.email ?? m.member} is out of this workspace. What they made stays.`)} />
@@ -165,6 +170,7 @@ export function MembersPage({ me }: { me: Me | null }) {
                   </div>
                   <span className="text-[13px] text-muted-foreground">{ROLE_HELP[role]}</span>
                 </div>
+                {role === 'reviewer' && <ProjectPicker legend="Projects they can see" folders={folders} picked={sharing} onChange={setSharing} />}
                 <label className="flex flex-col gap-1"><span className="text-[13px] font-semibold">Monthly spend limit (optional)</span>
                   <input className={cn(field, 'w-40')} inputMode="decimal" value={limit} onChange={(e) => setLimit(e.target.value)} placeholder="$ none" />
                   <span className="text-[13px] text-muted-foreground">What they start counts against it, inside your own ceilings.</span>
@@ -195,10 +201,30 @@ export function MembersPage({ me }: { me: Me | null }) {
   )
 }
 
-function MemberRow({ m, roles, busy, onRole, onLimit, onRemove }: {
-  m: WorkspaceMember; roles: { role: MemberRole; word: string }[]; busy: boolean
-  onRole: (r: MemberRole) => void; onLimit: (v: number | null) => void; onRemove: () => void
+/** Launch item 1: tick the projects a Reviewer may see; nothing else in the workspace is shown to them. */
+function ProjectPicker({ legend, folders, picked, onChange }: { legend: string; folders: ProjectFolder[]; picked: string[]; onChange: (ids: string[]) => void }) {
+  return (
+    <fieldset className="m-0 flex flex-col gap-1.5 border-0 p-0" data-testid="share-picker">
+      <legend className="mb-1 p-0 text-[13px] font-semibold">{legend}</legend>
+      {folders.length === 0 && <span className="text-[13px] text-muted-foreground">No projects yet. A Reviewer sees only the projects you share.</span>}
+      {folders.map((f) => (
+        <label key={f.project_id} className="flex min-h-11 items-center gap-2.5 text-sm">
+          <input type="checkbox" className="size-4 accent-foreground" checked={picked.includes(f.project_id)}
+            onChange={(e) => onChange(e.target.checked ? [...picked, f.project_id] : picked.filter((x) => x !== f.project_id))} />
+          <span className="min-w-0 truncate">{f.name}</span>
+        </label>
+      ))}
+    </fieldset>
+  )
+}
+
+function MemberRow({ m, roles, busy, folders, onRole, onLimit, onRemove, onShares }: {
+  m: WorkspaceMember; roles: { role: MemberRole; word: string }[]; busy: boolean; folders: ProjectFolder[]
+  onRole: (r: MemberRole) => void; onLimit: (v: number | null) => void; onRemove: () => void; onShares: (ids: string[]) => void
 }) {
+  const shared = m.shares?.projects ?? []
+  const [editing, setEditing] = useState<string[] | null>(null)
+  const sees = folders.filter((f) => shared.includes(f.project_id)).map((f) => f.name)
   const [limit, setLimit] = useState(m.spend_limit_usd != null ? String(m.spend_limit_usd) : '')
   const [asking, setAsking] = useState(false)
   const [bad, setBad] = useState(false)
@@ -214,6 +240,12 @@ function MemberRow({ m, roles, busy, onRole, onLimit, onRemove }: {
       <span className="flex min-w-0 flex-[1_1_220px] flex-col">
         <span className="truncate font-semibold">{name}</span>
         <span className="tnum text-[13px] text-muted-foreground">{spendLine(m)}</span>
+        {m.role === 'reviewer' && (
+          <span className="text-[13px] text-muted-foreground" data-testid="member-sees">
+            {sees.length ? `Sees ${sees.join(', ')}` : (m.shares?.videos.length ? `Sees ${m.shares.videos.length} ${m.shares.videos.length === 1 ? 'video' : 'videos'}` : 'Sees nothing yet')}
+            {' · '}<button type="button" className="act" onClick={() => setEditing(editing ? null : shared)} disabled={busy}>{editing ? 'Close' : 'Change'}</button>
+          </span>
+        )}
       </span>
       <select className={cn(field, 'h-9 text-sm')} aria-label={`Role for ${name}`} value={m.role} disabled={busy} onChange={(e) => onRole(e.target.value as MemberRole)}>
         {roles.map((r) => <option key={r.role} value={r.role}>{r.word}</option>)}
@@ -223,6 +255,12 @@ function MemberRow({ m, roles, busy, onRole, onLimit, onRemove }: {
       {asking
         ? <span className="flex items-center gap-2"><span className="text-[13px]">Remove {name}?</span><button type="button" className="act" onClick={() => setAsking(false)}>Keep</button><button type="button" className="btn sm" onClick={() => { setAsking(false); onRemove() }}>Remove</button></span>
         : <button type="button" className="act" onClick={() => setAsking(true)} disabled={busy}>Remove</button>}
+      {editing && (
+        <div className="flex w-full flex-col gap-2 rounded-lg border border-line p-3">
+          <ProjectPicker legend={`Projects ${m.email ?? m.member} can see`} folders={folders} picked={editing} onChange={setEditing} />
+          <button type="button" className="btn sm self-start" disabled={busy} onClick={() => { onShares(editing); setEditing(null) }}>Save</button>
+        </div>
+      )}
     </div>
   )
 }

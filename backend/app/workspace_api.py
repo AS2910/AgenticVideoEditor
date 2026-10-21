@@ -116,6 +116,7 @@ def _members_page(owner: str) -> dict:
     rows = []
     for m in members_store.members(api.database, wid):
         rows.append({**m.to_dict(), "role_word": members_store.ROLE_WORDS[m.role],
+                     "shares": members_store.shares(api.database, wid, m.member),
                      "spent_usd": round(api.ledger.spent_usd_by_actor(m.member, wid, since), 4)})
     owner_row = {**_who(owner), "role": "owner", "role_word": "Owner",
                  "spent_usd": round(api.ledger.spent_usd_by_owner(owner, since), 4)}
@@ -143,6 +144,19 @@ class InviteRequest(BaseModel):
     email: str
     role: str = "editor"
     spend_limit_usd: float | None = None
+    # Launch item 1: what a Reviewer will see (project and video ids of this workspace).
+    project_ids: list[str] = []
+    video_ids: list[str] = []
+
+
+def _own_shares(owner: str, project_ids: list[str], video_ids: list[str]) -> dict:
+    """The ids, each checked to be the owner's own (404 otherwise)."""
+    api = _api()
+    for pid in project_ids:
+        api._owned_project(pid, owner)
+    for vid in video_ids:
+        api._owned(vid, owner)
+    return {"projects": project_ids, "videos": video_ids}
 
 
 @router.post("/workspace/invites", status_code=201)
@@ -153,7 +167,8 @@ def send_invite(req: InviteRequest, owner: str = Depends(_owner)) -> dict:
     _flag(owner)
     wid = members_store.workspace_of(api.database, owner)
     try:
-        row, token = members_store.invite(api.database, _key(), wid, req.email, req.role, owner, req.spend_limit_usd)
+        shares = _own_shares(owner, req.project_ids, req.video_ids)
+        row, token = members_store.invite(api.database, _key(), wid, req.email, req.role, owner, req.spend_limit_usd, shares)
     except members_store.MemberError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from None
     word = members_store.ROLE_WORDS[row["role"]]
@@ -180,6 +195,26 @@ def revoke_invite(invite_id: str, owner: str = Depends(_owner)) -> dict:
     wid = members_store.workspace_of(api.database, owner)
     if not members_store.revoke_invite(api.database, wid, invite_id):
         raise HTTPException(status_code=404, detail="That invite is not waiting any more.")
+    return _members_page(owner)
+
+
+class SharesChange(BaseModel):
+    project_ids: list[str] = []
+    video_ids: list[str] = []
+
+
+@router.put("/workspace/members/{member}/shares")
+def change_shares(member: str, req: SharesChange, owner: str = Depends(_owner)) -> dict:
+    """Owner only: replace the projects and videos shared with a member (a
+    Reviewer reads only these)."""
+    api = _api()
+    _flag(owner)
+    wid = members_store.workspace_of(api.database, owner)
+    shares = _own_shares(owner, req.project_ids, req.video_ids)
+    try:
+        members_store.set_shares(api.database, wid, member, shares, owner)
+    except members_store.MemberError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from None
     return _members_page(owner)
 
 

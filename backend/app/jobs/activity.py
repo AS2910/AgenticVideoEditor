@@ -185,6 +185,11 @@ class ActivityJobs:
         if kind not in KINDS:
             raise ValueError(f"unknown job kind {kind}")
         detail = dict(detail or {})
+        # Launch item 1: who started it (a member acting in someone's workspace), so its notice reaches them.
+        if "started_by" not in detail:
+            from app.usage import current_actor
+            if current_actor.get():
+                detail["started_by"] = current_actor.get()
         est = self.estimate(kind, detail.get("chars"))
         with self.db.tx() as c:
             cur = c.execute("INSERT INTO jobs (job_id, project_id, turn_id, kind, status, touched, body) "
