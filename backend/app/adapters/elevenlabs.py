@@ -29,8 +29,10 @@ import json
 import math
 import re
 import tempfile
+from contextlib import contextmanager
+from contextvars import ContextVar
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Iterator
 
 import httpx
 
@@ -273,6 +275,26 @@ DELIVERY_SETTINGS: dict[str, dict] = {
 }
 
 
+# 9b: whether the words around a line go to the vendor as previous/next
+# context. Off around a language version's takes (unless AVE_LANG_MASTER_CONTEXT
+# is on): its transcript is the master's English, which can anglicise a
+# translated line. Set by the caller around the generation, like the respellings.
+_SEND_CONTEXT: ContextVar[bool] = ContextVar("vendor_context", default=True)
+
+
+@contextmanager
+def vendor_context(on: bool) -> Iterator[None]:
+    token = _SEND_CONTEXT.set(bool(on))
+    try:
+        yield
+    finally:
+        _SEND_CONTEXT.reset(token)
+
+
+def sends_context() -> bool:
+    return _SEND_CONTEXT.get()
+
+
 def to_request(plan: EditPlan, transcript: Transcript | None, model: str, speed: float = 1.0) -> dict:
     model = model_of(plan, model)
     # A3: the project's respellings go in the text sent; the plan keeps the words as written.
@@ -283,7 +305,7 @@ def to_request(plan: EditPlan, transcript: Transcript | None, model: str, speed:
         settings["speed"] = round(min(SPEED_MAX, max(SPEED_MIN, speed * settings.get("speed", 1.0))), 2)
     if settings:
         body["voice_settings"] = settings
-    if transcript is None or model in NO_CONTEXT_MODELS:
+    if transcript is None or model in NO_CONTEXT_MODELS or not _SEND_CONTEXT.get():
         return body
     start, end = plan.selection.start, plan.selection.end
     before = [w.text for w in transcript.words if w.end <= start]

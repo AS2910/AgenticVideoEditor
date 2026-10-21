@@ -147,6 +147,9 @@ class Settings:
     # D3: run the purge (Bin items older than 30 days) once a day from the
     # server. Off by default: `python -m app.purge` by hand.
     purge_daily: bool = False
+    # 9b: send the master's (English) words as the vendor's previous/next
+    # context when voicing a language version's line. Off by default.
+    lang_master_context: bool = False
     # The origin the browser uses, for the OAuth redirect: https://voltage.example.com
     public_url: str = "http://localhost:5173"
     # Who may sign in: emails or @domains, comma-separated. Empty = anyone with a Google account.
@@ -266,6 +269,7 @@ def load_settings() -> Settings:
         consent_retention_years=_amount("AVE_CONSENT_RETENTION_YEARS", 7.0),
         admin_owners=tuple(o.strip() for o in os.environ.get("AVE_ADMIN_OWNERS", "local").split(",") if o.strip()),
         purge_daily=os.environ.get("AVE_PURGE_DAILY", "").strip().lower() in _TRUTHY,
+        lang_master_context=os.environ.get("AVE_LANG_MASTER_CONTEXT", "").strip().lower() in _TRUTHY,
     )
 
 

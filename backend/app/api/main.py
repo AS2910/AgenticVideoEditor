@@ -87,6 +87,7 @@ from app.render import captions as captions_mod, deliver as deliver_mod
 from app.jobs import exports as exports_mod
 from app.agent import project_check as pcheck
 from app.adapters import pronounce
+from app.adapters.elevenlabs import vendor_context
 from app.store.actors import VOLTAGE, Actor, user as user_actor
 from app.store.repository import Project, ProjectRecord, ProjectRepository, LOCAL_OWNER
 from app.store.artifacts import ArtifactStore
@@ -5331,7 +5332,9 @@ def _generate(
     # A take that does not fit its slot raises SpanMismatch to the caller:
     # Voltage hears why and decides (a shorter wording, another placement).
     # A3: the project's respellings go to the vendor; the plan keeps the words as written.
-    with pronounce.respelling(_respellings(project_id)):
+    # 9b: a language version's transcript is the master's English; it goes to the vendor as context only when set.
+    master_context = not (record.master_id and record.language) or settings.lang_master_context
+    with pronounce.respelling(_respellings(project_id)), vendor_context(master_context):
         candidate = generate(plan)
     # Retained so approval commits this exact candidate rather than re-running
     # generation, which real vendors would not reproduce byte-for-byte.

@@ -164,3 +164,64 @@ def test_the_flag_off_hides_language_sets(client, sample_video):
     flags.set("projects.batch", "local", False)
     assert client.get("/videos/p1/languages").status_code == 404
     assert client.post("/videos/p1/languages", json={"languages": ["hi"]}).status_code == 404
+
+
+# ── 9b: the master's English goes to the vendor as context only when set ──────
+
+def test_to_request_sends_context_only_when_allowed():
+    from app.adapters.elevenlabs import to_request, vendor_context
+    from app.domain.models import Transcript, Word
+    words = (Word("Get", 0.0, 0.4), Word("twenty", 0.5, 0.9), Word("off", 2.5, 2.9), Word("today", 3.0, 3.4))
+    plan = EditPlan(Selection(1.0, 2.0), "आज छूट", "v1")
+    sent = to_request(plan, Transcript(words=words), "eleven_multilingual_v2")
+    assert sent["previous_text"] == "Get twenty" and sent["next_text"] == "off today"
+    with vendor_context(False):
+        quiet = to_request(plan, Transcript(words=words), "eleven_multilingual_v2")
+    assert "previous_text" not in quiet and "next_text" not in quiet
+    assert "previous_text" in to_request(plan, Transcript(words=words), "eleven_multilingual_v2")   # reset after
+
+
+def _context_seen(monkeypatch):
+    """Whether vendor context was allowed at each take the mock voice made, by video."""
+    import app.api.main as main
+    from app.adapters.elevenlabs import sends_context
+    seen: dict[str, bool] = {}
+    real = main.voice.synthesize
+
+    def spy(source, plan, transcript=None):
+        seen[source.project_id] = sends_context()
+        return real(source, plan, transcript)
+    monkeypatch.setattr(main.voice, "synthesize", spy)
+    return seen
+
+
+@pytest.mark.parametrize("setting, expect", [(False, False), (True, True)])
+def test_a_language_versions_take_gets_the_master_as_context_only_with_the_setting(client, sample_video, monkeypatch, setting, expect):
+    from dataclasses import replace
+    import app.api.main as main
+    master(client, sample_video)
+    seen = _context_seen(monkeypatch)
+    agent(monkeypatch, {"p2": [reply(take(text="आज 20% छूट।"), stop="tool_use"), reply(text("Ready to hear."))]})
+    monkeypatch.setattr(main, "settings", replace(main.settings, lang_master_context=setting))
+    make(client, langs=("hi",))
+    assert repo.latest_plan("p2").items[0].candidate_id
+    assert seen["p2"] is expect
+
+
+def test_the_master_itself_always_sends_its_context(client, sample_video, monkeypatch):
+    import app.api.main as main
+    from tests.api.test_endpoints import _agent_on, send
+    master(client, sample_video)
+    seen = _context_seen(monkeypatch)
+    client.put("/videos/p1/settings", json={"autonomy": "draft"})
+    _agent_on(monkeypatch, main, [reply(take(text="Get 30% off today only."), stop="tool_use"), reply(text("Ready."))])
+    send(client, "make it 30%")
+    assert seen["p1"] is True
+
+
+def test_the_setting_reads_from_the_environment(monkeypatch):
+    from app.config import load_settings
+    monkeypatch.delenv("AVE_LANG_MASTER_CONTEXT", raising=False)
+    assert load_settings().lang_master_context is False
+    monkeypatch.setenv("AVE_LANG_MASTER_CONTEXT", "1")
+    assert load_settings().lang_master_context is True
