@@ -16,11 +16,24 @@ def _cols(c, table):
     return {r[1] for r in c.execute(f"PRAGMA table_info({table})")}
 
 
+# FTS5 keeps each virtual table's data in shadow tables (`<name>_data`, `_idx`,
+# `_content`, `_docsize`, `_config`): SQLite's own system tables, not user
+# tables. The virtual table itself (9d's `search_fts`) carries the column.
+FTS_SHADOWS = ("_data", "_idx", "_content", "_docsize", "_config")
+
+
+def _fts_shadow(c, table):
+    virtual = {r[0] for r in c.execute("SELECT name FROM sqlite_master WHERE type = 'table' AND sql LIKE 'CREATE VIRTUAL TABLE%'")}
+    return any(table.endswith(s) and table[:-len(s)] in virtual for s in FTS_SHADOWS)
+
+
 def test_every_user_data_table_has_a_workspace_column():
     db = Database()
     with db.tx() as c:
-        missing = [t for t in m30.user_tables(c) if "workspace_id" not in _cols(c, t)]
+        missing = [t for t in m30.user_tables(c) if not _fts_shadow(c, t) and "workspace_id" not in _cols(c, t)]
     assert missing == []
+    with db.tx() as c:
+        assert "workspace_id" in _cols(c, "search_fts") and _fts_shadow(c, "search_fts_data")
 
 
 def test_a_row_written_without_a_workspace_takes_its_owners():

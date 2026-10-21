@@ -8,6 +8,8 @@
 - **Search** across project names, video names, what is said in each video
   (its transcript's words, with the time each hit starts) and brief text,
   grouped by project. Deleted items (F8) never show; archived ones do.
+  An FTS5 trigram index (migration 0033, `search_fts`) narrows the rows
+  read; the checks on them are the same as before it (9d).
 """
 from __future__ import annotations
 
@@ -146,6 +148,38 @@ def transcript_hits(words: list[dict], query: str, limit: int = 3) -> list[dict]
     return hits
 
 
+def _phrase(text: str) -> str:
+    return '"' + text.replace('"', '""') + '"'
+
+
+def _candidates(db: Database, c: sqlite3.Connection, owner: str, q: str) -> dict[str, str | None]:
+    """9d: the FTS5 MATCH expression that narrows each kind's rows, or None to
+    read every row (as before the index). Always a superset of what `search`
+    keeps: its own checks still decide. A project matches on the query as a
+    substring of its name or brief; a video on that, or on every query word
+    of 3+ letters as a substring of its words (a word under 3 letters cannot
+    narrow a trigram index, so the video side reads every row then)."""
+    if getattr(db, "dialect", "sqlite") != "sqlite":
+        # TODO(postgres): the same narrowing over a `tsvector`/pg_trgm index
+        # behind this function (projects: name || brief; videos: file name ||
+        # transcript words), returning ids the exact checks below then run on.
+        return {"project": None, "video": None}
+    from app.store.migrations.m0033_search_fts import available
+    if len(q) < 3 or not available(c):
+        return {"project": None, "video": None}
+    whole = _phrase(q.lower())
+    long = [t for t in _tokens(q) if len(t) >= 3]
+    return {"project": whole,
+            "video": f"{whole} OR ({' AND '.join(_phrase(t) for t in long)})" if long else None}
+
+
+def _narrowed(c: sqlite3.Connection, kind: str, owner: str, match: str | None) -> set[str] | None:
+    if match is None:
+        return None
+    return {r[0] for r in c.execute("SELECT item_id FROM search_fts WHERE search_fts MATCH ? AND kind = ? AND owner = ?",
+                                    (match, kind, owner))}
+
+
 def search(db: Database, owner: str, query: str, limit: int = 40) -> dict:
     """Matches grouped by project (standalone videos last), each group's
     hits in order: the project's name, its brief, then per video its name
@@ -162,15 +196,23 @@ def search(db: Database, owner: str, query: str, limit: int = 40) -> dict:
                                        "archived": archived, "hits": []})
 
     with db.tx() as c:
+        narrow = _candidates(db, c, owner, q)
+        maybe_projects = _narrowed(c, "project", owner, narrow["project"])
+        maybe_videos = _narrowed(c, "video", owner, narrow["video"])
         projects = {r["id"]: r for r in c.execute(
             "SELECT id, name, brief, archived_at FROM projects WHERE owner = ? AND deleted_at IS NULL", (owner,))}
         for pid, p in projects.items():
+            if maybe_projects is not None and pid not in maybe_projects:
+                continue
             if ql in (p["name"] or "").lower():
                 group(pid, p["name"], bool(p["archived_at"]))["hits"].append({"kind": "project", "text": p["name"]})
             if ql in (p["brief"] or "").lower():
                 group(pid, p["name"], bool(p["archived_at"]))["hits"].append({"kind": "brief", "text": _snippet(p["brief"], q)})
         videos = c.execute("SELECT id, source, transcript, project_id FROM videos WHERE owner = ? AND deleted_at IS NULL "
-                           "ORDER BY created_at DESC, id DESC", (owner,)).fetchall()
+                           + ("" if maybe_videos is None else
+                              "AND id IN (SELECT item_id FROM search_fts WHERE search_fts MATCH ? AND kind = 'video' AND owner = ?) ")
+                           + "ORDER BY created_at DESC, id DESC",
+                           (owner,) if maybe_videos is None else (owner, narrow["video"], owner)).fetchall()
     for v in videos:
         pid = v["project_id"] if v["project_id"] in projects else None
         p = projects.get(pid) if pid else None
