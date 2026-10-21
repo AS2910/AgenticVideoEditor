@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { track } from '../lib/analytics'
 import type { MembersPage as Page, MemberRole, WorkspaceMember, WorkspaceView } from '../types'
 import type { Me } from '../api'
 import { ApiError, changeMember, getWorkspace, listMembers, removeMember, revokeInvite, sendInvite, switchWorkspace } from '../api'
@@ -53,6 +54,7 @@ export function MembersPage({ me }: { me: Me | null }) {
     }
   }, [])
   useEffect(() => { void load() }, [load])
+  useEffect(() => { track('members.opened') }, [])
 
   const act = async (key: string, work: () => Promise<Page>, done: string) => {
     setBusy(key)

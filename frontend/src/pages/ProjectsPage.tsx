@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { track } from '../lib/analytics'
 import type React from 'react'
 import type { DragEvent } from 'react'
 import type { Pin, ProjectFolder, ProjectSummary, ProjectTemplate, SpendSummary } from '../types'
@@ -133,6 +134,7 @@ export function ProjectsPage({ me, projects, folders = [], onOpen, onUpload, onS
   const togglePin = async (kind: Pin['kind'], id: string, name: string) => {
     const was = pins
     const on = !isPinned(kind, id)
+    track(on ? 'pin.added' : 'pin.removed', { kind })
     setPins(on ? [...was, { kind, id, name, pinned_at: new Date().toISOString() }] : was.filter((p) => !(p.kind === kind && p.id === id)))
     try { await setPin(kind, id, on) } catch {
       setPins(was)
@@ -257,7 +259,7 @@ export function ProjectsPage({ me, projects, folders = [], onOpen, onUpload, onS
               <div className="flex min-w-0 flex-col gap-1">
                 <label htmlFor="new-project-from" className="text-[13px] font-semibold">Start from</label>
                 <select id="new-project-from" className="box-border h-9 w-full min-w-0 rounded-md border-[1.5px] border-line2 bg-background px-2 text-sm text-foreground outline-none focus-visible:border-ink focus-visible:ring-[3px] focus-visible:ring-volt"
-                  value={startFrom} disabled={making || templates === null} onChange={(e) => setStartFrom(e.target.value)} data-testid="start-from">
+                  value={startFrom} disabled={making || templates === null} onChange={(e) => { setStartFrom(e.target.value); if (e.target.value) track('template.start_from_picked') }} data-testid="start-from">
                   <option value="">{templates === null && !templatesError ? 'Blank (reading templates…)' : 'Blank'}</option>
                   {templates && templates.some((t) => !t.starter) && (
                     <optgroup label="Your templates">{templates.filter((t) => !t.starter).map((t) => <option key={t.template_id} value={t.template_id}>{t.name}</option>)}</optgroup>
@@ -423,17 +425,17 @@ export function ProjectsPage({ me, projects, folders = [], onOpen, onUpload, onS
             {reuseOn && onHome.length > 0 && (
               <div className="flex flex-wrap items-center gap-2.5" data-testid="video-controls" data-tour="video-controls">
                 <label className="flex items-center gap-2"><span className="tag text-faint">Sort</span>
-                  <select className="h-8 rounded-lg border-[1.5px] border-foreground bg-card px-2 text-[13px] text-foreground pointer-coarse:h-11" aria-label="Sort videos" value={sort} onChange={(e) => setSort(e.target.value as Sort)}>
+                  <select className="h-8 rounded-lg border-[1.5px] border-foreground bg-card px-2 text-[13px] text-foreground pointer-coarse:h-11" aria-label="Sort videos" value={sort} onChange={(e) => { setSort(e.target.value as Sort); track('home.sorted', { by: e.target.value }) }}>
                     {SORTS.map((o) => <option key={o.key} value={o.key}>{o.label}</option>)}
                   </select>
                 </label>
                 <label className="flex items-center gap-2"><span className="tag text-faint">Stage</span>
-                  <select className="h-8 rounded-lg border-[1.5px] border-foreground bg-card px-2 text-[13px] text-foreground pointer-coarse:h-11" aria-label="Stage" value={stageFilter} onChange={(e) => setStageFilter(e.target.value)}>
+                  <select className="h-8 rounded-lg border-[1.5px] border-foreground bg-card px-2 text-[13px] text-foreground pointer-coarse:h-11" aria-label="Stage" value={stageFilter} onChange={(e) => { setStageFilter(e.target.value); track('home.filtered', { stage: e.target.value }) }}>
                     <option value="all">Any stage</option>
                     {STAGES.map((o) => <option key={o.key} value={o.key}>{o.label}</option>)}
                   </select>
                 </label>
-                <button type="button" className="pill" aria-pressed={attention} onClick={() => setAttention((v) => !v)} title="Brief changed, out of sync with its master, or open review comments">Needs attention · {inTab.filter(needsAttention).length}</button>
+                <button type="button" className="pill" aria-pressed={attention} onClick={() => { setAttention((v) => !v); track('home.filtered', { attention: !attention }) }} title="Brief changed, out of sync with its master, or open review comments">Needs attention · {inTab.filter(needsAttention).length}</button>
               </div>
             )}
             {shown.length === 0 ? (

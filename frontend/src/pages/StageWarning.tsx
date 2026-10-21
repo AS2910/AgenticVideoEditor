@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react'
+import { track } from '../lib/analytics'
 import { cn } from '@/lib/utils'
 
 /** C1: the warning before an add lands on an Approved video ("This video is
@@ -15,8 +16,8 @@ export function StageWarning({ message, onAnyway, onCancel, busy, className }: {
       onKeyDown={(e) => { if (e.key === 'Escape') { e.preventDefault(); onCancel() } }}>
       <span className="stamp need">Approved</span>
       <span id="stage-warning-text" className="min-w-0 flex-[1_1_220px] text-sm">{message}</span>
-      <button type="button" className="btn sm" onClick={onCancel} disabled={busy}>Cancel</button>
-      <button ref={anyway} type="button" className="btn volt sm" onClick={onAnyway} disabled={busy}>{busy ? 'Adding…' : 'Add anyway'}</button>
+      <button type="button" className="btn sm" onClick={() => { track('stage.add_cancelled'); onCancel() }} disabled={busy}>Cancel</button>
+      <button ref={anyway} type="button" className="btn volt sm" onClick={() => { track('stage.add_anyway'); onAnyway() }} disabled={busy}>{busy ? 'Adding…' : 'Add anyway'}</button>
     </div>
   )
 }

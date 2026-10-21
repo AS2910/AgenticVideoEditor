@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import sqlite3
 
+from app import analytics
 from app.notify import digest
 from app.store.db import Database
 from app.timefmt import now_iso
@@ -79,6 +80,7 @@ def set_settings(db: Database, user: str, changes: dict[str, dict]) -> list[dict
             c.execute("INSERT INTO notification_settings (recipient, kind, in_app, email) VALUES (?, ?, ?, ?) "
                       "ON CONFLICT (recipient, kind) DO UPDATE SET in_app = excluded.in_app, email = excluded.email",
                       (user, kind, int(in_app), int(email)))
+        analytics.safe_in(c, "notification.settings_changed", user, {"kinds": sorted(changes)})
     return settings(db, user)
 
 
@@ -102,6 +104,8 @@ def add_in(c: sqlite3.Connection, user: str, kind: str, title: str, *, body: str
     if email:
         digest.queue_in(c, user, DIGEST_KIND[kind], project_id=project_id, video_id=video_id,
                         payload=digest_payload or {"text": title + (f" {body}" if body else "")})
+    analytics.safe_in(c, "notification.created", user, {"kind": kind, "in_app": in_app, "email": email},
+                      workspace_id=workspace_id)
     return made
 
 
@@ -130,12 +134,16 @@ def mark_read(db: Database, user: str, ids: list[int] | None = None) -> int:
     """Mark these (or, with None, all of this person's) read. Returns how many changed."""
     with db.tx() as c:
         if ids is None:
-            return c.execute("UPDATE notifications SET read_at = ? WHERE recipient = ? AND read_at IS NULL", (now_iso(), user)).rowcount
-        if not ids:
+            n = c.execute("UPDATE notifications SET read_at = ? WHERE recipient = ? AND read_at IS NULL", (now_iso(), user)).rowcount
+        elif not ids:
             return 0
-        marks = ",".join("?" * len(ids))
-        return c.execute(f"UPDATE notifications SET read_at = ? WHERE recipient = ? AND read_at IS NULL AND id IN ({marks})",
-                         (now_iso(), user, *ids)).rowcount
+        else:
+            marks = ",".join("?" * len(ids))
+            n = c.execute(f"UPDATE notifications SET read_at = ? WHERE recipient = ? AND read_at IS NULL AND id IN ({marks})",
+                          (now_iso(), user, *ids)).rowcount
+        if n:
+            analytics.safe_in(c, "notification.read", user, {"count": n, "all": ids is None})
+        return n
 
 
 def crossed(spent: float, ceiling: float | None) -> int | None:

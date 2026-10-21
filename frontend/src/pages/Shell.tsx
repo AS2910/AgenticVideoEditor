@@ -1,5 +1,7 @@
 import type { ReactNode } from 'react'
+import { useEffect, useState } from 'react'
 import type { Me } from '../api'
+import { getMeAdmin } from '../api'
 import { hrefFor } from '../lib/route'
 import { cn } from '@/lib/utils'
 import { initialOf } from './fmt'
@@ -89,10 +91,25 @@ export type SideSection = (typeof SIDE)[number]['id']
 
 /** The side nav of Settings and Billing. On Settings the three sections scroll into view
  *  (an in-page `#agent` href would be read as a route); from Billing they open Settings. */
-export function SideNav({ active, onSection }: { active: SideSection | 'usage' | 'billing' | 'members' | 'notifications'; onSection?: (id: SideSection) => void }) {
+/** G7: whether the internal admin page is yours (asked once per page load, only with golive.g7 on). */
+let adminAsked: Promise<boolean> | null = null
+function useAdmin(on: boolean): boolean {
+  const [admin, setAdmin] = useState(false)
+  useEffect(() => {
+    if (!on) return
+    let live = true
+    adminAsked ??= getMeAdmin().catch(() => { adminAsked = null; return false })
+    void adminAsked.then((a) => { if (live) setAdmin(a) })
+    return () => { live = false }
+  }, [on])
+  return admin
+}
+
+export function SideNav({ active, onSection }: { active: SideSection | 'usage' | 'billing' | 'members' | 'notifications' | 'admin'; onSection?: (id: SideSection) => void }) {
   const flagged = useFlags()
   const membersOn = flagged.enabled('golive.g2')
   const notesOn = flagged.enabled('golive.g4')
+  const admin = useAdmin(flagged.enabled('golive.g7'))
   const item = 'block rounded-lg px-3 py-[9px] text-left font-medium text-muted-foreground no-underline hover:bg-sunk hover:text-foreground'
   const on = 'border-[1.5px] border-foreground bg-card text-foreground'
   return (
@@ -104,6 +121,7 @@ export function SideNav({ active, onSection }: { active: SideSection | 'usage' |
       {notesOn && <a href={hrefFor({ page: 'notifications' })} className={cn(item, active === 'notifications' && on)} aria-current={active === 'notifications' ? 'page' : undefined}>Notifications</a>}
       <a href={hrefFor({ page: 'usage' })} className={cn(item, active === 'usage' && on)}>Usage</a>
       <a href={hrefFor({ page: 'billing' })} className={cn(item, active === 'billing' && on)} aria-current={active === 'billing' ? 'page' : undefined}>Billing</a>
+      {admin && <a href={hrefFor({ page: 'admin' })} className={cn(item, active === 'admin' && on)} aria-current={active === 'admin' ? 'page' : undefined}>Admin</a>}
     </nav>
   )
 }

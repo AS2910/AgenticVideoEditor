@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { track } from '../lib/analytics'
 import type { ReactNode } from 'react'
 import type { SearchHit, SearchResult } from '../types'
 import { searchEverything } from '../api'
@@ -72,6 +73,7 @@ export function HomeSearch({ debounceMs = 250 }: { debounceMs?: number }) {
           placeholder="Search projects, videos, what is said, briefs"
           value={q}
           onChange={(e) => setQ(e.target.value)}
+          onFocus={() => track('search.opened')}
           onKeyDown={(e) => { if (e.key === 'Escape') { e.preventDefault(); clear(); input.current?.blur() } }}
         />
         <span className="kbd text-muted-foreground" aria-hidden="true">/</span>
@@ -101,7 +103,7 @@ export function HomeSearch({ debounceMs = 250 }: { debounceMs?: number }) {
                   <ul className="m-0 flex list-none flex-col p-0">
                     {g.hits.map((h, i) => (
                       <li key={`${h.kind}-${h.video_id ?? ''}-${i}`}>
-                        <a href={hitHref(h, g.project_id)} className="flex min-w-0 items-baseline gap-3 rounded-lg px-2 py-1.5 text-foreground no-underline hover:bg-sunk focus-visible:bg-sunk" data-testid="search-hit">
+                        <a href={hitHref(h, g.project_id)} onClick={() => track('search.result_opened', { kind: h.kind })} className="flex min-w-0 items-baseline gap-3 rounded-lg px-2 py-1.5 text-foreground no-underline hover:bg-sunk focus-visible:bg-sunk" data-testid="search-hit">
                           <span className="tag w-[104px] flex-none whitespace-nowrap text-faint">{h.kind === 'transcript' ? `Said · ${clock(h.at ?? 0)}` : KIND_WORD[h.kind]}</span>
                           <span className="min-w-0 flex-1">
                             {(h.kind === 'transcript' || h.kind === 'brief') && h.filename && <span className="font-medium">{h.filename} · </span>}

@@ -59,7 +59,7 @@ export function LearnWord({ projectId, projectName, container = '[data-testid="t
     setBusy(true)
     setError(null)
     try {
-      let rule = await addRule(projectId, 'pronounce', { term: form.term.trim(), say: form.say.trim(), ...(form.respell.trim() ? { respell: form.respell.trim() } : {}) })
+      let rule = await addRule(projectId, 'pronounce', { term: form.term.trim(), say: form.say.trim(), ...(form.respell.trim() ? { respell: form.respell.trim() } : {}) }, 'transcript')
       if (form.clip) rule = await uploadRuleAudio(projectId, rule.rule_id, form.clip)
       onAdded?.(rule)
       setDone(`Added “${rule.data.term}” to ${projectName ?? 'the project'}'s words.`)

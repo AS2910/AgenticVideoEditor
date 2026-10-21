@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { track } from '../lib/analytics'
 import type { ActivityJob, ImportSource } from '../types'
 import { ApiError, getImport, getImportSources, startImport } from '../api'
 import { FillBar } from './bits'
@@ -51,6 +52,7 @@ export function LinkImport({ projectId, disabled, onDone }: {
   const submit = async () => {
     const link = url.trim()
     if (!link || busy) return
+    track('import.link_pasted')
     setError(null)
     setSending(true)
     try {

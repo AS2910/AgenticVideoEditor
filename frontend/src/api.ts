@@ -8,7 +8,7 @@ import type {
   ProjectSettings, Autonomy, Effort, Plan, Mix, Selection, Candidate, Reading, Sight, ChatMessage,
   ProjectFolder, ProjectDetailFolder, ProjectFile, HelpArticle, Onboarding, ProjectVoice,
   ActivityJob, TurnView, RenderState, BriefVersion, BriefChange, BriefUpdateRun, ProjectRule, RuleKind, RuleData, CheckPage, Batch, ExportPreset, ExportPresetPage, ExportPresetChange, Preflight, BatchExport, ShareLink, PublicShare,
-  PublicComment, ReviewAnswer, ReviewComment, ReviewLinkRequest, BinItem, BinKind, BinRestored, Pin, SearchResult, ProjectTemplate, LearnedPage, ImportSource, MembersPage, WorkspaceView, InviteView, MemberRole, NotificationItem, NotificationSetting,
+  PublicComment, ReviewAnswer, ReviewComment, ReviewLinkRequest, BinItem, BinKind, BinRestored, Pin, SearchResult, ProjectTemplate, LearnedPage, ImportSource, MembersPage, WorkspaceView, InviteView, MemberRole, NotificationItem, NotificationSetting, AdminAnalytics,
 } from './types'
 
 const BASE = '/api'
@@ -142,7 +142,8 @@ export const getBriefUpdate = (id: string) => get<{ run: BriefUpdateRun | null }
 export const startBriefUpdate = (id: string) => post<{ run: BriefUpdateRun }>(`/projects/${id}/brief-update`, {})
 /** F3/A3: the project's words (how to say a term, banned words, required lines). */
 export const listRules = async (id: string) => (await get<{ rules: ProjectRule[]; rules_version: number }>(`/projects/${id}/rules`)).rules
-export const addRule = (id: string, kind: RuleKind, data: RuleData) => post<ProjectRule>(`/projects/${id}/rules`, { kind, data })
+/** `source: 'transcript'`: a word learned from the editor's transcript (A3), counted for G7. */
+export const addRule = (id: string, kind: RuleKind, data: RuleData, source?: 'transcript') => post<ProjectRule>(`/projects/${id}/rules${source ? `?source=${source}` : ''}`, { kind, data })
 export const updateRule = (id: string, ruleId: number, data: RuleData) => patch<ProjectRule>(`/projects/${id}/rules/${ruleId}`, { data })
 export const deleteRule = (id: string, ruleId: number) => del(`/projects/${id}/rules/${ruleId}`)
 export async function uploadRuleAudio(id: string, ruleId: number, file: File): Promise<ProjectRule> {
@@ -527,6 +528,9 @@ export const getNotificationCount = () => get<{ unread: number }>('/me/notificat
 export const markNotificationsRead = (which: { ids?: number[]; all?: boolean }) => post<{ unread: number }>('/me/notifications/read', which)
 export const getNotificationSettings = () => get<{ kinds: NotificationSetting[] }>('/me/notifications/settings')
 export const putNotificationSettings = (changes: Record<string, { in_app?: boolean; email?: boolean }>) => put<{ kinds: NotificationSetting[] }>('/me/notifications/settings', changes)
+/** G7: whether the internal admin page is yours, and its numbers (admins only). */
+export const getMeAdmin = async () => (await get<{ admin: boolean }>('/me/admin')).admin
+export const getAdminAnalytics = () => get<AdminAnalytics>('/admin/analytics')
 export const getMyFlags = async () => (await get<{ flags: string[] }>('/me/flags')).flags
 /** Everything of yours: every project, take and voice, and the consent records. */
 export async function deleteAccount(): Promise<void> {

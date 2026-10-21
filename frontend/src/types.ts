@@ -1012,3 +1012,21 @@ export interface InviteView { email: string; role: MemberRole; role_word: string
 /** G4: one notification in the bell, and a kind's settings. */
 export interface NotificationItem { id: number; kind: string; title: string; body: string; link: string | null; video_id: string | null; project_id: string | null; created_at: string; read: boolean }
 export interface NotificationSetting { kind: string; label: string; help: string; in_app: boolean; email: boolean }
+
+/** G7: the internal admin page's numbers (GET /admin/analytics). A rate with nothing under it is null. */
+export interface AdminAnalytics {
+  funnel: { step: string; label: string; owners: number; share: number | null }[]
+  take_acceptance: { voiced: number; added: number; rate: number | null }
+  cost_per_exported_minute: { cost_usd: number; minutes: number; per_minute: number | null }
+  vendor_quality: { vendor: string; takes: number; sim_o: number | null; sim_o_takes: number; utmos: number | null; utmos_takes: number; measured: boolean }[]
+  counts: { name: string; source: 'server' | 'client'; count: number; owners: number; last: string }[]
+  /** G8: thumbs and their reasons, when that store is here. */
+  feedback?: AdminFeedback
+}
+
+/** G8: thumbs up and down on takes and turns, for the admin page. */
+export interface AdminFeedback {
+  totals: { target: 'take' | 'turn'; up: number; down: number }[]
+  recent: { target: 'take' | 'turn'; video_id: string; target_id: string; vote: 'up' | 'down'; reason: string; owner: string; at: string }[]
+  errors?: { count: number; recent: { message: string; source: string; at: string; where: string }[] }
+}

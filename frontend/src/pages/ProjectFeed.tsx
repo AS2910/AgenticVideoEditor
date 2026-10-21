@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { track } from '../lib/analytics'
 import type { ProjectEvent } from '../types'
 import { getProjectEvents } from '../api'
 import { agoLabel } from '../lib/dates'
@@ -64,6 +65,7 @@ export function ProjectFeed({ projectId, nameOf, tick = 0, pollMs = FEED_POLL_MS
     try {
       const page = await getProjectEvents(projectId, nextRef.current, PAGE)
       loadedOlder.current = true
+      track('feed.older_loaded')
       nextRef.current = page.next
       setNext(page.next)
       setEvents((have) => [...(have ?? []), ...page.events.filter((e) => !(have ?? []).some((h) => h.id === e.id))])

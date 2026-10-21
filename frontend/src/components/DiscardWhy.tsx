@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { track } from '../lib/analytics'
 import { giveDecisionReason } from '../api'
 import { said } from '../pages/fmt'
 
@@ -19,6 +20,7 @@ export function DiscardWhy({ videoId, decisionId, line, reasons, onClose }: {
     setError(null)
     try {
       await giveDecisionReason(videoId, decisionId, reason)
+      track('proposal.discard_reason_given', { reason })
       setState('thanks')
     } catch (e) {
       setError(said(e, 'Could not send that.'))

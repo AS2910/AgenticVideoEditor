@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { track } from '../lib/analytics'
 import type { ReviewComment } from '../types'
 import { replyReviewComment, resolveReviewComment } from '../api'
 import { commentGoal } from './useReviewComments'
@@ -46,7 +47,7 @@ function CommentRow({ videoId, c, busy, onSeek, onAsk, onChanged }: {
         <div className="flex flex-wrap items-center gap-2">
           <button type="button" className="act" onClick={() => setReplying(true)}>Reply</button>
           <button type="button" className="act" disabled={working} onClick={() => void act(() => resolveReviewComment(videoId, c.comment_id, open), open ? 'Could not resolve it.' : 'Could not open it again.')}>{open ? 'Resolve' : 'Open again'}</button>
-          {open && <button type="button" className="btn volt sm" disabled={busy} onClick={() => onAsk(commentGoal(c))} title="Voltage takes this comment as a normal turn">Do what the client asked</button>}
+          {open && <button type="button" className="btn volt sm" disabled={busy} onClick={() => { track('review.turn_started'); onAsk(commentGoal(c)) }} title="Voltage takes this comment as a normal turn">Do what the client asked</button>}
         </div>
       )}
     </li>

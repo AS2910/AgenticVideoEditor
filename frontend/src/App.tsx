@@ -51,6 +51,7 @@ import { BinPage } from './pages/BinPage'
 import { TemplatesPage } from './pages/Templates'
 import { MembersPage } from './pages/MembersPage'
 import { InvitePage } from './pages/InvitePage'
+import { AdminPage } from './pages/AdminPage'
 import { NotificationsPage } from './pages/NotificationsPage'
 import { NotificationBell } from './components/NotificationBell'
 import { DiscardWhy } from './components/DiscardWhy'
@@ -1406,6 +1407,7 @@ function Studio() {
     if (route.page === 'bin') return <BinPage me={me} onRestored={() => void refreshProjects()} />
     if (route.page === 'members') return <MembersPage me={me} />
     if (route.page === 'notifications') return <NotificationsPage me={me} />
+    if (route.page === 'admin') return <AdminPage me={me} />
     if (route.page === 'invite') return <InvitePage token={route.token} />
     if (route.page === 'templates') return <TemplatesPage me={me} onMade={() => void refreshProjects()} />
     if (route.page === 'export') {

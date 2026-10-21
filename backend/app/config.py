@@ -120,6 +120,8 @@ class Settings:
     notify_owner_email: str | None = None
     # Step 0 (FLAGS): the owners every phase flag is on for by default.
     flag_owners: tuple[str, ...] = ("local",)
+    # G7: who sees the internal admin page (#admin): owners, comma-separated.
+    admin_owners: tuple[str, ...] = ("local",)
     # D3: run the purge (Bin items older than 30 days) once a day from the
     # server. Off by default: `python -m app.purge` by hand.
     purge_daily: bool = False
@@ -214,6 +216,7 @@ def load_settings() -> Settings:
         chaos_force=os.environ.get("AVE_CHAOS_FORCE", "").strip().lower() in _TRUTHY,
         user_budget_usd=_amount("AVE_USER_BUDGET_USD", DEFAULT_USER_BUDGET_USD),
         flag_owners=tuple(o.strip() for o in os.environ.get("AVE_FLAG_OWNERS", "local").split(",") if o.strip()),
+        admin_owners=tuple(o.strip() for o in os.environ.get("AVE_ADMIN_OWNERS", "local").split(",") if o.strip()),
         purge_daily=os.environ.get("AVE_PURGE_DAILY", "").strip().lower() in _TRUTHY,
     )
 

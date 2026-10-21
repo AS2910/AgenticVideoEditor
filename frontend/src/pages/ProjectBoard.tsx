@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { track } from '../lib/analytics'
 import type { DragEvent, KeyboardEvent } from 'react'
 import type { ProjectSummary, Stage } from '../types'
 import { moveStage } from '../api'
@@ -38,6 +39,7 @@ export function ProjectBoard({ videos, briefChips, syncChips, onMoved }: BoardPr
     try {
       await moveStage(v.video_id, to)
       setSaid(`Moved ${v.filename} to ${STAGE_LABEL[to]}.`)
+      track('board.card_moved', { from, to })
     } catch (e) {
       onMoved(v.video_id, from)
       setError(e instanceof Error ? `Could not move ${v.filename}. ${e.message}` : `Could not move ${v.filename}.`)

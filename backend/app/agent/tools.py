@@ -686,6 +686,11 @@ def _plan(wb: Workbench, turn: Turn) -> Plan:
     return plan
 
 
+def _owner_of(wb: Workbench, video_id: str) -> str | None:
+    record = wb.repo.get(video_id) if hasattr(wb.repo, "get") else None
+    return getattr(record, "owner", None)
+
+
 def _word_check(wb: Workbench, turn: Turn, text: str, candidate: Any, item: Any = None):
     """A3: the take's words (its transcript) against the project's word rules.
     Nothing to check for a standalone video or one whose project has none."""
@@ -981,6 +986,11 @@ def _synthesize_take(wb: Workbench, turn: Turn, args: dict) -> ToolResult:
         cost = max(0.0, wb.ledger.spent_usd(turn.project_id) - before)
         # A3: after the sound and fit checks, the take's own words against the project's words.
         words_check = _word_check(wb, turn, text, candidate, item)
+        if words_check.breaks or words_check.warnings:                  # G7
+            from app import analytics
+            analytics.track("take.word_rule_broken" if words_check.breaks else "take.word_rule_warned",
+                            getattr(turn, "owner", None) or _owner_of(wb, turn.project_id),
+                            {"video_id": turn.project_id, "candidate_id": candidate.candidate_id})
         finish = getattr(wb.repo, "finish_attempt", None)
         if finish:
             extra_changes = {"selection": used} if used != selection else {}

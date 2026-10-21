@@ -29,6 +29,7 @@ import threading
 from concurrent.futures import ThreadPoolExecutor
 from typing import Callable
 
+from app import analytics
 from app.jobs.activity import ActivityJobs
 from app.timefmt import now_iso
 
@@ -162,6 +163,8 @@ class ExportEngine:
         why = f"The render failed twice. {_reason(last) if last else ''}".strip()
         self._change(export_id, index, error=why)
         self.activity.fail(job_id, "render_failed", why)
+        analytics.track("export.file_failed", record.get("owner"), {"export_id": export_id, "video_id": item["video_id"],
+                                                                    "preset": item["preset"]["name"]})
         self._progress(export_id)
 
     def _video_done(self, export_id: str, video_id: str) -> None:

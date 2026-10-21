@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { track } from '../lib/analytics'
 import type { ShareLink } from '../types'
 import { createProjectReviewLink, createReviewLink, listProjectShares, listReviewLinks, revokeReviewLink, revokeShare } from '../api'
 import { formatDate } from '../lib/dates'
@@ -14,7 +15,7 @@ const DAYS = [7, 30, 90] as const
 const STATE_WORD: Record<ShareLink['state'], string> = { live: 'Live', revoked: 'Turned off', expired: 'Expired' }
 
 async function copyText(text: string): Promise<boolean> {
-  try { await navigator.clipboard.writeText(text); return true } catch { return false }
+  try { await navigator.clipboard.writeText(text); track('review.link_copied'); return true } catch { return false }
 }
 
 /** One review link: who it is for, its state, Copy link, Turn off. */

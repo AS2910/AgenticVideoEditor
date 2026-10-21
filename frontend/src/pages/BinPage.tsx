@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { track } from '../lib/analytics'
 import type { BinItem, BinKind, BinRestored } from '../types'
 import type { Me } from '../api'
 import { getBin, restoreFromBin } from '../api'
@@ -69,6 +70,7 @@ export function BinPage({ me, onRestored }: { me: Me | null; onRestored?: (kind:
       .catch((e) => { if (live) setError(said(e, 'The Bin could not be read.')) })
     return () => { live = false }
   }, [])
+  useEffect(() => { track('bin.opened') }, [])
   useEffect(() => load(), [load])
   useEffect(() => {
     if (!toast) return
@@ -87,6 +89,7 @@ export function BinPage({ me, onRestored }: { me: Me | null; onRestored?: (kind:
       const back = new Set([key, ...(done.videos ?? []).map((v) => `video:${v}`)])
       setItems((all) => (all ?? []).filter((i) => !back.has(keyOf(i))))
       setToast({ text: restoredSentence(item, done), href: openHref(item, done) })
+      track('bin.restored', { kind: item.kind })
       onRestored?.(item.kind, item.id)
     } catch (e) {
       setRowError({ key, text: said(e, `${item.name} could not be restored.`) })

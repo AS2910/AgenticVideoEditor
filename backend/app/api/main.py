@@ -62,6 +62,7 @@ from app.orchestrator.clones import CloneService, VoiceChoice
 from app.orchestrator.pipeline import run_edit
 from app.store.db import Database
 from app.flags import FlagStore
+from app import analytics
 from app.purge import PurgeScheduler
 from app.usage import (
     Ledger, SpendCeilingReached, WHISPER_USD_PER_MINUTE, claude_usd, current_actor, current_turn, money, month_name, month_start,
@@ -123,6 +124,8 @@ database = Database(settings.data_dir / "ave.db")
 repo = ProjectRepository(database)
 # Step 0 (FLAGS): every phase of the projects plan ships behind a flag, on per owner.
 flags = FlagStore(database, settings.flag_owners)
+# G7: every tracked step lands in this database's analytics_events.
+analytics.configure(database)
 # Every paid call is recorded here; it backs the voice budget and the
 # per-project spend ceiling (Phase 9b).
 ledger = Ledger(database, ceiling_usd=settings.project_budget_usd)
@@ -486,7 +489,21 @@ def _me(request: Request) -> dict:
 @app.get("/auth/me")
 def auth_me(request: Request) -> dict:
     """Whether sign-in is on, and who is signed in."""
+    if settings.auth_mode == "off":
+        _signed_in(LOCAL_OWNER)
     return _me(request)
+
+
+_funnel_started: set[str] = set()
+
+
+def _signed_in(owner: str) -> None:
+    """G7: the funnel's first steps, once per owner (the store dedupes; this set saves the look)."""
+    if owner in _funnel_started:
+        return
+    analytics.track("signed_up", owner)
+    analytics.track("first_sign_in", owner)
+    _funnel_started.add(owner)
 
 
 @app.get("/auth/login")
@@ -522,6 +539,7 @@ def auth_callback(request: Request, code: str | None = None, state: str | None =
     if not auth.allowed(who, settings.allowed_emails):
         raise HTTPException(status_code=403, detail="This Voltage is private; that account is not on its list.")
     email_mod.remember_address(database, who.owner, who.email)      # C2: where their review digest goes
+    _signed_in(who.owner)                                             # G7: the funnel's first steps
     try:                                                              # G1: a new owner's sample project
         from app.tutorial import sample
         sample.ensure(who.owner)
@@ -873,6 +891,8 @@ def _ingest_staged(staged: Path, filename: str, consent: bool, folder: Project |
                       minutes * WHISPER_USD_PER_MINUTE)
     if any(w.speaker for w in transcript.words):
         _record_diarization(project_id, source.duration)
+    analytics.track("video_uploaded", owner, {"video_id": project_id, "seconds": round(source.duration, 1),
+                                              "project_id": folder.project_id if folder else None})
     return _project_dict(repo.get(project_id))
 
 
@@ -947,6 +967,7 @@ def start_import(req: LinkImportRequest, owner: str = Depends(current_owner)) ->
                                   "project_id": folder.project_id if folder else None})
     with database.tx() as c:
         c.execute("UPDATE jobs SET workspace_id = ? WHERE job_id = ?", (personal(c, owner), job.job_id))
+        analytics.track_in(c, "import.started", owner, {"source": resolved.provider})
 
     def run() -> None:
         _run_import(job.job_id, resolved, folder, req.consent, owner)
@@ -979,13 +1000,17 @@ def _run_import(job_id: str, resolved, folder: Project | None, consent: bool, ow
             activity.update(job_id, step_label="Reading the video", progress=0.9)
             video = _ingest_staged(path, path.name, consent, folder, owner)
         activity.finish(job_id, step_label="Ready", detail={"video_id": video["video_id"], "filename": video["filename"]})
+        analytics.track("import.finished", owner, {"source": resolved.provider, "video_id": video["video_id"]})
     except linkimport.ImportRefused as exc:
         activity.fail(job_id, "import_failed", str(exc))
+        analytics.track("import.failed", owner, {"source": resolved.provider})
     except HTTPException as exc:
         activity.fail(job_id, "import_failed", str(exc.detail))
+        analytics.track("import.failed", owner, {"source": resolved.provider})
     except Exception as exc:  # noqa: BLE001 - an import that breaks says so; the server stays up
         log.exception("import %s failed", job_id)
         activity.fail(job_id, "import_failed", f"The import stopped: {str(exc)[:200] or type(exc).__name__}")
+        analytics.track("import.failed", owner, {"source": resolved.provider})
 
 
 @app.get("/imports")
@@ -2491,9 +2516,14 @@ def list_project_rules(project_id: str, kind: str | None = None, owner: str = De
 
 
 @app.post("/projects/{project_id}/rules", status_code=201)
-def add_project_rule(project_id: str, req: RuleRequest, owner: str = Depends(current_owner)) -> dict:
+def add_project_rule(project_id: str, req: RuleRequest, source: str | None = None,
+                     owner: str = Depends(current_owner)) -> dict:
+    """`source=transcript`: a word learned from the editor's transcript (A3), counted for G7."""
     _owned_project(project_id, owner)
-    return _rule_or_422(lambda: rules.add(database, project_id, req.kind or "", req.data, owner)).to_dict()
+    made = _rule_or_422(lambda: rules.add(database, project_id, req.kind or "", req.data, owner)).to_dict()
+    if source == "transcript":
+        analytics.track("words.learned_from_transcript", owner, {"project_id": project_id, "kind": req.kind})
+    return made
 
 
 @app.patch("/projects/{project_id}/rules/{rule_id}")
@@ -2543,6 +2573,7 @@ async def add_word_audio(project_id: str, rule_id: int, file: UploadFile = File(
         if seconds > MAX_WORD_CLIP_SECONDS:
             raise HTTPException(status_code=422, detail=f"That clip is {seconds:.0f} s. Keep it under {MAX_WORD_CLIP_SECONDS:.0f} s: just the word, said right.")
         clip = artifacts.put_file(_words_store(project_id), wav, kind="audio", container="wav", duration=seconds)
+    analytics.track("words.clip_added", owner, {"project_id": project_id, "seconds": round(seconds, 1)})
     return _rule_or_422(lambda: rules.update(database, project_id, rule_id, {**rule.data, "audio": clip.sha256}, owner)).to_dict()
 
 
@@ -4907,7 +4938,20 @@ def _generate(
     # Retained so approval commits this exact candidate rather than re-running
     # generation, which real vendors would not reproduce byte-for-byte.
     repo.save_candidate(project_id, candidate)
+    _take_voiced(record, candidate)
     return candidate
+
+
+def _take_voiced(record: ProjectRecord, candidate: EditCandidate) -> None:
+    """G7: one take voiced, with its vendor; SIM-o and UTMOS go along only when
+    they were measured from the media (never the mock engine's stand-ins)."""
+    report = candidate.continuity
+    props: dict = {"video_id": record.source.project_id, "vendor": voice_label, "candidate_id": candidate.candidate_id}
+    if report.voice_match is not None and "voice_match" in (report.measured or ()):
+        props["sim_o"] = round(float(report.voice_match), 4)
+    if report.naturalness is not None and "naturalness" in (report.measured or ()):
+        props["utmos"] = round(float(report.naturalness), 3)
+    analytics.track("take_voiced", record.owner, props)
 
 
 def _project_rules(video_id: str) -> list[dict]:
@@ -5269,7 +5313,15 @@ class ExportRequest(BaseModel):
 def export_project(project_id: str, req: ExportRequest | None = None, owner: str = Depends(current_owner)) -> dict:
     out = _export(_owned(project_id, owner), proposals=bool(req and req.with_proposals), request_id=req.request_id if req else None,
                   purpose=req.purpose if req else "preview")
+    if req and req.purpose == "export" and not req.with_proposals:
+        _exported(owner, project_id, float(out.get("render", {}).get("duration") or 0.0))
     return {**out, "request_id": req.request_id if req else None}
+
+
+def _exported(owner: str, video_id: str, seconds: float, preset: str | None = None) -> None:
+    """G7: a video exported (its minutes feed cost per exported minute) and, once, the funnel's first export."""
+    analytics.track("video_exported", owner, {"video_id": video_id, "seconds": round(seconds, 2), "preset": preset})
+    analytics.track("first_export", owner, {"video_id": video_id})
 
 
 @app.get("/videos/{project_id}/renders/latest")
@@ -6709,6 +6761,8 @@ def _start_turn(project_id: str, record: ProjectRecord, text: str, owner: str, a
     lines wait as proposals for the batch board."""
     if any(j.kind == "turn" and j.project_id == project_id and not j.done for j in jobs.all()):
         raise HTTPException(status_code=409, detail="Voltage is still on the last thing you said.")
+    if carry is None:
+        analytics.track("first_turn", owner, {"video_id": project_id, "batch": batch})
     prefs = _settings(project_id, owner)
     autonomy = prefs["autonomy"]
     plan = _turn_plan(project_id, text)
@@ -7288,6 +7342,8 @@ def open_share(token: str) -> dict:
     """No account: what a live link shares, each file with its name and size
     (a review link adds `review`: each video's versions, comments and answer)."""
     share, contents = _shared(token)
+    analytics.track("review.page_opened" if share.role == "reviewer" else "share.opened", share.owner,
+                    {"share_id": share.share_id, "scope": share.scope, "project_id": share.project_id})
     return {"scope": share.scope, "role": share.role, "name": share.name, "expires_at": share.expires_at,
             "title": contents["title"], "files": [_public_file(f) for f in contents["files"]],
             **{k: v for k, v in contents.items() if k not in ("title", "files") and not k.startswith("_")}}
@@ -7898,6 +7954,7 @@ def _deliver_one(record: dict, item: dict) -> dict:
         shutil.move(str(Path(tmp) / "out.mp4"), folder / name)
     render_log.info("export file video=%s preset=%s name=%s framing=%s lufs=%s", video_id, preset["name"], name,
                     report["framing"], report["loudness_lufs"])
+    _exported(record["owner"], video_id, float(report.get("duration") or 0.0), preset["name"])
     return {"name": name, "size": report["size"], "version": out["version"], "duration": report["duration"], "report": report}
 
 
@@ -8166,7 +8223,9 @@ def batch_export_zip(project_id: str, export_id: str, owner: str = Depends(curre
     """Every made file as one zip, built on demand while it downloads."""
     _batch_flag(owner)
     project = _owned_project(project_id, owner)
-    return _zip_response(_export_files(_export_or_404(project_id, export_id)), f"{project.name}-export")
+    files = _export_files(_export_or_404(project_id, export_id))
+    analytics.track("export.zip_downloaded", owner, {"project_id": project_id, "export_id": export_id, "files": len(files)})
+    return _zip_response(files, f"{project.name}-export")
 
 
 class ExportShareRequest(BaseModel):
@@ -8202,8 +8261,10 @@ SHARE_CONTENTS["export"] = _export_share
 @app.get("/share/{token}/zip")
 def shared_zip(token: str) -> StreamingResponse:
     """No account: every file a live link shares, as one zip."""
-    _, contents = _shared(token)
-    return _zip_response([f for f in contents["files"] if Path(f["path"]).exists()], contents["title"])
+    share, contents = _shared(token)
+    files = [f for f in contents["files"] if Path(f["path"]).exists()]
+    analytics.track("export.zip_downloaded", share.owner, {"share_id": share.share_id, "files": len(files)})
+    return _zip_response(files, contents["title"])
 
 
 # ── G4: notifications ────────────────────────────────────────────────────────
@@ -8334,7 +8395,7 @@ async def _roles(request: Request, call_next):
 
 def _mount_optional_routers() -> None:
     import importlib
-    for name in ("app.onboarding", "app.help", "app.tutorial", "app.workspace_api", "app.notify_api"):
+    for name in ("app.onboarding", "app.help", "app.tutorial", "app.workspace_api", "app.notify_api", "app.analytics_api"):
         try:
             module = importlib.import_module(name)
         except ImportError:

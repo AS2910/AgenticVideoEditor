@@ -26,6 +26,7 @@ export type Route =
   | { page: 'export'; projectId: string }
   | { page: 'members' }
   | { page: 'notifications' }
+  | { page: 'admin' }
   | { page: 'invite'; token: string }
 
 export function parseRoute(hash: string): Route {
@@ -47,6 +48,7 @@ export function parseRoute(hash: string): Route {
   if (invite) return { page: 'invite', token: invite[1] }
   if (h === 'members') return { page: 'members' }
   if (h === 'notifications') return { page: 'notifications' }
+  if (h === 'admin') return { page: 'admin' }
   const help = /^help(?:\/([A-Za-z0-9_-]+))?$/.exec(h)
   if (help) return { page: 'help', slug: help[1] ?? null }
   if (h === 'voices' || h === 'settings' || h === 'billing' || h === 'bin' || h === 'templates') return { page: h }

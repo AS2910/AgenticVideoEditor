@@ -12,6 +12,8 @@ from __future__ import annotations
 
 import json
 
+from app import analytics
+
 from app.tutorial import start as start_tutorial
 
 NAME = "Sample: bhaji-cam ad"
@@ -51,10 +53,12 @@ def ensure(owner: str) -> dict:
             return {"created": False, "project_id": found.get("project_id")}
         if repo.list_projects(owner, include_deleted=True) or repo.list(owner, include_deleted=True):
             repo.set_meta(key(owner), json.dumps({"project_id": None, "at": api._now(), "skipped": "had work"}))
+            analytics.track("sample.skipped", owner, {"why": "had work"})
             return {"created": False, "project_id": None}
         project = repo.create_project(owner, NAME, BRIEF)
         video = start_tutorial(owner)
         repo.set_folder(video["video_id"], project.project_id)
         repo.set_meta(key(owner), json.dumps({"project_id": project.project_id, "video_id": video["video_id"],
                                              "at": api._now()}))
+    analytics.track("sample.created", owner, {"project_id": project.project_id})
     return {"created": True, "project_id": project.project_id}

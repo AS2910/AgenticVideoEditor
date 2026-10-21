@@ -55,7 +55,26 @@ def record(c: sqlite3.Connection, verb: str, actor: Actor, *, video_id: str | No
         "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (workspace_id, project_id, video_id, actor.kind, actor.name, verb, target,
          json.dumps(payload or {}), now_iso()))
-    return int(c.execute("SELECT last_insert_rowid()").fetchone()[0])
+    event_id = int(c.execute("SELECT last_insert_rowid()").fetchone()[0])
+    _mirror(c, verb, actor, video_id, project_id, workspace_id, payload or {})
+    return event_id
+
+
+def _mirror(c: sqlite3.Connection, verb: str, actor: Actor, video_id: str | None, project_id: str | None,
+            workspace_id: str | None, payload: dict) -> None:
+    """G7: every verb is also an analytics event for the workspace's owner, in
+    the same transaction; an edit shipped is also a take added (the funnel)."""
+    from app import analytics
+    row = c.execute("SELECT owner FROM workspaces WHERE id = ?", (workspace_id or "",)).fetchone() if workspace_id else None
+    owner = row[0] if row else (actor.name if actor.kind == "user" else None)
+    if not owner:
+        return
+    props = {"video_id": video_id, "project_id": project_id, "actor": actor.kind,
+             **{k: v for k, v in payload.items() if isinstance(v, (int, float, bool)) or k in ("why", "role", "kind", "to", "stage")}}
+    analytics.safe_in(c, verb, owner, props, workspace_id=workspace_id)
+    if verb == "edit.shipped":
+        analytics.safe_in(c, "take_added", owner, {"video_id": video_id, "overridden": bool(payload.get("overridden"))},
+                          workspace_id=workspace_id)
 
 
 def _event(row) -> dict:

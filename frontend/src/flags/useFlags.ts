@@ -32,6 +32,11 @@ function load(): Promise<Set<string>> {
   return cached
 }
 
+/** Whether a flag is on, outside React (G7's track() asks before posting). */
+export async function flagOn(flag: Flag): Promise<boolean> {
+  return (await load()).has(flag)
+}
+
 /** Forget the cached list (tests, and after sign-in changes who you are). */
 export function resetFlags(): void {
   cached = null

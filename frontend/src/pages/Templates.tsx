@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { track } from '../lib/analytics'
 import type { ProjectTemplate } from '../types'
 import type { Me } from '../api'
 import { ApiError, createFolderFrom, deleteTemplate, listTemplates, renameTemplate, saveTemplate } from '../api'
@@ -18,6 +19,7 @@ export function SaveTemplateDialog({ projectId, projectName, onClose, onSaved }:
   projectId: string; projectName: string; onClose: () => void; onSaved?: (t: ProjectTemplate) => void
 }) {
   const [name, setName] = useState(`${projectName} template`)
+  useEffect(() => { track('template.dialog_opened') }, [])
   const [voices, setVoices] = useState<{ voice_id: string; name: string }[] | null>(null)
   const [voice, setVoice] = useState<VoiceChoice>('copy')
   const [busy, setBusy] = useState(false)
@@ -163,6 +165,7 @@ export function TemplatesPage({ me, onMade }: { me: Me | null; onMade?: () => vo
     listTemplates().then((t) => { if (live) setItems(t) }).catch((e) => { if (live) setError(said(e, 'The templates could not be read.')) })
     return () => { live = false }
   }, [])
+  useEffect(() => { track('templates.opened') }, [])
   useEffect(() => load(), [load])
 
   const act = async (t: ProjectTemplate, run: () => Promise<void>, fallback: string) => {

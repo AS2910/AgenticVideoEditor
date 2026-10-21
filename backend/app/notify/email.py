@@ -19,6 +19,7 @@ import re
 from dataclasses import dataclass
 from typing import Protocol
 
+from app import analytics
 from app.store.db import Database
 from app.timefmt import now_iso
 
@@ -42,6 +43,11 @@ class EmailSender(Protocol):
     def send(self, email: Email) -> None: ...
 
 
+# G7: what each email kind is called in analytics.
+SENT_EVENTS = {"digest": "notify.digest_sent", "version_ready": "notify.version_ready_sent",
+               "review_invite": "notify.review_invite_sent"}
+
+
 class OutboxEmail:
     """The fake provider: no email leaves the machine; each one is a row in `notify_outbox`."""
 
@@ -55,6 +61,9 @@ class OutboxEmail:
             c.execute("INSERT INTO notify_outbox (workspace_id, owner, to_addr, kind, subject, body, provider, created_at) "
                       "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                       (email.workspace_id, email.owner, email.to, email.kind, email.subject, email.body, self.name, now_iso()))
+            sent = SENT_EVENTS.get(email.kind)
+            if sent and email.owner:
+                analytics.safe_in(c, sent, email.owner, {"kind": email.kind}, workspace_id=email.workspace_id)
         log.info("email (outbox) kind=%s to=%s subject=%r", email.kind, email.to, email.subject)
 
 

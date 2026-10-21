@@ -30,6 +30,7 @@ import { TaggedWords } from './TaggedWords'
 import { addKeyOf, keyOf } from '../transcript/keys'
 import type { LineKey } from '../transcript/keys'
 import type { ActivityJob, RenderIncludes } from '../types'
+import { track } from '../lib/analytics'
 import { CHIP_LABEL, aboutEta, isActive, rowChip } from '../jobs/model'
 import type { ChipState, RowChip } from '../jobs/model'
 
@@ -218,6 +219,18 @@ const MIX_NOTE: Record<string, string | null> = {
   replace: null, layer: 'plays over the picture', over: 'plays over the picture', concatenate: 'the picture makes room while it plays', remove: null,
 }
 const voiceLabel = (v: Voice) => (v.category === 'mine' ? `${v.name} (yours)` : v.gender ? `${v.name} (${v.gender})` : v.name)
+
+/** A3: one warning per banned word the typed line uses; G7 counts each new one once. */
+function BannedWarnings({ words }: { words: string[] }) {
+  const seen = useRef(new Set<string>())
+  const key = words.join('|')
+  useEffect(() => {
+    for (const w of words) if (!seen.current.has(w)) { seen.current.add(w); track('line.banned_word_warned') }
+  }, [key]) // eslint-disable-line react-hooks/exhaustive-deps
+  return words.map((w) => (
+    <p key={w} className="m-0 flex flex-wrap items-baseline gap-x-2 gap-y-1 text-sm" role="status" data-testid="banned-warning"><span className="stamp need">Banned word</span><span>“{w}” is a banned word in this project. You can still voice it.</span></p>
+  ))
+}
 
 /** A3: the banned words a typed line uses (whole words, any case). */
 function bannedIn(text: string, banned: string[]): string[] {
@@ -659,9 +672,7 @@ export function LineDoc({
             ))}
           </div>
         )}
-        {bannedIn(draft, bannedWords).map((w) => (
-          <p key={w} className="m-0 flex flex-wrap items-baseline gap-x-2 gap-y-1 text-sm" role="status" data-testid="banned-warning"><span className="stamp need">Banned word</span><span>“{w}” is a banned word in this project. You can still voice it.</span></p>
-        ))}
+        <BannedWarnings words={bannedIn(draft, bannedWords)} />
         <ControlRow label="Delivery">
           <Chip on={delivery === null && ownWords === null} onClick={() => { setDelivery(null); setOwnWords(null) }}>As spoken</Chip>
           {DELIVERIES.map((d) => (

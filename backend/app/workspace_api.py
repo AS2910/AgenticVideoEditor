@@ -341,6 +341,7 @@ def email_sign_in(token: str | None = None) -> Response:
     provider, sub = known.split(":", 1) if known and ":" in known else ("email", address)
     who = api.auth.Identity(sub, address, None, None, provider)
     api.email_mod.remember_address(api.database, who.owner, address)
+    api._signed_in(who.owner)                                    # G7: the funnel's first steps
     try:
         from app.tutorial import sample
         sample.ensure(who.owner)

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { track } from '../lib/analytics'
 import type { InviteView } from '../types'
 import { ApiError, acceptInvite, openInvite } from '../api'
 import { hrefFor } from '../lib/route'
@@ -11,6 +12,7 @@ export function InvitePage({ token }: { token: string }) {
   const [error, setError] = useState<string | null>(null)
   const [joined, setJoined] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  useEffect(() => { track('invite.opened') }, [])
   useEffect(() => {
     let live = true
     openInvite(token).then((i) => { if (live) setInvite(i) }).catch((e) => { if (live) setError(e instanceof ApiError ? e.message : 'This invite could not be read.') })

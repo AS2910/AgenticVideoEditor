@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { track } from '../lib/analytics'
 import type { NotificationItem } from '../types'
 import { getNotificationCount, listNotifications, markNotificationsRead } from '../api'
 import { hrefFor } from '../lib/route'
@@ -54,6 +55,7 @@ export function NotificationBell({ dark = false }: { dark?: boolean }) {
     try { setUnread((await markNotificationsRead({ all: true })).unread) } catch { load() }
   }
   const openItem = (n: NotificationItem) => {
+    track('bell.item_opened', { kind: n.kind })
     if (!n.read) markNotificationsRead({ ids: [n.id] }).then((r) => setUnread(r.unread)).catch(() => { /* still opens */ })
     setOpen(false)
     if (n.link) window.location.hash = n.link.replace(/^#/, '')
@@ -61,7 +63,7 @@ export function NotificationBell({ dark = false }: { dark?: boolean }) {
   const label = unread > 0 ? `Notifications, ${unread} unread` : 'Notifications'
   return (
     <div className="relative" ref={box}>
-      <button ref={button} type="button" aria-label={label} aria-expanded={open} aria-haspopup="dialog" onClick={() => setOpen((v) => !v)}
+      <button ref={button} type="button" aria-label={label} aria-expanded={open} aria-haspopup="dialog" onClick={() => { if (!open) track('bell.opened', { unread }); setOpen((v) => !v) }}
         className={cn('relative grid size-[34px] place-items-center rounded-full border-[1.5px] pointer-coarse:size-11', dark ? 'border-pline text-ptext hover:bg-psunk' : 'border-foreground text-foreground hover:bg-sunk')}
         data-testid="bell">
         <BellGlyph />

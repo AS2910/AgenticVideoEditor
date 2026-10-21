@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { track } from '../lib/analytics'
 import type { DragEvent } from 'react'
 import type { ProjectDetailFolder, ProjectFolder, ProjectSummary, MyVoice, MadeVoice, SpendSummary } from '../types'
 import type { Me } from '../api'
@@ -238,7 +239,7 @@ export function ProjectPage({ me, projectId, onUpload, uploading, error, onDelet
       setDetail((d) => (d ? { ...d, files: d.files.filter((f) => f.sha256 !== sha) } : d))
     } catch (e) { say(e, 'Could not remove that file.') } finally { setBusy(null) }
   }
-  const chooseView = (v: VideosView) => { setView(v); keepView(me, v) }
+  const chooseView = (v: VideosView) => { setView(v); keepView(me, v); if (v === 'board') track('board.opened') }
   /** C1: a card changed stage on the board (or went back after a refusal). */
   const staged = (videoId: string, stage: Stage) => {
     setDetail((d) => (d ? { ...d, videos: d.videos.map((v) => (v.video_id === videoId ? { ...v, stage } : v)) } : d))

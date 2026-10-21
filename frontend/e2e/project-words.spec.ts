@@ -52,7 +52,7 @@ async function serve(page: Page, rules: Rule[], posts: { url: string; body: unkn
     if (url.includes('/events')) return route.fulfill({ status: 404, body: '' })
     if (url.includes('/frames/')) return route.fulfill({ status: 404, body: '' })
     if (url.endsWith('/projects/f1/rules') && method === 'GET') return json({ rules, rules_version: rules.length })
-    if (url.endsWith('/projects/f1/rules') && method === 'POST') {
+    if (new URL(url).pathname.endsWith('/projects/f1/rules') && method === 'POST') {        // Learn a word adds ?source=transcript (G7)
       const body = req.postDataJSON() as { kind: string; data: Record<string, string> }
       const made = rule(next++, body.kind, body.data)
       rules.push(made)
@@ -125,6 +125,7 @@ test('in the editor: a broken word rule is marked, a banned word is warned about
   await form.getByRole('button', { name: 'Add word' }).click()
   await expect(page.getByRole('status').filter({ hasText: 'Added “Bajicam” to Diwali 2026' })).toBeVisible()
   const added = posts.find((p) => p.url === '/api/projects/f1/rules')
+  expect(posts.some((p) => p.url === '/api/projects/f1/rules')).toBe(true)
   expect(added?.body).toEqual({ kind: 'pronounce', data: { term: 'Bajicam', say: 'BAH-jee cam', respell: 'Bah jee cam' } })
 
   // A typed line with a banned word: warned, never blocked.

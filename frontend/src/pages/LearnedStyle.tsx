@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { track } from '../lib/analytics'
 import type { LearnedItem, LearnedPage, ProjectFolder } from '../types'
 import { answerLearned, getLearned, removeLearned } from '../api'
 import { Tip } from '../guides/Tip'
@@ -51,6 +52,8 @@ export function LearnedStyle({ projectId, onProject, tick = 0 }: {
   }
 
   const pending = page?.pending ?? null
+  const pendingKey = pending ? String(pending.item_id) : ''
+  useEffect(() => { if (pendingKey) track('learned.card_opened') }, [pendingKey])
   const left = page ? page.every - (page.decisions % page.every) : null
   return (
     <div className="rise d1 flex flex-col gap-2.5 rounded-xl border-[1.5px] border-foreground bg-card p-[18px]" data-testid="learned" data-tour="learned">

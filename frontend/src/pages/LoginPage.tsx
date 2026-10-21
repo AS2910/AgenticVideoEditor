@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { track } from '../lib/analytics'
 import { ApiError, emailSignInAvailable, loginUrl, sendSignInLink } from '../api'
 import { Wordmark } from './Shell'
 
@@ -17,6 +18,7 @@ export function LoginPage({ error }: { error?: string | null }) {
   }, [])
   const send = async () => {
     setSending(true)
+    track('signin.email_requested')
     setMailError(null)
     try {
       const out = await sendSignInLink(email.trim())
