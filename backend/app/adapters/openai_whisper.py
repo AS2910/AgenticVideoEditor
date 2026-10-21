@@ -366,6 +366,15 @@ class WhisperTranscriptionAdapter:
                 return transcript
         return assign_speakers(transcript, turns)
 
+    def hear(self, source: Source) -> list[str]:
+        """9a: the words alone, in order, for checking a take against the
+        project's glossary. One call, no diarization, no silence screen (a
+        take is all speech)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            audio = self._audio(source, Path(tmp))
+            transcript = to_transcript(self._post(audio, self._api_key, self._timeout))
+        return [w.text for w in transcript.words]
+
     def diarize(self, source: Source) -> list[Turn]:
         """Speaker turns alone — for projects transcribed before Phase 11."""
         with tempfile.TemporaryDirectory() as tmp:

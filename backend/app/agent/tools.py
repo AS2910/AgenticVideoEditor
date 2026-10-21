@@ -93,6 +93,9 @@ class Workbench:
     # 2026-10-20 (one processing model): every line voiced is a Job the editor
     # can show; None in a setup without them (the agent tests).
     jobs: Any = None
+    # 9a: what the take was heard to say (Whisper on the take itself), for
+    # the A3 word check; None, or a call returning None, keeps the vendor's words.
+    hear_take: Callable[[str, Any], Sequence[str] | None] | None = None
 
 
 class NoJobs:
@@ -700,6 +703,12 @@ def _word_check(wb: Workbench, turn: Turn, text: str, candidate: Any, item: Any 
     if not found:
         return WordCheck()
     heard = [w.text for w in (getattr(candidate, "words", None) or ())]
+    if wb.hear_take is not None and any(r.get("kind") == "pronounce" for r in found):
+        # 9a: the vendor's alignment repeats the text it was sent; what the take
+        # was heard to say is what can catch a mispronounced term.
+        listened = wb.hear_take(turn.project_id, candidate)
+        if listened:
+            heard = list(listened)
     got = check_take(text, heard, found, typed=turn.said)
     # B2: in a language version, a brand term the master's line says must come through verbatim.
     language = (view or {}).get("language")

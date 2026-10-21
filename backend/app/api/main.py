@@ -7078,7 +7078,16 @@ def _workbench() -> Workbench:
         project=_project_view, suggest=_suggest_brief, help_search=lambda query: search_help_articles(query, limit=3),
         spend=lambda pid: _spend_summary(repo.get(pid).owner if repo.get(pid) else LOCAL_OWNER, video_id=pid),
         measured=lambda: getattr(voice, "last_measure", None), held_take=_held_take, jobs=line_jobs,
+        hear_take=_hear_take,
     )
+
+
+def _hear_take(video_id: str, candidate) -> list[str] | None:
+    """9a: Whisper on the take (behind projects.consistency), charged by the minute."""
+    from app.agent.take_hearing import hear_take
+    record = repo.get(video_id)
+    return hear_take(video_id, candidate, transcriber=transcriber, label=transcriber_label, ledger=ledger,
+                     enabled=lambda: flags.enabled("projects.consistency", record.owner if record else LOCAL_OWNER))
 
 
 class TurnRequest(BaseModel):

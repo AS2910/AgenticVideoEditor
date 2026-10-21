@@ -274,3 +274,18 @@ def test_speech_that_stands_out_from_the_floor_is_kept(tmp_path):
         w.writeframes((x * 32767).astype("<i2").tobytes())
     t = Transcript(words=(Word("Hi", 0.4, 2.0),), statements=(Statement("Hi", 0.4, 2.0),))
     assert without_silent_speech(t, path).statements == t.statements
+
+
+def test_hear_returns_a_takes_words_in_one_call_without_diarizing(tmp_path):
+    """9a: a take is heard with one transcription call; no diarization."""
+    if not ffmpeg.available():
+        pytest.skip("ffmpeg not installed")
+    audio, _ = ffmpeg.generate_silence(tmp_path / "take.wav", 1.0)
+    calls = []
+
+    def no_diarize(*a):
+        raise AssertionError("a take is never diarized")
+
+    adapter = WhisperTranscriptionAdapter("sk-test", post=lambda *a: calls.append(a) or FIXTURE, post_diarize=no_diarize)
+    words = adapter.hear(make_source(media=_artifact_for(audio)))
+    assert words[:2] == ["Get", "20"] and len(calls) == 1

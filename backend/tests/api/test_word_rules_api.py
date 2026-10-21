@@ -108,3 +108,93 @@ def test_a_banned_word_in_a_user_typed_line_warns_but_does_not_block(client, sam
     item = repo.latest_plan("p1").items[0]
     assert item.word_rule == {"breaks": [], "warnings": ["Uses “cheap”, a banned word in this project. Kept, because you typed it."]}
     assert len(repo.list_edits("p1")) == 1                                # voiced and added: a warning, never a block
+
+
+# ── 9a: the take is heard (Whisper on the take), not read from the vendor's alignment ──
+
+class _Ears:
+    """The mock transcriber, made to hear chosen words in a take."""
+
+    def __init__(self, *words):
+        from app.adapters.mock import MockTranscriptionAdapter
+        self.inner, self.words, self.calls = MockTranscriptionAdapter(), list(words), 0
+
+    def hear(self, source):
+        self.calls += 1
+        assert source.media.kind == "audio" and source.duration > 0
+        return list(self.words)
+
+    def __getattr__(self, name):
+        return getattr(self.inner, name)
+
+
+def _whisper_hears(monkeypatch, *words):
+    import app.api.main as main
+    ears = _Ears(*words)
+    monkeypatch.setattr(main, "transcriber", ears)
+    monkeypatch.setattr(main, "transcriber_label", "openai:whisper-1")
+    return ears
+
+
+def _voice_one_take(monkeypatch, main):
+    from tests.agent.conftest import reply, text
+    _agent_on(monkeypatch, main, [reply(take(text="Try Bhaji Cam today."), stop="tool_use"), reply(text("Voiced it."))])
+
+
+def test_a_mispronounced_term_is_caught_by_hearing_the_take_and_the_minutes_are_charged(client, sample_video, monkeypatch):
+    import app.api.main as main
+    project_with_words(client, sample_video)
+    heard(monkeypatch, "Try", "Bhaji", "Cam", "today.")            # the vendor's alignment repeats the text
+    ears = _whisper_hears(monkeypatch, "Try", "Badge", "Cam", "today.")
+    _voice_one_take(monkeypatch, main)
+    send(client, "make the line about Bhaji Cam")
+    item = repo.latest_plan("p1").items[0]
+    assert ears.calls == 1
+    assert item.word_rule and item.word_rule["breaks"][0].startswith("“Bhaji Cam” did not come out as written")
+    assert "badge" in item.word_rule["breaks"][0]
+    charged = [ln for ln in main.ledger.lines("p1") if ln.what == "take_check"]
+    assert len(charged) == 1 and charged[0].vendor == "openai" and charged[0].unit == "minutes" and charged[0].usd > 0
+
+
+def test_a_take_heard_saying_the_term_right_passes(client, sample_video, monkeypatch):
+    import app.api.main as main
+    project_with_words(client, sample_video)
+    heard(monkeypatch, "Try", "Bhaji", "Cam", "today.")
+    _whisper_hears(monkeypatch, "Try", "Bhajicam", "today.")
+    _voice_one_take(monkeypatch, main)
+    send(client, "make the line about Bhaji Cam")
+    assert repo.latest_plan("p1").items[0].word_rule is None
+
+
+def test_the_take_is_not_heard_with_the_flag_off_or_a_mock_transcriber(client, sample_video, monkeypatch):
+    import app.api.main as main
+    project_with_words(client, sample_video)
+    heard(monkeypatch, "Try", "Bhaji", "Cam", "today.")
+    ears = _whisper_hears(monkeypatch, "Try", "Badge", "Cam", "today.")
+    flags.set("projects.consistency", "local", False)
+    _voice_one_take(monkeypatch, main)
+    send(client, "make the line about Bhaji Cam")
+    assert ears.calls == 0 and repo.latest_plan("p1").items[0].word_rule is None
+    assert not [ln for ln in main.ledger.lines("p1") if ln.what == "take_check"]
+
+
+def test_hear_take_needs_a_real_transcriber_and_survives_a_failure():
+    from types import SimpleNamespace
+    from app.adapters.mock import MockTranscriptionAdapter
+    from app.agent.take_hearing import hear_take
+    charges = []
+    ledger = SimpleNamespace(record=lambda *a: charges.append(a))
+    audio = SimpleNamespace(kind="audio", path="/x.wav", duration=3.0, sha256="0")
+    candidate = SimpleNamespace(candidate_id="c1", audio=audio)
+    mock = MockTranscriptionAdapter()
+    assert hear_take("p1", candidate, transcriber=mock, label="mock", ledger=ledger, enabled=lambda: True) is None
+    assert hear_take("p1", candidate, transcriber=mock, label="dry-run", ledger=ledger, enabled=lambda: True) is None
+    got = hear_take("p1", candidate, transcriber=mock, label="openai:whisper-1", ledger=ledger, enabled=lambda: True)
+    assert got == [w.text for w in mock.transcribe(None).words] and got[0] == "Get"
+    assert charges == [("p1", "openai", "take_check", 0.05, "minutes", 0.05 * 0.006)]
+
+    class Broken:
+        def hear(self, source):
+            raise RuntimeError("vendor down")
+    assert hear_take("p1", candidate, transcriber=Broken(), label="openai:whisper-1", ledger=ledger, enabled=lambda: True) is None
+    assert len(charges) == 1

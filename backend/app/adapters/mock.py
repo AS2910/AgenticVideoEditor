@@ -47,6 +47,10 @@ class MockTranscriptionAdapter:
         """One speaker throughout — enough to exercise speaker features offline."""
         return [("A", 0.0, source.duration)]
 
+    def hear(self, source: Source) -> list[str]:
+        """9a: the words a take was heard to say (the canned words offline)."""
+        return [w.text for w in self.transcribe(source).words]
+
     def transcribe(self, source: Source) -> Transcript:
         return Transcript(
             words=_CANNED_WORDS, statements=(Statement("Get 20% off today only.", 0.0, 2.3),),
