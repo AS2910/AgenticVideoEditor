@@ -131,6 +131,11 @@ class Settings:
     seller_name: str = "Voltage (seller details not set)"
     seller_gstin: str = ""
     seller_state: str = "29"
+    # G6: where abuse reports are emailed (the fake email provider until one is
+    # set up), and how long a kept consent record outlives its voice or video
+    # (D3 left it unset; 7 years until legal confirms: DECISIONS.md).
+    trust_email: str = "trust@voltage.invalid"
+    consent_retention_years: float = 7.0
     # D3: run the purge (Bin items older than 30 days) once a day from the
     # server. Off by default: `python -m app.purge` by hand.
     purge_daily: bool = False
@@ -229,6 +234,8 @@ def load_settings() -> Settings:
         seller_name=os.environ.get("AVE_SELLER_NAME") or "Voltage (seller details not set)",
         seller_gstin=(os.environ.get("AVE_SELLER_GSTIN") or "").strip().upper(),
         seller_state=(os.environ.get("AVE_SELLER_STATE") or "29").strip(),
+        trust_email=os.environ.get("AVE_TRUST_EMAIL") or "trust@voltage.invalid",
+        consent_retention_years=_amount("AVE_CONSENT_RETENTION_YEARS", 7.0),
         admin_owners=tuple(o.strip() for o in os.environ.get("AVE_ADMIN_OWNERS", "local").split(",") if o.strip()),
         purge_daily=os.environ.get("AVE_PURGE_DAILY", "").strip().lower() in _TRUTHY,
     )

@@ -45,6 +45,7 @@ class PurgeReport:
     vendor_voices: list[str] = field(default_factory=list)   # deleted at the vendor (or would be)
     vendor_failed: list[str] = field(default_factory=list)   # still at the vendor: remove by hand
     consent_kept: list[str] = field(default_factory=list)    # "<kind>:<id>" whose consent record stays
+    consent_expired: list[str] = field(default_factory=list)  # G6: "<kind>:<id>" past the retention period
 
     def to_dict(self) -> dict:
         return dict(self.__dict__)
@@ -78,8 +79,23 @@ def _held_voice_ids(c, voices: set[tuple[str, str]], projects: set[str], videos:
     return held
 
 
+# G6: how long a kept consent record outlives its purged voice or video (D3
+# left it unset): 7 years until legal confirms it (AVE_CONSENT_RETENTION_YEARS).
+CONSENT_RETENTION_YEARS = 7.0
+
+
+def expire_consent(c, years: float, now: datetime | None = None, dry_run: bool = False) -> list[str]:
+    """Clear the consent records kept longer than `years` after their purge."""
+    cutoff = _cutoff(years * 365.25, now)
+    rows = c.execute("SELECT kind, item_id FROM purged_items WHERE consent IS NOT NULL AND purged_at < ?", (cutoff,)).fetchall()
+    if not dry_run and rows:
+        c.execute("UPDATE purged_items SET consent = NULL WHERE consent IS NOT NULL AND purged_at < ?", (cutoff,))
+    return [f"{r['kind']}:{r['item_id']}" for r in rows]
+
+
 def purge(db: Database, artifacts_root: str | Path, older_than_days: float = 30, *, dry_run: bool = False,
-          delete_voice: Callable[[str], None] | None = None, now: datetime | None = None) -> PurgeReport:
+          delete_voice: Callable[[str], None] | None = None, now: datetime | None = None,
+          consent_years: float | None = None) -> PurgeReport:
     root = Path(artifacts_root)
     cutoff = _cutoff(older_than_days, now)
     report = PurgeReport(dry_run=dry_run, cutoff=cutoff)
@@ -194,6 +210,9 @@ def purge(db: Database, artifacts_root: str | Path, older_than_days: float = 30,
             log.warning("purge: voice %s is still at the vendor: %s", voice_id, exc)
             report.vendor_failed.append(voice_id)
     report.vendor_voices = done
+    with db.tx() as c:
+        report.consent_expired = expire_consent(c, CONSENT_RETENTION_YEARS if consent_years is None else consent_years,
+                                                now, dry_run)
     return report
 
 
@@ -254,7 +273,8 @@ def main(argv: list[str] | None = None) -> int:
     data_dir = Path(args.data_dir) if args.data_dir else settings.data_dir
     db = Database(args.db or data_dir / "ave.db")
     delete_voice = None if args.dry_run else _vendor_delete(settings, db, data_dir)
-    report = purge(db, data_dir / "artifacts", args.days, dry_run=args.dry_run, delete_voice=delete_voice)
+    report = purge(db, data_dir / "artifacts", args.days, dry_run=args.dry_run, delete_voice=delete_voice,
+                   consent_years=settings.consent_retention_years)
     print(json.dumps(report.to_dict(), indent=2))
     return 0
 

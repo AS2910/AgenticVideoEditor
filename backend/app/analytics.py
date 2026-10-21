@@ -55,6 +55,7 @@ F7_VERBS = frozenset({
     "template.saved", "template.renamed", "template.deleted", "project.from_template",
     "learned.suggested", "learned.accepted", "learned.dismissed", "learned.removed",
     "member.invited", "member.joined", "member.changed", "member.removed",
+    "consent.withdrawn",
 })
 SERVER_NAMES = F7_VERBS | frozenset({
     # The funnel and its measures.
@@ -69,6 +70,9 @@ SERVER_NAMES = F7_VERBS | frozenset({
     "feedback.given",
     # G3: billing (fake providers): a plan bought, a top-up, paid work paused for credits.
     "billing.plan_changed", "billing.topped_up", "billing.credits_out",
+    # G6: trust and safety.
+    "consent.liveness_checked", "consent.withdrawn", "clone.public_figure_refused", "abuse.reported",
+    "data.export_requested", "data.export_ready", "data.deletion_requested", "export.provenance_stamped",
 })
 # What the browser may post (and nothing else).
 CLIENT_NAMES = frozenset({
@@ -81,7 +85,7 @@ CLIENT_NAMES = frozenset({
     "proposal.discard_reason_given", "learned.card_opened",
     "import.link_pasted", "members.opened", "invite.opened", "signin.email_requested",
     "bell.opened", "bell.item_opened",
-    "admin.opened", "billing.opened",
+    "admin.opened", "billing.opened", "legal.opened",
 })
 NAMES = SERVER_NAMES | CLIENT_NAMES
 MAX_PROPS = 2000                # bytes of JSON kept per event

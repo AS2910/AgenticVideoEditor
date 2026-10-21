@@ -423,8 +423,8 @@ export const getMessages = (id: string, after = 0) => get<ChatMessage[]>(`/video
 
 /** Confirms the rights for a project uploaded without them — asked once, the
  *  first time a voice is about to be made (UX-3). */
-export const grantConsent = (id: string) =>
-  post<{ video_id: string; consent_granted_at: string | null }>(`/videos/${id}/consent`)
+export const grantConsent = (id: string, livenessId?: string | null) =>
+  post<{ video_id: string; consent_granted_at: string | null }>(`/videos/${id}/consent`, livenessId ? { liveness_id: livenessId } : undefined)
 
 /** A variant: the same clip as a new project, with the plan as a draft. */
 export const createVariant = (id: string) => post<Project>(`/videos/${id}/variants`)
@@ -618,3 +618,20 @@ export const putBillingDetails = (d: { country: string | null; legal_name: strin
 export const changePlan = (plan: string) => post<BillingView>('/billing/plan', { plan })
 export const topUp = (credits: number) => post<BillingView>('/billing/topup', { credits })
 export const invoiceUrl = (id: number) => `/api/billing/invoices/${id}`
+
+/** G6: trust and safety (fake providers, test mode). */
+export const startLiveness = (videoId: string, speaker?: string | null) => post<{ attempt_id: string; sentence: string; test_mode: boolean }>(`/videos/${videoId}/liveness`, { speaker: speaker ?? null })
+export async function sendLiveness(videoId: string, attemptId: string, audio: Blob, name = 'liveness.webm'): Promise<{ attempt_id: string; status: 'passed' | 'failed'; reason: string; test_mode: boolean }> {
+  const body = new FormData()
+  body.append('file', audio, name)
+  const res = await fetch(`${BASE}/videos/${videoId}/liveness/${attemptId}`, { method: 'POST', headers: FROM_VOLTAGE, body })
+  if (!res.ok) return failure(res)
+  return res.json()
+}
+export const withdrawConsent = (videoId: string) => post<{ withdrawn: boolean; deleted: number; failed: string[]; said: string }>(`/videos/${videoId}/consent/withdraw`)
+export const abuseFormOpen = async () => (await get<{ open: boolean }>('/abuse-reports/open')).open
+export const reportAbuse = (r: { location: string; kind: string; details: string; contact: string }) => post<{ report_id: number; said: string }>('/abuse-reports', r)
+export interface DataRequest { id: number; kind: 'export' | 'deletion'; status: string; job_id: string | null; created_at: string; done_at: string | null; job: ActivityJob | null }
+export const startDataExport = () => post<{ request: DataRequest }>('/me/data-export')
+export const listDataRequests = () => get<{ requests: DataRequest[] }>('/me/data-export')
+export const dataExportUrl = (jobId: string) => `${BASE}/me/data-export/${jobId}/download`

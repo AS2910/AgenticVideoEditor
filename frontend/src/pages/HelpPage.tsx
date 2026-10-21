@@ -8,6 +8,8 @@ import { KeyboardSheet } from '../components/KeyboardSheet'
 import { Markdown } from '../components/Markdown'
 import { Bolt, Shell } from './Shell'
 import { said } from './fmt'
+import { AbuseReport } from '../components/AbuseReport'
+import { LegalLinks } from './LegalPage'
 
 export interface HelpPageProps {
   me: Me | null
@@ -125,6 +127,8 @@ export function HelpPage({ me, articles: given, initialSlug = null, onReplay, on
         <button type="button" className="btn ghost" onClick={() => setKeys(true)}>Keyboard shortcuts</button>
       </section>
       <KeyboardSheet open={keys} onClose={() => setKeys(false)} />
+      {/* G6: report misuse (shown where reports are taken), and the policies. */}
+      <div className="flex flex-col gap-3" data-testid="help-trust"><AbuseReport compact /><LegalLinks /></div>
 
       {open && <Reader article={open} onClose={() => show(null)} onAsk={onAsk} onShowMe={onShowMe} />}
     </Shell>

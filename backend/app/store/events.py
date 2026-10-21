@@ -33,7 +33,9 @@ VERBS = ("brief.saved", "rule.added", "rule.changed", "rule.removed", "stage.mov
          # D1: templates saved, renamed, deleted, and a project made from one.
          "template.saved", "template.renamed", "template.deleted", "project.from_template",
          # D2: what a learned-style pass suggested, and what the user did with it.
-         "learned.suggested", "learned.accepted", "learned.dismissed", "learned.removed")
+         "learned.suggested", "learned.accepted", "learned.dismissed", "learned.removed",
+         # G6: consent withdrawn now (the clone deleted at the voice service at once).
+         "consent.withdrawn")
 MAX_PAGE = 200
 
 

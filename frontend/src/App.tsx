@@ -52,6 +52,8 @@ import { TemplatesPage } from './pages/Templates'
 import { MembersPage } from './pages/MembersPage'
 import { InvitePage } from './pages/InvitePage'
 import { AdminPage } from './pages/AdminPage'
+import { LegalPage } from './pages/LegalPage'
+import { WithdrawConsent } from './components/WithdrawConsent'
 import { FeedbackProvider } from './components/Thumbs'
 import { NotificationsPage } from './pages/NotificationsPage'
 import { NotificationBell } from './components/NotificationBell'
@@ -186,6 +188,8 @@ function Studio() {
   // D4: an archived project's videos are read-only; the header says so.
   const reuseOn = useFlags().enabled('projects.reuse')
   const feedbackOn = useFlags().enabled('golive.g8')
+  const safetyOn = useFlags().enabled('golive.g6')
+  const [withdrew, setWithdrew] = useState(false)       // G6: keep the sentence on screen after a withdrawal
   // D2: the optional "why?" after a discard.
   const [discardWhy, setDiscardWhy] = useState<{ decisionId: number; line: string } | null>(null)
   const [stageAsk, setStageAsk] = useState<{ message: string; run: () => void } | null>(null)
@@ -488,11 +492,11 @@ function Studio() {
     else setConsentAsk({ who, go })
   }
 
-  const confirmConsent = async () => {
+  const confirmConsent = async (livenessId: string | null = null) => {
     if (!projectId || !consentAsk) return
     setConsenting(true)
     try {
-      const r = await grantConsent(projectId)
+      const r = await grantConsent(projectId, livenessId)
       consentGiven.current = true
       setProject((p) => (p ? { ...p, consent_granted_at: r.consent_granted_at } : p))
       const { go } = consentAsk
@@ -1359,6 +1363,7 @@ function Studio() {
         </div>
       )
     }
+    if (route.page === 'legal') return <LegalPage doc={route.doc} />     // G6: readable without an account
     if (route.page === 'invite' && me.mode === 'google' && (!me.user || signedOut)) {
       // G2: sign in first, then come back to the invite.
       try { sessionStorage.setItem('voltage-invite', route.token) } catch { /* the link can be opened again */ }
@@ -1824,6 +1829,9 @@ function Studio() {
                   <button type="button" className="btn sm" onClick={() => setReviewOpen(true)} aria-haspopup="dialog" data-testid="send-review-open">Send for review</button>
                 </div>
               )}
+              {safetyOn && (project.consent_granted_at || withdrew) && (
+                <WithdrawConsent videoId={project.video_id} onWithdrawn={() => { consentGiven.current = false; setWithdrew(true); setProject((p) => (p ? { ...p, consent_granted_at: null } : p)) }} />
+              )}
               {reviewOn && (
                 <ReviewComments videoId={project.video_id} comments={review.comments} error={review.error} busy={turnBusy}
                   onReload={review.reload} onChanged={review.replace}
@@ -1920,7 +1928,7 @@ function Studio() {
           </aside>
         </div>
         {consentAsk && (
-          <ConsentSheet who={consentAsk.who} busy={consenting} onConfirm={() => void confirmConsent()} onCancel={() => setConsentAsk(null)} />
+          <ConsentSheet who={consentAsk.who} busy={consenting} livenessVideoId={safetyOn ? project.video_id : null} onConfirm={(id) => void confirmConsent(id)} onCancel={() => setConsentAsk(null)} />
         )}
         {firstTip && <Tip key={firstTip.id} id={firstTip.id} target={firstTip.target} />}
         <KeyboardSheet open={keysOpen} onClose={() => setKeysOpen(false)} />

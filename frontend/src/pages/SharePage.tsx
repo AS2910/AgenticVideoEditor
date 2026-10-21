@@ -6,6 +6,8 @@ import { clock } from '../transcript/format'
 import { said } from './fmt'
 import { Wordmark } from './Shell'
 import { fileSize } from '../lib/exports'
+import { AbuseReport } from '../components/AbuseReport'
+import { LegalLinks } from './LegalPage'
 import { ReviewPage } from '../review/ReviewPage'
 
 /** F6/B3: what a share link opens, with no account: every file with a
@@ -67,6 +69,8 @@ export function SharePage({ token }: { token: string }) {
             {share.files.length > 1 && <a className="btn volt self-start" href={sharedZipUrl(token)} download>Download all (.zip)</a>}
           </>
         )}
+        {/* G6: anyone with the link can report misuse; the policies. */}
+        <div className="mt-6 flex flex-col gap-3 border-t border-line pt-4" data-testid="share-trust"><AbuseReport compact location={typeof window !== 'undefined' ? window.location.href : ''} /><LegalLinks /></div>
       </main>
     </div>
   )

@@ -10,6 +10,9 @@ import { cn } from '@/lib/utils'
 import { Shell, SideNav } from './Shell'
 import type { SideSection } from './Shell'
 import { initialOf, said, usd } from './fmt'
+import { useFlags } from '../flags/useFlags'
+import { YourData } from './YourData'
+import { LegalLinks } from './LegalPage'
 
 interface SettingsPageProps { me: Me | null; onSignedOut: () => void }
 
@@ -47,6 +50,7 @@ const Row = ({ title, desc, children, tone }: { title: string; desc: string; chi
 
 /** Your defaults for new projects, the look, and the account. Every change saves at once. */
 export function SettingsPage({ me, onSignedOut }: SettingsPageProps) {
+  const safetyOn = useFlags().enabled('golive.g6')   // G6: your data, the policies
   const [settings, setSettings] = useState<UserSettings | null>(null)
   const [projectCap, setProjectCap] = useState<number | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -200,6 +204,12 @@ export function SettingsPage({ me, onSignedOut }: SettingsPageProps) {
             <div className="flex flex-[1_1_200px] flex-col"><span className="text-base font-semibold">{displayName}</span><span className="tnum text-[13px] text-muted-foreground">{signedWith}</span></div>
             {me?.mode === 'google' && who && <button type="button" className="btn sm" onClick={() => void signOut()} disabled={busy !== null}>{busy === 'out' ? 'Signing out…' : 'Sign out'}</button>}
           </div>
+          {safetyOn && (
+            <div className="flex flex-col gap-2 border-t border-line pt-4" aria-labelledby="data-h">
+              <h3 id="data-h" className="m-0 text-sm font-semibold">Your data</h3>
+              <YourData onDelete={() => { setConfirmDelete(true); document.getElementById('account')?.scrollIntoView({ block: 'end' }) }} />
+            </div>
+          )}
           <Row title="Delete everything" desc="Every project, take and voice, and the consent records with them. This can't be undone." tone="danger">
             {!confirmDelete && <button type="button" className="btn sm border-destructive text-destructive" onClick={() => setConfirmDelete(true)}>Delete…</button>}
           </Row>
@@ -214,6 +224,7 @@ export function SettingsPage({ me, onSignedOut }: SettingsPageProps) {
               {accountError && <p className="m-0 text-sm text-destructive" role="alert">{accountError}</p>}
             </div>
           )}
+          {safetyOn && <LegalLinks className="pt-2" />}
         </section>
       </div>
     </Shell>

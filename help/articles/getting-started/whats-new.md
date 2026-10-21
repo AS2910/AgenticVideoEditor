@@ -16,3 +16,5 @@ What is new in Voltage this week, in short.
 **Go-live basics.** A sample project to try first, and import from a Google Drive or Dropbox link. Invite people as Editors or Reviewers with their own spend limit. The bell tells you when long work finishes or fails, about review news and spend alerts. Thumbs up or down on any take or reply, with a reason if you like, so we can make Voltage better.
 
 **Billing in test mode.** Plans with monthly credits, top-ups and 5 free credits to start, shown as about how many minutes they buy once that is known. Invoices carry GST for India. No card is asked for and no money moves yet.
+
+**Trust and safety.** A speaker reads a sentence aloud before their voice is cloned, and Withdraw consent now deletes the clone at once. Public figures' voices are refused. Every export carries an invisible mark and a provenance record. Report misuse from any shared link or Help. Download all your data from Settings. Terms, Privacy and Acceptable use are drafts until legal review.

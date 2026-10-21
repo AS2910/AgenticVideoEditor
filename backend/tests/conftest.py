@@ -115,3 +115,20 @@ def sample_audio_only(tmp_path_factory):
     path = tmp_path_factory.mktemp("media") / "audio-only.wav"
     ffmpeg.generate_silence(path, 1.0)
     return path
+
+
+@pytest.fixture(autouse=True)
+def _g6_off_unless_asked(monkeypatch):
+    """G6 (trust and safety) is on for `local` by default, like every go-live
+    flag; the suites written before it run with its gates off by default
+    (consent without a read-aloud sentence, exports without a mark), so they
+    keep testing what they were written for. A G6 test turns it on with
+    `flags.set("golive.g6", "local", True)` (a row always wins)."""
+    import sys
+    main = sys.modules.get("app.api.main")
+    if main is None:
+        yield
+        return
+    original = main.flags._default
+    monkeypatch.setattr(main.flags, "_default", lambda flag, owner: False if flag == "golive.g6" else original(flag, owner))
+    yield

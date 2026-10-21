@@ -167,6 +167,13 @@ class ProjectRepository:
             return None
         return Consent(row["consent_at"])
 
+    def withdraw_consent(self, project_id: str) -> str | None:
+        """G6: consent withdrawn now; returns when it had been granted (None if it was not)."""
+        with self.db.tx() as c:
+            row = c.execute("SELECT consent_at FROM videos WHERE id = ?", (project_id,)).fetchone()
+            c.execute("UPDATE videos SET consent_at = NULL WHERE id = ?", (project_id,))
+        return row["consent_at"] if row else None
+
     def get(self, project_id: str, include_deleted: bool = False) -> ProjectRecord | None:
         """The video; a deleted one (F8, in the Bin) only with `include_deleted`."""
         with self.db.tx() as c:

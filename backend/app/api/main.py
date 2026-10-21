@@ -62,7 +62,8 @@ from app.orchestrator.clones import CloneService, VoiceChoice
 from app.orchestrator.pipeline import run_edit
 from app.store.db import Database
 from app.flags import FlagStore
-from app import analytics, errors_report
+from app import analytics, dataexport, errors_report
+from app.safety import figures as figures_mod, liveness as liveness_mod, provenance as provenance_mod
 from app.purge import PurgeScheduler
 from app.usage import (
     Ledger, SpendCeilingReached, WHISPER_USD_PER_MINUTE, claude_usd, current_actor, current_turn, money, month_name, month_start,
@@ -128,6 +129,18 @@ flags = FlagStore(database, settings.flag_owners)
 analytics.configure(database)
 # G8: the error-reporting hook (log provider; SENTRY_DSN is read but not connected).
 error_reporter = errors_report.reporter_for(settings.sentry_dsn, database)
+# G6: trust and safety behind interfaces, all fake (SETUP_NEEDED.md): liveness
+# for consent, the public-figure check on the clone path, and an invisible
+# watermark and a C2PA-style manifest on every export.
+def _recording_seconds(path: Path) -> float:
+    """How long a recording is, decoded (a browser's WebM often has no duration in its header)."""
+    with tempfile.TemporaryDirectory() as tmp:
+        return ffmpeg.extract_audio(path, Path(tmp) / "a.wav", sample_rate=16000)[1]
+
+
+liveness = liveness_mod.FakeLiveness(_recording_seconds)
+public_figures = figures_mod.ListCheck()
+watermarker = provenance_mod.FakeWatermarker()
 # Every paid call is recorded here; it backs the voice budget and the
 # per-project spend ceiling (Phase 9b).
 ledger = Ledger(database, ceiling_usd=settings.project_budget_usd)
@@ -1143,6 +1156,7 @@ def _voice_name_or_422(name: str) -> str:
 
 
 def _no_voice_called(owner: str, label: str) -> None:
+    _refuse_public_figure(owner, label)                  # G6: not a known public figure's name
     if any(v["name"].lower() == label.lower() for v in _my_voices(owner)):
         raise HTTPException(status_code=409, detail=f"You already have a voice called {label}.")
 
@@ -2255,6 +2269,11 @@ def delete_account(owner: str = Depends(current_owner)) -> Response:
         templates_store.purge_owner_in(c, owner)   # D1: their templates
     repo.delete(_user_store(owner))   # the designs' spend, kept under the owner's own id
     shutil.rmtree(artifacts.root / _user_store(owner), ignore_errors=True)
+    if flags.enabled("golive.g6", owner):               # G6: the deletion request, kept as a record
+        with database.tx() as c:
+            c.execute("INSERT INTO data_requests (owner, kind, status, created_at, done_at) VALUES (?, 'deletion', 'done', ?, ?)",
+                      (owner, _now(), _now()))
+            analytics.track_in(c, "data.deletion_requested", owner, {})
     return Response(status_code=204)
 
 
@@ -4842,14 +4861,24 @@ def _make_variant(project_id: str, record: ProjectRecord, owner: str, copy_plan:
     return new_id
 
 
+class ConsentRequest(BaseModel):
+    liveness_id: str | None = None      # G6: the passed read-aloud attempt
+
+
 @app.post("/videos/{project_id}/consent")
 @app.post("/projects/{project_id}/consent", deprecated=True)
-def grant_consent(project_id: str, owner: str = Depends(current_owner)) -> dict:
+def grant_consent(project_id: str, req: ConsentRequest | None = None, owner: str = Depends(current_owner)) -> dict:
     """Confirm rights for a project uploaded without them.
 
-    Lets a refused generation be recovered without re-uploading.
+    Lets a refused generation be recovered without re-uploading. G6: with
+    `golive.g6` on, the speaker first reads a sentence aloud (liveness); the
+    consent names that passed attempt.
     """
     _owned(project_id, owner)
+    if flags.enabled("golive.g6", owner):
+        from app.safety_api import passed_attempt
+        if not passed_attempt(project_id, req.liveness_id if req else None):
+            raise HTTPException(status_code=422, detail="Read the sentence aloud first, so we know the speaker is here and agrees.")
     recorded = repo.grant_consent(project_id, Consent(granted_at=_now()))
     return {"video_id": project_id, "consent_granted_at": recorded.granted_at if recorded else None}
 
@@ -4901,7 +4930,20 @@ def _voice_for(project_id: str, record: ProjectRecord, selection: Selection, req
     else the voice asked for, with the reason it is not their own. `speaker`
     names who says it when that is not the selection's speaker (an added line)."""
     speaker = speaker or speaker_of(record.transcript, selection)
+    if speaker and flags.enabled("golive.g6", record.owner):
+        name = next((s["name"] for s in _speakers(project_id) if s["label"] == speaker and s["name"]), None)
+        figure = public_figures.match(name or "") if name else None
+        if figure and not any(s["label"] == speaker and s["voice_id"] for s in _speakers(project_id)):
+            analytics.track("clone.public_figure_refused", record.owner, {"video_id": project_id})
+            return VoiceChoice(requested, (f"Stock voice: {figures_mod.REFUSAL}",))
     return clones.resolve(project_id, record.source, record.transcript, speaker, requested)
+
+
+def _refuse_public_figure(owner: str, name: str | None) -> None:
+    """G6: a voice named after a known public figure is not cloned or kept."""
+    if name and flags.enabled("golive.g6", owner) and public_figures.match(name):
+        analytics.track("clone.public_figure_refused", owner, {})
+        raise HTTPException(status_code=422, detail=figures_mod.REFUSAL)
 
 
 # An added line can play over the picture only if the pause after its line
@@ -5339,6 +5381,7 @@ def export_project(project_id: str, req: ExportRequest | None = None, owner: str
     out = _export(_owned(project_id, owner), proposals=bool(req and req.with_proposals), request_id=req.request_id if req else None,
                   purpose=req.purpose if req else "preview")
     if req and req.purpose == "export" and not req.with_proposals:
+        out = _provenance_export(repo.get(project_id), out)        # G6: the mark and the manifest
         _exported(owner, project_id, float(out.get("render", {}).get("duration") or 0.0))
     return {**out, "request_id": req.request_id if req else None}
 
@@ -7192,6 +7235,8 @@ async def video_events(project_id: str, request: Request, limit: int | None = No
 # `projects.batch`, C2 under `projects.review`); opening one needs no flag.
 
 share_key = shares_store.secret(settings.data_dir, settings.share_secret)
+# G6: the fake C2PA signer's key, derived from the share key (a test signature, not a certificate).
+c2pa_signer = provenance_mod.FakeSigner(hashlib.sha256((share_key if isinstance(share_key, bytes) else str(share_key).encode()) + b"c2pa").digest())
 # What each scope shows: scope -> (share) -> {"title", "files": [{file_id, name, kind, size, duration, path}]}.
 # B3 registers "export"; C2 may widen "video" with versions and comments.
 SHARE_CONTENTS: dict = {}
@@ -7637,7 +7682,9 @@ app.router.lifespan_context = _lifespan_with_digests
 def _purge_due():
     from app.purge import purge, _vendor_delete
     return purge(database, artifacts.root, BIN_PURGE_DAYS,
-                 delete_voice=_vendor_delete(settings, database, settings.data_dir))
+                 delete_voice=_vendor_delete(settings, database, settings.data_dir),
+                 consent_years=settings.consent_retention_years)      # G6: 7 years by default
+
 
 
 BIN_PURGE_DAYS = bin_store.BIN_DAYS
@@ -7977,6 +8024,7 @@ def _deliver_one(record: dict, item: dict) -> dict:
                                      loudness_lufs=preset["loudness"], cues=cues)
         folder.mkdir(parents=True, exist_ok=True)
         shutil.move(str(Path(tmp) / "out.mp4"), folder / name)
+    _stamp_export(folder / name, video_id, record["owner"], video.source.media.sha256)    # G6: mark + manifest
     render_log.info("export file video=%s preset=%s name=%s framing=%s lufs=%s", video_id, preset["name"], name,
                     report["framing"], report["loudness_lufs"])
     _exported(record["owner"], video_id, float(report.get("duration") or 0.0), preset["name"])
@@ -8309,7 +8357,7 @@ JOB_NOTICE_SECONDS = 60.0
 JOB_WORDS = {"voice_line": "Voicing a line", "design_voice": "Designing a voice", "clone": "Cloning a voice",
              "mix": "The mix", "render_preview": "The preview", "export": "The export",
              "brief_update": "Bringing it up to date with the brief", "check": "The project check", "batch": "The batch",
-             "learn": "Learning your style", "import": "The import"}
+             "learn": "Learning your style", "import": "The import", "data_export": "Your data export"}
 
 
 def _workspace_of_video(c, video_id: str) -> str | None:
@@ -8421,6 +8469,134 @@ def _credit_alerts(owner: str) -> None:
 ledger.on_record = _after_charge
 
 
+# ── G6: trust and safety ────────────────────────────────────────────────────
+# Routes in app/safety_api.py; these are the pieces that need the app.
+
+def withdraw_consent_now(video_id: str, owner: str) -> dict:
+    """Consent withdrawn now (the owed D3 item): the video's clones are deleted
+    at the voice service at once (a kept voice of the owner's is only
+    forgotten here), consent is cleared so nothing new is cloned until it is
+    given again, and the withdrawal is logged."""
+    _owned(video_id, owner)
+    before = repo.clones(video_id)
+    kept = _kept_voice_ids()
+    failed = clones.purge(video_id, keep=kept)
+    deleted = len([v for v in before.values() if v and v not in kept and v not in failed])
+    had = repo.withdraw_consent(video_id)
+    with database.tx() as c:
+        activity_log.record(c, "consent.withdrawn", user_actor(owner), video_id=video_id, target=video_id,
+                            payload={"deleted": deleted, "failed": len(failed), "had": bool(had)})
+    if failed:
+        said = (f"Consent withdrawn. {len(failed)} voice {'clone' if len(failed) == 1 else 'clones'} could not be deleted at "
+                "the voice service yet; they cannot be used, and deleting them is tried again when the Bin empties.")
+    elif deleted:
+        said = "Consent withdrawn. The speaker's voice clone was deleted at the voice service."
+    else:
+        said = "Consent withdrawn. There was no voice clone to delete."
+    return {"withdrawn": True, "deleted": deleted, "failed": failed, "said": said}
+
+
+def data_export_path(owner: str, job_id: str) -> Path:
+    safe = re.sub(r"[^A-Za-z0-9_.-]", "_", owner)
+    return settings.data_dir / "data-exports" / safe / f"{job_id}.zip"
+
+
+def start_data_export(owner: str) -> dict:
+    """Your data as a zip, as an Activity job keyed by your own store."""
+    job = activity.create(_user_store(owner), "data_export", step_label="Queued", detail={"owner": owner})
+    with database.tx() as c:
+        c.execute("UPDATE jobs SET workspace_id = ? WHERE job_id = ?", (personal(c, owner), job.job_id))
+        cur = c.execute("INSERT INTO data_requests (owner, kind, status, job_id, created_at) VALUES (?, 'export', 'running', ?, ?)",
+                        (owner, job.job_id, _now()))
+        request_id = int(cur.lastrowid)
+        analytics.track_in(c, "data.export_requested", owner, {})
+
+    def run() -> None:
+        activity.start(job.job_id, "Collecting your records")
+        try:
+            made = dataexport.build(database, owner, artifacts.root, data_export_path(owner, job.job_id))
+            activity.finish(job.job_id, step_label="Ready", detail={"owner": owner, **made})
+            status = "done"
+            analytics.track("data.export_ready", owner, {"rows": made["rows"], "media": made["media"]})
+        except Exception as exc:  # noqa: BLE001 - a failed export says why; the server stays up
+            log.exception("data export %s failed", job.job_id)
+            activity.fail(job.job_id, "export_failed", f"The export stopped: {str(exc)[:200] or type(exc).__name__}")
+            status = "failed"
+        with database.tx() as c:
+            c.execute("UPDATE data_requests SET status = ?, done_at = ? WHERE id = ?", (status, _now(), request_id))
+    if DATA_EXPORT_IN_BACKGROUND:
+        work_pool.submit(run)
+    else:
+        run()
+    with database.tx() as c:
+        row = dict(c.execute("SELECT * FROM data_requests WHERE id = ?", (request_id,)).fetchone())
+    found = activity.get(job.job_id)
+    return {"request": {**row, "job": found.to_dict() if found else None}}
+
+
+DATA_EXPORT_IN_BACKGROUND = True
+
+
+def _stamp_export(path: Path, video_id: str, owner: str, source_sha: str | None) -> dict | None:
+    """G6: the invisible mark and the C2PA-style manifest on one exported file
+    (golive.g6); recorded so the mark can be traced. Never fails the export."""
+    if not flags.enabled("golive.g6", owner):
+        return None
+    try:
+        made = provenance_mod.stamp(path, video_id=video_id, owner=owner, watermarker=watermarker, signer=c2pa_signer,
+                                    source_sha=source_sha)
+        with database.tx() as c:
+            c.execute("INSERT INTO provenance_marks (mark, owner, video_id, file, sha256, manifest, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                      (made["mark"], owner, video_id, path.name, made["sha256"], Path(made["manifest"]).read_text(), _now()))
+            analytics.track_in(c, "export.provenance_stamped", owner, {"video_id": video_id})
+        return made
+    except Exception:  # noqa: BLE001 - provenance never breaks an export; the log says why
+        log.exception("could not stamp the export of %s", video_id)
+        return None
+
+
+def _provenance_export(record: ProjectRecord, out: dict) -> dict:
+    """The Export page's file, marked and with its manifest (G6): a marked copy of
+    the render as its own artifact, made once per render; the manifest sits
+    beside it and is served at /videos/{id}/artifacts/{sha}/c2pa."""
+    video_id, owner = record.source.project_id, record.owner
+    if not flags.enabled("golive.g6", owner):
+        return out
+    src_sha = out["render"]["sha256"]
+    done = (repo.settings(video_id).get("provenance") or {}).get(src_sha)
+    if done and artifacts.find(video_id, done["sha256"]) is not None:
+        return {**out, "render": {**out["render"], "sha256": done["sha256"]}, "provenance": done}
+    src = artifacts.find(video_id, src_sha)
+    if src is None:
+        return out
+    with tempfile.TemporaryDirectory() as tmp:
+        work = Path(tmp) / f"{Path(record.source.filename).stem}-voltage.mp4"
+        shutil.copyfile(src, work)
+        made = _stamp_export(work, video_id, owner, record.source.media.sha256)
+        if made is None:
+            return out
+        art = artifacts.put_file(video_id, work, kind="video", container="mp4", duration=float(out["render"].get("duration") or 0.0))
+        stored = artifacts.find(video_id, art.sha256)
+        if stored is not None:
+            shutil.copyfile(made["manifest"], provenance_mod.manifest_path(Path(stored)))
+    done = {"sha256": art.sha256, "mark": made["mark"], "source_sha256": src_sha}
+    marks = dict(repo.settings(video_id).get("provenance") or {})
+    marks[src_sha] = done
+    repo.set_settings(video_id, provenance=marks)
+    return {**out, "render": {**out["render"], "sha256": art.sha256}, "provenance": done}
+
+
+@app.get("/videos/{video_id}/artifacts/{sha256}/c2pa")
+def get_c2pa(video_id: str, sha256: str, owner: str = Depends(current_owner)) -> dict:
+    """G6: the C2PA-style manifest beside an exported file."""
+    _owned(video_id, owner)
+    path = artifacts.find(video_id, sha256)
+    manifest = provenance_mod.manifest_path(Path(path)) if path else None
+    if manifest is None or not manifest.exists():
+        raise HTTPException(status_code=404, detail="That file has no provenance manifest.")
+    return json.loads(manifest.read_text())
+
+
 # ── G8: errors nothing caught ────────────────────────────────────────────────
 # A request that raises is reported (with the route and who) and then raised
 # on as before, so the response and the tests see exactly what they did.
@@ -8460,7 +8636,7 @@ async def _roles(request: Request, call_next):
 
 def _mount_optional_routers() -> None:
     import importlib
-    for name in ("app.onboarding", "app.help", "app.tutorial", "app.workspace_api", "app.notify_api", "app.analytics_api", "app.feedback_api", "app.billing_api"):
+    for name in ("app.onboarding", "app.help", "app.tutorial", "app.workspace_api", "app.notify_api", "app.analytics_api", "app.feedback_api", "app.billing_api", "app.safety_api"):
         try:
             module = importlib.import_module(name)
         except ImportError:

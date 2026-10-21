@@ -1,0 +1,30 @@
+# G6: a small built-in list of public figures whose voices Voltage will not clone.
+# One name a line. A fake: a real provider compares the voice itself (SETUP_NEEDED.md).
+Narendra Modi
+Rahul Gandhi
+Amitabh Bachchan
+Shah Rukh Khan
+Salman Khan
+Aamir Khan
+Deepika Padukone
+Priyanka Chopra
+Alia Bhatt
+Virat Kohli
+Sachin Tendulkar
+MS Dhoni
+Rajinikanth
+Lata Mangeshkar
+AR Rahman
+Mukesh Ambani
+Ratan Tata
+Barack Obama
+Donald Trump
+Joe Biden
+Kamala Harris
+Elon Musk
+Taylor Swift
+Oprah Winfrey
+Morgan Freeman
+Tom Hanks
+King Charles
+Pope Francis

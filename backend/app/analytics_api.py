@@ -82,4 +82,9 @@ def admin_analytics(request: Request) -> dict:
         out["feedback"] = feedback.summary(db)
     except ImportError:
         pass
+    try:                                    # G6: abuse reports, newest first
+        from app.safety_api import recent_reports
+        out["abuse_reports"] = recent_reports()
+    except ImportError:
+        pass
     return out

@@ -638,7 +638,7 @@ export interface HelpRef { slug: string; title: string; section: string; tour?: 
 // Every surface (the status strip, Activity, the row chips, the player's badge,
 // the chat's step list, toasts, the tab title) reads from these records.
 
-export type ActivityKind = 'voice_line' | 'design_voice' | 'clone' | 'mix' | 'render_preview' | 'export' | 'brief_update' | 'check' | 'batch' | 'learn' | 'import'
+export type ActivityKind = 'voice_line' | 'design_voice' | 'clone' | 'mix' | 'render_preview' | 'export' | 'brief_update' | 'check' | 'batch' | 'learn' | 'import' | 'data_export'
 export type ActivityStatus = 'queued' | 'running' | 'done' | 'failed' | 'cancelled'
 /** The takes a render carries: kept edits, proposals (items), and their candidates. */
 export interface RenderIncludes { candidate_ids: string[]; edit_ids: string[]; item_ids: string[] }
@@ -1022,6 +1022,8 @@ export interface AdminAnalytics {
   counts: { name: string; source: 'server' | 'client'; count: number; owners: number; last: string }[]
   /** G8: thumbs and their reasons, when that store is here. */
   feedback?: AdminFeedback
+  /** G6: abuse reports, newest first. */
+  abuse_reports?: { id: number; location: string; kind: string; details: string; contact: string; status: string; created_at: string }[]
 }
 
 /** G8: thumbs up and down on takes and turns, for the admin page. */

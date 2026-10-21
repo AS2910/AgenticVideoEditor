@@ -113,6 +113,19 @@ export function AdminPage({ me }: { me: Me | null }) {
               </section>
             )}
 
+            {data.abuse_reports && (
+              <section className={card} aria-labelledby="abuse-h" data-testid="admin-abuse">
+                <div className="mb-2 flex flex-wrap items-baseline gap-2.5"><h2 id="abuse-h" className="disp m-0 text-[22px] font-bold">Abuse reports</h2><span className="tag text-faint">{data.abuse_reports.length} newest</span></div>
+                {data.abuse_reports.length === 0 ? <p className="m-0 text-muted-foreground">No reports.</p> : data.abuse_reports.map((r) => (
+                  <div key={r.id} className="flex flex-col gap-0.5 border-t border-line py-2.5 text-[13px]" data-testid="abuse-row">
+                    <span className="flex flex-wrap items-baseline gap-2"><span className="stamp need">{r.kind.replace('_', ' ')}</span><span className="tnum min-w-0 truncate">{r.location}</span></span>
+                    {r.details && <span>{r.details}</span>}
+                    <span className="text-muted-foreground">{r.contact ? `Reply to ${r.contact}` : 'No contact given'}</span>
+                  </div>
+                ))}
+              </section>
+            )}
+
             <section className={card} aria-labelledby="counts-h" data-testid="admin-counts">
               <div className="mb-2 flex flex-wrap items-baseline gap-2.5"><h2 id="counts-h" className="disp m-0 text-[22px] font-bold">Events</h2><span className="tag text-faint">{data.counts.length} names</span></div>
               {data.counts.length === 0 && <p className="m-0 text-muted-foreground">No events yet.</p>}

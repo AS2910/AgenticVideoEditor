@@ -1,12 +1,15 @@
-import { useRef } from 'react'
+import { useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogFooter, DialogTitle } from '@/components/ui/dialog'
 import { useReturnFocus } from './useReturnFocus'
+import { LivenessStep } from './LivenessStep'
 
 interface ConsentSheetProps {
   /** Who the voice belongs to, when known: "the Shopkeeper". */
   who?: string | null
-  onConfirm: () => void
+  /** G6 (golive.g6): the video whose speaker reads a sentence aloud before consent counts. */
+  livenessVideoId?: string | null
+  onConfirm: (livenessId: string | null) => void
   onCancel: () => void
   busy?: boolean
 }
@@ -15,8 +18,10 @@ interface ConsentSheetProps {
  *  (UX-3): one sentence on what is about to happen, and why we ask. A real
  *  modal (a shadcn Dialog, so Radix does the work): focus lands on the title,
  *  Tab stays inside, Escape is "not yet", and focus returns to the opener. */
-export function ConsentSheet({ who, onConfirm, onCancel, busy }: ConsentSheetProps) {
+export function ConsentSheet({ who, livenessVideoId, onConfirm, onCancel, busy }: ConsentSheetProps) {
   const title = useRef<HTMLHeadingElement>(null)
+  const [passed, setPassed] = useState<string | null>(null)
+  const needsLiveness = !!livenessVideoId
   useReturnFocus()
   return (
     <Dialog open onOpenChange={(open) => { if (!open) onCancel() }}>
@@ -36,9 +41,10 @@ export function ConsentSheet({ who, onConfirm, onCancel, busy }: ConsentSheetPro
           </p>
           <p className="m-0 text-sm text-muted-foreground">Asked once for this project, and remembered. Deleting the project withdraws it.</p>
         </div>
+        {needsLiveness && <LivenessStep videoId={livenessVideoId!} who={who} onPassed={setPassed} />}
         <DialogFooter>
           <Button variant="outline" onClick={onCancel} disabled={busy}>Not yet, keep it as a draft</Button>
-          <Button onClick={onConfirm} disabled={busy}>{busy ? 'Saving…' : 'Yes, I have it'}</Button>
+          <Button onClick={() => onConfirm(passed)} disabled={busy || (needsLiveness && !passed)}>{busy ? 'Saving…' : 'Yes, I have it'}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
