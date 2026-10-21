@@ -1612,17 +1612,17 @@ function Studio() {
     const place = sight ? (sight.place_confirmed ?? sight.place_guess) : null
   
     return (
-      <div className="grid h-dvh grid-rows-[auto_auto_minmax(0,1fr)] overflow-hidden bg-background text-foreground max-[960px]:block max-[960px]:h-auto max-[960px]:min-h-dvh max-[960px]:overflow-visible" data-testid="editor-shell">
+      <div className="grid h-dvh grid-cols-[minmax(0,1fr)] grid-rows-[auto_auto_minmax(0,1fr)] overflow-hidden bg-background text-foreground max-[960px]:block max-[960px]:h-auto max-[960px]:min-h-dvh max-[960px]:overflow-visible" data-testid="editor-shell">
         <a className="skip" href="#main" onClick={(e) => { e.preventDefault(); document.getElementById('main')?.focus() }}>Skip to the transcript</a>
         {/* Volt: the editor's header — the wordmark, the file, the play switch, the autonomy, the spend, Export, the account. */}
-        <header className="z-30 flex min-h-[62px] flex-wrap max-[960px]:sticky max-[960px]:top-0 items-center gap-x-4 gap-y-2 border-b-[1.5px] border-foreground bg-card px-4 py-2 sm:px-6 lg:flex-nowrap lg:[&>*:not(h1)]:shrink-0" data-testid="editor-header">
+        <header className="z-30 flex min-h-[62px] min-w-0 flex-wrap max-[960px]:sticky max-[960px]:top-0 items-center gap-x-4 gap-y-2 border-b-[1.5px] border-foreground bg-card px-4 py-2 sm:px-6 max-[1600px]:gap-x-3 lg:[&>*:not(h1)]:shrink-0" data-testid="editor-header">
           <Wordmark />
-          <span className="text-faint max-sm:hidden" aria-hidden="true">/</span>
+          <span className="text-faint max-[1600px]:hidden" aria-hidden="true">/</span>
           {/* Folders: the project the video is in, with its menu; or a dashed "No project" that opens the move dialog. */}
           <div className="relative" data-crumb>
             {project.project_id ? (
               <button type="button" className="inline-flex h-[34px] items-center gap-2 rounded-lg border-[1.5px] border-line2 bg-card px-2.5 font-semibold hover:border-foreground" aria-haspopup="menu" aria-expanded={crumbMenu} onClick={() => setCrumbMenu((m) => !m)} data-testid="crumb">
-                <span aria-hidden="true" className="h-3 w-4 rounded-[3px] border-[1.5px] border-ink bg-volt" />{project.project_name ?? 'Project'}<span aria-hidden="true" className="text-xs">▾</span>
+                <span aria-hidden="true" className="h-3 w-4 shrink-0 rounded-[3px] border-[1.5px] border-ink bg-volt" /><span className="max-w-[28ch] truncate max-[1600px]:max-w-[14ch]" title={project.project_name ?? undefined}>{project.project_name ?? 'Project'}</span><span aria-hidden="true" className="text-xs">▾</span>
               </button>
             ) : (
               <button type="button" className="inline-flex h-[34px] items-center gap-2 rounded-lg border-[1.5px] border-dashed border-line2 bg-card px-2.5 font-medium text-muted-foreground hover:border-foreground" onClick={() => setMoving(true)} data-testid="crumb">
@@ -1646,6 +1646,9 @@ function Studio() {
               </div>
             )}
           </div>
+          {/* The status chips (archived, brief changed, language version, out of sync) take a row of their own under the header's row, so the file name, Export, the bell and the account always fit. */}
+          {(reuseOn && project.project_id && project.project_archived) || (consistency && project.project_id && project.brief_changed) || (batchOn && project.master_id) ? (
+          <div className="order-last flex min-w-0 basis-full flex-wrap items-center gap-2" data-testid="header-chips">
           {reuseOn && project.project_id && project.project_archived && (
             <a className="stamp quiet no-underline" href={hrefFor({ page: 'folder', projectId: project.project_id })} title="This project is archived. Unarchive it to make changes." data-testid="archived">Archived</a>
           )}
@@ -1658,9 +1661,11 @@ function Studio() {
             <a className="stamp in whitespace-nowrap no-underline" href={hrefFor({ page: 'editor', projectId: project.master_id })} title={`The ${project.language_label} version of ${project.master_filename ?? 'its master'}. Open the master.`} data-testid="language-of">{project.language_label} · of {project.master_filename ?? 'master'}</a>
           )}
           {batchOn && project.master_id && project.out_of_sync && <SyncChip videoId={project.video_id} compact onSettled={() => void settleSync(project.video_id)} />}
-          <span className="text-faint max-sm:hidden" aria-hidden="true">/</span>
+          </div>
+          ) : null}
+          <span className="text-faint max-[1600px]:hidden" aria-hidden="true">/</span>
           <h1 className="disp m-0 min-w-0 max-w-[28ch] truncate text-[15px] font-semibold lg:max-w-none lg:flex-[1_1_0]" title={project.filename}>{project.filename}</h1>
-          <span className="tag text-faint">{timecode(project.duration)}{speakers.length > 0 ? ` · ${speakers.length} ${speakers.length === 1 ? 'voice' : 'voices'}` : ''}</span>
+          <span className="tag text-faint max-[1600px]:hidden">{timecode(project.duration)}{speakers.length > 0 ? ` · ${speakers.length} ${speakers.length === 1 ? 'voice' : 'voices'}` : ''}</span>
           <div className="segs" role="group" aria-label="Play" data-tour="playback-switch">
             {views.map(([v, label, on, why]) => (
               <button key={v} type="button" className="seg disabled:cursor-not-allowed disabled:opacity-45" aria-pressed={view === v} onClick={() => switchView(v)} disabled={!on}
@@ -1669,7 +1674,7 @@ function Studio() {
               </button>
             ))}
           </div>
-          <span className="flex-1" />
+          <span className="flex-1 lg:hidden" />
           <button type="button" className="act" onClick={() => { setMayDoOpen(true); tour.notify('autonomy-opened') }} data-tour="autonomy" data-tour-action="autonomy" aria-haspopup="dialog" aria-label={`${autonomy === 'ask' ? 'Check with me' : 'Just do it'}. What Voltage may do`}>
             <span className="tag">{autonomy === 'ask' ? 'Check with me' : 'Just do it'}</span>
             <svg width="12" height="12" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>

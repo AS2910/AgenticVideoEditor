@@ -64,7 +64,7 @@ export function SpendPill({ summary, videoId }: { summary: SpendSummary | null; 
         <span className="font-medium">{word}</span>{' '}
         {shown ? <span>{ofCeiling(shown)}</span> : <span aria-hidden="true">…</span>}
         {shown?.ceiling_usd != null && (
-          <span className="h-2 w-10 overflow-hidden rounded-sm bg-line" aria-hidden="true"><span className="block h-full bg-foreground" style={{ width: `${Math.min(100, share * 100)}%` }} /></span>
+          <span className="h-2 w-10 overflow-hidden rounded-sm bg-line max-[1600px]:hidden" aria-hidden="true"><span className="block h-full bg-foreground" style={{ width: `${Math.min(100, share * 100)}%` }} /></span>
         )}
         <svg width="12" height="12" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>
       </button>

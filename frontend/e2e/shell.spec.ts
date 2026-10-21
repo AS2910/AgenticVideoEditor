@@ -170,3 +170,42 @@ test.describe('the editor shell', () => {
     expect((await page.getByTestId('editor-header').boundingBox())!.y).toBe(0)     // sticky
   })
 })
+
+/** SHELL (golive): the editor header fits with the bell. A busy header (a long project name,
+ *  Brief changed, a language version chip, a long file name, the bell on) at desktop sizes:
+ *  nothing overflows sideways and Export, the bell and the account circle stay on screen. */
+const BUSY = {
+  ...PROJECT, project_id: 'f1', project_name: 'Diwali festive campaign for the western region',
+  filename: 'bhaji-cam-ad-final-final-with-the-new-price-and-the-longer-ending.mp4',
+  brief_changed: true, made_with_brief: 2, brief_version: 4,
+  master_id: 'p0', master_filename: 'bhaji-cam-ad-master.mp4', language: 'hi', language_label: 'Hindi', out_of_sync: true,
+}
+const ALL_FLAGS = ['projects.consistency', 'projects.batch', 'projects.review', 'projects.reuse', 'golive.g4']
+
+for (const [w, h] of [[1280, 720], [1360, 860], [1440, 900], [1920, 1080]] as [number, number][]) {
+  test(`the editor header fits with the bell at ${w}x${h}`, async ({ page }) => {
+    await page.setViewportSize({ width: w, height: h })
+    await mockApi(page)
+    await page.route('**/api/me/flags', (r) => r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ flags: ALL_FLAGS }) }))
+    await page.route('**/api/me/notifications/count', (r) => r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ unread: 12 }) }))
+    await page.route('**/api/videos/p1', (r) => r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(BUSY) }))
+    await page.route('**/api/projects/f1/rules', (r) => r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ rules: [], rules_version: 0 }) }))
+    await page.route('**/api/videos/p1/comments', (r) => r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ comments: [], open: 0 }) }))
+    await page.goto('/#v/p1')
+    const header = page.getByTestId('editor-header')
+    await expect(header).toBeVisible()
+    const bell = page.getByRole('button', { name: /^Notifications/ })
+    await expect(bell).toBeVisible()
+    await expect(page.getByTestId('brief-changed')).toBeVisible()
+    if (process.env.SHOTS) await page.screenshot({ path: `${process.env.SHOTS}/shell-header-${w}.png` })
+    const m = await header.evaluate((el) => ({ sw: el.scrollWidth, cw: el.clientWidth, docW: document.documentElement.scrollWidth, vw: innerWidth }))
+    expect(m.sw).toBeLessThanOrEqual(m.cw)          // no horizontal overflow in the header
+    expect(m.docW).toBeLessThanOrEqual(m.vw)        // nor on the page
+    for (const el of [page.getByRole('link', { name: 'Export' }), bell, page.getByRole('link', { name: 'Account' })]) {
+      const b = (await el.boundingBox())!
+      expect(b.x).toBeGreaterThanOrEqual(0)
+      expect(b.x + b.width).toBeLessThanOrEqual(w)
+      expect(b.y + b.height).toBeLessThanOrEqual(h)
+    }
+  })
+}
