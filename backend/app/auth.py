@@ -95,7 +95,8 @@ def verify(token: str | None, secret: str, *, max_age: int, now: float | None = 
 def identity_from(payload: dict | None) -> Identity | None:
     if not payload or not isinstance(payload.get("sub"), str) or not payload["sub"]:
         return None
-    provider = payload.get("provider") if payload.get("provider") in ("google", "email") else "google"
+    # Launch item 5: "acct" is an account with a password (sub is its id).
+    provider = payload.get("provider") if payload.get("provider") in ("google", "email", "acct") else "google"
     return Identity(payload["sub"], payload.get("email"), payload.get("name"), payload.get("picture"), provider)
 
 

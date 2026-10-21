@@ -38,6 +38,14 @@ Each: what, why, how to undo. The projects-plan decisions from the night before 
 - 4: The Anthropic SDK may retry twice within one call (was once); the agent turn is not retried by the job runner, so a Claude call is tried at most three times.
 - 4: `/ready` is public and reports only which checks passed; reasons go to the log.
 - 4: Backups keep 14 days on the same disk; OPS.md says to copy them off the machine (no storage account created).
+- 5: "Email sign-in with verification, reset and change email" is built as accounts with a password, next to Google and the one-use emailed link (G2). New mode AVE_AUTH=accounts runs without Google; AVE_AUTH=google offers both. Undo: drop `app.accounts_api` from the mounted routers.
+- 5: An account's owner id is `acct:<random id>`, not its address, so changing the address moves nothing. People who signed in with an emailed link keep their `email:<address>` id (their address cannot change in place).
+- 5: Passwords: at least 10 characters, scrypt (n=2^14, r=8). Verify links last 48 hours, reset links 1 hour, change-email links 24 hours; each works once and a new one turns the older off. A reset also confirms an unconfirmed address (the link reached it).
+- 5: Signing up with an address that has an account answers exactly like a new sign-up and emails the address's owner instead (no account enumeration). Wrong address and wrong password give the same sentence and take the same time.
+- 5: A password reset or address change signs out every other session of that account (a session version in the cookie, checked against the account on each request).
+- 5: Invite-only lets in a waiting workspace invite for the address or a code from AVE_INVITE_CODES (comma-separated); people who have signed in before are never refused. Turn it on: `python -m app.flags set launch.invite_only on --db ...`.
+- 5: Terms acceptance is stored on the account (`terms_version`, `terms_at`; version from AVE_TERMS_VERSION, default `draft-2026-10-22`). Google sign-ups do not see a terms checkbox yet (the login page says nothing about terms for Google): a launch-blocker note in MORNING.md.
+- 5: Deleting an account removes its sample and onboarding records and its password account, so making it again starts fresh with the sample. Its billing account is kept, so the free trial is not granted twice to the same owner id (a password account made again gets a new id, and so a new trial).
 
 ---
 

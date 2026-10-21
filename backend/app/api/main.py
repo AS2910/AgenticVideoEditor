@@ -18,6 +18,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import shutil
+from urllib.parse import quote
 from types import SimpleNamespace
 
 from fastapi import Depends, FastAPI, HTTPException, File, Form, Request, Response, UploadFile
@@ -398,9 +399,17 @@ acting: ContextVar[Acting | None] = ContextVar("acting", default=None)
 def signed_in_identity(request: Request) -> "auth.Identity | None":
     if settings.auth_mode == "off":
         return None
-    return auth.identity_from(auth.verify(
-        request.cookies.get(auth.SESSION_COOKIE), settings.session_secret or "", max_age=auth.SESSION_SECONDS,
-    ))
+    payload = auth.verify(request.cookies.get(auth.SESSION_COOKIE), settings.session_secret or "", max_age=auth.SESSION_SECONDS)
+    who = auth.identity_from(payload)
+    if who is not None and who.provider == "acct":
+        # Launch item 5: an account's session holds while the account exists and
+        # its password (or address) has not changed since the session began.
+        from app.store import accounts as accounts_store
+        account = accounts_store.by_id(database, who.sub)
+        if account is None or not account.verified or int((payload or {}).get("sv", 0)) != account.session_version:
+            return None
+        who = replace(who, email=account.email)
+    return who
 
 
 def signed_in_user(request: Request) -> str:
@@ -700,13 +709,21 @@ def _redirect_uri() -> str:
 def _me(request: Request) -> dict:
     if settings.auth_mode == "off":
         return {"mode": "off", "user": None}
-    who = auth.identity_from(auth.verify(
-        request.cookies.get(auth.SESSION_COOKIE), settings.session_secret or "", max_age=auth.SESSION_SECONDS,
-    ))
+    who = signed_in_identity(request)
     return {
         "mode": settings.auth_mode,
-        "user": {"sub": who.sub, "email": who.email, "name": who.name, "picture": who.picture} if who else None,
+        "user": {"sub": who.sub, "email": who.email, "name": who.name, "picture": who.picture,
+                 "provider": who.provider} if who else None,
     }
+
+
+def _new_person_refused(owner: str, email: str | None) -> bool:
+    """Launch item 5: with invite-only on, someone who has never signed in
+    may not start now without an invite (Google and emailed links alike)."""
+    from app.accounts_api import invite_only, may_join
+    if not invite_only() or email_mod.address_for(database, owner):
+        return False
+    return not may_join(email or "", None)
 
 
 @app.get("/auth/me")
@@ -766,6 +783,9 @@ def auth_callback(request: Request, code: str | None = None, state: str | None =
         raise HTTPException(status_code=502, detail=str(exc)) from exc
     if not auth.allowed(who, settings.allowed_emails):
         raise HTTPException(status_code=403, detail="This Voltage is private; that account is not on its list.")
+    if _new_person_refused(who.owner, who.email):
+        from app.accounts_api import INVITE_ONLY
+        raise HTTPException(status_code=403, detail=INVITE_ONLY)
     email_mod.remember_address(database, who.owner, who.email)      # C2: where their review digest goes
     _signed_in(who.owner)                                             # G7: the funnel's first steps
     try:                                                              # G1: a new owner's sample project
@@ -2482,8 +2502,14 @@ def delete_account(owner: str = Depends(current_owner)) -> Response:
         except Exception as exc:  # noqa: BLE001
             logging.getLogger("ave").warning("account %s deleted, but voice %s (%s) is still at ElevenLabs: %s",
                                              owner, v.get("name"), v["voice_id"], exc)
-    for key in ("my_voices", "prefs", "designs"):
+    # Launch item 5: the sample and onboarding records go too, so an account
+    # made again with the same id starts fresh (and gets the sample again).
+    for key in ("my_voices", "prefs", "designs", "sample", "onboarding"):
         repo.delete_meta(f"{key}:{owner}")
+    _funnel_started.discard(owner)
+    if owner.startswith("acct:"):
+        from app.store import accounts as accounts_store
+        accounts_store.delete(database, owner[len("acct:"):])
     with database.tx() as c:          # D4: their pins
         c.execute("DELETE FROM pins WHERE owner = ?", (owner,))
         templates_store.purge_owner_in(c, owner)   # D1: their templates
@@ -9032,7 +9058,7 @@ async def _roles(request: Request, call_next):
 
 def _mount_optional_routers() -> None:
     import importlib
-    for name in ("app.onboarding", "app.help", "app.tutorial", "app.workspace_api", "app.notify_api", "app.analytics_api", "app.feedback_api", "app.billing_api", "app.safety_api"):
+    for name in ("app.onboarding", "app.help", "app.tutorial", "app.workspace_api", "app.accounts_api", "app.notify_api", "app.analytics_api", "app.feedback_api", "app.billing_api", "app.safety_api"):
         try:
             module = importlib.import_module(name)
         except ImportError:

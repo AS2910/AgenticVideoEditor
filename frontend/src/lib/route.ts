@@ -29,6 +29,9 @@ export type Route =
   | { page: 'admin' }
   | { page: 'legal'; doc: 'terms' | 'privacy' | 'acceptable-use' }
   | { page: 'invite'; token: string }
+  // Launch item 5: a password reset link, and the sign-in page (with an error a link landed on).
+  | { page: 'reset'; token: string }
+  | { page: 'login'; error?: string | null }
 
 export function parseRoute(hash: string): Route {
   const h = hash.replace(/^#\/?/, '').trim()
@@ -45,6 +48,10 @@ export function parseRoute(hash: string): Route {
     if (usage[1]) return { page: 'usage', scope: { kind: usage[1] === 'v' ? 'video' : 'project', id: usage[2] } }
     return { page: 'usage' }
   }
+  const reset = /^reset\/([A-Za-z0-9_-]+)$/.exec(h)
+  if (reset) return { page: 'reset', token: reset[1] }
+  const login = /^login(?:\?error=(.*))?$/.exec(h)
+  if (login) return { page: 'login', error: login[1] ? decodeURIComponent(login[1]) : null }
   const invite = /^invite\/([A-Za-z0-9_.-]+)$/.exec(h)
   if (invite) return { page: 'invite', token: invite[1] }
   if (h === 'members') return { page: 'members' }
@@ -64,6 +71,8 @@ export const hrefFor = (r: Route): string =>
     : r.page === 'help' ? (r.slug ? `#help/${r.slug}` : '#help')
     : r.page === 'projects' ? '#home'
     : r.page === 'invite' ? `#invite/${r.token}`
+    : r.page === 'reset' ? `#reset/${r.token}`
+    : r.page === 'login' ? (r.error ? `#login?error=${encodeURIComponent(r.error)}` : '#login')
     : r.page === 'legal' ? `#${r.doc}`
     : r.page === 'usage' ? (!r.scope ? '#usage' : r.scope.kind === 'none' ? '#usage/none' : `#usage/${r.scope.kind === 'video' ? 'v' : 'p'}/${r.scope.id}`)
     : `#${r.page}`

@@ -375,6 +375,9 @@ def email_sign_in(token: str | None = None) -> Response:
     known = members_store.owner_for_email(api.database, address)
     provider, sub = known.split(":", 1) if known and ":" in known else ("email", address)
     who = api.auth.Identity(sub, address, None, None, provider)
+    if api._new_person_refused(who.owner, address):           # launch item 5: invite-only
+        from app.accounts_api import INVITE_ONLY
+        raise HTTPException(status_code=403, detail=INVITE_ONLY)
     api.email_mod.remember_address(api.database, who.owner, address)
     api._signed_in(who.owner)                                    # G7: the funnel's first steps
     try:

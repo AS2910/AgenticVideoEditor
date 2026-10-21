@@ -105,7 +105,8 @@ class Settings:
     stems: bool = True
     clone_min_seconds: float = DEFAULT_CLONE_MIN_SECONDS
     voice_route: str = DEFAULT_VOICE_ROUTE
-    # Phase 9c: "off" keeps the single local owner; "google" requires sign-in.
+    # Phase 9c: "off" keeps the single local owner; "google" requires sign-in
+    # (Google or an account); "accounts" requires sign-in with an account (item 5).
     auth_mode: str = "off"
     google_client_id: str | None = None
     google_client_secret: str | None = None
@@ -265,8 +266,12 @@ def _voice_route() -> str:
 
 def _auth_mode() -> str:
     mode = (os.environ.get("AVE_AUTH") or "off").strip().lower()
-    if mode not in ("off", "google"):
-        raise ValueError(f"AVE_AUTH must be 'off' or 'google', got {mode!r}")
+    # Launch item 5: "accounts" is sign-in with an email and password (and
+    # emailed links) without Google; "google" offers both.
+    if mode not in ("off", "google", "accounts"):
+        raise ValueError(f"AVE_AUTH must be 'off', 'google' or 'accounts', got {mode!r}")
+    if mode == "accounts" and not os.environ.get("AVE_SESSION_SECRET"):
+        raise ValueError("AVE_AUTH=accounts needs AVE_SESSION_SECRET")
     if mode == "google":
         missing = [k for k in ("GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "AVE_SESSION_SECRET") if not os.environ.get(k)]
         if missing:

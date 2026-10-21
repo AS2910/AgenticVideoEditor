@@ -1,34 +1,8 @@
-import { useEffect, useState } from 'react'
-import { track } from '../lib/analytics'
-import { ApiError, emailSignInAvailable, loginUrl, sendSignInLink } from '../api'
 import { Wordmark } from './Shell'
+import { SignInForms } from './SignInForms'
 
 /** The door, when sign-in is on: the promise on the left, Voltage at work on the right. */
-export function LoginPage({ error }: { error?: string | null }) {
-  // G2: sign in with an emailed link too, when this Voltage offers it.
-  const [byEmail, setByEmail] = useState(false)
-  const [email, setEmail] = useState('')
-  const [sent, setSent] = useState<string | null>(null)
-  const [mailError, setMailError] = useState<string | null>(null)
-  const [sending, setSending] = useState(false)
-  useEffect(() => {
-    let live = true
-    emailSignInAvailable().then((r) => { if (live) setByEmail(r.available) }).catch(() => { /* Google only */ })
-    return () => { live = false }
-  }, [])
-  const send = async () => {
-    setSending(true)
-    track('signin.email_requested')
-    setMailError(null)
-    try {
-      const out = await sendSignInLink(email.trim())
-      setSent(`Check ${out.email}. The link works once, for 15 minutes.`)
-    } catch (e) {
-      setMailError(e instanceof ApiError ? e.message : 'The link could not be sent.')
-    } finally {
-      setSending(false)
-    }
-  }
+export function LoginPage({ error, onSignedIn = () => window.location.reload() }: { error?: string | null; onSignedIn?: () => void }) {
   return (
     <div className="flex min-h-dvh flex-wrap bg-background text-foreground">
       <section className="flex min-w-0 flex-[1_1_520px] flex-col justify-between gap-12 px-[clamp(24px,6vw,88px)] py-12">
@@ -39,26 +13,12 @@ export function LoginPage({ error }: { error?: string | null }) {
           </h1>
           <p className="m-0 text-lg leading-[1.55] text-muted-foreground">No reshoot. Tell Voltage the goal. It rewrites the line, voices it in the speaker's own voice, and keeps the picture moving.</p>
           <div className="flex flex-col items-start gap-3.5">
-            <a href={loginUrl} className="btn volt lg shine">
-              <svg width="20" height="20" viewBox="0 0 18 18" aria-hidden="true"><circle cx="9" cy="9" r="7.5" fill="none" stroke="currentColor" strokeWidth="1.8" /><path d="M12.6 9H9" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" /></svg>
-              Continue with Google
-            </a>
-            {byEmail && (sent
-              ? <p className="m-0 text-sm" role="status" data-testid="email-sent">{sent}</p>
-              : (
-                <form className="flex w-full max-w-[420px] flex-wrap items-end gap-2.5" aria-label="Sign in with email" onSubmit={(e) => { e.preventDefault(); void send() }}>
-                  <label className="flex min-w-0 flex-[1_1_220px] flex-col gap-1"><span className="text-[13px] font-semibold">Or sign in with your email</span>
-                    <input type="email" autoComplete="email" className="box-border h-10 min-w-0 rounded-lg border-[1.5px] border-foreground bg-card px-2.5 text-base text-foreground outline-none focus-visible:ring-[3px] focus-visible:ring-volt" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="name@agency.com" aria-invalid={mailError ? true : undefined} />
-                  </label>
-                  <button type="submit" className="btn" disabled={!email.trim() || sending} aria-busy={sending || undefined}>{sending ? 'Sending…' : 'Email me a link'}</button>
-                  {mailError && <span className="basis-full text-[13px] text-destructive" role="alert">{mailError}</span>}
-                </form>
-              ))}
+            <SignInForms onSignedIn={onSignedIn} />
             <span className="tag text-faint">Private by default · your footage and voices stay yours</span>
             {error && <div className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive" role="alert">{error}</div>}
           </div>
         </div>
-        <span className="tag text-faint">Videos up to 3 min · speech or silent</span>
+        <span className="tag text-faint">Videos up to 10 min · speech or silent</span>
       </section>
 
       <section aria-hidden="true" className="pane flex min-w-0 flex-[1_1_520px] items-center justify-center px-6 py-12">

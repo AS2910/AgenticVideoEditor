@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import type { AskBefore, Autonomy, Effort, UserSettings } from '../types'
 import type { Me } from '../api'
-import { deleteAccount, getUserSettings, getUsageReport, logout, updateUserSettings } from '../api'
+import { ApiError, changeEmail, deleteAccount, getUserSettings, getUsageReport, logout, updateUserSettings } from '../api'
 import { go } from '../lib/route'
 import { useTheme } from '../lib/theme'
 import type { Theme } from '../lib/theme'
@@ -202,8 +202,9 @@ export function SettingsPage({ me, onSignedOut }: SettingsPageProps) {
           <div className="flex flex-wrap items-center gap-4">
             <span className="disp grid size-14 place-items-center rounded-full border-[1.5px] border-ink bg-volt text-[22px] font-bold text-ink" aria-hidden="true">{initialOf(me)}</span>
             <div className="flex flex-[1_1_200px] flex-col"><span className="text-base font-semibold">{displayName}</span><span className="tnum text-[13px] text-muted-foreground">{signedWith}</span></div>
-            {me?.mode === 'google' && who && <button type="button" className="btn sm" onClick={() => void signOut()} disabled={busy !== null}>{busy === 'out' ? 'Signing out…' : 'Sign out'}</button>}
+            {me && me.mode !== 'off' && who && <button type="button" className="btn sm" onClick={() => void signOut()} disabled={busy !== null}>{busy === 'out' ? 'Signing out…' : 'Sign out'}</button>}
           </div>
+          {who?.provider === 'acct' && <ChangeEmail current={who.email ?? ''} />}
           {safetyOn && (
             <div className="flex flex-col gap-2 border-t border-line pt-4" aria-labelledby="data-h">
               <h3 id="data-h" className="m-0 text-sm font-semibold">Your data</h3>
@@ -228,5 +229,47 @@ export function SettingsPage({ me, onSignedOut }: SettingsPageProps) {
         </section>
       </div>
     </Shell>
+  )
+}
+
+/** Launch item 5: a new address, confirmed by a link sent to it (the old one is told). */
+function ChangeEmail({ current }: { current: string }) {
+  const [open, setOpen] = useState(false)
+  const [address, setAddress] = useState('')
+  const [password, setPassword] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [sent, setSent] = useState<string | null>(null)
+  const field = 'box-border h-10 min-w-0 rounded-lg border-[1.5px] border-foreground bg-card px-2.5 text-base text-foreground outline-none focus-visible:ring-[3px] focus-visible:ring-volt'
+  const send = async () => {
+    setBusy(true)
+    setError(null)
+    try { setSent((await changeEmail(address.trim(), password)).message); setOpen(false); setPassword('') } catch (e) {
+      setError(e instanceof ApiError ? e.message : 'The link could not be sent.')
+    } finally { setBusy(false) }
+  }
+  return (
+    <div className="flex flex-col gap-2 border-t border-line pt-4" data-testid="change-email">
+      <div className="flex flex-wrap items-center gap-3">
+        <span className="min-w-0 flex-1 text-sm">Email <span className="tnum text-muted-foreground">{current}</span></span>
+        {!open && <button type="button" className="btn sm" onClick={() => { setOpen(true); setSent(null) }}>Change email</button>}
+      </div>
+      {sent && <p className="m-0 text-sm" role="status">{sent}</p>}
+      {open && (
+        <form className="flex flex-col gap-2.5" aria-label="Change email" onSubmit={(e) => { e.preventDefault(); void send() }}>
+          <label className="flex flex-col gap-1"><span className="text-[13px] font-semibold">New email</span>
+            <input className={field} type="email" autoComplete="email" value={address} onChange={(e) => setAddress(e.target.value)} />
+          </label>
+          <label className="flex flex-col gap-1"><span className="text-[13px] font-semibold">Your password</span>
+            <input className={field} type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} />
+          </label>
+          {error && <span className="text-[13px] text-destructive" role="alert">{error}</span>}
+          <div className="flex gap-2">
+            <button type="button" className="btn sm" onClick={() => setOpen(false)} disabled={busy}>Cancel</button>
+            <button type="submit" className="btn volt sm" disabled={!address.trim() || !password || busy} aria-busy={busy || undefined}>{busy ? 'Sending…' : 'Send the link'}</button>
+          </div>
+        </form>
+      )}
+    </div>
   )
 }

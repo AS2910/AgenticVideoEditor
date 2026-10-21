@@ -64,6 +64,8 @@ SERVER_NAMES = F7_VERBS | frozenset({
     "words.clip_added", "words.learned_from_transcript", "take.word_rule_broken", "take.word_rule_warned",
     # Launch items 2 and 3.
     "rate_limited", "paid.paused_refusal", "paid.switch",
+    # Launch item 5.
+    "account.created", "account.verified", "account.password_reset", "account.email_changed",
     "voice.restored", "share.opened", "export.file_failed", "export.zip_downloaded",
     "notify.digest_sent", "notify.version_ready_sent", "notify.review_invite_sent",
     "sample.created", "sample.skipped", "import.started", "import.finished", "import.failed",

@@ -439,7 +439,17 @@ export const makeLanguages = (videoId: string, body: { languages: string[]; voic
 export const syncLanguage = (videoId: string, confirmStage = false) => post<SyncStarted>(`/videos/${videoId}/sync`, confirmStage ? { confirm_stage: true } : undefined)
 
 /** Phase 9c: whether sign-in is on, and who is signed in. */
-export interface Me { mode: 'off' | 'google'; user: { sub: string; email: string | null; name: string | null; picture: string | null } | null }
+export interface Me { mode: 'off' | 'google' | 'accounts'; user: { sub: string; email: string | null; name: string | null; picture: string | null; provider?: 'google' | 'email' | 'acct' } | null }
+/** Launch item 5: what sign-in this Voltage offers. */
+export interface AuthOptions { mode: Me['mode']; google: boolean; password: boolean; email_link: boolean; invite_only: boolean; terms_version: string }
+export const getAuthOptions = () => get<AuthOptions>('/auth/options')
+export const signUp = (email: string, password: string, inviteCode?: string) =>
+  post<{ sent: boolean; message: string }>('/auth/signup', { email, password, accept_terms: true, ...(inviteCode ? { invite_code: inviteCode } : {}) })
+export const passwordLogin = (email: string, password: string) => post<{ signed_in: boolean; email: string }>('/auth/password/login', { email, password })
+export const resendVerify = (email: string) => post<{ sent: boolean; message: string }>('/auth/verify/resend', { email })
+export const forgotPassword = (email: string) => post<{ sent: boolean; message: string }>('/auth/password/forgot', { email })
+export const resetPassword = (token: string, password: string) => post<{ signed_in: boolean; email: string }>('/auth/password/reset', { token, password })
+export const changeEmail = (newEmail: string, password: string) => post<{ sent: boolean; message: string }>('/auth/change-email', { new_email: newEmail, password })
 export const getMe = () => get<Me>('/auth/me')
 /** Where the browser goes to sign in (a redirect to Google). */
 export const loginUrl = `${BASE}/auth/login`

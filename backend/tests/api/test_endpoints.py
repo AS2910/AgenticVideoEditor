@@ -1557,7 +1557,8 @@ def test_with_sign_in_on_nothing_is_reachable_until_you_sign_in(client, sample_v
     back = login(client)
     assert back.status_code == 302 and back.headers["location"] == "http://localhost:5173/"
     assert fake.exchanged[0][0] == "c0de" and fake.exchanged[0][1] == "http://localhost:5173/api/auth/callback"
-    assert client.get("/auth/me").json()["user"] == {"sub": "42", "email": "ash@example.com", "name": "Ash", "picture": None}
+    assert client.get("/auth/me").json()["user"] == {"sub": "42", "email": "ash@example.com", "name": "Ash", "picture": None,
+                                                   "provider": "google"}
     assert client.get("/videos").json() == {"videos": []}
 
     # A write needs the header a cross-site form cannot send.

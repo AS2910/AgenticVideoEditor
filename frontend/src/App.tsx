@@ -26,6 +26,7 @@ import { UsagePage } from './pages/UsagePage'
 import { SettingsPage } from './pages/SettingsPage'
 import { BillingPage } from './pages/BillingPage'
 import { LoginPage } from './pages/LoginPage'
+import { ResetPage } from './pages/ResetPage'
 import { ExportPage } from './pages/ExportPage'
 import { HelpPage } from './pages/HelpPage'
 import { KeyboardSheet } from './components/KeyboardSheet'
@@ -294,7 +295,7 @@ function Studio() {
 
   // A 401 anywhere means the session ended: back to the door.
   useEffect(() => {
-    if (me?.mode === 'google' && error === 'Sign in to continue.') setSignedOut(true)
+    if (me?.mode !== 'off' && me && error === 'Sign in to continue.') setSignedOut(true)
   }, [error, me])
 
   /** Back to a blank editor state, e.g. before opening another project. */
@@ -1374,12 +1375,14 @@ function Studio() {
       )
     }
     if (route.page === 'legal') return <LegalPage doc={route.doc} />     // G6: readable without an account
-    if (route.page === 'invite' && me.mode === 'google' && (!me.user || signedOut)) {
+    if (route.page === 'invite' && me.mode !== 'off' && (!me.user || signedOut)) {
       // G2: sign in first, then come back to the invite.
       try { sessionStorage.setItem('voltage-invite', route.token) } catch { /* the link can be opened again */ }
     }
-    if (me.mode === 'google' && (!me.user || signedOut)) {
-      return <LoginPage error={signedOut ? 'Your session ended. Sign in again to continue.' : null} />
+    if (me.mode !== 'off' && (!me.user || signedOut)) {
+      // Launch item 5: a password reset link works signed out.
+      if (route.page === 'reset') return <ResetPage token={route.token} onDone={() => window.location.reload()} />
+      return <LoginPage error={signedOut ? 'Your session ended. Sign in again to continue.' : route.page === 'login' ? route.error ?? null : null} />
     }
     if (route.page === 'projects') {
       return (
@@ -1959,7 +1962,7 @@ function Studio() {
       </FeedbackProvider>
     )
   })()
-  const showChecklist = me !== null && !(me.mode === 'google' && (!me.user || signedOut)) && !project?.settings?.tutorial
+  const showChecklist = me !== null && !(me.mode !== 'off' && (!me.user || signedOut)) && !project?.settings?.tutorial
   return (
     <>
       {page}
