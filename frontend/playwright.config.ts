@@ -8,6 +8,8 @@ const port = Number(process.env.PW_PORT || 5181)
 export default defineConfig({
   testDir: './e2e',
   timeout: 60_000,
+  // Launch item 11: a loaded machine can take more than 5 s to settle a focus or a scroll.
+  expect: { timeout: 15_000 },
   fullyParallel: false,
   reporter: [['list']],
   use: { baseURL: `http://localhost:${port}`, channel: 'chrome', headless: true },

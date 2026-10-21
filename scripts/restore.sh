@@ -9,11 +9,14 @@
 # then runs an integrity check. Run `python -m app.store.migrate status` after.
 set -euo pipefail
 
+# sha256sum on Linux, shasum on macOS.
+if command -v sha256sum >/dev/null 2>&1; then sha=(sha256sum); else sha=(shasum -a 256); fi
+
 src="${1:?usage: restore.sh BACKUP_FOLDER DATA_DIR [--force]}"
 data="${2:?usage: restore.sh BACKUP_FOLDER DATA_DIR [--force]}"
 force="${3:-}"
 
-( cd "$src" && shasum -a 256 -c SHA256SUMS >/dev/null ) || { echo "The backup does not match its checksums." >&2; exit 1; }
+( cd "$src" && "${sha[@]}" -c SHA256SUMS >/dev/null ) || { echo "The backup does not match its checksums." >&2; exit 1; }
 
 mkdir -p "$data"
 if [[ -f "$data/ave.db" && "$force" != "--force" ]]; then

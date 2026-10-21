@@ -34,6 +34,8 @@ RUN mkdir -p app && touch app/__init__.py && pip install . && rm -rf app build *
 COPY backend/app ./app
 COPY backend/bench ./bench
 COPY help /srv/help
+# OPS.md: backup.sh and restore.sh, run with `docker compose exec -T app /srv/scripts/backup.sh /data /data/backups`.
+COPY scripts /srv/scripts
 RUN pip install --no-deps . && rm -rf build *.egg-info \
  && mkdir -p /data \
  && chown -R voltage:voltage /data

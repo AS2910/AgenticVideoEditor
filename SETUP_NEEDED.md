@@ -1,5 +1,17 @@
 # What you need to set up
 
+## For the public launch (2026-11-04), in order
+
+1. **A server and a domain**: one VM (2 vCPU, 4 GB RAM, 80 GB disk is enough to start) with Docker Compose, a domain and its DNS A record pointing at the VM. Follow `DEPLOY.md` (Caddy gets the HTTPS certificate on its own). Nothing was created tonight.
+2. **Production variables** in `.env` on the server (mode 600), checked by `make launch-check` (or `cd backend && python -m app.tools.env_check --env-file ../.env`): `AVE_ENV=production`, `AVE_AUTH=accounts` (or `google` with `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET`), `AVE_SESSION_SECRET` and `AVE_SHARE_SECRET` (each `openssl rand -hex 32`), `AVE_PUBLIC_URL=https://<your domain>`, `ANTHROPIC_API_KEY`, `ELEVENLABS_API_KEY`, `OPENAI_API_KEY`, `AVE_EMAIL_PROVIDER=resend` with `AVE_EMAIL_API_KEY` and `AVE_EMAIL_FROM`, `AVE_LAUNCH_PROFILE=public`, `AVE_ADMIN_OWNERS=<your owner id>` (sign up first, then read your id from the Admin page or the database), `AVE_DAILY_SPEND_CAP_USD` (default 50).
+3. **Email**: a Resend account, a verified sending domain (SPF and DKIM records at your DNS host). Sign-up, verification and password reset emails depend on it.
+4. **Database**: SQLite on the server's disk is fine for launch. For Postgres, a managed database and `DATABASE_URL` (section "Postgres" below).
+5. **Backups off the machine**: object storage (for example an S3 bucket or Backblaze B2) and `rclone` on the server to copy `/data/backups` there nightly (OPS.md).
+6. **Error tracking**: a Sentry project and `SENTRY_DSN` (optional; errors are also in the log and on the Admin page).
+7. **Payments**: Stripe and/or Razorpay keys and webhooks (section G3 below). Until then billing stays in test mode and the free trial's credits are the only ones anyone gets.
+8. **Legal**: the Terms, Privacy and Acceptable use pages are drafts; a lawyer must replace them, then bump `AVE_TERMS_VERSION`.
+
+
 - B3/F6 share links: set `AVE_PUBLIC_URL` to the address people open the app at (default `http://localhost:5173`), or links will point at localhost. Optional: `AVE_SHARE_SECRET` (a long random string) to sign links; without it one is generated into the data dir (`share_secret`) on first start; keep that file if you move the data dir, or every link stops working.
 - B3 captions in non-Latin scripts (Hindi, Tamil for B2): the installed ffmpeg has no libass. Install an ffmpeg built with libass (for example `brew install homebrew-ffmpeg/ffmpeg/ffmpeg`) and the subtitles filter is used automatically; until then captions are drawn with OpenCV (Latin letters only).
 - C2 email (review digests, new-version emails, review invites; item 7): every email is written to the `notify_outbox` table until Resend is set up. To send for real: a Resend account, a verified sending domain (SPF, DKIM, and a DMARC record), an API key with sending access, then `AVE_EMAIL_PROVIDER=resend`, `AVE_EMAIL_API_KEY=<key>` (or `RESEND_API_KEY`) and `AVE_EMAIL_FROM` (for example `Voltage <hello@yourdomain>`, on the verified domain). Without the key or the from address it stays on the outbox and logs a warning. Sent emails still get an outbox row (provider `resend`, or `resend (failed)` after the retries). Postmark or SES would be another `EmailSender` in `backend/app/notify/email.py`. Set `AVE_NOTIFY_OWNER_EMAIL` to where your own digest should go while sign-in is off; signed-in owners get theirs at their Google email. `AVE_PUBLIC_URL` must be the public address, or review links in emails point at localhost.

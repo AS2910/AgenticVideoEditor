@@ -23,6 +23,9 @@ FTS_SHADOWS = ("_data", "_idx", "_content", "_docsize", "_config")
 
 
 def _fts_shadow(c, table):
+    from app.store.pg import is_pg
+    if is_pg(c):
+        return False                       # no FTS5 on Postgres (0033 is a no-op there)
     virtual = {r[0] for r in c.execute("SELECT name FROM sqlite_master WHERE type = 'table' AND sql LIKE 'CREATE VIRTUAL TABLE%'")}
     return any(table.endswith(s) and table[:-len(s)] in virtual for s in FTS_SHADOWS)
 
@@ -32,8 +35,10 @@ def test_every_user_data_table_has_a_workspace_column():
     with db.tx() as c:
         missing = [t for t in m30.user_tables(c) if not _fts_shadow(c, t) and "workspace_id" not in _cols(c, t)]
     assert missing == []
+    from app.store.pg import is_pg
     with db.tx() as c:
-        assert "workspace_id" in _cols(c, "search_fts") and _fts_shadow(c, "search_fts_data")
+        if not is_pg(c):
+            assert "workspace_id" in _cols(c, "search_fts") and _fts_shadow(c, "search_fts_data")
 
 
 def test_a_row_written_without_a_workspace_takes_its_owners():

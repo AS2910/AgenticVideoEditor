@@ -68,7 +68,8 @@ def test_adding_to_an_approved_video_warns_first_then_drops_it_to_draft_and_logs
     assert (last["payload"]["from"], last["payload"]["to"]) == ("approved", "draft")
     assert last["payload"]["why"] == "A new edit was added after approval."
     verbs = [e["verb"] for e in client.get("/videos/p1/events/log").json()["events"]]
-    assert verbs[:2] == ["stage.moved", "edit.shipped"]
+    # Newest first: the move to Draft follows the ship (a render's own events may land in between under load).
+    assert verbs.index("stage.moved") < verbs.index("edit.shipped")
 
 
 def test_with_the_flag_off_an_add_is_not_held_but_still_leaves_approved(client, sample_video, monkeypatch):

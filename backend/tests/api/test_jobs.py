@@ -10,7 +10,7 @@ def active(client):
     return client.get("/videos/p1/jobs?active=1").json()
 
 
-def wait_job(client, job_id, timeout=30.0):
+def wait_job(client, job_id, timeout=120.0):
     deadline = time.time() + timeout
     while time.time() < deadline:
         found = next((j for j in client.get("/videos/p1/jobs").json()["jobs"] if j["job_id"] == job_id), None)

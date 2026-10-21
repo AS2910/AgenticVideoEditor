@@ -12,7 +12,8 @@ from tests.factories import make_source
 from app.domain.models import Transcript
 
 ROOT = Path(__file__).resolve().parents[3]
-pytestmark = pytest.mark.skipif(not shutil.which("sqlite3") or not shutil.which("shasum"), reason="sqlite3/shasum not installed")
+pytestmark = pytest.mark.skipif(not shutil.which("sqlite3") or not (shutil.which("shasum") or shutil.which("sha256sum")),
+                                reason="sqlite3 or a sha256 tool not installed")
 
 
 def _counts(path: Path) -> dict:
@@ -21,6 +22,7 @@ def _counts(path: Path) -> dict:
     return {n: c.execute(f"SELECT COUNT(*) FROM {n}").fetchone()[0] for n in names}
 
 
+@pytest.mark.sqlite_only
 def test_a_backup_restores_to_the_same_data(tmp_path):
     data = tmp_path / "var"
     db = Database(data / "ave.db")

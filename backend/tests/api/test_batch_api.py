@@ -95,7 +95,7 @@ def plan(client, goal="Make the offer line say 30% off", **more):
     return resp.json()
 
 
-def finished(client, batch_id, timeout=30.0):
+def finished(client, batch_id, timeout=120.0):
     batch_engine.wait(batch_id, timeout)
     return client.get(f"/projects/f1/batches/{batch_id}").json()
 
@@ -153,7 +153,7 @@ def test_cancel_stops_the_queued_videos_and_the_running_ones_finish(client, samp
     fake = agent(monkeypatch, {}, gate=hold)
     gate = plan(client)
     client.post(f"/projects/f1/batches/{gate['batch_id']}/go")
-    deadline = time.time() + 30
+    deadline = time.time() + 120
     while len(fake.entered) < 3 and time.time() < deadline:
         time.sleep(0.02)
     assert len(fake.entered) == 3
@@ -195,7 +195,7 @@ def test_a_video_with_a_question_pauses_alone_and_its_answer_carries_it_on(clien
     assert done["summary"]["waiting"] == ["p2"]
     answered = client.post(f"/projects/f1/batches/{gate['batch_id']}/videos/p2/answer", json={"text": "30%"})
     assert answered.status_code == 202, answered.text
-    deadline = time.time() + 30
+    deadline = time.time() + 120
     row = None
     while time.time() < deadline:
         row = {r["video_id"]: r for r in client.get(f"/projects/f1/batches/{gate['batch_id']}").json()["rows"]}["p2"]

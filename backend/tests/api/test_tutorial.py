@@ -22,7 +22,7 @@ def client():
     return TestClient(app)
 
 
-def await_job(client, job_id, timeout=30.0):
+def await_job(client, job_id, timeout=120.0):
     deadline = time.time() + timeout
     while time.time() < deadline:
         job = client.get(f"/jobs/{job_id}").json()

@@ -132,7 +132,7 @@ nightly from the host's crontab (`crontab -e`):
 
 ```cron
 # 03:15 every night: Voltage backup (OPS.md); keeps its own log
-15 3 * * * cd /opt/voltage && scripts/backup.sh >> /var/log/voltage-backup.log 2>&1
+15 3 * * * cd /opt/voltage && docker compose exec -T app /srv/scripts/backup.sh /data /data/backups >> /var/log/voltage-backup.log 2>&1
 ```
 
 Ship the backups off the machine (object storage or another host) and test a

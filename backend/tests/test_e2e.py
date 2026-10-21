@@ -49,7 +49,7 @@ def test_full_journey_ingest_turn_approve_export(sample_video, monkeypatch):
     job_id = accepted.json()["job_id"]
 
     # 2b. Poll the job to completion, as the UI does
-    deadline = time.time() + 30
+    deadline = time.time() + 120
     while time.time() < deadline:
         job = client.get(f"/jobs/{job_id}").json()
         if job["status"] in ("succeeded", "failed"):

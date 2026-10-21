@@ -13,6 +13,9 @@
 # Each backup folder gets a SHA256SUMS file; restore.sh checks it.
 set -euo pipefail
 
+# sha256sum on Linux, shasum on macOS.
+if command -v sha256sum >/dev/null 2>&1; then sha=(sha256sum); else sha=(shasum -a 256); fi
+
 here="$(cd "$(dirname "$0")/.." && pwd)"
 data="${1:-${AVE_DATA_DIR:-$here/backend/var}}"
 dest_root="${2:-${AVE_BACKUP_DIR:-$(dirname "$data")/backups}}"
@@ -41,7 +44,7 @@ fi
 # The media store and the signing key file (if one was generated).
 tar -C "$data" -czf "$dest/data.tar.gz" --exclude='./ave.db*' --exclude='./backups' .
 
-( cd "$dest" && shasum -a 256 ./* > SHA256SUMS )
+( cd "$dest" && "${sha[@]}" ./* > SHA256SUMS )
 echo "$dest"
 
 # Old backups go after a fortnight (KEEP_DAYS).

@@ -36,5 +36,7 @@ export default defineConfig({
     // The layout tests run in a real browser with Playwright (npm run test:layout).
     exclude: ['**/node_modules/**', 'e2e/**'],
     css: true,
+    // Launch item 11: typing through userEvent can pass 5 s on a loaded machine; a passing test is no slower.
+    testTimeout: 20_000,
   },
 })

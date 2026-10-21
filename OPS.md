@@ -46,7 +46,7 @@ Nightly, on a single VM with Docker Compose (see `DEPLOY.md`):
 
 ```sh
 # crontab -e (as the deploy user)
-15 3 * * * cd /srv/voltage && docker compose exec -T app /srv/scripts/backup.sh /data /data/backups >> /var/log/voltage-backup.log 2>&1
+15 3 * * * cd /opt/voltage && docker compose exec -T app /srv/scripts/backup.sh /data /data/backups >> /var/log/voltage-backup.log 2>&1
 ```
 
 Then copy `/data/backups` off the machine (for example `rclone sync` to object
