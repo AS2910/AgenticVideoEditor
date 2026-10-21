@@ -77,7 +77,7 @@ async function mockApi(page: Page, world: World, posts: string[]) {
     const json = (body: unknown, status = 200) => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) })
     if (method !== 'GET') posts.push(`${method} ${path} ${route.request().postData() ?? ''}`.trim())
     if (url.endsWith('/auth/me')) return json({ mode: 'off', user: null })
-    if (url.endsWith('/me/flags')) return json({ flags: ['projects.consistency'] })
+    if (url.endsWith('/me/flags')) return json({ flags: ['projects.consistency', 'projects.check'] })
     if (url.endsWith('/me/onboarding')) return json({ tour: { step: 0, finished: true, skipped: true }, tips: [], checklist: [], checklist_hidden: true })
     if (url.includes('/frames/')) return route.fulfill({ status: 404, body: '' })
     if (path === '/api/projects/f1/check' && method === 'POST') { world.checkAt = Date.now(); return json(world.page(), 202) }
