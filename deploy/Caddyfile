@@ -1,0 +1,25 @@
+# Voltage behind Caddy: HTTPS with an automatic Let's Encrypt certificate.
+# VOLTAGE_DOMAIN and ACME_EMAIL come from .env (docker-compose.yml passes them).
+{
+	email {$ACME_EMAIL}
+}
+
+{$VOLTAGE_DOMAIN} {
+	encode zstd gzip
+	# Uploads up to the backend's 500 MB limit.
+	request_body {
+		max_size 520MB
+	}
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		-Server
+	}
+	# flush_interval -1 passes Server-Sent Events (live job updates) straight through.
+	reverse_proxy web:8080 {
+		flush_interval -1
+	}
+	log {
+		output stdout
+		format json
+	}
+}

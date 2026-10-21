@@ -1,0 +1,115 @@
+# Voltage on one machine. Secrets and settings come from `.env` beside this
+# file (copy .env.example; chmod 600). See DEPLOY.md.
+#
+#   docker compose up -d --build          # app, worker, web, postgres
+#   COMPOSE_PROFILES=https in .env        # also Caddy on :80/:443 (the VM)
+#
+# SQLite stays the default: ave.db and the media live in the `avedata` volume.
+# Postgres runs for when DATABASE_URL points the app at it (blank = SQLite).
+
+name: voltage
+
+x-backend: &backend
+  build:
+    context: .
+    dockerfile: backend/Dockerfile
+  image: voltage-backend:latest
+  env_file: .env
+  volumes:
+    - avedata:/data
+  restart: unless-stopped
+  logging:
+    driver: json-file
+    options: { max-size: "20m", max-file: "5" }
+
+services:
+  app:
+    <<: *backend
+    environment:
+      AVE_DATA_DIR: /data
+      DATABASE_URL: ${DATABASE_URL:-}
+      # The purge runs in the worker, never here as well.
+      AVE_PURGE_DAILY: "0"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    # Not published: only `web` reaches it, on the compose network.
+    expose:
+      - "8000"
+
+  worker:
+    <<: *backend
+    command: ["python", "-m", "app.worker"]
+    environment:
+      AVE_DATA_DIR: /data
+      DATABASE_URL: ${DATABASE_URL:-}
+      AVE_PURGE_DAILY: ${AVE_PURGE_DAILY:-1}
+      # The API still sends review digests itself (DEPLOY.md, "The worker").
+      AVE_WORKER_DIGESTS: ${AVE_WORKER_DIGESTS:-0}
+    # The API applies the migrations at start; the worker opens the same database after it.
+    depends_on:
+      app:
+        condition: service_healthy
+    healthcheck:
+      disable: true
+
+  web:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    image: voltage-web:latest
+    depends_on:
+      app:
+        condition: service_healthy
+    # Loopback only: Caddy (or an SSH tunnel) is the way in.
+    ports:
+      - "127.0.0.1:8080:8080"
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options: { max-size: "20m", max-file: "5" }
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-voltage}
+      POSTGRES_USER: ${POSTGRES_USER:-voltage}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options: { max-size: "20m", max-file: "5" }
+
+  caddy:
+    profiles: ["https"]
+    image: caddy:2.8-alpine
+    environment:
+      VOLTAGE_DOMAIN: ${VOLTAGE_DOMAIN:?set VOLTAGE_DOMAIN in .env}
+      ACME_EMAIL: ${ACME_EMAIL:?set ACME_EMAIL in .env}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddydata:/data
+      - caddyconfig:/config
+    depends_on:
+      - web
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options: { max-size: "20m", max-file: "5" }
+
+volumes:
+  avedata:
+  pgdata:
+  caddydata:
+  caddyconfig:

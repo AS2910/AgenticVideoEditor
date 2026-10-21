@@ -17,6 +17,8 @@ Underneath that: The backend ingests a real file, measures it with ffprobe, stor
 
 ## Running it
 
+To run it on a server (Docker Compose, HTTPS, backups), see `DEPLOY.md`; every setting is listed in `.env.example`.
+
 **Prerequisites**
 
 ffmpeg (with ffprobe) must be on `PATH` — the backend encodes, probes and demuxes real media.
