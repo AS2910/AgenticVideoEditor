@@ -61,7 +61,7 @@ from app.media.ffmpeg import SpanMismatch
 from app.media.reference import extract_reference_audio, speech_seconds
 from app.orchestrator.clones import CloneService, VoiceChoice
 from app.orchestrator.pipeline import run_edit
-from app.store.db import Database
+from app.store.db import Database, location as database_location
 from app.flags import FlagStore
 from app import analytics, dataexport, errors_report
 from app.safety import figures as figures_mod, liveness as liveness_mod, provenance as provenance_mod
@@ -127,7 +127,7 @@ app = FastAPI(title="Agentic Video Editor", debug=False,
 log = logging.getLogger(__name__)
 
 # Wiring (module-level singletons for this in-memory slice).
-database = Database(settings.data_dir / "ave.db")
+database = Database(database_location(settings.data_dir / "ave.db"))
 repo = ProjectRepository(database)
 # Step 0 (FLAGS): every phase of the projects plan ships behind a flag, on per owner.
 flags = FlagStore(database, settings.flag_owners)

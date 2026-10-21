@@ -131,7 +131,7 @@ def test_migration_0024_up_and_down(tmp_path):
     tabs = lambda: {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
     cols = lambda: {r[1] for r in conn.execute("PRAGMA table_info(usage)")}
     assert {"workspace_members", "workspace_invites", "login_links"} <= tabs() and "by" in cols()
-    migrate.down(conn, max(migrate.applied(conn)) - 23)   # back to 0023
+    migrate.down_to(conn, 23)   # back to 0023
     assert not ({"workspace_members", "workspace_invites", "login_links"} & tabs()) and "by" not in cols()
     assert "learned_items" in tabs()
     migrate.up(conn)

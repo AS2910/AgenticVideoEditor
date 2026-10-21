@@ -1,7 +1,8 @@
 """The migration runner (Step 0, M0): applies the numbered steps in
 `app.store.migrations` and records them in `schema_migrations`.
 
-`Database` runs `up` at startup. From the command line, against a file:
+`Database` runs `up` at startup. From the command line, against a file or a
+Postgres URL (`--db postgres://user:pass@host:5432/name`):
 
     python -m app.store.migrate status --db var/ave.db
     python -m app.store.migrate up [N] --db var/ave.db      # all pending, or the next N
@@ -89,7 +90,15 @@ def down(conn: sqlite3.Connection, steps: int = 1) -> list[int]:
     return rolled
 
 
+def down_to(conn: sqlite3.Connection, version: int) -> list[int]:
+    """Roll back every applied step after `version` (numbers can have gaps)."""
+    return down(conn, sum(1 for v in applied(conn) if v > version))
+
+
 def connect(path: str) -> sqlite3.Connection:
+    from app.store import pg
+    if pg.is_url(path):
+        return pg.connect(path)
     conn = sqlite3.connect(path, isolation_level=None)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA busy_timeout=5000")
@@ -100,7 +109,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m app.store.migrate", description="Apply or roll back schema migrations.")
     parser.add_argument("command", choices=("up", "down", "status"))
     parser.add_argument("steps", nargs="?", type=int, help="how many steps (up: default all pending; down: default 1)")
-    parser.add_argument("--db", required=True, help="path to the SQLite file")
+    parser.add_argument("--db", required=True, help="path to the SQLite file, or a postgres:// URL")
     args = parser.parse_args(argv)
     conn = connect(args.db)
     try:

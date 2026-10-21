@@ -30,6 +30,48 @@ os.environ["AVE_VOICE_BUDGET_CHARS"] = "2000"
 # The measure extra (WavLM, UTMOS) stays off: no model downloads in the suite;
 # its tests inject fakes. tests/continuity/test_similarity_live.py opts in.
 os.environ["AVE_MEASURE"] = "0"
+# A developer's DATABASE_URL never points the suite at their Postgres.
+os.environ["DATABASE_URL"] = ""
+
+
+# The Postgres run (launch, item 6): with AVE_TEST_DATABASE_URL set, every
+# `Database` in the suite is a schema in a database made for this session
+# (see `app.store.pg.target`), dropped at the end. Unset, the suite is SQLite.
+_PG_SERVER = os.environ.get("AVE_TEST_DATABASE_URL")
+_PG_DB = None
+if _PG_SERVER:
+    import psycopg
+    from psycopg.conninfo import make_conninfo
+    _PG_DB = f"ave_test_{os.getpid()}"
+    with psycopg.connect(_PG_SERVER, autocommit=True) as _admin:
+        _admin.execute(f'CREATE DATABASE "{_PG_DB}"')
+    os.environ["AVE_TEST_DATABASE_URL"] = make_conninfo(_PG_SERVER, dbname=_PG_DB)
+
+
+def pytest_configure(config):
+    config.addinivalue_line("markers", "sqlite_only: reads or writes the SQLite file directly; skipped on the Postgres run")
+
+
+def pytest_collection_modifyitems(config, items):
+    if not _PG_DB:
+        return
+    skip = pytest.mark.skip(reason="reads or writes the SQLite file directly")
+    for item in items:
+        if item.get_closest_marker("sqlite_only"):
+            item.add_marker(skip)
+
+
+def pytest_sessionfinish(session, exitstatus):
+    if not _PG_DB:
+        return
+    import gc
+    import psycopg
+    gc.collect()
+    try:
+        with psycopg.connect(_PG_SERVER, autocommit=True) as admin:
+            admin.execute(f'DROP DATABASE IF EXISTS "{_PG_DB}" WITH (FORCE)')
+    except Exception:
+        pass
 
 
 # No test reaches a real model, vendor or link host. A test that sets a fake

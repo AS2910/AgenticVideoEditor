@@ -2,6 +2,8 @@
 startup; every project row becomes a standalone video."""
 import sqlite3
 
+import pytest
+
 from app.store.db import Database
 from app.store.repository import ProjectRepository
 
@@ -37,6 +39,7 @@ def _old_database(path):
     conn.close()
 
 
+@pytest.mark.sqlite_only
 def test_projects_table_is_renamed_to_videos_and_every_row_is_standalone(tmp_path):
     path = tmp_path / "ave.db"
     _old_database(path)

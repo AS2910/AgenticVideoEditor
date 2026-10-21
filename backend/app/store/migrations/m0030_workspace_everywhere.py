@@ -16,10 +16,14 @@ before or outside any account (`login_links`, `abuse_reports`, and the
 auth tables 0031 adds).
 
 `down` drops the triggers and the added columns.
+
+On Postgres (item 6) each trigger is a BEFORE INSERT function that fills
+`NEW.workspace_id` the same way; the outcome is the same row.
 """
 from __future__ import annotations
 
 from app.store.migrations._util import add_column, columns, drop_column, tables
+from app.store.pg import is_pg
 
 # Owner-keyed tables that get the column here (their owner column's name).
 ADDED = {
@@ -85,6 +89,10 @@ def up(conn) -> int:
         source = _source(table, cols)
         if "workspace_id" not in cols or source is None:
             continue
+        if is_pg(conn):
+            _pg_trigger(conn, table, source)
+            made += 1
+            continue
         conn.execute(f"DROP TRIGGER IF EXISTS {_trigger_name(table)}")
         conn.execute(
             f"CREATE TRIGGER {_trigger_name(table)} AFTER INSERT ON {table} "
@@ -94,7 +102,24 @@ def up(conn) -> int:
     return made
 
 
+def _pg_trigger(conn, table: str, source: str) -> None:
+    name = _trigger_name(table)
+    conn.execute(
+        f"CREATE OR REPLACE FUNCTION {name}() RETURNS trigger LANGUAGE plpgsql AS $fn$ BEGIN "
+        f"IF NEW.workspace_id IS NULL THEN NEW.workspace_id := {source}; END IF; RETURN NEW; END $fn$")
+    conn.execute(f"DROP TRIGGER IF EXISTS {name} ON {table}")
+    conn.execute(f"CREATE TRIGGER {name} BEFORE INSERT ON {table} FOR EACH ROW EXECUTE FUNCTION {name}()")
+
+
 def down(conn) -> None:
+    if is_pg(conn):
+        for (name, table) in conn.execute(
+                "SELECT DISTINCT name, tbl_name FROM sqlite_master WHERE type = 'trigger' AND name LIKE 'ws_default_%'").fetchall():
+            conn.execute(f"DROP TRIGGER IF EXISTS {name} ON {table}")
+            conn.execute(f"DROP FUNCTION IF EXISTS {name}()")
+        for table in ADDED:
+            drop_column(conn, table, "workspace_id")
+        return
     for (name,) in conn.execute(
             "SELECT name FROM sqlite_master WHERE type = 'trigger' AND name LIKE 'ws_default_%'").fetchall():
         conn.execute(f"DROP TRIGGER IF EXISTS {name}")

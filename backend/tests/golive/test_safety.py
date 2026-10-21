@@ -109,7 +109,7 @@ def test_migration_0029_up_and_down(tmp_path):
     tabs = lambda: {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
     mine = {"liveness_attempts", "abuse_reports", "data_requests", "provenance_marks"}
     assert mine <= tabs()
-    migrate.down(conn, max(migrate.applied(conn)) - 28)   # back to 0028
+    migrate.down_to(conn, 28)   # back to 0028
     assert not (mine & tabs()) and "invoices" in tabs()
     migrate.up(conn)
     assert mine <= tabs()

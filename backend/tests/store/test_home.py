@@ -48,7 +48,7 @@ def test_archive_and_pins(repo):
 def test_migration_0021_up_down_and_refuses_to_unarchive_silently(tmp_path):
     conn = migrate.connect(str(tmp_path / "m.db"))
     migrate.up(conn)
-    migrate.down(conn, max(migrate.applied(conn)) - 21)   # 0021 is the last step applied
+    migrate.down_to(conn, 21)   # 0021 is the last step applied
     cols = lambda: {r[1] for r in conn.execute("PRAGMA table_info(projects)")}
     tabs = lambda: {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
     assert {"archived_at", "archived_by"} <= cols() and "pins" in tabs()

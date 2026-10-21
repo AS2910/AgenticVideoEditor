@@ -18,6 +18,9 @@ dev = ["pytest>=8.0"]
 # stems (the voice is laid over the original mix) and no measured identity.
 room = ["demucs>=4.0.1", "torch>=2.2", "torchaudio>=2.2"]           # stem separation (15c)
 measure = ["torch>=2.2", "torchaudio>=2.2", "transformers>=4.40"]    # SIM-o and UTMOS (15d)
+# Launch item 6: Postgres when DATABASE_URL is set; pgserver runs the suite on a local throwaway server.
+postgres = ["psycopg[binary]>=3.1"]
+postgres-test = ["psycopg[binary]>=3.1", "pgserver>=0.1.4"]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]

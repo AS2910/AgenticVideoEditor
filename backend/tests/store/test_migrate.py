@@ -127,9 +127,13 @@ def _rows(conn) -> dict:
     return {t: sorted(tuple(r) for r in conn.execute(f"SELECT * FROM {t}")) for t in tables}
 
 
+# Numbers held for steps on other branches (0032 accounts, 0033 search index).
+RESERVED = {32, 33}
+
+
 def test_versions_are_numbered_from_one_without_gaps():
     versions = [m.version for m in all_migrations()]
-    assert versions == list(range(1, len(versions) + 1))
+    assert versions == [v for v in range(1, versions[-1] + 1) if v not in RESERVED or v in versions]
 
 
 def test_a_fresh_database_gets_every_step_and_records_it():
@@ -221,6 +225,7 @@ def test_a_failing_step_leaves_the_database_as_it_was(monkeypatch):
     assert _shape(conn) == before and max(migrate.applied(conn)) == 4
 
 
+@pytest.mark.sqlite_only
 def test_the_database_runs_the_runner_at_startup(tmp_path):
     path = tmp_path / "ave.db"
     db = Database(path)
@@ -243,7 +248,7 @@ def test_the_command_line_applies_rolls_back_and_reports(tmp_path, capsys):
     assert f"rolled back {last:04d}" in capsys.readouterr().out
     assert migrate.main(["status", "--db", path]) == 0
     lines = capsys.readouterr().out.strip().splitlines()
-    assert len(lines) == last and lines[-1].endswith("pending")
+    assert len(lines) == len(all_migrations()) and lines[-1].endswith("pending")
 
 
 @pytest.mark.skipif(not os.environ.get("AVE_LIVE_DB_COPY"), reason="set AVE_LIVE_DB_COPY to a copy of a real database")

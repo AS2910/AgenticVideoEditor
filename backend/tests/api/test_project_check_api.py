@@ -79,7 +79,9 @@ def run(client, mode="rules", timeout=30.0):
     deadline = time.time() + timeout
     while time.time() < deadline:
         page = client.get("/projects/f1/check").json()
-        if page["check"]["status"] != "running":
+        # The check's row finishes a moment before its job does; wait for both.
+        job = page["check"].get("job") or {}
+        if page["check"]["status"] != "running" and job.get("status") not in ("queued", "running"):
             return page
         time.sleep(0.05)
     raise AssertionError("the check never finished")

@@ -3,6 +3,8 @@ user's data names its workspace (defaulting to the owner's), and launch
 switches are flags that can be set for everyone at once."""
 import sqlite3
 
+import pytest
+
 from app.flags import ALL, FlagStore, main as flags_main
 from app.store import migrate
 from app.store.db import Database
@@ -43,6 +45,7 @@ def test_a_row_keyed_by_a_video_takes_the_videos_workspace():
         assert c.execute("SELECT workspace_id FROM messages").fetchone()[0] == "w9"
 
 
+@pytest.mark.sqlite_only
 def test_0030_goes_down_and_up_again_without_losing_rows(tmp_path):
     path = tmp_path / "ave.db"
     Database(path)
@@ -98,6 +101,7 @@ def test_the_flags_cli_sets_a_flag_for_everyone(tmp_path, capsys):
     assert not FlagStore(Database(path)).enabled("launch.invite_only", "google:anyone")
 
 
+@pytest.mark.sqlite_only
 def test_the_migrations_run_on_a_database_made_before_the_runner(tmp_path):
     """A pre-runner file (only 0001's shape, nothing recorded) comes up to date."""
     path = tmp_path / "old.db"

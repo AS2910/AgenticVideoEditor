@@ -28,7 +28,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Callable
 
-from app.store.db import PROJECT_TABLES, Database
+from app.store.db import PROJECT_TABLES, Database, location
 from app.timefmt import iso, now_iso
 
 log = logging.getLogger("ave")
@@ -271,7 +271,7 @@ def main(argv: list[str] | None = None) -> int:
     from app.config import load_settings
     settings = load_settings()
     data_dir = Path(args.data_dir) if args.data_dir else settings.data_dir
-    db = Database(args.db or data_dir / "ave.db")
+    db = Database(args.db or location(data_dir / "ave.db"))
     delete_voice = None if args.dry_run else _vendor_delete(settings, db, data_dir)
     report = purge(db, data_dir / "artifacts", args.days, dry_run=args.dry_run, delete_voice=delete_voice,
                    consent_years=settings.consent_retention_years)

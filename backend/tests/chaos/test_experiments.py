@@ -158,6 +158,7 @@ def test_e4b_a_full_disk_fails_the_job_with_the_system_s_own_words():
 
 # ── E5 · a second process holds the database for a moment ──────────────────────
 
+@pytest.mark.sqlite_only
 def test_e5_a_writer_in_another_connection_is_waited_for_not_failed(tmp_path):
     """Hypothesis: a momentary lock from another process (a script, a second
     server) does not fail the request. Before the fix sqlite raised at once."""

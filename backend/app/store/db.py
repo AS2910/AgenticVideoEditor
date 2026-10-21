@@ -1,4 +1,6 @@
-"""The SQLite database behind videos, projects (folders), chat and spend (Phase 9).
+"""The database behind videos, projects (folders), chat and spend (Phase 9):
+SQLite by default, Postgres when the path is a postgres:// URL (launch, item 6;
+see `app.store.pg`).
 
 One connection, shared across request and job-worker threads under a lock —
 the write volume is a handful of rows per edit, so contention is not a
@@ -6,13 +8,15 @@ concern, and one connection keeps `:memory:` databases (tests) coherent.
 """
 from __future__ import annotations
 
+import os
 import sqlite3
 import threading
+import weakref
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator
 
-from app.store import migrate
+from app.store import migrate, pg
 
 # The tables keyed by a video's id (their `project_id` column is the video id,
 # from before projects were folders).
@@ -30,15 +34,29 @@ EXTRA_TABLES = ("project_briefs", "project_rules", "project_events", "purged_ite
                 "member_shares", "accounts", "auth_tokens")
 
 
+def location(default: str | Path) -> str | Path:
+    """Where the app's database is: `DATABASE_URL` when it is a postgres://
+    URL, else `default` (the SQLite file)."""
+    url = os.environ.get("DATABASE_URL", "")
+    return url if pg.is_url(url) else default
+
+
 class Database:
     def __init__(self, path: str | Path = ":memory:") -> None:
-        if path != ":memory:":
-            Path(path).parent.mkdir(parents=True, exist_ok=True)
-        self._conn = sqlite3.connect(str(path), check_same_thread=False, isolation_level=None)
-        self._conn.row_factory = sqlite3.Row
+        on_pg = pg.target(path)
+        self.dialect = "postgres" if on_pg else "sqlite"
+        if on_pg:
+            url, schema, throwaway = on_pg
+            self._conn = pg.connect(url, schema)
+            weakref.finalize(self, self._conn.close, throwaway)
+        else:
+            if path != ":memory:":
+                Path(path).parent.mkdir(parents=True, exist_ok=True)
+            self._conn = sqlite3.connect(str(path), check_same_thread=False, isolation_level=None)
+            self._conn.row_factory = sqlite3.Row
         self._lock = threading.RLock()
         with self._lock:
-            if path != ":memory:":
+            if path != ":memory:" and not on_pg:
                 self._conn.execute("PRAGMA journal_mode=WAL")
             # The chaos pass: another process on the same file (a second server,
             # a script) holds a write lock for a moment; wait up to 5 s rather

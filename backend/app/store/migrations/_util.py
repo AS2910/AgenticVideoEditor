@@ -1,4 +1,6 @@
-"""Small helpers the steps share."""
+"""Small helpers the steps share. They work on SQLite and on Postgres (where
+`app.store.pg` reads `sqlite_master` and `PRAGMA table_info` from the
+information schema)."""
 from __future__ import annotations
 
 import sqlite3

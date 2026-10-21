@@ -97,7 +97,7 @@ def test_migration_0026_up_and_down(tmp_path):
     migrate.up(conn)
     tabs = lambda: {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
     assert "analytics_events" in tabs()
-    migrate.down(conn, max(migrate.applied(conn)) - 25)   # back to 0025
+    migrate.down_to(conn, 25)   # back to 0025
     assert "analytics_events" not in tabs() and "notifications" in tabs()
     migrate.up(conn)
     assert "analytics_events" in tabs()
