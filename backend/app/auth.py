@@ -46,10 +46,12 @@ class Identity:
     email: str | None = None
     name: str | None = None
     picture: str | None = None
+    # G2: "google", or "email" for someone signed in with an emailed link (sub is their address).
+    provider: str = "google"
 
     @property
     def owner(self) -> str:
-        return f"google:{self.sub}"
+        return f"{self.provider}:{self.sub}"
 
 
 # ── signed tokens ─────────────────────────────────────────────────────────────
@@ -93,7 +95,8 @@ def verify(token: str | None, secret: str, *, max_age: int, now: float | None = 
 def identity_from(payload: dict | None) -> Identity | None:
     if not payload or not isinstance(payload.get("sub"), str) or not payload["sub"]:
         return None
-    return Identity(payload["sub"], payload.get("email"), payload.get("name"), payload.get("picture"))
+    provider = payload.get("provider") if payload.get("provider") in ("google", "email") else "google"
+    return Identity(payload["sub"], payload.get("email"), payload.get("name"), payload.get("picture"), provider)
 
 
 # ── PKCE ──────────────────────────────────────────────────────────────────────

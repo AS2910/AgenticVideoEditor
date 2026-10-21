@@ -6,6 +6,7 @@ error. `sleep` is injectable so tests exercise the backoff without waiting.
 from __future__ import annotations
 
 import logging
+import contextvars
 import time
 from concurrent.futures import ThreadPoolExecutor
 from typing import Callable
@@ -71,7 +72,8 @@ class JobRunner:
         `work` receives a `report(progress, step)` callback and returns the
         payload to store on the job.
         """
-        self._pool.submit(self._run, job.job_id, work)
+        # G2: the work carries the request's context (who caused its charges).
+        self._pool.submit(contextvars.copy_context().run, self._run, job.job_id, work)
         return job
 
     def _run(self, job_id: str, work) -> None:

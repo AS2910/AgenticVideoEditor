@@ -42,6 +42,9 @@ def claude_usd(model: str, input_tokens: int, output_tokens: int, cache_read: in
 # The turn a charge belongs to: the turn job sets it for its duration and
 # `Ledger.record` reads it, so every row a turn causes carries the turn's id.
 current_turn: ContextVar[str | None] = ContextVar("current_turn", default=None)
+# G2: the signed-in person whose action caused a charge (a workspace member,
+# or the owner). Set per request; work started by the request carries it.
+current_actor: ContextVar[str | None] = ContextVar("current_actor", default=None)
 
 MONTHS = ("January", "February", "March", "April", "May", "June", "July", "August",
           "September", "October", "November", "December")
@@ -86,6 +89,21 @@ class UserCeilingReached(SpendCeilingReached):
             self,
             f"You have reached your {money(ceiling)} ceiling for {month_name(now)}. "
             f"It resets on 1 {MONTHS[now.month % 12]}.",
+        )
+
+
+class MemberLimitReached(SpendCeilingReached):
+    """G2: a workspace member has spent their own monthly limit."""
+
+    scope = "member"
+
+    def __init__(self, spent: float, limit: float, now: datetime | None = None) -> None:
+        self.spent, self.ceiling = spent, limit
+        now = now or datetime.now(timezone.utc)
+        NonRetryableError.__init__(
+            self,
+            f"You have reached your {money(limit)} spend limit in this workspace for {month_name(now)}. "
+            "Ask the workspace owner to raise it.",
         )
 
 
@@ -142,10 +160,10 @@ class Ledger:
         now and the turn running now; moving the video later rewrites neither."""
         with self.db.tx() as c:
             c.execute(
-                "INSERT INTO usage (project_id, vendor, what, units, unit, usd, at, folder_id, turn_id) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO usage (project_id, vendor, what, units, unit, usd, at, folder_id, turn_id, by) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (project_id, vendor, what, units, unit, usd, now_iso(),
-                 folder_of(c, project_id), current_turn.get()),
+                 folder_of(c, project_id), current_turn.get(), current_actor.get()),
             )
             stamp_last(c, "usage", project_id)
 
@@ -156,9 +174,9 @@ class Ledger:
         a project voice, reading reference files): no video id, the project set."""
         with self.db.tx() as c:
             c.execute(
-                "INSERT INTO usage (project_id, vendor, what, units, unit, usd, at, folder_id, turn_id) "
-                "VALUES ('', ?, ?, ?, ?, ?, ?, ?, ?)",
-                (vendor, what, units, unit, usd, now_iso(), folder_id, current_turn.get()),
+                "INSERT INTO usage (project_id, vendor, what, units, unit, usd, at, folder_id, turn_id, by) "
+                "VALUES ('', ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (vendor, what, units, unit, usd, now_iso(), folder_id, current_turn.get(), current_actor.get()),
             )
             stamp_last(c, "usage", "", folder_id)
 
@@ -268,6 +286,15 @@ class Ledger:
             ).fetchone()
         return float(row["usd"])
 
+    def spent_usd_by_actor(self, actor: str, workspace_id: str, since: str | None = None) -> float:
+        """What one person caused in one workspace (G2: a member's month)."""
+        with self.db.tx() as c:
+            row = c.execute(
+                "SELECT COALESCE(SUM(usd), 0) AS usd FROM usage WHERE by = ? AND workspace_id = ?"
+                + (" AND at >= ?" if since else ""), (actor, workspace_id) + ((since,) if since else ()),
+            ).fetchone()
+        return float(row["usd"])
+
     def spent_usd_by_folder(self, folder_id: str, since: str | None = None) -> float:
         """What a project's videos spent while in it (Folders)."""
         with self.db.tx() as c:
@@ -293,10 +320,12 @@ class Ledger:
 
     def ensure_can_spend(self, project_id: str, owner: str | None = None,
                          owner_ceiling_usd: float | None = None, folder: tuple[str, float, str] | None = None,
-                         filename: str = "") -> None:
+                         filename: str = "", member: tuple[str, str, float] | None = None) -> None:
         """Refuse new paid work once the video, its project (`folder` =
-        (id, ceiling, name)) or the person this month has reached its ceiling.
-        Every ceiling applies; the refusal names the scope that was reached."""
+        (id, ceiling, name)) or the person this month has reached its ceiling,
+        or (G2) a workspace member (`member` = (who, workspace id, limit))
+        their own monthly limit. Every ceiling applies; the refusal names the
+        scope that was reached."""
         spent = self.spent_usd(project_id)
         if spent >= self.ceiling_usd:
             raise SpendCeilingReached(spent, self.ceiling_usd, filename)
@@ -309,3 +338,8 @@ class Ledger:
             mine = self.spent_usd_by_owner(owner, iso(month_start()))
             if mine >= owner_ceiling_usd:
                 raise UserCeilingReached(mine, owner_ceiling_usd)
+        if member is not None:
+            who, workspace_id, limit = member
+            theirs = self.spent_usd_by_actor(who, workspace_id, iso(month_start()))
+            if theirs >= limit:
+                raise MemberLimitReached(theirs, limit)

@@ -1000,3 +1000,11 @@ export interface LearnedPage {
 
 /** G1: where a link can be imported from. */
 export interface ImportSource { name: 'drive' | 'dropbox' | 'youtube'; label: string; enabled: boolean; why_off: string | null }
+
+/** G2: roles. The owner is the workspace's own; members are Editors or Reviewers. */
+export type MemberRole = 'owner' | 'editor' | 'reviewer'
+export interface WorkspaceMember { member: string; email: string | null; name: string | null; role: MemberRole; role_word: string; spend_limit_usd?: number | null; spent_usd: number; joined_at?: string }
+export interface WorkspaceInvite { id: string; email: string; role: MemberRole; spend_limit_usd: number | null; created_at: string; expires_at: string; state: string; link: string }
+export interface MembersPage { workspace_id: string; owner: WorkspaceMember; members: WorkspaceMember[]; invites: WorkspaceInvite[]; roles: { role: MemberRole; word: string }[]; sign_in: boolean; invite?: WorkspaceInvite }
+export interface WorkspaceView { workspace: { workspace_id: string; name: string; own: boolean }; you: { user: string; role: MemberRole }; workspaces: { workspace_id: string; name: string; role: MemberRole; own: boolean }[] }
+export interface InviteView { email: string; role: MemberRole; role_word: string; workspace_name: string; invited_by: string | null; expires_at: string; sign_in: boolean }

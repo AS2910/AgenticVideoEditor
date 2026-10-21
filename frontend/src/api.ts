@@ -8,7 +8,7 @@ import type {
   ProjectSettings, Autonomy, Effort, Plan, Mix, Selection, Candidate, Reading, Sight, ChatMessage,
   ProjectFolder, ProjectDetailFolder, ProjectFile, HelpArticle, Onboarding, ProjectVoice,
   ActivityJob, TurnView, RenderState, BriefVersion, BriefChange, BriefUpdateRun, ProjectRule, RuleKind, RuleData, CheckPage, Batch, ExportPreset, ExportPresetPage, ExportPresetChange, Preflight, BatchExport, ShareLink, PublicShare,
-  PublicComment, ReviewAnswer, ReviewComment, ReviewLinkRequest, BinItem, BinKind, BinRestored, Pin, SearchResult, ProjectTemplate, LearnedPage, ImportSource,
+  PublicComment, ReviewAnswer, ReviewComment, ReviewLinkRequest, BinItem, BinKind, BinRestored, Pin, SearchResult, ProjectTemplate, LearnedPage, ImportSource, MembersPage, WorkspaceView, InviteView, MemberRole,
 } from './types'
 
 const BASE = '/api'
@@ -509,6 +509,18 @@ export const ensureSample = () => post<{ created: boolean; project_id: string | 
 export const getImportSources = () => get<{ sources: ImportSource[]; max_bytes: number }>('/imports/sources')
 export const startImport = (url: string, projectId: string | null) => post<ActivityJob>('/imports', { url, project_id: projectId })
 export const getImport = (jobId: string) => get<ActivityJob>(`/imports/${encodeURIComponent(jobId)}`)
+// G2: the workspace, members and invites, email sign-in.
+export const getWorkspace = () => get<WorkspaceView>('/workspace')
+export const listMembers = () => get<MembersPage>('/workspace/members')
+export const sendInvite = (email: string, role: MemberRole, spendLimit: number | null) => post<MembersPage>('/workspace/invites', { email, role, spend_limit_usd: spendLimit })
+export const revokeInvite = (id: string) => request<MembersPage>(`/workspace/invites/${encodeURIComponent(id)}`, { method: 'DELETE' })
+export const changeMember = (member: string, change: { role?: MemberRole; spend_limit_usd?: number | null }) => patch<MembersPage>(`/workspace/members/${encodeURIComponent(member)}`, change)
+export const removeMember = (member: string) => request<MembersPage>(`/workspace/members/${encodeURIComponent(member)}`, { method: 'DELETE' })
+export const switchWorkspace = (workspaceId: string | null) => post<{ workspace_id: string | null }>('/workspace/switch', { workspace_id: workspaceId })
+export const openInvite = (token: string) => get<InviteView>(`/invites/${encodeURIComponent(token)}`)
+export const acceptInvite = (token: string) => post<{ workspace_id: string; workspace_name: string; role: MemberRole; role_word: string }>(`/invites/${encodeURIComponent(token)}/accept`)
+export const emailSignInAvailable = () => get<{ available: boolean }>('/auth/email')
+export const sendSignInLink = (email: string) => post<{ sent: boolean; email: string }>('/auth/email', { email })
 export const getMyFlags = async () => (await get<{ flags: string[] }>('/me/flags')).flags
 /** Everything of yours: every project, take and voice, and the consent records. */
 export async function deleteAccount(): Promise<void> {

@@ -87,7 +87,8 @@ export type SideSection = (typeof SIDE)[number]['id']
 
 /** The side nav of Settings and Billing. On Settings the three sections scroll into view
  *  (an in-page `#agent` href would be read as a route); from Billing they open Settings. */
-export function SideNav({ active, onSection }: { active: SideSection | 'usage' | 'billing'; onSection?: (id: SideSection) => void }) {
+export function SideNav({ active, onSection }: { active: SideSection | 'usage' | 'billing' | 'members'; onSection?: (id: SideSection) => void }) {
+  const membersOn = useFlags().enabled('golive.g2')
   const item = 'block rounded-lg px-3 py-[9px] text-left font-medium text-muted-foreground no-underline hover:bg-sunk hover:text-foreground'
   const on = 'border-[1.5px] border-foreground bg-card text-foreground'
   return (
@@ -95,6 +96,7 @@ export function SideNav({ active, onSection }: { active: SideSection | 'usage' |
       {SIDE.map((s) => onSection
         ? <button key={s.id} type="button" className={cn(item, active === s.id && on)} aria-current={active === s.id ? 'true' : undefined} onClick={() => onSection(s.id)}>{s.label}</button>
         : <a key={s.id} href={hrefFor({ page: 'settings' })} className={item}>{s.label}</a>)}
+      {membersOn && <a href={hrefFor({ page: 'members' })} className={cn(item, active === 'members' && on)} aria-current={active === 'members' ? 'page' : undefined}>Members</a>}
       <a href={hrefFor({ page: 'usage' })} className={cn(item, active === 'usage' && on)}>Usage</a>
       <a href={hrefFor({ page: 'billing' })} className={cn(item, active === 'billing' && on)} aria-current={active === 'billing' ? 'page' : undefined}>Billing</a>
     </nav>

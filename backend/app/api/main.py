@@ -12,7 +12,8 @@ from concurrent.futures import ThreadPoolExecutor
 import hashlib
 import logging
 import tempfile
-from dataclasses import asdict, replace
+from contextvars import ContextVar
+from dataclasses import asdict, dataclass, replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -63,7 +64,7 @@ from app.store.db import Database
 from app.flags import FlagStore
 from app.purge import PurgeScheduler
 from app.usage import (
-    Ledger, SpendCeilingReached, WHISPER_USD_PER_MINUTE, claude_usd, current_turn, money, month_name, month_start,
+    Ledger, SpendCeilingReached, WHISPER_USD_PER_MINUTE, claude_usd, current_actor, current_turn, money, month_name, month_start,
 )
 from app import auth
 from app import linkimport
@@ -76,6 +77,7 @@ from app.store import bin as bin_store
 from app.store import home as home_store
 from app.store import templates as templates_store
 from app.store import learned as learned_store
+from app.store import members as members_store
 from app.notify import digest as digest_mod, email as email_mod
 from app.render import captions as captions_mod, deliver as deliver_mod
 from app.jobs import exports as exports_mod
@@ -277,22 +279,75 @@ CONSENT_REQUIRED = (
 )
 
 
+@dataclass(frozen=True)
+class Acting:
+    """G2: who is acting in this request. `user` is the signed-in person;
+    `owner` whose work it is (the workspace owner when a member works in
+    someone's workspace, else themselves); `role` owner | editor | reviewer."""
+    user: str
+    owner: str
+    role: str
+    workspace_id: str | None = None
+    email: str | None = None
+
+
+acting: ContextVar[Acting | None] = ContextVar("acting", default=None)
+
+
+def signed_in_identity(request: Request) -> "auth.Identity | None":
+    if settings.auth_mode == "off":
+        return None
+    return auth.identity_from(auth.verify(
+        request.cookies.get(auth.SESSION_COOKIE), settings.session_secret or "", max_age=auth.SESSION_SECONDS,
+    ))
+
+
+def signed_in_user(request: Request) -> str:
+    """The signed-in person (not the workspace they act in); 401 when nobody is."""
+    if settings.auth_mode == "off":
+        return LOCAL_OWNER
+    who = signed_in_identity(request)
+    if who is None:
+        raise HTTPException(status_code=401, detail="Sign in to continue.")
+    return who.owner
+
+
+def _resolve_acting(request: Request) -> Acting | None:
+    """The person, and the workspace they chose when they are a member of
+    it and its owner has roles on (`golive.g2`); otherwise their own."""
+    if settings.auth_mode == "off":
+        return Acting(LOCAL_OWNER, LOCAL_OWNER, "owner")
+    who = signed_in_identity(request)
+    if who is None:
+        return None
+    wid = request.cookies.get("ave_workspace")
+    if wid:
+        role = members_store.role_in(database, wid, who.owner)
+        ws = members_store.workspace(database, wid) if role and role != "owner" else None
+        if ws is not None and flags.enabled("golive.g2", ws["owner"]):
+            return Acting(who.owner, ws["owner"], role, wid, who.email)
+    return Acting(who.owner, who.owner, "owner", None, who.email)
+
+
 def current_owner(request: Request) -> str:
     """Who is calling — the auth seam (Phase 9c).
 
     With AVE_AUTH=off everyone is the local owner. With sign-in on, the
     session cookie names the owner, every route is scoped by it, and a
     state-changing request must carry the header a cross-site form cannot.
+    G2: a member working in someone's workspace acts for its owner (the
+    middleware has already checked their role allows the request).
     """
     if settings.auth_mode == "off":
         return LOCAL_OWNER
-    who = auth.identity_from(auth.verify(
-        request.cookies.get(auth.SESSION_COOKIE), settings.session_secret or "", max_age=auth.SESSION_SECONDS,
-    ))
+    who = signed_in_identity(request)
     if who is None:
         raise HTTPException(status_code=401, detail="Sign in to continue.")
     if request.method not in ("GET", "HEAD", "OPTIONS") and request.headers.get(auth.CSRF_HEADER) != auth.CSRF_VALUE:
         raise HTTPException(status_code=403, detail="This request did not come from Voltage.")
+    me = acting.get()
+    if me is not None and me.user == who.owner:
+        return me.owner
     return who.owner
 
 
@@ -311,7 +366,19 @@ def _ensure_spend(project_id: str) -> None:
         owner_ceiling_usd=settings.user_budget_usd,
         folder=folder,
         filename=record.source.filename if record else "",
+        member=_member_limit(),
     )
+
+
+def _member_limit() -> tuple[str, str, float] | None:
+    """G2: (who, workspace, limit) when a member with a monthly limit is acting."""
+    me = acting.get()
+    if me is None or me.role == "owner" or me.workspace_id is None:
+        return None
+    found = members_store.member(database, me.workspace_id, me.user)
+    if found is None or found.spend_limit_usd is None:
+        return None
+    return me.user, me.workspace_id, float(found.spend_limit_usd)
 
 
 # ── Spend scopes: turn → video → project → month ─────────────────────────────
@@ -7628,6 +7695,33 @@ class CommentReplyRequest(BaseModel):
     text: str
 
 
+class MemberCommentRequest(BaseModel):
+    at_s: float
+    text: str
+    version: int | None = None
+
+
+@app.post("/videos/{video_id}/comments", status_code=201)
+def add_member_comment(video_id: str, req: MemberCommentRequest, owner: str = Depends(current_owner)) -> dict:
+    """G2: a comment from someone in the workspace (a Reviewer's way to
+    comment), at a time in the video, like a review link's."""
+    _review_flag(owner)
+    record = _owned(video_id, owner)
+    me = acting.get()
+    who = me.user if me else owner
+    name = (me.email if me else None) or email_mod.address_for(database, who) or ("The owner" if who == owner else "A member")
+    if req.at_s > record.source.duration + 0.5:
+        raise HTTPException(status_code=422, detail="That time is past the end of the video.")
+    try:
+        with database.tx() as c:
+            comment = comments_store.add_in(c, video_id=video_id, author_name=name, at_s=req.at_s, text=req.text,
+                                            version=req.version, author_kind="member")
+            activity_log.record(c, "review.commented", user_actor(who), video_id=video_id, target=str(comment.comment_id))
+    except comments_store.CommentError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    return comment.to_dict()
+
+
 @app.post("/videos/{video_id}/comments/{comment_id}/replies")
 def reply_review_comment(video_id: str, comment_id: int, req: CommentReplyRequest, owner: str = Depends(current_owner)) -> dict:
     """The owner's reply; the reviewer sees it under their comment."""
@@ -8090,11 +8184,31 @@ def shared_zip(token: str) -> StreamingResponse:
     return _zip_response([f for f in contents["files"] if Path(f["path"]).exists()], contents["title"])
 
 
+# ── G2: roles ────────────────────────────────────────────────────────────────
+# Defined last so it is the outermost middleware: who is acting is known
+# before any other middleware or route runs (app/workspace_api.py).
+
+@app.middleware("http")
+async def _roles(request: Request, call_next):
+    from app.workspace_api import role_refusal
+    me = _resolve_acting(request) if settings.auth_mode == "off" else await asyncio.to_thread(_resolve_acting, request)
+    a, b = acting.set(me), current_actor.set(me.user if me else None)
+    try:
+        if me is not None and me.role != "owner":
+            refusal = role_refusal(me.role, request.method, request.url.path)
+            if refusal:
+                return JSONResponse(status_code=403, content={"detail": refusal, "code": "role"})
+        return await call_next(request)
+    finally:
+        acting.reset(a)
+        current_actor.reset(b)
+
+
 # ── Help, the tutorial, onboarding: the coordinator's routers ────────────────
 
 def _mount_optional_routers() -> None:
     import importlib
-    for name in ("app.onboarding", "app.help", "app.tutorial"):
+    for name in ("app.onboarding", "app.help", "app.tutorial", "app.workspace_api"):
         try:
             module = importlib.import_module(name)
         except ImportError:

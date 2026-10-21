@@ -49,6 +49,8 @@ import { useReviewComments } from './review/useReviewComments'
 import { useFlags } from './flags/useFlags'
 import { BinPage } from './pages/BinPage'
 import { TemplatesPage } from './pages/Templates'
+import { MembersPage } from './pages/MembersPage'
+import { InvitePage } from './pages/InvitePage'
 import { DiscardWhy } from './components/DiscardWhy'
 import { DISCARD_REASONS } from './lib/learned'
 import { LanguageDialog, SyncChip } from './pages/LanguageVersions'
@@ -268,6 +270,14 @@ function Studio() {
       .then(setMe)
       .catch(() => setMe({ mode: 'off', user: null }))   // an older server: open as before
   }, [])
+
+  // G2: an invite opened before signing in comes back once signed in.
+  useEffect(() => {
+    if (me?.mode !== 'google' || !me.user) return
+    let token: string | null = null
+    try { token = sessionStorage.getItem('voltage-invite'); sessionStorage.removeItem('voltage-invite') } catch { /* nothing waiting */ }
+    if (token) go({ page: 'invite', token })
+  }, [me])
 
   // A 401 anywhere means the session ended: back to the door.
   useEffect(() => {
@@ -1344,6 +1354,10 @@ function Studio() {
         </div>
       )
     }
+    if (route.page === 'invite' && me.mode === 'google' && (!me.user || signedOut)) {
+      // G2: sign in first, then come back to the invite.
+      try { sessionStorage.setItem('voltage-invite', route.token) } catch { /* the link can be opened again */ }
+    }
     if (me.mode === 'google' && (!me.user || signedOut)) {
       return <LoginPage error={signedOut ? 'Your session ended. Sign in again to continue.' : null} />
     }
@@ -1388,6 +1402,8 @@ function Studio() {
     if (route.page === 'settings') return <SettingsPage me={me} onSignedOut={signedOutNow} />
     if (route.page === 'billing') return <BillingPage me={me} />
     if (route.page === 'bin') return <BinPage me={me} onRestored={() => void refreshProjects()} />
+    if (route.page === 'members') return <MembersPage me={me} />
+    if (route.page === 'invite') return <InvitePage token={route.token} />
     if (route.page === 'templates') return <TemplatesPage me={me} onMade={() => void refreshProjects()} />
     if (route.page === 'export') {
       return <ExportPage projectId={route.projectId} me={me} onBack={() => go({ page: 'editor', projectId: route.projectId })} />

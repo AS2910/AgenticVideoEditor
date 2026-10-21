@@ -34,6 +34,7 @@ import json
 import logging
 import math
 import statistics
+import contextvars
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass, field
@@ -177,7 +178,7 @@ class BatchEngine:
             record["started_at"] = now_iso()
             self.save(record)
             self.activity.start(batch_id, f"Working on {len(record['children'])} videos")
-            thread = threading.Thread(target=self._drive, args=(batch_id,), daemon=True, name=f"batch-{batch_id}")
+            thread = threading.Thread(target=contextvars.copy_context().run, args=(self._drive, batch_id), daemon=True, name=f"batch-{batch_id}")
             self._threads[batch_id] = thread
         thread.start()
         return self.get(batch_id)  # type: ignore[return-value]
@@ -254,7 +255,7 @@ class BatchEngine:
         record = self._load(batch_id) or {"children": []}
         try:
             with ThreadPoolExecutor(max_workers=self.concurrency, thread_name_prefix=f"batch-{batch_id}") as pool:
-                for future in [pool.submit(self._one, batch_id, i) for i in range(len(record["children"]))]:
+                for future in [pool.submit(contextvars.copy_context().run, self._one, batch_id, i) for i in range(len(record["children"]))]:
                     future.result()
         except Exception:  # noqa: BLE001 - the parent always ends
             log.exception("batch %s driver failed", batch_id)

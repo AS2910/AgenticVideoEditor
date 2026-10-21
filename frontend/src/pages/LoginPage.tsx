@@ -1,8 +1,32 @@
-import { loginUrl } from '../api'
+import { useEffect, useState } from 'react'
+import { ApiError, emailSignInAvailable, loginUrl, sendSignInLink } from '../api'
 import { Wordmark } from './Shell'
 
 /** The door, when sign-in is on: the promise on the left, Voltage at work on the right. */
 export function LoginPage({ error }: { error?: string | null }) {
+  // G2: sign in with an emailed link too, when this Voltage offers it.
+  const [byEmail, setByEmail] = useState(false)
+  const [email, setEmail] = useState('')
+  const [sent, setSent] = useState<string | null>(null)
+  const [mailError, setMailError] = useState<string | null>(null)
+  const [sending, setSending] = useState(false)
+  useEffect(() => {
+    let live = true
+    emailSignInAvailable().then((r) => { if (live) setByEmail(r.available) }).catch(() => { /* Google only */ })
+    return () => { live = false }
+  }, [])
+  const send = async () => {
+    setSending(true)
+    setMailError(null)
+    try {
+      const out = await sendSignInLink(email.trim())
+      setSent(`Check ${out.email}. The link works once, for 15 minutes.`)
+    } catch (e) {
+      setMailError(e instanceof ApiError ? e.message : 'The link could not be sent.')
+    } finally {
+      setSending(false)
+    }
+  }
   return (
     <div className="flex min-h-dvh flex-wrap bg-background text-foreground">
       <section className="flex min-w-0 flex-[1_1_520px] flex-col justify-between gap-12 px-[clamp(24px,6vw,88px)] py-12">
@@ -17,6 +41,17 @@ export function LoginPage({ error }: { error?: string | null }) {
               <svg width="20" height="20" viewBox="0 0 18 18" aria-hidden="true"><circle cx="9" cy="9" r="7.5" fill="none" stroke="currentColor" strokeWidth="1.8" /><path d="M12.6 9H9" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" /></svg>
               Continue with Google
             </a>
+            {byEmail && (sent
+              ? <p className="m-0 text-sm" role="status" data-testid="email-sent">{sent}</p>
+              : (
+                <form className="flex w-full max-w-[420px] flex-wrap items-end gap-2.5" aria-label="Sign in with email" onSubmit={(e) => { e.preventDefault(); void send() }}>
+                  <label className="flex min-w-0 flex-[1_1_220px] flex-col gap-1"><span className="text-[13px] font-semibold">Or sign in with your email</span>
+                    <input type="email" autoComplete="email" className="box-border h-10 min-w-0 rounded-lg border-[1.5px] border-foreground bg-card px-2.5 text-base text-foreground outline-none focus-visible:ring-[3px] focus-visible:ring-volt" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="name@agency.com" aria-invalid={mailError ? true : undefined} />
+                  </label>
+                  <button type="submit" className="btn" disabled={!email.trim() || sending} aria-busy={sending || undefined}>{sending ? 'Sending…' : 'Email me a link'}</button>
+                  {mailError && <span className="basis-full text-[13px] text-destructive" role="alert">{mailError}</span>}
+                </form>
+              ))}
             <span className="tag text-faint">Private by default · your footage and voices stay yours</span>
             {error && <div className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive" role="alert">{error}</div>}
           </div>

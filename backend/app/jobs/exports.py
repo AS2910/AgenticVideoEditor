@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import json
 import logging
+import contextvars
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from typing import Callable
@@ -121,7 +122,7 @@ class ExportEngine:
             ids = json.loads(self.get_meta(INDEX.format(project_id)) or "[]")
             self.set_meta(INDEX.format(project_id), json.dumps(ids + [parent.job_id]))
             self.activity.start(parent.job_id, f"Exporting {len(rows)} {'file' if len(rows) == 1 else 'files'}")
-            thread = threading.Thread(target=self._drive, args=(parent.job_id,), daemon=True, name=f"export-{parent.job_id}")
+            thread = threading.Thread(target=contextvars.copy_context().run, args=(self._drive, parent.job_id), daemon=True, name=f"export-{parent.job_id}")
             self._threads[parent.job_id] = thread
         thread.start()
         return self.get(parent.job_id)  # type: ignore[return-value]
@@ -194,7 +195,7 @@ class ExportEngine:
         record = self._load(export_id) or {"items": []}
         try:
             with ThreadPoolExecutor(max_workers=self.concurrency, thread_name_prefix=f"export-{export_id}") as pool:
-                for future in [pool.submit(self._one, export_id, i) for i in range(len(record["items"]))]:
+                for future in [pool.submit(contextvars.copy_context().run, self._one, export_id, i) for i in range(len(record["items"]))]:
                     future.result()
         except Exception:  # noqa: BLE001 - the parent always ends
             log.exception("export %s driver failed", export_id)

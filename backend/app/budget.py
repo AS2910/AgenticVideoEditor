@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 
 from app.errors import NonRetryableError
 from app.store.workspaces import stamp_last
-from app.usage import Ledger, folder_of
+from app.usage import Ledger, current_actor, folder_of
 
 
 class BudgetExceeded(NonRetryableError):
@@ -64,10 +64,10 @@ class VoiceBudget:
             if spent + amount > self.ceiling:
                 raise BudgetExceeded(amount, self.ceiling - spent)
             c.execute(
-                "INSERT INTO usage (project_id, vendor, what, units, unit, usd, at, folder_id) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO usage (project_id, vendor, what, units, unit, usd, at, folder_id, by) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (project_id, self.VENDOR, self.WHAT, amount, self.UNIT,
-                 amount * self.usd_per_1k / 1000, now_iso(), folder_of(c, project_id)),
+                 amount * self.usd_per_1k / 1000, now_iso(), folder_of(c, project_id), current_actor.get()),
             )
             stamp_last(c, "usage", project_id)
 
