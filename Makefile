@@ -10,7 +10,7 @@ PY     ?= $(VENV)/bin/python
 DB     ?= $(CURDIR)/backend/var/ave.db
 ENV_FILE ?= $(CURDIR)/.env
 PW_PORT ?= 5194
-BACKEND = cd backend && PYTHONPATH=$(CURDIR)/backend
+BACKEND = cd backend && PYTHONPATH="$(CURDIR)/backend"
 
 .PHONY: launch-check backend-tests frontend-tests migrations-check em-dash-check profile env-check
 
@@ -18,23 +18,23 @@ launch-check: backend-tests frontend-tests migrations-check em-dash-check profil
 	@echo "launch-check: all steps passed"
 
 backend-tests:
-	$(BACKEND) $(PY) -m pytest -q -p no:cacheprovider
+	$(BACKEND) "$(PY)" -m pytest -q -p no:cacheprovider
 
 frontend-tests:
 	cd frontend && npx vitest run && npm run build && npm run lint && PW_PORT=$(PW_PORT) npx playwright test
 
 migrations-check:
-	$(BACKEND) $(PY) -m app.tools.migration_check --db "$(DB)"
+	$(BACKEND) "$(PY)" -m app.tools.migration_check --db "$(DB)"
 
 em-dash-check:
-	$(BACKEND) $(PY) -m pytest -q -p no:cacheprovider tests/test_no_em_dashes.py
+	$(BACKEND) "$(PY)" -m pytest -q -p no:cacheprovider tests/test_no_em_dashes.py
 
 profile:
-	$(BACKEND) $(PY) -m app.flags profile public
+	$(BACKEND) "$(PY)" -m app.flags profile public
 
 env-check:
 ifeq ($(SKIP_ENV),1)
 	@echo "env-check: skipped (SKIP_ENV=1)"
 else
-	$(BACKEND) $(PY) -m app.tools.env_check --env-file "$(ENV_FILE)"
+	$(BACKEND) "$(PY)" -m app.tools.env_check --env-file "$(ENV_FILE)"
 endif
