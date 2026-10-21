@@ -93,3 +93,33 @@ def test_migration_0028_up_and_down(tmp_path):
     assert not (mine & tabs()) and "feedback" in tabs()
     migrate.up(conn)
     assert mine <= tabs()
+
+
+def test_plan_credits_lapse_at_the_months_end_and_top_ups_after_twelve_months():
+    """Decision 0: spend comes out of the soonest-to-lapse grant first; what a
+    plan month leaves unused lapses when the month ends, a top-up after 12 months."""
+    grants = [
+        {"kind": "trial", "credits": 5.0, "period": None, "at": "2026-09-01T00:00:00.000Z"},
+        {"kind": "plan", "credits": 50.0, "period": "2026-09", "at": "2026-09-01T00:00:00.000Z"},
+        {"kind": "topup", "credits": 10.0, "period": None, "at": "2026-09-10T00:00:00.000Z"},
+        {"kind": "plan", "credits": 50.0, "period": "2026-10", "at": "2026-10-01T00:00:00.000Z"},
+    ]
+    # $30 spent in September, $20 in October.
+    spend = [("2026-09-15T00:00:00.000Z", 30.0), ("2026-10-15T00:00:00.000Z", 20.0)]
+    since = lambda at: sum(usd for when, usd in spend if when >= at)  # noqa: E731
+    got = billing.balance(grants, since, "2026-09-01T00:00:00.000Z", "2026-10-20T00:00:00.000Z")
+    # September's plan paid the $30 and lapsed with 20 left; October's plan paid $20; trial and top-up untouched.
+    assert got == {"used": 50.0, "left": 45.0, "lapsed": 20.0}
+    assert [g["left"] for g in grants] == [5.0, 0.0, 10.0, 30.0]
+    assert grants[2]["expires_at"] == "2027-09-10T00:00:00.000Z" and grants[0]["expires_at"] is None
+    assert billing.expires_at("plan", "2026-12", "x") == "2027-01-01T00:00:00.000Z"
+    later = billing.balance([dict(g) for g in grants], since, "2026-09-01T00:00:00.000Z", "2027-10-01T00:00:00.000Z")
+    assert later["left"] == 5.0                                           # only the trial outlives a year
+
+
+def test_spend_past_the_credits_is_owed_from_the_next_grant():
+    grants = [{"kind": "trial", "credits": 5.0, "period": None, "at": "2026-09-01T00:00:00.000Z"},
+              {"kind": "topup", "credits": 10.0, "period": None, "at": "2026-09-20T00:00:00.000Z"}]
+    since = lambda at: 8.0 if at <= "2026-09-05T00:00:00.000Z" else 0.0  # noqa: E731
+    got = billing.balance(grants, since, "2026-09-01T00:00:00.000Z", "2026-09-30T00:00:00.000Z")
+    assert got["left"] == 7.0 and got["lapsed"] == 0.0

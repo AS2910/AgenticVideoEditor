@@ -35,6 +35,7 @@ LABELS = {"draft": "Draft", "in_review": "In review", "changes_asked": "Changes 
 
 # What the editor and the project page say before an edit lands on an Approved video (C1).
 APPROVED_WARNING = "This video is Approved. Adding this moves it back to Draft."
+APPROVED_CHANGE_WARNING = "This video is Approved. This change moves it back to Draft."
 
 
 class StageError(ValueError):
@@ -99,10 +100,16 @@ def after_new_edit(db: Database, video_id: str, actor: Actor) -> StageMove | Non
         return after_new_edit_in(c, video_id, actor)
 
 
+# The stages a review link moves to In review (decision 0, 2026-10-22).
+REVIEWABLE = ("draft", "changes_asked")
+
+
 def review_sent_in(c: sqlite3.Connection, video_ids: list[str], actor: Actor,
                    why: str = "A review link was sent.") -> list[StageMove]:
-    """Sending a review link puts each video In review (one already there stays)."""
-    moves = [move_in(c, v, "in_review", actor, why) for v in video_ids if current_in(c, v) is not None]
+    """Sending a review link puts a Draft or Changes asked video In review.
+    Approved and Exported keep their stage (one already In review stays):
+    only the reviewer asking for changes moves them."""
+    moves = [move_in(c, v, "in_review", actor, why) for v in video_ids if current_in(c, v) in REVIEWABLE]
     return [m for m in moves if m]
 
 

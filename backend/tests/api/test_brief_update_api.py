@@ -96,7 +96,14 @@ def test_bring_up_to_date_skips_an_untouched_video_for_free_and_runs_a_turn_on_t
     spent_p2 = ledger.spent_usd("p2")
     run = client.post("/projects/f1/brief-update").json()["run"]
     assert run["to"] == 2 and [v["video_id"] for v in run["videos"]] == ["p1", "p2"]
-    assert client.post("/projects/f1/brief-update").status_code in (409, 202)   # a second press never starts a second run
+    # Decision 0: the press opens the normal batch gate; nothing runs or is spent until Go.
+    assert run["status"] == "gate" and run["gate"]["phase"] == "gate" and run["gate"]["totals"]["videos"] == 2
+    assert len(scripted.calls) == 0
+    again = client.post("/projects/f1/brief-update")                       # pressed again: a fresh gate, never a second run
+    assert again.status_code == 202 and again.json()["run"]["batch_id"] != run["batch_id"]
+    run = again.json()["run"]
+    assert client.post(f"/projects/f1/batches/{run['batch_id']}/go").status_code == 202
+    assert client.post("/projects/f1/brief-update").status_code == 409     # running: no second run
     run = await_run(client)
     by = {v["video_id"]: v for v in run["videos"]}
     assert by["p2"]["outcome"] == "current" and "nothing was spent" in by["p2"]["why"]
@@ -116,3 +123,34 @@ def test_the_routes_are_behind_the_consistency_flag(client):
     assert client.get("/projects/f1/brief-update").status_code == 404
     assert client.post("/projects/f1/brief-update").status_code == 404
     assert database is not None
+
+
+def test_bring_up_to_date_shows_the_gate_without_the_batch_flag(client, sample_video, monkeypatch):
+    """Decision 0: the public launch has A1 on and Phase B off; the gate and its Go still work."""
+    import app.api.main as main
+    from tests.agent.conftest import reply, text
+    flags.set("projects.batch", "local", False)
+    try:
+        client.post("/projects", json={"name": "Spring", "brief": "Get 20% off."})
+        upload_into(client, sample_video, "f1")
+        ship(client, "p1", "Get 20% off today")
+        client.patch("/projects/f1", json={"brief": "Get 30% off."})
+        _agent_on(monkeypatch, main, [reply(text("Nothing to change."))])
+        run = client.post("/projects/f1/brief-update").json()["run"]
+        assert run["status"] == "gate" and run["gate"]["rows"][0]["video_id"] == "p1"
+        assert client.post("/projects/f1/batches").status_code in (404, 405, 422)   # other batches stay off
+        assert client.post(f"/projects/f1/batches/{run['batch_id']}/go").status_code == 202
+        assert await_run(client)["videos"][0]["status"] == "done"
+    finally:
+        flags.clear("projects.batch", "local")
+
+
+def test_cancel_at_the_gate_ends_the_run_without_spending(client, sample_video):
+    client.post("/projects", json={"name": "Spring", "brief": "Get 20% off."})
+    upload_into(client, sample_video, "f1")
+    ship(client, "p1", "Get 20% off today")
+    client.patch("/projects/f1", json={"brief": "Get 30% off."})
+    run = client.post("/projects/f1/brief-update").json()["run"]
+    assert client.post(f"/projects/f1/batches/{run['batch_id']}/cancel").status_code == 200
+    after = client.get("/projects/f1/brief-update").json()["run"]
+    assert after["status"] == "finished" and stale_ids(client) == ["p1"]

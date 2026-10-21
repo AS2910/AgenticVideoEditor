@@ -220,7 +220,8 @@ def test_bring_up_to_date_runs_as_a_batch_with_the_flag_on(client, sample_video,
     client.patch("/projects/f1", json={"brief": "Get 30% off."})
     agent(monkeypatch, {})
     run = client.post("/projects/f1/brief-update").json()["run"]
-    assert run["batch_id"]
+    assert run["batch_id"] and run["status"] == "gate"
+    assert client.post(f"/projects/f1/batches/{run['batch_id']}/go").status_code == 202
     run = await_run(client)
     by = {v["video_id"]: v for v in run["videos"]}
     assert by["p2"]["outcome"] == "current" and "nothing was spent" in by["p2"]["why"]

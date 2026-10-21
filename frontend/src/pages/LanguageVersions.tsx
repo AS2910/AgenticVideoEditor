@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { LanguageChip, LanguageGate, LanguageSet } from '../types'
-import { getLanguages, makeLanguages, pollJob, PollCancelled, syncLanguage } from '../api'
+import { getLanguages, makeLanguages, pollJob, PollCancelled, stageHold, syncLanguage } from '../api'
+import { StageWarning } from './StageWarning'
 import { hrefFor } from '../lib/route'
 import { cn } from '@/lib/utils'
 import { usd } from './fmt'
@@ -179,15 +180,20 @@ export function SyncChip({ videoId, onStarted, onSettled, compact }: { videoId: 
   const [started, setStarted] = useState(false)
   const gone = useRef(false)
   useEffect(() => { gone.current = false; return () => { gone.current = true } }, [])
-  const sync = async () => {
+  const [hold, setHold] = useState<string | null>(null)
+  const sync = async (confirmStage = false) => {
     setBusy(true)
     setError(null)
+    setHold(null)
     let jobId: string
     try {
-      jobId = (await syncLanguage(videoId)).job_id
+      jobId = (await syncLanguage(videoId, confirmStage)).job_id
       setStarted(true)
       onStarted?.()
     } catch (e) {
+      // Decision 0: syncing an Approved version takes it back to Draft; ask once.
+      const held = stageHold(e)
+      if (held) { setHold(held.message); return }
       setError(e instanceof Error ? e.message : 'Could not start the sync.')
       return
     } finally { setBusy(false) }
@@ -213,6 +219,7 @@ export function SyncChip({ videoId, onStarted, onSettled, compact }: { videoId: 
         <button type="button" className={cn('btn sm', compact && 'h-7')} onClick={() => void sync()} disabled={busy}>{busy ? 'Starting…' : 'Sync this change'}</button>
       )}
       {error && <span className="text-[13px] text-destructive" role="alert">{error}</span>}
+      {hold && <StageWarning message={hold} anyway="Change anyway" busy={busy} onCancel={() => setHold(null)} onAnyway={() => void sync(true)} />}
     </span>
   )
 }

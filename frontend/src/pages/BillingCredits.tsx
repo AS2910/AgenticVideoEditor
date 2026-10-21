@@ -51,13 +51,13 @@ export function BillingCredits() {
         <div className="flex flex-[1_1_280px] flex-col gap-1.5">
           <span className="flex flex-wrap items-center gap-2"><span className="tag text-volt">Your plan</span>{view.provider.test_mode && <span className="stamp need">Test mode</span>}</span>
           <span className="disp text-4xl font-bold">{view.plan ? view.plan.name : 'Free trial'}</span>
-          <span className="text-pmuted">{view.plan ? `${credits(view.plan.credits)} a month, plus any top-ups.` : `${credits(view.trial_credits)} to start, free. Pick a plan or top up when you need more.`}</span>
+          <span className="text-pmuted">{view.plan ? `${credits(view.plan.credits)} a month, plus any top-ups. A month's unused plan credits lapse when the month ends.` : `${credits(view.trial_credits)} to start, free. Pick a plan or top up when you need more.`}</span>
         </div>
         <div className="flex flex-[1_1_240px] flex-col gap-2">
           <span className="tag text-pmuted">Credits left</span>
           <span className="disp text-[30px] font-bold" data-testid="credits-left">{credits(Math.max(0, c.left))}</span>
           <FillBar share={c.share ?? 0} height={10} label="Credits used" />
-          <span className="text-[13px] text-pmuted">{c.minutes != null ? `About ${c.minutes} ${c.minutes === 1 ? 'minute' : 'minutes'} of finished video at what a minute has cost so far. ` : ''}{`${credits(c.used)} used of ${credits(c.granted)}. One credit is $1 of work.`}</span>
+          <span className="text-[13px] text-pmuted">{c.minutes != null ? `About ${c.minutes} ${c.minutes === 1 ? 'minute' : 'minutes'} of finished video at what a minute has cost so far. ` : ''}{`${credits(c.used)} used of ${credits(c.granted)}${c.lapsed ? `, ${credits(c.lapsed)} lapsed` : ''}. One credit is $1 of work.`}</span>
         </div>
       </div>
       {c.left <= 0 && <p className="m-0 rounded-lg border-[1.5px] border-warn bg-card px-3 py-2 text-sm" role="status" data-testid="credits-out"><span className="stamp need mr-2">Paused</span>Your credits are used up, so paid steps are paused. Top up or pick a plan to carry on.</p>}
@@ -81,7 +81,7 @@ export function BillingCredits() {
       </section>
 
       <section className={`${card} flex flex-col gap-3`} aria-labelledby="topup-h" data-money-scope="all">
-        <div className="flex flex-wrap items-baseline gap-2.5"><h2 id="topup-h" className="disp m-0 text-[22px] font-bold">Top up</h2><span className="tag text-faint">credits that do not expire</span></div>
+        <div className="flex flex-wrap items-baseline gap-2.5"><h2 id="topup-h" className="disp m-0 text-[22px] font-bold">Top up</h2><span className="tag text-faint">credits last 12 months</span></div>
         <p className="m-0 text-[13px] text-muted-foreground">Paid through {view.provider.label}. {view.provider.test_mode ? 'Test mode: no card is asked for and no money moves.' : ''}</p>
         <div className="flex flex-wrap gap-2.5">
           {view.topups.map((t) => (

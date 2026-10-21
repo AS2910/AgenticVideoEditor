@@ -84,9 +84,10 @@ describe('D3: the Bin', () => {
     expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument()
   })
 
-  it('puts Bin in the main nav only with the flag on', async () => {
+  it('keeps Bin out of the main nav (decision 0: it lives in Home\'s sidebar)', async () => {
     vi.stubGlobal('fetch', routeFetch([]))
     render(<Shell active="projects" me={ME}><p>x</p></Shell>)
-    expect(await screen.findByRole('link', { name: 'Bin' })).toHaveAttribute('href', '#bin')
+    expect(await screen.findByRole('link', { name: 'Voices' })).toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'Bin' })).not.toBeInTheDocument()
   })
 })

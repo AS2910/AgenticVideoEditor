@@ -1,7 +1,8 @@
 import { Fragment, useEffect, useRef, useState } from 'react'
 import type { BriefChange, BriefUpdateRun, BriefUpdateVideo, BriefVersion, ProjectFolder } from '../types'
 import type { Me } from '../api'
-import { diffBriefVersions, getBriefUpdate, listBriefVersions, startBriefUpdate } from '../api'
+import { cancelBatch, diffBriefVersions, getBriefUpdate, goBatch, listBriefVersions, startBriefUpdate } from '../api'
+import { BatchGate } from './BatchGate'
 import { agoLabel, formatRelative } from '../lib/dates'
 import { hrefFor } from '../lib/route'
 import { cn } from '@/lib/utils'
@@ -110,6 +111,7 @@ const OUTCOME_WORD: Record<NonNullable<BriefUpdateVideo['outcome']>, string> = {
 }
 
 function rowStamp(v: BriefUpdateVideo): { word: string; tone: string } {
+  if (v.status === 'planned') return { word: 'Planned', tone: 'quiet' }
   if (v.status === 'queued') return { word: 'Queued', tone: 'live' }
   if (v.status === 'running') return { word: v.step || 'Working', tone: 'live' }
   if (v.status === 'failed') return { word: 'Failed', tone: 'need' }
@@ -160,13 +162,31 @@ export function StaleLine({ projectId, count, version, onChanged }: { projectId:
     } catch (e) { setError(said(e, 'Could not start bringing them up to date.')) } finally { setStarting(false) }
   }
 
+  // Decision 0: the press opens the normal batch gate; Go runs it, Not yet drops it.
+  const [gateBusy, setGateBusy] = useState<'go' | 'cancel' | null>(null)
+  const atGate = run?.status === 'gate' && run.gate ? run.gate : null
+  const answerGate = async (how: 'go' | 'cancel') => {
+    if (!run?.batch_id) return
+    setError(null)
+    setGateBusy(how)
+    try {
+      await (how === 'go' ? goBatch(projectId, run.batch_id) : cancelBatch(projectId, run.batch_id))
+      if (how === 'cancel') setDismissed(run.run_id)
+      setTick((t) => t + 1)
+    } catch (e) { setError(said(e, how === 'go' ? 'Could not start bringing them up to date.' : 'Could not drop it.')) } finally { setGateBusy(null) }
+  }
+
   const running = run?.status === 'running'
-  const showRun = run && (running || dismissed !== run.run_id) && (running || run.to === version)
+  const showRun = run && !atGate && (running || dismissed !== run.run_id) && (running || run.to === version)
   if (!loaded && count === 0) return null
   if (!showRun && count === 0) return null
   return (
     <div className="rise flex flex-col gap-2.5 rounded-xl border-[1.5px] border-foreground bg-card p-4" data-testid="stale-line" data-tour="stale-line">
-      {!running && count > 0 && (
+      {atGate && (
+        <BatchGate batch={atGate} busy={gateBusy !== null} going={gateBusy === 'go'}
+          onGo={() => void answerGate('go')} onCancel={() => void answerGate('cancel')} />
+      )}
+      {!running && !atGate && count > 0 && (
         <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
           <span className="stamp need">Brief changed</span>
           <span className="min-w-0 flex-1 text-sm">

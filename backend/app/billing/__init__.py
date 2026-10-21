@@ -6,7 +6,7 @@ ledger records it. What an owner has left is everything granted (the trial,
 each month's plan credits, top-ups) minus everything spent since their
 billing account began (the ledger, all their work). Credits are granted as
 rows in `credit_grants`; a month's plan credits are granted the first time
-the account is read in that month (they carry over; see DECISIONS.md).
+the account is read in that month. Unused plan credits lapse when their month ends and top-ups after 12 months (`balance`).
 
     account(db, owner) -> dict                       made on first read, with the trial
     credits(db, owner, spent_since) -> dict          granted, used, left, share
@@ -30,27 +30,8 @@ from app.errors import NonRetryableError
 from app.timefmt import now_iso
 from app.usage import SpendCeilingReached
 
-TRIAL_CREDITS = 5.0
-INR_PER_USD = 84.0
-TOPUP_MARKUP = 1.2           # a top-up credit costs $1.20 (the margin on vendor cost)
-TOPUPS = (10, 25, 50)
-
-
-@dataclass(frozen=True)
-class Plan:
-    plan_id: str
-    name: str
-    credits: float           # included each month
-    usd: float               # price a month
-    inr: float
-    blurb: str
-
-
-PLANS = {p.plan_id: p for p in (
-    Plan("starter", "Starter", 15.0, 19.0, 1599.0, "For one person trying a few videos a month."),
-    Plan("studio", "Studio", 50.0, 59.0, 4999.0, "For a small team shipping every week."),
-    Plan("agency", "Agency", 160.0, 179.0, 14999.0, "For agencies running campaigns for clients."),
-)}
+# Every price, plan and credit amount lives in one file for the owner to set: app/billing/prices.py.
+from app.billing.prices import INR_PER_USD, PLANS, TOPUP_MARKUP, TOPUP_MONTHS, TOPUPS, TRIAL_CREDITS, Plan  # noqa: E402,F401
 
 
 class BillingError(ValueError):
@@ -112,18 +93,80 @@ def account(db, owner: str, now: datetime | None = None) -> dict:
         return _account_dict(r)
 
 
+def expires_at(kind: str, period: str | None, at: str) -> str | None:
+    """When a grant's unused credits lapse (decision 0, 2026-10-22): a month's
+    plan credits at the end of that month, a top-up 12 months after it was
+    bought; the free trial does not lapse."""
+    if kind == "plan" and period:
+        year, month = (int(x) for x in period.split("-"))
+        year, month = (year + 1, 1) if month == 12 else (year, month + 1)
+        return f"{year:04d}-{month:02d}-01T00:00:00.000Z"
+    if kind == "topup":
+        year, rest = int(at[:4]), at[4:]
+        months = TOPUP_MONTHS
+        month = int(rest[1:3]) + months
+        year, month = year + (month - 1) // 12, (month - 1) % 12 + 1
+        day = min(int(rest[4:6]), 28)
+        return f"{year:04d}-{month:02d}-{day:02d}{at[10:]}"
+    return None
+
+
+def balance(grants: list[dict], spent_since: Callable[[str], float], start: str, now: str) -> dict:
+    """Spend the ledger against the grants in time order, soonest to lapse
+    first, and let what is left of a grant lapse at its expiry. Returns used,
+    left, lapsed and each grant's own remainder (`left`, `expires_at`)."""
+    for g in grants:
+        g["expires_at"] = expires_at(g["kind"], g["period"], g["at"])
+        g["left"] = 0.0
+    points = sorted({start, now, *(g["at"] for g in grants if start < g["at"] < now),
+                     *(g["expires_at"] for g in grants if g["expires_at"] and start < g["expires_at"] < now)})
+    since = {p: float(spent_since(p)) for p in points}
+    active: list[dict] = []
+    lapsed = debt = 0.0
+    for i, point in enumerate(points):
+        for g in grants:
+            if g["at"] <= point and g not in active and not g.get("_done"):
+                g["left"], g["_done"] = float(g["credits"]), True
+                active.append(g)
+                if debt:
+                    take = min(debt, g["left"])
+                    g["left"] -= take
+                    debt -= take
+        for g in list(active):
+            if g["expires_at"] and g["expires_at"] <= point:
+                lapsed += g["left"]
+                g["left"] = 0.0
+                active.remove(g)
+        # Spend from this point to the next (the last runs to now and beyond: anything not yet counted).
+        spend = since[point] - (since[points[i + 1]] if i + 1 < len(points) else 0.0)
+        for g in sorted(active, key=lambda g: g["expires_at"] or "9999"):
+            take = min(spend, g["left"])
+            g["left"] -= take
+            spend -= take
+        debt += spend
+    left = sum(g["left"] for g in active) - debt
+    for g in grants:
+        g.pop("_done", None)
+        g["left"] = round(g["left"], 4)
+    return {"used": round(since[start], 4), "left": round(left, 4), "lapsed": round(lapsed, 4)}
+
+
 def credits(db, owner: str, spent_since: Callable[[str], float]) -> dict:
-    """What is granted, used (the ledger since the account began) and left;
-    `share` is used over granted (None when nothing was granted)."""
+    """What is granted, used (the ledger since the account began), lapsed
+    and left; `share` is used over granted (None when nothing was granted).
+    Plan credits lapse at the month's end, top-ups after 12 months."""
     acct = account(db, owner)
     with db.tx() as c:
-        granted = float(c.execute("SELECT COALESCE(SUM(credits), 0) FROM credit_grants WHERE owner = ?", (owner,)).fetchone()[0])
-        grants = [{"kind": g["kind"], "credits": g["credits"], "period": g["period"], "reference": g["reference"], "at": g["at"]}
-                  for g in c.execute("SELECT * FROM credit_grants WHERE owner = ? ORDER BY id DESC LIMIT 20", (owner,))]
-    used = round(float(spent_since(acct["created_at"])), 4)
-    left = round(granted - used, 4)
-    return {"granted": round(granted, 4), "used": used, "left": left,
-            "share": (used / granted) if granted > 0 else None, "grants": grants}
+        rows = [dict(g) for g in c.execute("SELECT * FROM credit_grants WHERE owner = ? ORDER BY at, id", (owner,))]
+    for r in rows:
+        if r["at"] < acct["created_at"]:
+            r["at"] = acct["created_at"]
+    got = balance(rows, spent_since, acct["created_at"], now_iso())
+    granted = sum(float(r["credits"]) for r in rows)
+    grants = [{"kind": g["kind"], "credits": g["credits"], "period": g["period"], "reference": g["reference"], "at": g["at"],
+               "expires_at": g["expires_at"], "left": g["left"]} for g in reversed(rows)][:20]
+    return {"granted": round(granted, 4), "used": got["used"], "left": got["left"], "lapsed": got["lapsed"],
+            "share": (got["used"] / granted) if granted > 0 else None, "grants": grants}
 
 
 def can_spend(db, owner: str, spent_since: Callable[[str], float]) -> tuple[bool, dict]:

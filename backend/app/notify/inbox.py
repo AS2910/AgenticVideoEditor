@@ -66,14 +66,23 @@ def _settings_in(c: sqlite3.Connection, user: str) -> dict[str, tuple[bool, bool
     return out
 
 
-def settings(db: Database, user: str) -> list[dict]:
+# Kinds only the people who run Voltage get (decision 0: hidden from everyone else).
+ADMIN_KINDS = ("abuse_report",)
+
+
+def kinds_for(admin: bool) -> tuple[str, ...]:
+    return KINDS if admin else tuple(k for k in KINDS if k not in ADMIN_KINDS)
+
+
+def settings(db: Database, user: str, admin: bool = True) -> list[dict]:
     with db.tx() as c:
         found = _settings_in(c, user)
-    return [{"kind": k, "label": LABELS[k], "help": HELP[k], "in_app": found[k][0], "email": found[k][1]} for k in KINDS]
+    return [{"kind": k, "label": LABELS[k], "help": HELP[k], "in_app": found[k][0], "email": found[k][1]}
+            for k in kinds_for(admin)]
 
 
-def set_settings(db: Database, user: str, changes: dict[str, dict]) -> list[dict]:
-    unknown = [k for k in changes if k not in KINDS]
+def set_settings(db: Database, user: str, changes: dict[str, dict], admin: bool = True) -> list[dict]:
+    unknown = [k for k in changes if k not in kinds_for(admin)]
     if unknown:
         raise ValueError(f"Unknown kind: {', '.join(unknown)}.")
     with db.tx() as c:
@@ -85,7 +94,7 @@ def set_settings(db: Database, user: str, changes: dict[str, dict]) -> list[dict
                       "ON CONFLICT (recipient, kind) DO UPDATE SET in_app = excluded.in_app, email = excluded.email",
                       (user, kind, int(in_app), int(email)))
         analytics.safe_in(c, "notification.settings_changed", user, {"kinds": sorted(changes)})
-    return settings(db, user)
+    return settings(db, user, admin)
 
 
 def add_in(c: sqlite3.Connection, user: str, kind: str, title: str, *, body: str = "", link: str | None = None,

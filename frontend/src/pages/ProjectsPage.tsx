@@ -339,6 +339,11 @@ export function ProjectsPage({ me, projects, folders = [], onOpen, onUpload, onS
               <span aria-hidden="true" className="w-[18px] text-center">▦</span>
               <span className="flex-1 font-medium">Templates</span>
             </a>
+            {/* Decision 0: the Bin lives at the foot of Home's sidebar, not in the main nav. */}
+            <a href={hrefFor({ page: 'bin' })} className="mt-auto flex w-full items-center gap-2.5 rounded-lg border-t border-line px-2.5 pt-4 pb-2 text-muted-foreground no-underline hover:bg-sunk" data-testid="bin-link">
+              <span aria-hidden="true" className="w-[18px] text-center">⌫</span>
+              <span className="flex-1 font-medium">Bin</span>
+            </a>
           </>
         )}
       </aside>

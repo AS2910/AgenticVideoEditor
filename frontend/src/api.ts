@@ -305,7 +305,7 @@ export const exportProject = (id: string, withProposals = false, requestId?: num
 
 /** 2026-10-20: a line's role in the mix and its fine-tune, nothing voiced again. The only
  *  speech in its span answers 409 with a question (RoleQuestion) unless `confirm`. */
-export interface RoleChange { role: Role; offset_db?: number; confirm?: boolean }
+export interface RoleChange { role: Role; offset_db?: number; confirm?: boolean; confirm_stage?: boolean }
 export interface RoleQuestion { question: string; options: { label: string; detail?: string; role: Role; offset_db: number; confirm?: boolean }[] }
 export const setEditRole = (id: string, editId: string, change: RoleChange) =>
   post<{ edit_id: string; reverted: string; candidate: Candidate }>(`/videos/${id}/edits/${editId}/role`, change)
@@ -348,7 +348,7 @@ export const moveCandidate = (id: string, candidateId: string, req: { start: num
   post<Candidate>(`/videos/${id}/candidates/${candidateId}/move`, req)
 
 /** A kept line placed somewhere else: reverted and re-kept at the new place in one step. */
-export const moveEdit = (id: string, editId: string, req: { start: number; mix?: Mix }) =>
+export const moveEdit = (id: string, editId: string, req: { start: number; mix?: Mix; confirm_stage?: boolean }) =>
   post<{ edit_id: string; reverted: string; candidate: Candidate }>(`/videos/${id}/edits/${editId}/move`, req)
 
 /** Proposes taking a line out (20e): a plan item whose take is the room's own sound; Add it makes it so. */
@@ -435,7 +435,7 @@ export const getLanguages = (videoId: string) => get<LanguageSet>(`/videos/${vid
 export const makeLanguages = (videoId: string, body: { languages: string[]; voice: 'same' | 'designed'; dry_run?: boolean }) =>
   post<LanguagesMade>(`/videos/${videoId}/languages`, body)
 /** B2: Sync this change: one turn on the version for only the master's changed lines. */
-export const syncLanguage = (videoId: string) => post<SyncStarted>(`/videos/${videoId}/sync`)
+export const syncLanguage = (videoId: string, confirmStage = false) => post<SyncStarted>(`/videos/${videoId}/sync`, confirmStage ? { confirm_stage: true } : undefined)
 
 /** Phase 9c: whether sign-in is on, and who is signed in. */
 export interface Me { mode: 'off' | 'google'; user: { sub: string; email: string | null; name: string | null; picture: string | null } | null }
@@ -479,7 +479,8 @@ export interface ArrangementView {
 }
 export const getArrangement = (id: string) => get<ArrangementView>(`/videos/${id}/arrangement`)
 /** The whole arrangement, as one action (one undo). */
-export const putArrangement = (id: string, arrangement: Arrangement) => put<ArrangementView>(`/videos/${id}/arrangement`, arrangement)
+export const putArrangement = (id: string, arrangement: Arrangement, confirmStage = false) =>
+  put<ArrangementView>(`/videos/${id}/arrangement`, confirmStage ? { ...arrangement, confirm_stage: true } : arrangement)
 export const undoArrangement = (id: string) => post<ArrangementView>(`/videos/${id}/arrangement/undo`)
 
 // ── Volt (2026-10-18): the account pages ─────────────────────────────────────

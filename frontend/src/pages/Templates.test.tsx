@@ -125,5 +125,7 @@ describe('D1: New project from a template on Home', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Create' }))
     await waitFor(() => expect(onNewFolder).toHaveBeenCalledWith('Navratri', 'starter-festive-ad'))
     expect(await screen.findByTestId('templates-link')).toHaveAttribute('href', '#templates')
+    // Decision 0: the Bin is at the foot of Home's sidebar.
+    expect(screen.getByTestId('bin-link')).toHaveAttribute('href', '#bin')
   })
 })

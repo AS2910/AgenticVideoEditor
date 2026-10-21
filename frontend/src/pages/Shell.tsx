@@ -62,9 +62,8 @@ interface ShellProps {
 
 /** The chrome of the account pages: the wordmark, the nav, a slot on the right, the account circle. */
 export function Shell({ active, right, me, children, mainClassName }: ShellProps) {
-  // D3: the Bin sits before Help while projects.reuse is on.
-  const binOn = useFlags().enabled('projects.reuse')
-  const nav = binOn ? [...NAV.slice(0, -1), { page: 'bin' as const, label: 'Bin' }, NAV[NAV.length - 1]] : NAV
+  // Decision 0: the Bin is reached from Home's sidebar footer, not the main nav.
+  const nav = NAV
   return (
     <div className="flex min-h-dvh flex-col bg-background text-foreground">
       {/* The skip link focuses main by hand: a "#main" href would change the route. */}

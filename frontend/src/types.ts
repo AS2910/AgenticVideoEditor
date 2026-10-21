@@ -566,8 +566,9 @@ export interface BriefUpdateVideo {
   filename: string
   /** The brief version it was made with. */
   from: number
-  job_id: string
-  status: ActivityStatus
+  /** null at the gate, before Go made its job (decision 0). */
+  job_id: string | null
+  status: ActivityStatus | 'planned'
   step: string
   /** current: nothing to change · updated: changed and added · proposed: lines ready to review · waiting: a question */
   outcome: 'current' | 'updated' | 'proposed' | 'waiting' | null
@@ -579,7 +580,8 @@ export interface RuleData { term?: string; say?: string; respell?: string; audio
   /** B2: a brand name never translates; `lang` + `translation` say the term in one language version. */
   brand?: boolean; lang?: string; translation?: string }
 export interface ProjectRule { rule_id: number; project_id: string; kind: RuleKind; data: RuleData; version: number; created_by: string; updated_at: string }
-export interface BriefUpdateRun { run_id: string; to: number; status: 'running' | 'finished'; started_at: string; finished_at: string | null; videos: BriefUpdateVideo[] }
+/** Decision 0: a run opens at the batch gate (`status: 'gate'`, `gate` the batch) and runs on Go. */
+export interface BriefUpdateRun { run_id: string; to: number; status: 'gate' | 'running' | 'finished'; started_at: string; finished_at: string | null; videos: BriefUpdateVideo[]; batch_id?: string; gate?: Batch }
 /** A2: one place an issue was found: a video, the time in it (null: the whole video) and the words there. */
 export interface CheckPlace { video_id: string; filename: string; t: number | null; text: string }
 export type CheckIssueKind = 'fact' | 'offer' | 'voice' | 'pronounce' | 'banned' | 'required_line' | 'loudness'
@@ -724,6 +726,8 @@ export interface Batch {
   totals: { videos: number; lines: number | null; est_usd: number | null; est_s: number | null; cap_usd: number }
   summary: { finished: string[]; waiting: string[]; failed: string[]; cancelled: string[]; spent_usd: number } | null
   rows: BatchRow[]; counts: Record<string, number>; spent_usd: number; can_add: boolean
+  /** Decision 0: how many Approved videos adding would take back to Draft, and the sentence (null: none). */
+  approved_count?: number; approved_note?: string | null
 }
 
 // ── B3 (projects.batch): batch export; F6: share links ──────────────────────
@@ -1042,7 +1046,7 @@ export interface BillingInvoice {
 export interface BillingView {
   account: { owner: string; plan: string | null; country: string | null; legal_name: string; gstin: string; state_code: string | null; created_at: string }
   /** `minutes`: about how many exported minutes are left, null when the cost per minute is not measured yet. */
-  credits: { granted: number; used: number; left: number; share: number | null; minutes: number | null; grants: { kind: string; credits: number; period: string | null; reference: string; at: string }[] }
+  credits: { granted: number; used: number; left: number; lapsed?: number; share: number | null; minutes: number | null; grants: { kind: string; credits: number; period: string | null; reference: string; at: string; expires_at?: string | null; left?: number }[] }
   plan: BillingPlan | null
   plans: BillingPlan[]
   topups: { credits: number; price: number; currency: 'USD' | 'INR' }[]

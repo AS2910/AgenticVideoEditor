@@ -1516,20 +1516,31 @@ def _review_flag(owner: str) -> None:
         raise HTTPException(status_code=404, detail="Not found")
 
 
-def _stage_gate(video_ids: list[str], owner: str, confirmed: bool) -> None:
+def _stage_gate(video_ids: list[str], owner: str, confirmed: bool, change: bool = False) -> None:
     """C1: before an add from the editor or a board lands on an Approved
     video, the user is warned (409 with the sentence and the videos) and
-    answers with `confirm_stage`. Off without `projects.review`."""
+    answers with `confirm_stage`. Off without `projects.review`. Decision 0:
+    a sync, a role change or a line move (`change`) asks the same way."""
     if confirmed or not _review_on(owner):
         return
     held = [v for v in video_ids if stages.current(database, v) == "approved"]
     if not held:
         return
     names = [r.source.filename for r in (repo.get(v) for v in held) if r is not None]
-    message = stages.APPROVED_WARNING if len(held) == 1 else (
-        f"{len(held)} videos are Approved ({', '.join(names)}). Adding these moves them back to Draft.")
+    if change:
+        message, anyway = stages.APPROVED_CHANGE_WARNING, "Change anyway"
+    else:
+        message, anyway = (stages.APPROVED_WARNING if len(held) == 1 else (
+            f"{len(held)} videos are Approved ({', '.join(names)}). Adding these moves them back to Draft.")), "Add anyway"
     raise HTTPException(status_code=409, detail={"code": "stage_approved", "message": message, "videos": held,
-                                                 "options": ["Add anyway", "Cancel"]})
+                                                 "options": [anyway, "Cancel"]})
+
+
+def _left_approved(project_id: str, owner: str) -> None:
+    """Decision 0: a confirmed line move that writes no edit (a shift, the
+    arrangement) still takes an Approved video back to Draft, as an edit does."""
+    if _review_on(owner):
+        stages.after_new_edit(database, project_id, user_actor(owner))
 
 
 class StageMoveRequest(BaseModel):
@@ -2684,7 +2695,7 @@ def _brief_run(project_id: str) -> dict | None:
             v["step"] = job.step_label
             v["outcome"] = job.detail.get("outcome", v.get("outcome"))
             v["why"] = job.error_text if job.status == "failed" else job.detail.get("why", v.get("why"))
-    if run["status"] == "running" and all(v["status"] in ("done", "failed", "cancelled") for v in run["videos"]):
+    if run["status"] == "running" and all(v["status"] in ("done", "failed", "cancelled") for v in run["videos"] if v.get("job_id")):
         run["status"] = "finished"
     return run
 
@@ -2803,13 +2814,18 @@ def start_brief_update(project_id: str, owner: str = Depends(current_owner)) -> 
         now = _brief_run(project_id)
         if now is not None and now["status"] == "running":
             raise HTTPException(status_code=409, detail="Already bringing the videos up to date.")
+        if now is not None and now["status"] == "gate" and now.get("batch_id"):
+            # Pressed again at the gate: the old gate is dropped for a fresh plan.
+            with contextlib.suppress(batch_mod.BatchError):
+                batch_engine.cancel(now["batch_id"])
         stale = briefs.stale_videos(database, project_id)
         if not stale or project.brief_version is None:
             raise HTTPException(status_code=409, detail="Every video is made with the current brief.")
         n = 1 + int((now or {}).get("run_id", "u0")[1:] or 0)
         run = {"run_id": f"u{n}", "to": project.brief_version, "status": "running", "started_at": _now(), "finished_at": None,
                "videos": []}
-        if _batch_on(owner):
+        # Decision 0: the normal batch gate (videos, lines, cost) first; Go runs it.
+        if _gate_brief_updates():
             return {"run": _brief_update_batch(project, owner, run, stale)}
         for vid in stale:
             record = repo.get(vid)
@@ -2827,11 +2843,19 @@ def start_brief_update(project_id: str, owner: str = Depends(current_owner)) -> 
     return {"run": _brief_run(project_id)}
 
 
+def _gate_brief_updates() -> bool:
+    """Decision 0 (2026-10-22): Bring up to date opens the batch gate first,
+    with or without `projects.batch`. The old path (no gate, one video after
+    another) is kept behind this seam for the tests written for it."""
+    return True
+
+
 def _brief_update_batch(project: Project, owner: str, run: dict, stale: list[str]) -> dict:
-    """F4 (`projects.batch` on): Bring up to date as one batch turn. The press
-    is the gate's yes (the button says what it does, and the free check still
-    runs first in each video); the run record points at the batch's children.
-    Called with `_brief_runs_lock` held."""
+    """F4: Bring up to date as one batch turn. Decision 0: the press opens the
+    normal gate (videos, lines, cost, cap) and the gate's Go starts it
+    (`_brief_run_started`); the free check still runs first in each video.
+    The run record points at the batch's children. Called with
+    `_brief_runs_lock` held."""
     project_id, to = project.project_id, project.brief_version
     thinking = _thinking_usd(owner)
     children = []
@@ -2846,16 +2870,40 @@ def _brief_update_batch(project: Project, owner: str, run: dict, stale: list[str
                                      turn=hit, extra={"from": made}))
     opened = _open_batch(project, owner, "brief", f"Apply brief changes to v{to}", children,
                          extra={"to": to, "run_id": run["run_id"]})
-    started = _go_batch(opened, owner)
-    run["batch_id"] = started["batch_id"]
-    for child in started["children"]:
+    run["batch_id"] = opened["batch_id"]
+    run["status"] = "gate"
+    for child in opened["children"]:
         run["videos"].append({"video_id": child["video_id"], "filename": child["filename"], "from": child["extra"]["from"],
-                              "job_id": child["job_id"], "status": "queued", "step": "Queued", "outcome": None, "why": None})
+                              "job_id": None, "status": "planned", "step": "Planned", "outcome": None, "why": None})
     _save_brief_run(project_id, run)
-    with database.tx() as c:
-        activity_log.record(c, "brief.update_started", user_actor(owner), project_id=project_id, target=run["run_id"],
-                            payload={"to": to, "videos": stale, "batch_id": run["batch_id"]})
-    return _brief_run(project_id)
+    return dict(_brief_run(project_id), gate=_batch_view(opened["batch_id"]))
+
+
+def _brief_run_started(started: dict, owner: str) -> None:
+    """Decision 0: the gate's Go on a Bring up to date batch; the run follows its children's jobs."""
+    project_id = started["project_id"]
+    with _brief_runs_lock:
+        run = _brief_run(project_id)
+        if run is None or run.get("batch_id") != started["batch_id"]:
+            return
+        jobs_by_video = {c["video_id"]: c.get("job_id") for c in started["children"]}
+        for v in run["videos"]:
+            v["job_id"] = jobs_by_video.get(v["video_id"])
+            v["status"], v["step"] = "queued", "Queued"
+        run["status"] = "running"
+        _save_brief_run(project_id, run)
+        with database.tx() as c:
+            activity_log.record(c, "brief.update_started", user_actor(owner), project_id=project_id, target=run["run_id"],
+                                payload={"to": run["to"], "videos": [v["video_id"] for v in run["videos"]],
+                                         "batch_id": run["batch_id"]})
+
+
+def _brief_run_cancelled(batch_id: str, project_id: str) -> None:
+    with _brief_runs_lock:
+        run = _brief_run(project_id)
+        if run is not None and run.get("batch_id") == batch_id and run["status"] == "gate":
+            run.update(status="finished", finished_at=_now())
+            _save_brief_run(project_id, run)
 
 
 # ── A2: the project check ────────────────────────────────────────────────────
@@ -3596,15 +3644,31 @@ def _batch_view(batch_id: str) -> dict:
             "created_at": record["created_at"], "started_at": record.get("started_at"), "finished_at": record.get("finished_at"),
             "totals": record["totals"], "summary": record.get("summary"), "rows": rows, "counts": counts,
             "spent_usd": round(sum(r["spent_usd"] for r in rows), 4),
-            "can_add": any(r["state"] == "ready" for r in rows) and record["phase"] != "gate"}
+            "can_add": any(r["state"] == "ready" for r in rows) and record["phase"] != "gate",
+            **_approved_note([c["video_id"] for c in record["children"]], record["project_id"])}
+
+
+def _approved_note(video_ids: list[str], project_id: str) -> dict:
+    """Decision 0: the gate (and the board) says how many Approved videos
+    adding would take back to Draft. Empty without `projects.review`."""
+    project = repo.get_project(project_id)
+    if project is None or not _review_on(project.owner):
+        return {"approved_count": 0, "approved_note": None}
+    n = sum(1 for v in video_ids if stages.current(database, v) == "approved")
+    note = None if n == 0 else ("1 approved video will return to Draft." if n == 1
+                                else f"{n} approved videos will return to Draft.")
+    return {"approved_count": n, "approved_note": note}
 
 
 def _owned_batch(project_id: str, batch_id: str, owner: str) -> dict:
-    _batch_flag(owner)
+    """A batch of the caller's project. Bring up to date (A1) uses the batch
+    gate with only `projects.consistency` on (decision 0); every other batch needs `projects.batch`."""
     _owned_project(project_id, owner)
     record = batch_engine.get(batch_id)
     if record is None or record["project_id"] != project_id:
         raise HTTPException(status_code=404, detail="batch not found")
+    if not _batch_on(owner) and not (record["source"] == "brief" and flags.enabled("projects.consistency", owner)):
+        raise HTTPException(status_code=404, detail="Not found")
     return record
 
 
@@ -3673,7 +3737,9 @@ def go_batch(project_id: str, batch_id: str, owner: str = Depends(current_owner)
     record = _owned_batch(project_id, batch_id, owner)
     if not _agent_on():
         raise HTTPException(status_code=409, detail="Voltage needs Claude to change a video (set AVE_AGENT=1 and an Anthropic key).")
-    _go_batch(record, owner)
+    started = _go_batch(record, owner)
+    if record["source"] == "brief":
+        _brief_run_started(started, owner)
     return _batch_view(batch_id)
 
 
@@ -3681,11 +3747,13 @@ def go_batch(project_id: str, batch_id: str, owner: str = Depends(current_owner)
 def cancel_batch(project_id: str, batch_id: str, owner: str = Depends(current_owner)) -> dict:
     """F4: at the gate, drop it; running, the queued videos are cancelled and
     the running ones finish the step they are on (each video's Stop)."""
-    _owned_batch(project_id, batch_id, owner)
+    record = _owned_batch(project_id, batch_id, owner)
     try:
         batch_engine.cancel(batch_id)
     except batch_mod.BatchError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    if record["source"] == "brief":
+        _brief_run_cancelled(batch_id, project_id)
     return _batch_view(batch_id)
 
 
@@ -4074,8 +4142,13 @@ def _sync_settles(child_id: str, turn_job_id: str, to: int, owner: str) -> None:
                             payload={"master_id": now.master_id, "synced_edit": to})
 
 
+class ConfirmStage(BaseModel):
+    # Decision 0: the yes to taking an Approved video back to Draft.
+    confirm_stage: bool = False
+
+
 @app.post("/videos/{video_id}/sync", status_code=202)
-def sync_language(video_id: str, owner: str = Depends(current_owner)) -> dict:
+def sync_language(video_id: str, req: ConfirmStage | None = None, owner: str = Depends(current_owner)) -> dict:
     """B2: Sync this change. One turn on the language version for only the
     master's lines changed since it last synced (the press is the yes for
     its paid steps); in step again once that turn finishes."""
@@ -4083,6 +4156,7 @@ def sync_language(video_id: str, owner: str = Depends(current_owner)) -> dict:
     record = _owned(video_id, owner)
     if not record.master_id:
         raise HTTPException(status_code=409, detail="This video is not a language version.")
+    _stage_gate([video_id], owner, bool(req and req.confirm_stage), change=True)
     master = repo.get(record.master_id)
     if master is None:
         raise HTTPException(status_code=409, detail="The master video was deleted, so there is nothing to sync with.")
@@ -6098,6 +6172,8 @@ class ShiftRequest(BaseModel):
     end: float
     # Where the words should start instead, in seconds of the source.
     to: float
+    # Decision 0: the yes to taking an Approved video back to Draft.
+    confirm_stage: bool = False
 
 
 def _room_tone_candidate(project_id: str, record: ProjectRecord, selection: Selection) -> EditCandidate:
@@ -6128,8 +6204,11 @@ def shift_line(project_id: str, req: ShiftRequest, owner: str = Depends(current_
     record = _owned(project_id, owner)
     if not any(w.end > req.start and w.start < req.end for w in record.transcript.words):
         raise HTTPException(status_code=422, detail="Nothing is said there to move.")
+    _stage_gate([project_id], owner, req.confirm_stage, change=True)
     # 2026-10-19: a move is the arrangement's now: the line is pinned there and the others flow.
-    return _pin_line(project_id, record, Selection(req.start, req.end), req.to)
+    moved = _pin_line(project_id, record, Selection(req.start, req.end), req.to)
+    _left_approved(project_id, owner)
+    return moved
 
 
 # ── The arrangement (2026-10-19): the transcript's order is the playback order ──
@@ -6410,16 +6489,20 @@ class ArrangementRequest(BaseModel):
     min_gap: float | None = None
     # A run past the end: "hold" lets the picture ease, "trim" fades the last line out.
     end: Literal["hold", "trim"] | None = None
+    # Decision 0: the yes to taking an Approved video back to Draft.
+    confirm_stage: bool = False
 
 
 @app.put("/videos/{project_id}/arrangement")
 def put_arrangement(project_id: str, req: ArrangementRequest, owner: str = Depends(current_owner)) -> dict:
     """The whole arrangement, as one action (one undo)."""
     record = _owned(project_id, owner)
+    _stage_gate([project_id], owner, req.confirm_stage, change=True)
     _migrate_moves(project_id, record)
     before = _placements(record, _arrangement(project_id))
     new = arrange.Arrangement(order=tuple(req.order), pins=dict(req.pins), min_gap=req.min_gap, end=req.end)
     _save_arrangement(project_id, record, new, _arrangement_said(record, before, _placements(record, new)))
+    _left_approved(project_id, owner)
     return _arrangement_dict(project_id, record)
 
 
@@ -6467,6 +6550,8 @@ class MoveRequest(BaseModel):
     start: float
     # Change how it meets the sound there too, if asked.
     mix: Literal["replace", "layer", "concatenate"] | None = None
+    # Decision 0: the yes to taking an Approved video back to Draft (a kept line).
+    confirm_stage: bool = False
 
 
 def _moved(project_id: str, record: ProjectRecord, source: EditCandidate, start: float, mix: str | None) -> EditCandidate:
@@ -6498,6 +6583,8 @@ class RoleRequest(BaseModel):
     offset_db: float = 0.0
     # Make the only speech in its span a Bed anyway: the user was asked and said so.
     confirm: bool = False
+    # Decision 0: the yes to taking an Approved video back to Draft (a kept line).
+    confirm_stage: bool = False
 
 
 ONLY_VOICE = ("This is the only speech here. As a Bed it would just be quieter. "
@@ -6569,6 +6656,7 @@ def role_edit(project_id: str, edit_id: str, req: RoleRequest, owner: str = Depe
     """An added line in the video as a Voice, a Bed or an Effect, or fine-tuned:
     the old edit is reverted and the same take approved in its new role, in one step."""
     record = _owned(project_id, owner)
+    _stage_gate([project_id], owner, req.confirm_stage, change=True)
     edit = next((e for e in repo.list_edits(project_id) if e.edit_id == edit_id and not e.reverted), None)
     if edit is None:
         raise HTTPException(status_code=404, detail="edit not found")
@@ -6623,6 +6711,8 @@ def move_edit(
 ) -> dict:
     """A kept line, placed somewhere else: the old edit is reverted and the
     same take approved at the new place, in one step."""
+    _owned(project_id, owner)
+    _stage_gate([project_id], owner, req.confirm_stage, change=True)
     record = _owned(project_id, owner)
     _migrate_moves(project_id, record)
     edit = next((e for e in repo.list_edits(project_id) if e.edit_id == edit_id and not e.reverted), None)

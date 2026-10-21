@@ -192,7 +192,7 @@ function Studio() {
   const [withdrew, setWithdrew] = useState(false)       // G6: keep the sentence on screen after a withdrawal
   // D2: the optional "why?" after a discard.
   const [discardWhy, setDiscardWhy] = useState<{ decisionId: number; line: string } | null>(null)
-  const [stageAsk, setStageAsk] = useState<{ message: string; run: () => void } | null>(null)
+  const [stageAsk, setStageAsk] = useState<{ message: string; run: () => void; anyway?: string } | null>(null)
   const [languagesOpen, setLanguagesOpen] = useState(false)
   // A3: the project's words, for the typed-line warning and Learn a word.
   const [projectRules, setProjectRules] = useState<ProjectRule[]>([])
@@ -540,11 +540,12 @@ function Studio() {
     }
   }
   /** A kept line dragged to a new start: reverted and re-kept there, in one step. */
-  const moveKept = async (editId: string, start: number) => {
+  const moveKept = async (editId: string, start: number, confirmStage = false) => {
     if (!projectId) return
     setError(null)
     try {
-      const r = await moveEdit(projectId, editId, { start })
+      const r = await moveEdit(projectId, editId, confirmStage ? { start, confirm_stage: true } : { start })
+      if (confirmStage) leftApproved()
       const { selection: at, new_text: text, mix = 'replace' } = r.candidate.plan
       setApproved((a) => a.map((rev) => (
         rev.edit_id === editId ? { ...rev, edit_id: r.edit_id, start: at.start, end: at.end, text, mix, partner: rev.partner ?? null }
@@ -553,6 +554,7 @@ function Studio() {
       setDownload(null)
       if (await runExport()) setView('final')
     } catch (e) {
+      if (stageHeld(e, () => void moveKept(editId, start, true))) return
       setError(e instanceof ApiError ? e.message : 'Could not move the line.')
     }
   }
@@ -568,7 +570,7 @@ function Studio() {
     const hold = stageHold(e)
     if (!hold) return false
     setProject((p) => (p ? { ...p, stage: 'approved' } : p))
-    setStageAsk({ message: hold.message, run })
+    setStageAsk({ message: hold.message, run, anyway: hold.options[0] })
     return true
   }
   /** C1: an edit landed, so an Approved video is a Draft again (the server moved it in the same step). */
@@ -636,14 +638,16 @@ function Studio() {
     }
   }
   /** The arrangement, as one action: saved, then the video rendered with it. */
-  const arrange = async (next: Arrangement | 'undo') => {
+  const arrange = async (next: Arrangement | 'undo', confirmStage = false) => {
     if (!projectId) return
     setError(null)
     try {
-      setArranged(next === 'undo' ? await undoArrangement(projectId) : await putArrangement(projectId, next))
+      setArranged(next === 'undo' ? await undoArrangement(projectId) : await putArrangement(projectId, next, confirmStage))
+      if (confirmStage) leftApproved()
       setDownload(null)
       if (await runExport()) setView('final')
     } catch (e) {
+      if (next !== 'undo' && stageHeld(e, () => void arrange(next, true))) return
       setError(e instanceof ApiError ? e.message : 'Could not move that line.')
     }
   }
@@ -867,6 +871,7 @@ function Studio() {
     try {
       if (target.editId) {
         const r = await setEditRole(projectId, target.editId, change)
+        if (change.confirm_stage) leftApproved()
         setApproved((all) => all.map((rev) => (rev.edit_id === target.editId
           ? { ...rev, edit_id: r.edit_id, role: r.candidate.plan.role ?? 'voice', offset_db: r.candidate.plan.offset_db ?? null } : rev)))
         setPreview(null)
@@ -881,6 +886,7 @@ function Studio() {
     } catch (e) {
       const asked = roleQuestion(e)
       if (asked) return asked
+      if (stageHeld(e, () => void changeRole(target, { ...change, confirm_stage: true }))) return null
       setError(e instanceof ApiError ? e.message : 'Could not change how the line is mixed.')
       return null
     }
@@ -1767,7 +1773,7 @@ function Studio() {
               )}
               {error && <div className="rounded-lg border-[1.5px] border-warn bg-card px-3.5 py-2.5 text-sm" role="alert">{error}</div>}
               {discardWhy && projectId && <DiscardWhy key={discardWhy.decisionId} videoId={projectId} decisionId={discardWhy.decisionId} line={discardWhy.line} reasons={DISCARD_REASONS} onClose={() => setDiscardWhy(null)} />}
-              {stageAsk && <StageWarning className="fixed bottom-6 left-1/2 z-40 w-[min(560px,calc(100vw-32px))] -translate-x-1/2 shadow-volt" message={stageAsk.message} onCancel={() => setStageAsk(null)} onAnyway={() => { const run = stageAsk.run; setStageAsk(null); run() }} />}
+              {stageAsk && <StageWarning className="fixed bottom-6 left-1/2 z-40 w-[min(560px,calc(100vw-32px))] -translate-x-1/2 shadow-volt" message={stageAsk.message} anyway={stageAsk.anyway} onCancel={() => setStageAsk(null)} onAnyway={() => { const run = stageAsk.run; setStageAsk(null); run() }} />}
               {firstRead && speakers.length > 0 && (
                 <WhoSpeaks speakers={speakers} statements={statements} reading={readingBusy ? null : reading} onName={(label, name) => void changeSpeaker(label, { name })} />
               )}

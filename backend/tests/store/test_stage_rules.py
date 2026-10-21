@@ -52,3 +52,18 @@ def test_a_review_link_puts_videos_in_review_and_a_reviewer_answers_under_their_
     assert (last["actor_kind"], last["actor_name"], last["payload"]["to"]) == ("reviewer", "Priya", "approved")
     assert stages.reviewer_asked_changes(db, "p2", "").actor_name == "A reviewer"
     assert stages.current(db, "p2") == "changes_asked"
+
+
+def test_a_review_link_moves_only_draft_and_changes_asked_videos():
+    """Decision 0: Approved and Exported keep their stage when a link is sent;
+    only the reviewer asking for changes moves them."""
+    db, _ = _repo()
+    stages.move(db, "p1", "approved", user("local"))
+    moved = stages.review_sent(db, ["p1"], user("local"))
+    assert moved == [] and stages.current(db, "p1") == "approved"
+    stages.move(db, "p1", "exported", user("local"))
+    assert stages.review_sent(db, ["p1"], user("local")) == [] and stages.current(db, "p1") == "exported"
+    stages.move(db, "p1", "changes_asked", user("local"))
+    assert [m.to_stage for m in stages.review_sent(db, ["p1"], user("local"))] == ["in_review"]
+    stages.move(db, "p1", "approved", user("local"))
+    assert stages.reviewer_asked_changes(db, "p1", "Priya").to_stage == "changes_asked"

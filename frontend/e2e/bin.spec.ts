@@ -2,7 +2,7 @@ import { expect, test } from '@playwright/test'
 import type { Page, Route } from '@playwright/test'
 
 /** D3 in a real browser (API mocked, nothing spent): delete a video from
- *  Home (the confirmation names the Bin), open the Bin from the nav, see who
+ *  Home (the confirmation names the Bin), open the Bin from Home's sidebar, see who
  *  deleted it and the days left, restore a project with its video and a
  *  video whose project is in the Bin (standalone, said so).
  *  SHOTS=<dir> saves screenshots. */
@@ -81,8 +81,8 @@ test('the Bin: a delete says where it goes, the Bin lists it, Restore puts thing
   await expect(page.getByRole('status').filter({ hasText: 'Moved bhaji-cam-ad.mp4 to the Bin.' })).toBeVisible()
   await expect.poll(() => posts.includes('DELETE /api/videos/p1'), { timeout: 10_000 }).toBe(true)
 
-  // The Bin, from the nav.
-  await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Bin' }).click()
+  // The Bin, from the foot of Home's sidebar (decision 0).
+  await page.getByTestId('bin-link').click()
   await expect(page.getByRole('heading', { name: 'Bin', level: 1 })).toBeVisible()
   const row = page.getByTestId('bin-video:p1')
   await expect(row).toContainText('Deleted by you just now')
