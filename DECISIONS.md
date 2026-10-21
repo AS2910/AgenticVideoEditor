@@ -33,6 +33,11 @@ Each: what, why, how to undo. The projects-plan decisions from the night before 
 - 3: Clones count as paid work (a vendor slot) and pause too; the credit check does not apply to them (they cost no ledger dollars).
 - 3: The A2 project check and D2 learned pass, and batch starts, now also stop when the owner's credits are used up (before, only turns checked credits).
 - 3: The free trial stays 5 credits (`app/billing/prices.py`, AVE_TRIAL_CREDITS), granted when an owner's billing account is made (first sign-in with golive.g3 on).
+- 4: On startup every queued or running job is failed as interrupted (not only those past their timeout): jobs run inside the API process, so none can survive a restart. Past-timeout jobs in a live process are failed by the sweep.
+- 4: Idempotency keys are sent on every paid ElevenLabs and Whisper call; neither vendor documents honouring them today, so the bound that matters is the attempt count (three, as before). Stripe and Resend (item 7) honour them.
+- 4: The Anthropic SDK may retry twice within one call (was once); the agent turn is not retried by the job runner, so a Claude call is tried at most three times.
+- 4: `/ready` is public and reports only which checks passed; reasons go to the log.
+- 4: Backups keep 14 days on the same disk; OPS.md says to copy them off the machine (no storage account created).
 
 ---
 

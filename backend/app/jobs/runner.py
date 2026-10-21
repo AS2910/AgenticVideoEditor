@@ -11,7 +11,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from typing import Callable
 
-from app.adapters.base import VendorError
+from app.adapters.base import VendorError, idempotency_scope
 from app.errors import NonRetryableError
 from app.media.ffmpeg import FFmpegError
 from app.jobs.store import Job, JobStore
@@ -31,7 +31,14 @@ def with_retries(
     on_attempt: Callable[[int], None] | None = None,
     retry_on: tuple[type[BaseException], ...] = (VendorError,),
 ):
-    """Call `work`, retrying transient vendor failures with exponential backoff."""
+    """Call `work`, retrying transient vendor failures with exponential backoff.
+    Every attempt runs in one idempotency scope, so a retried vendor call
+    sends the key its first attempt sent (launch item 4)."""
+    with idempotency_scope():
+        return _attempts(work, attempts, base_delay, sleep, on_attempt, retry_on)
+
+
+def _attempts(work, attempts, base_delay, sleep, on_attempt, retry_on):
     last: BaseException | None = None
     for attempt in range(1, attempts + 1):
         if on_attempt:

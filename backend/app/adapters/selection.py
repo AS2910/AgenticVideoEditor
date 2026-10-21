@@ -60,13 +60,13 @@ def select_continuity(voice_identity: str, store: ArtifactStore):
 
 def anthropic_client(settings: Settings, chaos: Chaos | None = None):
     """One Anthropic client for the planner and the interpreter: a 60 s timeout
-    and one retry of the SDK's own (the job runner retries too), instead of the
+    and at most two retries of the SDK's own (launch item 4), instead of the
     SDK's ten-minute default that let a hung call hold a worker (the chaos
     pass); wrapped by chaos when faults are on."""
     import anthropic
     headers = {"anthropic-workspace-id": settings.anthropic_workspace_id} if settings.anthropic_workspace_id else None
     client = anthropic.Anthropic(api_key=settings.anthropic_api_key, default_headers=headers,
-                                 timeout=ANTHROPIC_TIMEOUT, max_retries=1)
+                                 timeout=ANTHROPIC_TIMEOUT, max_retries=2)
     return chaos.anthropic_client(client) if chaos else client
 
 

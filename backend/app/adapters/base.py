@@ -1,4 +1,8 @@
-from typing import Protocol
+import hashlib
+import uuid
+from contextlib import contextmanager
+from contextvars import ContextVar
+from typing import Iterator, Protocol
 
 from app.domain.models import Source, Transcript, EditPlan, MediaArtifact
 
@@ -54,3 +58,32 @@ class LipSyncAdapter(Protocol):
     def sync(self, source: Source, plan: EditPlan, audio: MediaArtifact) -> MediaArtifact:
         """Re-sync the mouth to `audio` and return the stored frames."""
         ...
+
+
+# ── Launch item 4: idempotency keys on paid vendor calls ─────────────────────
+# A retried call carries the same key as its first attempt, so a vendor that
+# honours keys (Stripe, Resend, OpenAI's newer APIs) does the work once. The
+# key is the retry scope (one per logical call, set by `with_retries`) plus
+# what is being asked; a call outside any scope gets a fresh key.
+
+_idempotency_scope: ContextVar[str | None] = ContextVar("idempotency_scope", default=None)
+
+
+@contextmanager
+def idempotency_scope() -> Iterator[str]:
+    """Every vendor call inside shares one scope (kept if one is already open)."""
+    current = _idempotency_scope.get()
+    if current is not None:
+        yield current
+        return
+    token = _idempotency_scope.set(uuid.uuid4().hex)
+    try:
+        yield _idempotency_scope.get()  # type: ignore[misc]
+    finally:
+        _idempotency_scope.reset(token)
+
+
+def idempotency_header(*parts: object) -> dict[str, str]:
+    scope = _idempotency_scope.get() or uuid.uuid4().hex
+    digest = hashlib.sha256("|".join([scope, *(str(p) for p in parts)]).encode()).hexdigest()[:40]
+    return {"Idempotency-Key": f"ave-{digest}"}

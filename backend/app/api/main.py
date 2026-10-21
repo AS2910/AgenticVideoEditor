@@ -190,6 +190,50 @@ oidc: auth.Provider | None = (
 )
 
 
+# ── Launch item 4: readiness ─────────────────────────────────────────────────
+# /health says the process is up (and which vendors are real); /ready says it
+# can take traffic: the database answers, every migration is applied, the data
+# dir takes writes, ffmpeg runs. A load balancer sends traffic only on 200.
+
+def _check_database() -> None:
+    with database.tx() as c:
+        c.execute("SELECT 1").fetchone()
+
+
+def _check_migrations() -> None:
+    from app.store import migrate
+    with database.tx() as c:
+        missing = [m["version"] for m in migrate.status(c) if not m["applied_at"]]
+    if missing:
+        raise RuntimeError(f"{len(missing)} migrations not applied")
+
+
+def _check_storage() -> None:
+    probe = settings.data_dir / ".ready-probe"
+    probe.write_text("ok")
+    probe.unlink()
+
+
+def _check_ffmpeg() -> None:
+    if not ffmpeg.available():
+        raise RuntimeError("ffmpeg is not installed")
+
+
+@app.get("/ready")
+def ready() -> JSONResponse:
+    checks = []
+    for name, check in (("database", _check_database), ("migrations", _check_migrations),
+                        ("storage", _check_storage), ("ffmpeg", _check_ffmpeg)):
+        try:
+            check()
+            checks.append({"name": name, "ok": True})
+        except Exception as exc:  # noqa: BLE001 - a failed check is reported, never raised
+            log.error("readiness check %s failed: %s", name, exc)
+            checks.append({"name": name, "ok": False})
+    ok = all(c["ok"] for c in checks)
+    return JSONResponse(status_code=200 if ok else 503, content={"ready": ok, "checks": checks})
+
+
 @app.get("/health")
 def health() -> dict:
     """Which capabilities are real in this process — handy when a key is missing."""

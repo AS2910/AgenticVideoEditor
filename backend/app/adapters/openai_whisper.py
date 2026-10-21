@@ -17,7 +17,7 @@ import httpx
 
 import re
 
-from app.adapters.base import VendorError
+from app.adapters.base import idempotency_header, VendorError
 from app.domain.models import Source, Statement, Transcript, Word
 from app.domain.transcript import assign_speakers
 from app.media import ffmpeg
@@ -254,11 +254,16 @@ def without_silent_speech(transcript: Transcript, audio_path: Path) -> Transcrip
     return Transcript(words=words, statements=tuple(kept))
 
 
+def _sha(path: Path) -> str:
+    import hashlib
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
 def _post(audio_path: Path, api_key: str, timeout: float) -> dict:
     with audio_path.open("rb") as handle:
         response = httpx.post(
             ENDPOINT,
-            headers={"Authorization": f"Bearer {api_key}"},
+            headers={"Authorization": f"Bearer {api_key}", **idempotency_header("transcribe", _sha(audio_path))},
             files={"file": (audio_path.name, handle, "audio/wav")},
             data={
                 "model": MODEL,
@@ -302,7 +307,7 @@ def _post_diarize(audio_path: Path, api_key: str, timeout: float) -> dict:
         with audio_path.open("rb") as handle:
             response = httpx.post(
                 ENDPOINT,
-                headers={"Authorization": f"Bearer {api_key}"},
+                headers={"Authorization": f"Bearer {api_key}", **idempotency_header("diarize", _sha(audio_path))},
                 files={"file": (audio_path.name, handle, "audio/wav")},
                 data={
                     "model": DIARIZE_MODEL,

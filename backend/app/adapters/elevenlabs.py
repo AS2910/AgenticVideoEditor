@@ -22,6 +22,8 @@ preview takes a voice slot and no credits.
 """
 from __future__ import annotations
 
+import hashlib
+
 import base64
 import json
 import math
@@ -32,7 +34,7 @@ from typing import Callable
 
 import httpx
 
-from app.adapters.base import VendorError
+from app.adapters.base import idempotency_header, VendorError
 from app.adapters.pronounce import for_synthesis
 from app.budget import VoiceBudget
 from app.domain.models import Word, EditPlan, MediaArtifact, Source, Transcript
@@ -194,7 +196,7 @@ def _add_from_library(api_key: str, owner_id: str, voice_id: str, name: str, tim
     try:
         response = httpx.post(
             ADD_LIBRARY_ENDPOINT.format(owner_id=owner_id, voice_id=voice_id),
-            headers={"xi-api-key": api_key}, json={"new_name": name}, timeout=timeout,
+            headers={"xi-api-key": api_key, **idempotency_header("library", voice_id, name)}, json={"new_name": name}, timeout=timeout,
         )
     except httpx.HTTPError as exc:
         raise VoiceError(f"Could not reach ElevenLabs ({type(exc).__name__}).") from None
@@ -298,7 +300,7 @@ def _post(voice_id: str, body: dict, api_key: str, timeout: float) -> tuple[int,
         response = httpx.post(
             TIMESTAMPS_ENDPOINT.format(voice_id=voice_id),
             params={"output_format": OUTPUT_FORMAT},
-            headers={"xi-api-key": api_key},
+            headers={"xi-api-key": api_key, **idempotency_header("tts", voice_id, json.dumps(body, sort_keys=True))},
             json=body,
             timeout=timeout,
         )
@@ -395,7 +397,7 @@ def _add_voice(api_key: str, name: str, wav: bytes, timeout: float) -> tuple[int
     try:
         response = httpx.post(
             ADD_VOICE_ENDPOINT,
-            headers={"xi-api-key": api_key},
+            headers={"xi-api-key": api_key, **idempotency_header("clone", name, hashlib.sha256(wav).hexdigest())},
             data={"name": name, "remove_background_noise": "true",
                   "description": "Made by Voltage from the speaker's own speech, with consent."},
             files={"files": ("reference.wav", wav, "audio/wav")},
@@ -416,7 +418,7 @@ def _convert(api_key: str, voice_id: str, wav: bytes, timeout: float) -> tuple[i
         response = httpx.post(
             STS_ENDPOINT.format(voice_id=voice_id),
             params={"output_format": OUTPUT_FORMAT},
-            headers={"xi-api-key": api_key},
+            headers={"xi-api-key": api_key, **idempotency_header("sts", voice_id, hashlib.sha256(wav).hexdigest())},
             data={"model_id": STS_MODEL, "remove_background_noise": "true"},
             files={"audio": ("take.wav", wav, "audio/wav")},
             timeout=timeout,
@@ -434,7 +436,8 @@ def _design(api_key: str, description: str, text: str | None, timeout: float) ->
     else:
         body["auto_generate_text"] = True
     try:
-        response = httpx.post(DESIGN_ENDPOINT, headers={"xi-api-key": api_key}, json=body, timeout=timeout)
+        response = httpx.post(DESIGN_ENDPOINT, headers={"xi-api-key": api_key, **idempotency_header("design", json.dumps(body, sort_keys=True))},
+                              json=body, timeout=timeout)
     except httpx.HTTPError as exc:
         raise VoiceError(f"Could not reach ElevenLabs ({type(exc).__name__}).") from None
     if response.status_code != 200:
@@ -448,7 +451,7 @@ def _design(api_key: str, description: str, text: str | None, timeout: float) ->
 def _create_voice(api_key: str, name: str, description: str, generated_voice_id: str, timeout: float) -> tuple[int, str, str]:
     try:
         response = httpx.post(
-            CREATE_VOICE_ENDPOINT, headers={"xi-api-key": api_key}, timeout=timeout,
+            CREATE_VOICE_ENDPOINT, headers={"xi-api-key": api_key, **idempotency_header("save", generated_voice_id, name)}, timeout=timeout,
             json={"voice_name": name, "voice_description": description, "generated_voice_id": generated_voice_id},
         )
     except httpx.HTTPError as exc:
