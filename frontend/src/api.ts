@@ -8,7 +8,7 @@ import type {
   ProjectSettings, Autonomy, Effort, Plan, Mix, Selection, Candidate, Reading, Sight, ChatMessage,
   ProjectFolder, ProjectDetailFolder, ProjectFile, HelpArticle, Onboarding, ProjectVoice,
   ActivityJob, TurnView, RenderState, BriefVersion, BriefChange, BriefUpdateRun, ProjectRule, RuleKind, RuleData, CheckPage, Batch, ExportPreset, ExportPresetPage, ExportPresetChange, Preflight, BatchExport, ShareLink, PublicShare,
-  PublicComment, ReviewAnswer, ReviewComment, ReviewLinkRequest, BinItem, BinKind, BinRestored, Pin, SearchResult, ProjectTemplate, LearnedPage,
+  PublicComment, ReviewAnswer, ReviewComment, ReviewLinkRequest, BinItem, BinKind, BinRestored, Pin, SearchResult, ProjectTemplate, LearnedPage, ImportSource,
 } from './types'
 
 const BASE = '/api'
@@ -504,6 +504,11 @@ export async function unarchiveFolder(id: string): Promise<ProjectFolder> {
   return (await res.json()) as ProjectFolder
 }
 export const searchEverything = (q: string) => get<SearchResult>(`/search?q=${encodeURIComponent(q)}`)
+// G1: the sample project (once per new owner) and import from a link.
+export const ensureSample = () => post<{ created: boolean; project_id: string | null }>('/me/sample')
+export const getImportSources = () => get<{ sources: ImportSource[]; max_bytes: number }>('/imports/sources')
+export const startImport = (url: string, projectId: string | null) => post<ActivityJob>('/imports', { url, project_id: projectId })
+export const getImport = (jobId: string) => get<ActivityJob>(`/imports/${encodeURIComponent(jobId)}`)
 export const getMyFlags = async () => (await get<{ flags: string[] }>('/me/flags')).flags
 /** Everything of yours: every project, take and voice, and the consent records. */
 export async function deleteAccount(): Promise<void> {

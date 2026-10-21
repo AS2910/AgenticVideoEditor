@@ -553,6 +553,8 @@ export interface ProjectFolder {
   stale_count?: number
   /** D4: set while archived (hidden from Home, read-only). */
   archived_at?: string | null
+  /** G1: the sample project made for a new owner. */
+  sample?: boolean
 }
 /** F2: one saved version of a project's brief. */
 export interface BriefVersion { project_id: string; version: number; text: string; created_by: string; created_at: string }
@@ -636,7 +638,7 @@ export interface HelpRef { slug: string; title: string; section: string; tour?: 
 // Every surface (the status strip, Activity, the row chips, the player's badge,
 // the chat's step list, toasts, the tab title) reads from these records.
 
-export type ActivityKind = 'voice_line' | 'design_voice' | 'clone' | 'mix' | 'render_preview' | 'export' | 'brief_update' | 'check' | 'batch' | 'learn'
+export type ActivityKind = 'voice_line' | 'design_voice' | 'clone' | 'mix' | 'render_preview' | 'export' | 'brief_update' | 'check' | 'batch' | 'learn' | 'import'
 export type ActivityStatus = 'queued' | 'running' | 'done' | 'failed' | 'cancelled'
 /** The takes a render carries: kept edits, proposals (items), and their candidates. */
 export interface RenderIncludes { candidate_ids: string[]; edit_ids: string[]; item_ids: string[] }
@@ -663,6 +665,11 @@ export interface ActivityJob {
     text?: string; voice_name?: string; chars?: number
     version?: number; mode?: 'final' | 'proposals'; render_id?: string; includes?: RenderIncludes
     manual?: boolean
+    // G1: an import from a link (bytes so far, the size when known, the video it made).
+    bytes?: number
+    total_bytes?: number | null
+    video_id?: string
+    filename?: string
   }
 }
 export interface TurnView {
@@ -990,3 +997,6 @@ export interface LearnedPage {
   /** After accept or remove: the project as it now is (a new brief version). */
   project?: ProjectFolder
 }
+
+/** G1: where a link can be imported from. */
+export interface ImportSource { name: 'drive' | 'dropbox' | 'youtube'; label: string; enabled: boolean; why_off: string | null }

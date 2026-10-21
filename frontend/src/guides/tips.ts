@@ -24,6 +24,7 @@ export const TIPS: TipDef[] = [
   { id: 'first-template', title: 'Templates', text: 'A template starts a project with its brief, words, presets, defaults and ceiling set. Starters are read-only; save your own from a project with ••• then Save as template.', link: 'Project templates', slug: 'project-templates' },
   { id: 'first-learned', title: 'Learned style', text: 'Voltage looked at your last decisions on its lines and suggests one line. Nothing changes until you add it, and anything added can be removed here.', link: 'What Voltage has learned', slug: 'what-voltage-has-learned' },
   { id: 'first-home-search', title: 'Search', text: 'Press / to search every project, video, brief and word anyone says. A spoken word opens the editor at its moment. Pin what you use most to the top of the sidebar.', link: 'Pin, archive, search and sort', slug: 'pin-archive-search-and-sort' },
+  { id: 'first-sample', title: 'Sample project', text: 'The sample ad replays a recorded run, so trying it is free. A video can also come from a Google Drive or Dropbox share link: paste it under the drop zone.', link: 'The sample project and importing from a link', slug: 'the-sample-project-and-links' },
   { id: 'first-batch-export', title: 'Exported', text: 'Each file is in its preset\'s frame and loudness. Download them one by one or all as a zip, or share one link that plays and downloads every file.', link: 'Export many videos at once', slug: 'batch-export' },
 ]
 

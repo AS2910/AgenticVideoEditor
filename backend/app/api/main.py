@@ -66,6 +66,9 @@ from app.usage import (
     Ledger, SpendCeilingReached, WHISPER_USD_PER_MINUTE, claude_usd, current_turn, money, month_name, month_start,
 )
 from app import auth
+from app import linkimport
+import httpx
+from app.store.workspaces import personal
 from app.store import briefs, checks as checks_store, events as activity_log, rules, stages
 from app.store import shares as shares_store, presets as presets_store, languages as langs
 from app.store import comments as comments_store
@@ -444,6 +447,11 @@ def auth_callback(request: Request, code: str | None = None, state: str | None =
     if not auth.allowed(who, settings.allowed_emails):
         raise HTTPException(status_code=403, detail="This Voltage is private; that account is not on its list.")
     email_mod.remember_address(database, who.owner, who.email)      # C2: where their review digest goes
+    try:                                                              # G1: a new owner's sample project
+        from app.tutorial import sample
+        sample.ensure(who.owner)
+    except Exception:  # noqa: BLE001 - the sample is a nicety; sign-in never fails over it
+        log.exception("could not make the sample project for a new owner")
     response = RedirectResponse(settings.public_url + "/", status_code=302)
     response.set_cookie(
         auth.SESSION_COOKIE,
@@ -746,22 +754,26 @@ async def create_project(
     if folder is not None:
         _not_archived(folder.project_id, owner)
     filename = Path(file.filename or "upload.mp4").name
-    container = (Path(filename).suffix.lstrip(".") or "mp4").lower()
-
     with tempfile.TemporaryDirectory() as tmp:
         staged = Path(tmp) / filename
         await _spool(file, staged)
-        try:
-            probed = ingest.probe_source(staged)
-        except ingest.IngestError as exc:
-            # Reject before allocating a project id, so a refused upload leaves
-            # no trace in the store.
-            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        return _ingest_staged(staged, filename, consent, folder, owner)
 
-        project_id = repo.next_id()
-        media = artifacts.put_file(
-            project_id, staged, kind="video", container=container, duration=probed.duration,
-        )
+
+def _ingest_staged(staged: Path, filename: str, consent: bool, folder: Project | None, owner: str) -> dict:
+    """A file on disk becomes a video: probed (refused before an id is
+    given, so a refusal leaves no trace), stored, transcribed, charged.
+    Shared by the upload and G1's import from a link."""
+    container = (Path(filename).suffix.lstrip(".") or "mp4").lower()
+    try:
+        probed = ingest.probe_source(staged)
+    except ingest.IngestError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    project_id = repo.next_id()
+    media = artifacts.put_file(
+        project_id, staged, kind="video", container=container, duration=probed.duration,
+    )
 
     source = Source(
         project_id=project_id, filename=filename, duration=probed.duration, media=media,
@@ -787,6 +799,134 @@ async def create_project(
     if any(w.speaker for w in transcript.words):
         _record_diarization(project_id, source.duration)
     return _project_dict(repo.get(project_id))
+
+
+# ── G1: the sample project and upload from a link ────────────────────────────
+#
+# The sample project (app/tutorial/sample.py) is made once per new owner, the
+# first time Home loads (`POST /me/sample`) or they sign in. An import from a
+# link (app/linkimport.py: Google Drive, Dropbox; YouTube behind the
+# interface but off) is one Activity job (kind "import", keyed by the
+# owner's own store id, `user-<owner>`, since no video exists yet): download
+# with a 2 GB cap and progress, sniff, then the upload's own ingest. Both
+# need `golive.g1`.
+
+_samples_lock = threading.Lock()
+# Tests swap in a client on an httpx.MockTransport; None means a real one.
+_link_http: "httpx.Client | None" = None
+# Tests run an import inline; the server runs it on the work pool.
+IMPORT_IN_BACKGROUND = True
+
+
+def _g1_flag(owner: str) -> None:
+    if not flags.enabled("golive.g1", owner):
+        raise HTTPException(status_code=404, detail="Not found")
+
+
+@app.post("/me/sample")
+def ensure_sample(owner: str = Depends(current_owner)) -> dict:
+    """Home's first load: the sample project for a new owner, once ever."""
+    from app.tutorial import sample
+    return sample.ensure(owner)
+
+
+class LinkImportRequest(BaseModel):
+    url: str
+    project_id: str | None = None
+    consent: bool = False
+
+
+def _import_key(owner: str) -> str:
+    return _user_store(owner)
+
+
+def _import_dict(job) -> dict:
+    out = job.to_dict()
+    out["detail"] = {k: v for k, v in out["detail"].items() if k != "owner"}
+    return out
+
+
+@app.get("/imports/sources")
+def import_sources(owner: str = Depends(current_owner)) -> dict:
+    """Where a link can come from, and why one is off."""
+    _g1_flag(owner)
+    return {"sources": [{"name": i.name, "label": i.label, "enabled": i.enabled, "why_off": i.why_off}
+                        for i in linkimport.IMPORTERS], "max_bytes": linkimport.MAX_LINK_BYTES}
+
+
+@app.post("/imports", status_code=202)
+def start_import(req: LinkImportRequest, owner: str = Depends(current_owner)) -> dict:
+    """Import a video from a share link. 422 with a sentence for a link that
+    cannot work (not Drive or Dropbox, YouTube while it is off, not a file);
+    otherwise the job, which says how far the download is."""
+    _g1_flag(owner)
+    folder = _owned_project(req.project_id, owner) if req.project_id else None
+    if folder is not None:
+        _not_archived(folder.project_id, owner)
+    try:
+        resolved = linkimport.resolve(req.url)
+    except linkimport.ImportRefused as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
+    job = activity.create(_import_key(owner), "import", step_label="Queued",
+                          detail={"owner": owner, "source": resolved.provider, "source_label": resolved.label,
+                                  "project_id": folder.project_id if folder else None})
+    with database.tx() as c:
+        c.execute("UPDATE jobs SET workspace_id = ? WHERE job_id = ?", (personal(c, owner), job.job_id))
+
+    def run() -> None:
+        _run_import(job.job_id, resolved, folder, req.consent, owner)
+    if IMPORT_IN_BACKGROUND:
+        work_pool.submit(run)
+    else:
+        run()
+    return _import_dict(activity.get(job.job_id))
+
+
+def _run_import(job_id: str, resolved, folder: Project | None, consent: bool, owner: str) -> None:
+    activity.start(job_id, f"Downloading from {resolved.label}")
+    last = [0.0]
+
+    def progress(got: int, total: int | None) -> None:
+        now = time.time()
+        if now - last[0] < 0.5 and (total is None or got < total):
+            return
+        last[0] = now
+        activity.update(job_id, progress=0.85 * got / total if total else None,
+                        detail={"bytes": got, "total_bytes": total})
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            client = _link_http or httpx.Client()
+            try:
+                path = linkimport.download(resolved, Path(tmp), client=client, on_progress=progress)
+            finally:
+                if client is not _link_http:
+                    client.close()
+            activity.update(job_id, step_label="Reading the video", progress=0.9)
+            video = _ingest_staged(path, path.name, consent, folder, owner)
+        activity.finish(job_id, step_label="Ready", detail={"video_id": video["video_id"], "filename": video["filename"]})
+    except linkimport.ImportRefused as exc:
+        activity.fail(job_id, "import_failed", str(exc))
+    except HTTPException as exc:
+        activity.fail(job_id, "import_failed", str(exc.detail))
+    except Exception as exc:  # noqa: BLE001 - an import that breaks says so; the server stays up
+        log.exception("import %s failed", job_id)
+        activity.fail(job_id, "import_failed", f"The import stopped: {str(exc)[:200] or type(exc).__name__}")
+
+
+@app.get("/imports")
+def list_imports(owner: str = Depends(current_owner)) -> dict:
+    """The caller's recent imports, newest first."""
+    _g1_flag(owner)
+    return {"imports": [_import_dict(j) for j in activity.list(_import_key(owner), limit=20)]}
+
+
+@app.get("/imports/{job_id}")
+def get_import(job_id: str, owner: str = Depends(current_owner)) -> dict:
+    _g1_flag(owner)
+    job = activity.get(job_id)
+    if job is None or job.kind != "import" or job.detail.get("owner") != owner:
+        raise HTTPException(status_code=404, detail="import not found")
+    return _import_dict(job)
 
 
 # ── 20i: the user's own voices ───────────────────────────────────────────────
@@ -2054,7 +2194,14 @@ def _folder_dict(project: Project) -> dict:
         "created_at": project.created_at,
         # D4: set while archived (hidden from Home, read-only).
         "archived_at": project.archived_at,
+        # G1: the sample project made for a new owner.
+        "sample": _is_sample(project),
     }
+
+
+def _is_sample(project: Project) -> bool:
+    raw = repo.get_meta(f"sample:{project.owner}")
+    return bool(raw) and json.loads(raw).get("project_id") == project.project_id
 
 
 def _last_at(videos: list[ProjectRecord], fallback: str) -> str:

@@ -30,8 +30,9 @@ from app.timefmt import now_iso
 # export (B3) also names a batch export: its parent keyed by the project's id (`detail.batch_export`)
 # and one child per video x preset in that video's slot (`detail.parent_id`).
 # learn (D2): the learned-style pass, keyed by the project's id like a check.
+# import (G1): a video imported from a link, keyed by the owner's own store id (`user-<owner>`).
 KINDS = ("voice_line", "design_voice", "clone", "mix", "render_preview", "export", "brief_update", "check", "batch",
-         "learn")
+         "learn", "import")
 TERMINAL = frozenset({"done", "failed", "cancelled"})
 ACTIVE = frozenset({"queued", "running"})
 ALLOWED = {
@@ -45,7 +46,7 @@ ALLOWED = {
 TIMEOUT_SECONDS = {"voice_line": 300.0, "design_voice": 300.0, "clone": 300.0, "mix": 120.0,
                    "render_preview": 900.0, "export": 1800.0, "brief_update": 1800.0, "check": 1800.0,
                    # A parent waits on rounds of child turns (each up to 30 min); it is touched as each child ends.
-                   "batch": 3600.0, "learn": 600.0}
+                   "batch": 3600.0, "learn": 600.0, "import": 1800.0}
 HISTORY = 20
 
 ERROR_TEXT = {

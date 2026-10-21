@@ -3,7 +3,7 @@ import type React from 'react'
 import type { DragEvent } from 'react'
 import type { Pin, ProjectFolder, ProjectSummary, ProjectTemplate, SpendSummary } from '../types'
 import type { Me } from '../api'
-import { frameUrl, getPins, getSpend, listArchivedFolders, listTemplates, setPin } from '../api'
+import { ensureSample, frameUrl, getPins, getSpend, listArchivedFolders, listTemplates, setPin } from '../api'
 import { templateFacts } from '../lib/templates'
 import { ofCeiling } from '../lib/money'
 import { hrefFor } from '../lib/route'
@@ -17,6 +17,7 @@ import { LanguageChips } from './LanguageVersions'
 import { useFlags } from '../flags/useFlags'
 import { HomeSearch } from './HomeSearch'
 import { Tip } from '../guides/Tip'
+import { LinkImport } from './LinkImport'
 
 import type { Sort } from '../lib/home'
 import { SORTS, STAGES, needsAttention, sortVideos } from '../lib/home'
@@ -51,7 +52,12 @@ interface ProjectsPageProps {
   error?: string | null
   /** How long "Deleted · Undo" waits before the delete goes through. */
   undoMs?: number
+  /** G1: the sample project was just made for a new owner; the caller refreshes its lists. */
+  onSampleMade?: () => void
 }
+
+// G1: Home asks for the sample project once per page load (the server makes it once ever).
+let sampleAsked = false
 
 /** This month's spend against the monthly ceiling, in the header, labelled with the month:
  *  "October: $0.14 of $100". Nothing until the summary is in. */
@@ -93,8 +99,15 @@ type Tab = 'all' | 'in' | 'none'
  *  "Add to" picker, and the recent videos as cards with a project chip.
  *  Each card's ••• has Move to project… and Delete; deleting waits with
  *  Undo before anything goes. */
-export function ProjectsPage({ me, projects, folders = [], onOpen, onUpload, onSample, onDelete, onNewFolder, onFolderMade, onMoved, banner, uploading, progress = null, error, undoMs = 5000 }: ProjectsPageProps) {
+export function ProjectsPage({ me, projects, folders = [], onOpen, onUpload, onSample, onDelete, onNewFolder, onFolderMade, onMoved, banner, uploading, progress = null, error, undoMs = 5000, onSampleMade }: ProjectsPageProps) {
   const input = useRef<HTMLInputElement>(null)
+  // G1: the sample project and import from a link.
+  const g1 = useFlags().enabled('golive.g1')
+  useEffect(() => {
+    if (!g1 || sampleAsked) return
+    sampleAsked = true
+    ensureSample().then((r) => { if (r.created) onSampleMade?.() }).catch(() => { /* Home works without it */ })
+  }, [g1, onSampleMade])
   // A1: "Brief changed" on a card whose project's brief moved on since it was made.
   const briefChips = useFlags().enabled('projects.consistency')
   // B2: a language version says its language; a master shows its versions as chips.
@@ -286,6 +299,7 @@ export function ProjectsPage({ me, projects, folders = [], onOpen, onUpload, onS
             <a key={f.project_id} href={hrefFor({ page: 'folder', projectId: f.project_id })} aria-current={f.project_id === selected ? 'true' : undefined} title={f.name} className="flex min-w-0 flex-1 items-center gap-2.5 rounded-lg px-2.5 py-2 text-foreground no-underline hover:bg-sunk aria-[current=true]:bg-sunk aria-[current=true]:font-semibold">
               <Folder filled={countIn(f.project_id) > 0 || f.project_id === selected} />
               <span className="min-w-0 flex-1 truncate font-medium">{f.name}</span>
+              {g1 && f.sample && <span className="stamp quiet">Sample</span>}
               <span className="tnum text-xs text-faint">{f.video_count ?? countIn(f.project_id)}</span>
             </a>
           )
@@ -393,6 +407,8 @@ export function ProjectsPage({ me, projects, folders = [], onOpen, onUpload, onS
             <span className="text-[13px] text-muted-foreground" data-testid="dest-note">
               {destId ? `It joins ${destName} and Voltage reads that project's brief and voices from the first turn.` : 'It will be a standalone video. You can add it to a project any time.'}
             </span>
+            {g1 && <LinkImport projectId={destId} disabled={uploading} onDone={onOpen} />}
+            {g1 && folders.some((f) => f.sample) && <Tip id="first-sample" target="link-import" />}
           </section>
 
           <section aria-labelledby="recent-h" className="flex flex-col gap-3.5" data-testid="recent-videos">

@@ -1360,6 +1360,7 @@ function Studio() {
           onNewFolder={async (name, templateId) => { const made = templateId ? await createFolderFrom(name, templateId) : await createFolder(name); await refreshProjects(); return made }}
           onFolderMade={() => void refreshProjects()}
           onMoved={() => void refreshProjects()}
+          onSampleMade={() => void refreshProjects()}
           banner={onboarding.loaded && !onboarding.onboarding.tour.finished && !onboarding.onboarding.tour.skipped ? (
             <div className="rise flex flex-wrap items-center gap-4 rounded-xl bg-pane px-5 py-4 text-ptext shadow-volt" data-testid="tour-offer">
               <span className="flex flex-1 basis-[260px] flex-col gap-0.5">
