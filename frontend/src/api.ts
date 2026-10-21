@@ -8,7 +8,7 @@ import type {
   ProjectSettings, Autonomy, Effort, Plan, Mix, Selection, Candidate, Reading, Sight, ChatMessage,
   ProjectFolder, ProjectDetailFolder, ProjectFile, HelpArticle, Onboarding, ProjectVoice,
   ActivityJob, TurnView, RenderState, BriefVersion, BriefChange, BriefUpdateRun, ProjectRule, RuleKind, RuleData, CheckPage, Batch, ExportPreset, ExportPresetPage, ExportPresetChange, Preflight, BatchExport, ShareLink, PublicShare,
-  PublicComment, ReviewAnswer, ReviewComment, ReviewLinkRequest, BinItem, BinKind, BinRestored, Pin, SearchResult, ProjectTemplate, LearnedPage, ImportSource, MembersPage, WorkspaceView, InviteView, MemberRole,
+  PublicComment, ReviewAnswer, ReviewComment, ReviewLinkRequest, BinItem, BinKind, BinRestored, Pin, SearchResult, ProjectTemplate, LearnedPage, ImportSource, MembersPage, WorkspaceView, InviteView, MemberRole, NotificationItem, NotificationSetting,
 } from './types'
 
 const BASE = '/api'
@@ -521,6 +521,12 @@ export const openInvite = (token: string) => get<InviteView>(`/invites/${encodeU
 export const acceptInvite = (token: string) => post<{ workspace_id: string; workspace_name: string; role: MemberRole; role_word: string }>(`/invites/${encodeURIComponent(token)}/accept`)
 export const emailSignInAvailable = () => get<{ available: boolean }>('/auth/email')
 export const sendSignInLink = (email: string) => post<{ sent: boolean; email: string }>('/auth/email', { email })
+// G4: the bell and its settings.
+export const listNotifications = () => get<{ items: NotificationItem[]; unread: number }>('/me/notifications')
+export const getNotificationCount = () => get<{ unread: number }>('/me/notifications/count')
+export const markNotificationsRead = (which: { ids?: number[]; all?: boolean }) => post<{ unread: number }>('/me/notifications/read', which)
+export const getNotificationSettings = () => get<{ kinds: NotificationSetting[] }>('/me/notifications/settings')
+export const putNotificationSettings = (changes: Record<string, { in_app?: boolean; email?: boolean }>) => put<{ kinds: NotificationSetting[] }>('/me/notifications/settings', changes)
 export const getMyFlags = async () => (await get<{ flags: string[] }>('/me/flags')).flags
 /** Everything of yours: every project, take and voice, and the consent records. */
 export async function deleteAccount(): Promise<void> {

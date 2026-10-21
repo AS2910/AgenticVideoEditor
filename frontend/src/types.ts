@@ -1008,3 +1008,7 @@ export interface WorkspaceInvite { id: string; email: string; role: MemberRole; 
 export interface MembersPage { workspace_id: string; owner: WorkspaceMember; members: WorkspaceMember[]; invites: WorkspaceInvite[]; roles: { role: MemberRole; word: string }[]; sign_in: boolean; invite?: WorkspaceInvite }
 export interface WorkspaceView { workspace: { workspace_id: string; name: string; own: boolean }; you: { user: string; role: MemberRole }; workspaces: { workspace_id: string; name: string; role: MemberRole; own: boolean }[] }
 export interface InviteView { email: string; role: MemberRole; role_word: string; workspace_name: string; invited_by: string | null; expires_at: string; sign_in: boolean }
+
+/** G4: one notification in the bell, and a kind's settings. */
+export interface NotificationItem { id: number; kind: string; title: string; body: string; link: string | null; video_id: string | null; project_id: string | null; created_at: string; read: boolean }
+export interface NotificationSetting { kind: string; label: string; help: string; in_app: boolean; email: boolean }

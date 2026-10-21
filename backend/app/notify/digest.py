@@ -29,7 +29,9 @@ from app.timefmt import iso, now_iso
 
 log = logging.getLogger("voltage.notify")
 WINDOW_S = 600
-KINDS = ("comment", "approved", "changes_asked")
+REVIEW_KINDS = ("comment", "approved", "changes_asked")
+# G4: the other notifications a person chose to have emailed ride the same digest.
+KINDS = REVIEW_KINDS + ("job_done", "job_failed", "spend_alert")
 
 
 def queue_in(c: sqlite3.Connection, owner: str, kind: str, *, project_id: str | None = None,
@@ -61,6 +63,8 @@ def _clock(t: float | None) -> str:
 def sentence(item: dict) -> str:
     """One item as the digest says it, e.g. Priya commented on promo.mp4 at 0:12 (v5): "Bigger logo"."""
     p = item["payload"]
+    if item["kind"] not in REVIEW_KINDS:
+        return str(p.get("text") or "")
     who = p.get("by") or "A reviewer"
     video = p.get("video") or "a video"
     version = f" v{p['version']}" if p.get("version") else ""
@@ -76,7 +80,9 @@ def sentence(item: dict) -> str:
 def _subject(items: list[dict]) -> str:
     if len(items) == 1:
         return sentence(items[0]).split(":")[0].rstrip(".")
-    return f"{len(items)} updates from your reviewers"
+    if all(i["kind"] in REVIEW_KINDS for i in items):
+        return f"{len(items)} updates from your reviewers"
+    return f"{len(items)} updates from Voltage"
 
 
 def flush(db: Database, sender: EmailSender, now: datetime, address_for: Callable[[str], str | None],
@@ -93,7 +99,8 @@ def flush(db: Database, sender: EmailSender, now: datetime, address_for: Callabl
             continue                                   # the first is not 10 minutes old yet: wait for more
         lines = [f"- {sentence(i)}" for i in items]
         link = link_for(items[0]) if link_for else None
-        body = "\n".join(["Here is what your reviewers said.", "", *lines, *(["", f"Open the project: {link}"] if link else [])])
+        intro = "Here is what your reviewers said." if all(i["kind"] in REVIEW_KINDS for i in items) else "Here is what happened in Voltage."
+        body = "\n".join([intro, "", *lines, *(["", f"Open the project: {link}"] if link else [])])
         email = Email(to=address_for(owner) or f"owner:{owner}", subject=_subject(items), body=body, kind="digest",
                       owner=owner, workspace_id=items[0]["workspace_id"])
         sender.send(email)

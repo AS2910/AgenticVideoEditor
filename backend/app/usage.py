@@ -15,6 +15,7 @@ from app.timefmt import iso, now_iso
 
 from contextvars import ContextVar
 from dataclasses import dataclass
+from typing import Callable
 from datetime import datetime, timezone
 
 from app.errors import NonRetryableError
@@ -152,6 +153,8 @@ class Ledger:
     def __init__(self, db: Database | None = None, ceiling_usd: float = 2.0) -> None:
         self.db = db or Database()
         self.ceiling_usd = ceiling_usd
+        # G4: called after each charge with (video id, project id) for spend alerts.
+        self.on_record: Callable[[str | None, str | None], None] | None = None
 
     def record(
         self, project_id: str, vendor: str, what: str, units: float, unit: str, usd: float,
@@ -166,6 +169,7 @@ class Ledger:
                  folder_of(c, project_id), current_turn.get(), current_actor.get()),
             )
             stamp_last(c, "usage", project_id)
+        self._after(project_id, None)
 
     def record_project_level(
         self, folder_id: str, vendor: str, what: str, units: float, unit: str, usd: float,
@@ -179,6 +183,16 @@ class Ledger:
                 (vendor, what, units, unit, usd, now_iso(), folder_id, current_turn.get(), current_actor.get()),
             )
             stamp_last(c, "usage", "", folder_id)
+        self._after(None, folder_id)
+
+    def _after(self, video_id: str | None, folder_id: str | None) -> None:
+        """G4: tell `on_record` (spend alerts) after a charge; it never fails the charge."""
+        hook = getattr(self, "on_record", None)
+        if hook is not None:
+            try:
+                hook(video_id, folder_id)
+            except Exception:  # noqa: BLE001
+                pass
 
     def spent_usd_by_turn(self, project_id: str, turn_id: str, since: str | None = None) -> float:
         """What one turn cost the video: the rows it caused, from the moment it

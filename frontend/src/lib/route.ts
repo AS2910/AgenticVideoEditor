@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react'
  *  read on load and on every change. `#`, `#home` or `#projects` is the
  *  start; `#v/p12` opens a video in the editor and `#v/p12/export` its
  *  export page; `#p/f3` is a project (a folder of videos); the account pages
- *  are `#voices`, `#usage`, `#settings`, `#billing`, `#bin` (D3), `#templates` (D1), `#members` (G2) and `#help` (with an
+ *  are `#voices`, `#usage`, `#settings`, `#billing`, `#bin` (D3), `#templates` (D1), `#members` (G2), `#notifications` (G4) and `#help` (with an
  *  article: `#help/<slug>`). Usage takes a scope: `#usage/v/p12` (one
  *  video), `#usage/p/f3` (one project), `#usage/none` (standalone videos).
  *  An old `#p12` link still opens the video. A2: `#v/p12@3.5` opens the
@@ -25,6 +25,7 @@ export type Route =
   | { page: 'editor'; projectId: string; t?: number | null }
   | { page: 'export'; projectId: string }
   | { page: 'members' }
+  | { page: 'notifications' }
   | { page: 'invite'; token: string }
 
 export function parseRoute(hash: string): Route {
@@ -45,6 +46,7 @@ export function parseRoute(hash: string): Route {
   const invite = /^invite\/([A-Za-z0-9_.-]+)$/.exec(h)
   if (invite) return { page: 'invite', token: invite[1] }
   if (h === 'members') return { page: 'members' }
+  if (h === 'notifications') return { page: 'notifications' }
   const help = /^help(?:\/([A-Za-z0-9_-]+))?$/.exec(h)
   if (help) return { page: 'help', slug: help[1] ?? null }
   if (h === 'voices' || h === 'settings' || h === 'billing' || h === 'bin' || h === 'templates') return { page: h }

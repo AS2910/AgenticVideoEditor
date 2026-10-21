@@ -78,6 +78,7 @@ from app.store import home as home_store
 from app.store import templates as templates_store
 from app.store import learned as learned_store
 from app.store import members as members_store
+from app.notify import inbox
 from app.notify import digest as digest_mod, email as email_mod
 from app.render import captions as captions_mod, deliver as deliver_mod
 from app.jobs import exports as exports_mod
@@ -147,7 +148,14 @@ runner = JobRunner(jobs, max_workers=4)
 # 2026-10-20 (one processing model): every piece of work the user waits on is
 # an Activity job, persisted; the editor hears each change on its live channel.
 events = EventBus()
-activity = ActivityJobs(database, on_change=lambda j: events.publish(j.video_id, "job.updated", j.to_dict()))
+def _on_job(j) -> None:
+    events.publish(j.video_id, "job.updated", j.to_dict())
+    notice = globals().get("_job_notice")      # G4, defined further down
+    if notice is not None and j.done:
+        notice(j)
+
+
+activity = ActivityJobs(database, on_change=_on_job)
 activity.interrupt_leftovers()
 # Renders and retries started from the editor run here, off the request thread
 # and apart from the turns' pool, so a long turn never holds a preview back.
@@ -7618,15 +7626,22 @@ def review_comment(token: str, req: ReviewCommentRequest) -> dict:
     if not (0 <= req.at_s <= float(length) + 0.5):
         raise HTTPException(status_code=422, detail="That time is not in the video.")
     name = _reviewer_name(share, req.name)
+    g4 = flags.enabled("golive.g4", share.owner)
     try:
         with database.tx() as c:
             comment = comments_store.add_in(c, video_id=req.video_id, author_name=name, at_s=req.at_s, text=req.text,
                                             version=req.version, share_id=share.share_id)
             activity_log.record(c, "review.commented", Actor("reviewer", name), video_id=req.video_id, target=share.share_id,
                                 payload={"comment_id": comment.comment_id, "at_s": comment.at_s, "version": req.version})
-            digest_mod.queue_in(c, share.owner, "comment", project_id=comment.project_id, video_id=req.video_id,
-                                payload={"by": name, "video": video["title"], "at_s": comment.at_s, "version": req.version,
-                                         "text": comment.text})
+            payload = {"by": name, "video": video["title"], "at_s": comment.at_s, "version": req.version, "text": comment.text}
+            if g4:      # G4: the bell, and email as the owner set it (C2's digest either way)
+                inbox.add_in(c, share.owner, "review_comment", f"{name} commented on {video['title']} at {_clock(comment.at_s)}.",
+                             body=comment.text, link=f"#v/{req.video_id}@{comment.at_s}", video_id=req.video_id,
+                             project_id=comment.project_id, workspace_id=_workspace_of_video(c, req.video_id),
+                             digest_payload=payload)
+            else:
+                digest_mod.queue_in(c, share.owner, "comment", project_id=comment.project_id, video_id=req.video_id,
+                                    payload=payload)
     except comments_store.CommentError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
     return _public_comment(comment)
@@ -7645,6 +7660,7 @@ def _answer_review(token: str, req: ReviewAnswerRequest, approved: bool) -> dict
     note = (req.note or "").strip()[: comments_store.MAX_TEXT] or None
     version = req.version or video["current_version"]
     folder = (repo.get(req.video_id) or None)
+    g4 = flags.enabled("golive.g4", share.owner)
     with database.tx() as c:
         if approved:
             stages.reviewer_approved_in(c, req.video_id, name, version)
@@ -7653,9 +7669,15 @@ def _answer_review(token: str, req: ReviewAnswerRequest, approved: bool) -> dict
         verb = "review.approved" if approved else "review.changes_asked"
         activity_log.record(c, verb, Actor("reviewer", name), video_id=req.video_id, target=share.share_id,
                             payload={"version": version, "note": note})
-        digest_mod.queue_in(c, share.owner, "approved" if approved else "changes_asked",
-                            project_id=folder.folder_id if folder else None, video_id=req.video_id,
-                            payload={"by": name, "video": video["title"], "version": version, "note": note})
+        payload = {"by": name, "video": video["title"], "version": version, "note": note}
+        if g4:          # G4: the bell, and email as the owner set it
+            said = f"{name} approved {video['title']} v{version}." if approved else f"{name} asked for changes on {video['title']} v{version}."
+            inbox.add_in(c, share.owner, "approval" if approved else "changes_requested", said, body=note or "",
+                         link=f"#v/{req.video_id}", video_id=req.video_id, project_id=folder.folder_id if folder else None,
+                         workspace_id=_workspace_of_video(c, req.video_id), digest_payload=payload)
+        else:
+            digest_mod.queue_in(c, share.owner, "approved" if approved else "changes_asked",
+                                project_id=folder.folder_id if folder else None, video_id=req.video_id, payload=payload)
     return {"video_id": req.video_id, "answer": _review_answer(share.share_id, req.video_id)}
 
 
@@ -8184,6 +8206,110 @@ def shared_zip(token: str) -> StreamingResponse:
     return _zip_response([f for f in contents["files"] if Path(f["path"]).exists()], contents["title"])
 
 
+# ── G4: notifications ────────────────────────────────────────────────────────
+#
+# The bell (app/notify/inbox.py, app/notify_api.py): long work finishing,
+# failures, review news (hooked into C2's review routes above) and spend
+# alerts. Activity jobs tell `_job_notice` when they end: a failure always
+# (but not a line inside a turn, nor a batch's or export's child: the turn or
+# the parent says it), a finish only when it took JOB_NOTICE_SECONDS or more
+# and is not a line or a mix. Spend alerts come from the ledger's
+# `on_record`: after each charge the existing spend summary is read and each
+# scope with a ceiling (the video, its project, the month) is checked against
+# 50/80/100%, each said once per ceiling and period. All need `golive.g4`
+# for the owner.
+
+JOB_NOTICE_SECONDS = 60.0
+JOB_WORDS = {"voice_line": "Voicing a line", "design_voice": "Designing a voice", "clone": "Cloning a voice",
+             "mix": "The mix", "render_preview": "The preview", "export": "The export",
+             "brief_update": "Bringing it up to date with the brief", "check": "The project check", "batch": "The batch",
+             "learn": "Learning your style", "import": "The import"}
+
+
+def _workspace_of_video(c, video_id: str) -> str | None:
+    row = c.execute("SELECT workspace_id FROM videos WHERE id = ?", (video_id,)).fetchone()
+    return row[0] if row else None
+
+
+def _job_place(key: str) -> tuple[str | None, str, str | None]:
+    """(owner, what it is called, link) for a job's slot: a video, a project, or someone's own store."""
+    record = repo.get(key)
+    if record is not None:
+        return record.owner, record.source.filename, f"#v/{key}"
+    project = repo.get_project(key)
+    if project is not None:
+        return project.owner, project.name, f"#p/{key}"
+    if key.startswith("user-"):
+        return key[len("user-"):], "", None
+    return None, "", None
+
+
+def _job_notice(job) -> None:
+    try:
+        if job.status not in ("done", "failed") or job.detail.get("parent_id"):
+            return
+        if job.status == "failed" and job.kind == "voice_line" and job.turn_id:
+            return
+        took = job.detail.get("seconds")
+        if job.status == "done" and (job.kind in ("voice_line", "mix")
+                                     or not isinstance(took, (int, float)) or took < JOB_NOTICE_SECONDS):
+            return
+        owner, name, link = _job_place(job.video_id)
+        if owner is None or not flags.enabled("golive.g4", owner):
+            return
+        what = JOB_WORDS.get(job.kind, "The work")
+        if job.kind == "import":
+            name = str(job.detail.get("filename") or "")
+            link = f"#v/{job.detail['video_id']}" if job.detail.get("video_id") else None
+        of = f" of {name}" if name else ""
+        if job.status == "failed":
+            title, body, kind = f"{what}{of} failed.", job.error_text or "", "job_failed"
+        else:
+            title, body, kind = f"{what}{of} is done.", job.step_label or "", "job_done"
+        with database.tx() as c:
+            inbox.add_in(c, owner, kind, title, body=body, link=link,
+                         video_id=job.video_id if (link or "").startswith("#v/") else None,
+                         project_id=job.video_id if (link or "").startswith("#p/") else None)
+    except Exception:  # noqa: BLE001 - a notice never breaks the work it reports
+        log.exception("notice for job %s", getattr(job, "job_id", "?"))
+
+
+def _after_charge(video_id: str | None, folder_id: str | None) -> None:
+    """Spend alerts at 50, 80 and 100% of each ceiling, from the spend summary."""
+    try:
+        record = repo.get(video_id) if video_id else None
+        project = repo.get_project(folder_id) if folder_id else (_folder_of(record) if record else None)
+        owner = record.owner if record else (project.owner if project else None)
+        if owner is None or not flags.enabled("golive.g4", owner):
+            return
+        summary = _spend_summary(owner, video_id=video_id) if record else _spend_summary(owner, project_id=project.project_id)
+        month = month_start().strftime("%Y-%m")
+        checks = [("month", owner, summary.get("month"), f"{month}", "your monthly ceiling", "#usage")]
+        if record is not None:
+            checks.append(("video", video_id, summary.get("video"), "all", f"the ceiling of {record.source.filename}", f"#v/{video_id}"))
+        if project is not None:
+            checks.append(("project", project.project_id, summary.get("project"), "all", f"the ceiling of {project.name}", f"#p/{project.project_id}"))
+        for scope, scope_id, s, period, whose, link in checks:
+            if not s or not s.get("ceiling_usd"):
+                continue
+            hit = inbox.crossed(float(s["spent_usd"]), float(s["ceiling_usd"]))
+            if hit is None:
+                continue
+            with database.tx() as c:
+                if not inbox.spend_alert_once(c, owner, scope, scope_id, f"{period}:{s['ceiling_usd']}", hit):
+                    continue
+                said = (f"You have used {hit}% of {whose} ({money(float(s['spent_usd']))} of {money(float(s['ceiling_usd']))})."
+                        if hit < 100 else f"You have reached {whose} ({money(float(s['ceiling_usd']))}). Paid steps stop until it is raised.")
+                inbox.add_in(c, owner, "spend_alert", said, link=link,
+                             video_id=video_id if scope == "video" else None,
+                             project_id=scope_id if scope == "project" else None)
+    except Exception:  # noqa: BLE001 - an alert never breaks a charge
+        log.exception("spend alert after a charge")
+
+
+ledger.on_record = _after_charge
+
+
 # ── G2: roles ────────────────────────────────────────────────────────────────
 # Defined last so it is the outermost middleware: who is acting is known
 # before any other middleware or route runs (app/workspace_api.py).
@@ -8208,7 +8334,7 @@ async def _roles(request: Request, call_next):
 
 def _mount_optional_routers() -> None:
     import importlib
-    for name in ("app.onboarding", "app.help", "app.tutorial", "app.workspace_api"):
+    for name in ("app.onboarding", "app.help", "app.tutorial", "app.workspace_api", "app.notify_api"):
         try:
             module = importlib.import_module(name)
         except ImportError:

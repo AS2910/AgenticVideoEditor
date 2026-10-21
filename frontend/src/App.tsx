@@ -51,6 +51,8 @@ import { BinPage } from './pages/BinPage'
 import { TemplatesPage } from './pages/Templates'
 import { MembersPage } from './pages/MembersPage'
 import { InvitePage } from './pages/InvitePage'
+import { NotificationsPage } from './pages/NotificationsPage'
+import { NotificationBell } from './components/NotificationBell'
 import { DiscardWhy } from './components/DiscardWhy'
 import { DISCARD_REASONS } from './lib/learned'
 import { LanguageDialog, SyncChip } from './pages/LanguageVersions'
@@ -1403,6 +1405,7 @@ function Studio() {
     if (route.page === 'billing') return <BillingPage me={me} />
     if (route.page === 'bin') return <BinPage me={me} onRestored={() => void refreshProjects()} />
     if (route.page === 'members') return <MembersPage me={me} />
+    if (route.page === 'notifications') return <NotificationsPage me={me} />
     if (route.page === 'invite') return <InvitePage token={route.token} />
     if (route.page === 'templates') return <TemplatesPage me={me} onMade={() => void refreshProjects()} />
     if (route.page === 'export') {
@@ -1675,6 +1678,7 @@ function Studio() {
           <a className={cn('btn ink sm', exporting && 'opacity-70')} href={hrefFor({ page: 'export', projectId: project.video_id })} aria-busy={exporting || undefined} data-tour="export" data-tour-action="export">
             {exporting ? 'Rendering…' : 'Export'}
           </a>
+          <NotificationBell />
           <AccountDot me={me} />
           {batchOn && languagesOpen && <LanguageDialog videoId={project.video_id} filename={project.filename} projectId={project.project_id} onClose={() => setLanguagesOpen(false)}
             onMade={(pid) => { setLanguagesOpen(false); if (pid) go({ page: 'folder', projectId: pid }) }} />}

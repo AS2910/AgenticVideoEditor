@@ -70,6 +70,7 @@ class VoiceBudget:
                  amount * self.usd_per_1k / 1000, now_iso(), folder_of(c, project_id), current_actor.get()),
             )
             stamp_last(c, "usage", project_id)
+        self.ledger._after(project_id, None)          # G4: spend alerts
 
     def refund(self, project_id: str, amount: int) -> None:
         """Give back a charge for a call that failed before anything was made
