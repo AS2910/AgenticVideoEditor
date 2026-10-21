@@ -1,6 +1,6 @@
 """G8: thumbs on takes and turns (stored, one per person and target, the
 latest wins, shown on the admin page), the error-reporting hook (log
-provider, a Sentry-shaped config that is not connected, the browser's
+provider, the Sentry one keeps reports locally too (item 7 sends them), the browser's
 reports rate limited, a server error captured and raised on), Ask Voltage
 finds the new Help articles, migration 0027 up and down."""
 
@@ -58,17 +58,17 @@ def test_one_vote_per_person_and_target_the_latest_wins(tmp_path):
         assert c.execute("SELECT COUNT(*) FROM analytics_events WHERE name = 'feedback.given'").fetchone()[0] == 4
 
 
-def test_reporters_stay_local_and_say_the_sentry_one_is_not_connected(tmp_path, caplog):
+def test_reporters_keep_reports_locally_with_or_without_sentry(tmp_path):
     db = Database(tmp_path / "t.db")
     assert isinstance(errors_report.reporter_for(None, db), errors_report.LogReporter)
     sentry = errors_report.reporter_for("https://key@o1.ingest.sentry.io/1", db)
-    assert isinstance(sentry, errors_report.SentryReporter) and "not connected" in sentry.name
+    assert isinstance(sentry, errors_report.SentryReporter) and sentry.name == "sentry"
+    sentry.submit = lambda send: None          # item 7 sends to Sentry (tests/golive/test_item7_providers.py); not here
     try:
         raise ValueError("boom")
     except ValueError as exc:
         sentry.capture_exception(exc, {"where": "GET /x", "owner": "u"})
     sentry.capture_message("second", context={"source": "client"})
-    assert "not connected" in caplog.text
     with db.tx() as c:
         got = [dict(r) for r in c.execute("SELECT source, message, location, owner FROM error_reports ORDER BY id")]
     assert got == [{"source": "server", "message": "ValueError: boom", "location": "GET /x", "owner": "u"},

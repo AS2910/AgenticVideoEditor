@@ -123,3 +123,11 @@ def test_spend_past_the_credits_is_owed_from_the_next_grant():
     since = lambda at: 8.0 if at <= "2026-09-05T00:00:00.000Z" else 0.0  # noqa: E731
     got = billing.balance(grants, since, "2026-09-01T00:00:00.000Z", "2026-09-30T00:00:00.000Z")
     assert got["left"] == 7.0 and got["lapsed"] == 0.0
+
+
+def test_a_refund_takes_its_credits_back():
+    grants = [{"kind": "topup", "credits": 10.0, "period": None, "at": "2026-09-01T00:00:00.000Z"},
+              {"kind": "refund", "credits": -10.0, "period": None, "at": "2026-09-02T00:00:00.000Z"},
+              {"kind": "trial", "credits": 5.0, "period": None, "at": "2026-09-01T00:00:00.000Z"}]
+    got = billing.balance(grants, lambda at: 0.0, "2026-09-01T00:00:00.000Z", "2026-09-30T00:00:00.000Z")
+    assert got["left"] == 5.0

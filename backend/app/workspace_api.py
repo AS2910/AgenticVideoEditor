@@ -37,9 +37,10 @@ REVIEWER_WRITES = (
     re.compile(rf"^/videos/{_ID}/comments$"),
     re.compile(rf"^/videos/{_ID}/comments/{_ID}/replies$"),
 )
-# Anyone may do these whatever their role: their own sign-in, invites, which workspace, their own notifications.
+# Anyone may do these whatever their role: their own sign-in, invites, which workspace, their own notifications,
+# and the payment providers' signed webhooks (item 7).
 OPEN_TO_ALL = (re.compile(r"^/auth/"), re.compile(r"^/invites/"), re.compile(r"^/workspace/switch$"),
-               re.compile(r"^/me/notifications"))
+               re.compile(r"^/me/notifications"), re.compile(r"^/billing/webhooks/"))
 OWNER_ONLY = (re.compile(r"^/workspace/members"), re.compile(r"^/workspace/invites"), re.compile(r"^/billing"))
 READS = ("GET", "HEAD", "OPTIONS")
 

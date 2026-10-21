@@ -123,10 +123,17 @@ class Settings:
     flag_owners: tuple[str, ...] = ("local",)
     # G7: who sees the internal admin page (#admin): owners, comma-separated.
     admin_owners: tuple[str, ...] = ("local",)
-    # G8: where errors would go. A Sentry-shaped DSN; the provider is NOT
-    # connected (app/errors_report.py): reports stay in the log and the
-    # local error_reports table until someone wires it (SETUP_NEEDED.md).
+    # G8: where errors go. Item 7: with a Sentry DSN, reports are also posted
+    # to Sentry's envelope endpoint (app/errors_report.py); without one they
+    # stay in the log and the local error_reports table.
     sentry_dsn: str | None = None
+    # Item 7: real payment providers, each on only when its keys are set
+    # (app/billing/providers.py); without them the fake test-mode ones stay.
+    stripe_secret_key: str | None = None
+    stripe_webhook_secret: str | None = None
+    razorpay_key_id: str | None = None
+    razorpay_key_secret: str | None = None
+    razorpay_webhook_secret: str | None = None
     # G3: who issues invoices (placeholders until the business is set up:
     # SETUP_NEEDED.md). The state code decides CGST+SGST or IGST.
     seller_name: str = "Voltage (seller details not set)"
@@ -247,6 +254,11 @@ def load_settings() -> Settings:
         user_budget_usd=_amount("AVE_USER_BUDGET_USD", DEFAULT_USER_BUDGET_USD),
         flag_owners=tuple(o.strip() for o in os.environ.get("AVE_FLAG_OWNERS", "local").split(",") if o.strip()),
         sentry_dsn=os.environ.get("SENTRY_DSN") or None,
+        stripe_secret_key=os.environ.get("AVE_STRIPE_SECRET_KEY") or None,
+        stripe_webhook_secret=os.environ.get("AVE_STRIPE_WEBHOOK_SECRET") or None,
+        razorpay_key_id=os.environ.get("AVE_RAZORPAY_KEY_ID") or None,
+        razorpay_key_secret=os.environ.get("AVE_RAZORPAY_KEY_SECRET") or None,
+        razorpay_webhook_secret=os.environ.get("AVE_RAZORPAY_WEBHOOK_SECRET") or None,
         seller_name=os.environ.get("AVE_SELLER_NAME") or "Voltage (seller details not set)",
         seller_gstin=(os.environ.get("AVE_SELLER_GSTIN") or "").strip().upper(),
         seller_state=(os.environ.get("AVE_SELLER_STATE") or "29").strip(),

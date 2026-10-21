@@ -23,6 +23,12 @@ os.environ["OPENAI_API_KEY"] = ""
 os.environ["ELEVENLABS_API_KEY"] = ""
 os.environ["ANTHROPIC_API_KEY"] = ""
 os.environ["AVE_DRY_RUN"] = ""
+# Item 7: the real payment, email and error providers stay off (the fakes answer)
+# whatever the shell or backend/.env sets; their tests build them with mocked HTTP.
+for _name in ("AVE_STRIPE_SECRET_KEY", "AVE_STRIPE_WEBHOOK_SECRET", "AVE_RAZORPAY_KEY_ID", "AVE_RAZORPAY_KEY_SECRET",
+              "AVE_RAZORPAY_WEBHOOK_SECRET", "AVE_EMAIL_API_KEY", "RESEND_API_KEY", "SENTRY_DSN"):
+    os.environ[_name] = ""
+os.environ["AVE_EMAIL_PROVIDER"] = "outbox"
 # The budgets the tests reason about are the defaults, whatever backend/.env raises them to.
 os.environ["AVE_PROJECT_BUDGET_USD"] = "2.0"
 os.environ["AVE_USER_BUDGET_USD"] = "10.0"

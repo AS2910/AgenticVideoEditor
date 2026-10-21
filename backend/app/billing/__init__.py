@@ -14,21 +14,31 @@ the account is read in that month. Unused plan credits lapse when their month en
     buy_plan(db, owner, plan_id, provider) / buy_topup(db, owner, credits, provider) -> invoice
     invoices(db, owner) / invoice(db, owner, invoice_id) / invoice_html(invoice)
 
-Payments go through `providers.BillingProvider`; both providers are fake
-(test mode). Nothing here talks to a network.
+    fulfil(db, provider, reference, payment_ref, ...) -> invoice | None     a confirmed real payment, once
+    refund(db, owner, invoice_id) -> dict            in full, credits taken back
+
+Payments go through `providers.BillingProvider`: fake (test mode, paid at
+once) unless a provider's keys are set; a real one returns a pending
+checkout and grants only on a verified webhook (item 7). Nothing in this
+module talks to a network itself.
 """
 from __future__ import annotations
 
 import html
+import json
+import logging
+import uuid
+from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
-from typing import Callable
 
 from app.billing import gst
-from app.billing.providers import BillingProvider, provider_for
+from app.billing.providers import BillingProvider, Checkout, ProviderError, minor, provider_for, provider_named
 from app.errors import NonRetryableError
 from app.timefmt import now_iso
 from app.usage import SpendCeilingReached
+
+log = logging.getLogger("voltage.billing")
 
 # Every price, plan and credit amount lives in one file for the owner to set: app/billing/prices.py.
 from app.billing.prices import INR_PER_USD, PLANS, TOPUP_MARKUP, TOPUP_MONTHS, TOPUPS, TRIAL_CREDITS, Plan  # noqa: E402,F401
@@ -47,6 +57,25 @@ class CreditsUsedUp(SpendCeilingReached):
         self.spent, self.ceiling = used, granted
         NonRetryableError.__init__(self, "Your credits are used up, so paid steps are paused. "
                                          "Top up or pick a plan on the Billing page to carry on.")
+
+
+# Item 7: real payments keep their bookkeeping in `meta` (no new table):
+# what an open checkout buys, that it was granted, what an invoice granted,
+# that it was refunded, and which webhook events were handled.
+def _pending_key(provider: str, reference: str) -> str:
+    return f"billing_pending:{provider}:{reference}"
+
+
+def _paid_key(provider: str, reference: str) -> str:
+    return f"billing_paid:{provider}:{reference}"
+
+
+def _bought_key(invoice_id: int) -> str:
+    return f"billing_bought:{invoice_id}"
+
+
+def _refund_key(invoice_id: int) -> str:
+    return f"billing_refund:{invoice_id}"
 
 
 def _month(now: datetime | None = None) -> str:
@@ -126,7 +155,15 @@ def balance(grants: list[dict], spent_since: Callable[[str], float], start: str,
     for i, point in enumerate(points):
         for g in grants:
             if g["at"] <= point and g not in active and not g.get("_done"):
-                g["left"], g["_done"] = float(g["credits"]), True
+                g["_done"] = True
+                if float(g["credits"]) < 0:          # a refund takes credits back: owed from what is left
+                    debt += -float(g["credits"])
+                    for held in sorted(active, key=lambda h: h["expires_at"] or "9999"):
+                        take = min(debt, held["left"])
+                        held["left"] -= take
+                        debt -= take
+                    continue
+                g["left"] = float(g["credits"])
                 active.append(g)
                 if debt:
                     take = min(debt, g["left"])
@@ -231,8 +268,59 @@ def _pay(provider: BillingProvider, owner: str, description: str, amount: float,
     return checkout
 
 
+def _hosted(provider) -> bool:
+    return bool(getattr(provider, "hosted", False))
+
+
+def _start(db, provider, owner: str, item: dict, description: str, amount: float, currency: str, acct: dict,
+           seller_state: str) -> dict:
+    """Item 7: open a real payment (Stripe's hosted page, a Razorpay order) and
+    remember what it buys; nothing is granted until the provider confirms it."""
+    total = gst.split(amount, acct["country"], acct["state_code"], seller_state).total
+    purchase = uuid.uuid4().hex
+    try:
+        checkout = provider.start(owner, description, total, currency, {"owner": owner, "purchase": purchase, **item},
+                                  idempotency_key=f"checkout-{purchase}")
+    except ProviderError as exc:
+        log.warning("%s checkout failed: %s", provider.name, exc)
+        raise BillingError("We could not open the payment page. Nothing was charged; try again.") from None
+    record = {"owner": owner, "purchase": purchase, **item, "description": description, "subtotal": amount,
+              "currency": currency, "total": total}
+    with db.tx() as c:
+        c.execute("INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)",
+                  (_pending_key(provider.name, checkout.checkout_id), json.dumps(record)))
+    return {"pending": True, "checkout": {"provider": provider.name, "checkout_id": checkout.checkout_id, "url": checkout.url,
+                                          "client": checkout.client, "total": total, "currency": currency,
+                                          "test_mode": checkout.test_mode}}
+
+
+def _complete(c, owner: str, acct: dict, item: dict, description: str, amount: float, currency: str, checkout,
+              seller_state: str, now: datetime | None = None) -> dict:
+    """Grant what a paid purchase buys and issue its invoice (inside the caller's transaction)."""
+    granted = 0.0
+    if item["kind"] == "plan":
+        plan = PLANS[item["plan"]]
+        c.execute("UPDATE billing_accounts SET plan = ? WHERE owner = ?", (plan.plan_id, owner))
+        period = _month(now)
+        # Changing plan this month: the new plan's credits for this month, once per plan.
+        if not c.execute("SELECT 1 FROM credit_grants WHERE owner = ? AND kind = 'plan' AND period = ? AND reference LIKE ?",
+                         (owner, period, f"{plan.name} plan%")).fetchone():
+            _grant_in(c, owner, "plan", plan.credits, period, f"{plan.name} plan, {period}")
+            granted = plan.credits
+    else:
+        _grant_in(c, owner, "topup", float(item["credits"]), None, description)
+        granted = float(item["credits"])
+    inv = _invoice_in(c, owner, acct, item["kind"], description, amount, currency, checkout, seller_state)
+    # What a refund takes back: the credits this purchase granted, and the plan it started.
+    c.execute("INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)",
+              (_bought_key(inv["id"]), json.dumps({"credits": granted, "plan": item.get("plan")})))
+    return inv
+
+
 def buy_plan(db, owner: str, plan_id: str, seller_state: str, provider: BillingProvider | None = None,
              now: datetime | None = None) -> dict:
+    """The invoice (a fake provider pays at once), or {"pending": True,
+    "checkout": ...} when a real provider takes the payment first."""
     plan = PLANS.get(plan_id)
     if plan is None:
         raise BillingError("That plan is not one we offer.")
@@ -242,15 +330,12 @@ def buy_plan(db, owner: str, plan_id: str, seller_state: str, provider: BillingP
     provider = provider or provider_for(acct["country"])
     amount, currency = price(plan, acct["country"])
     description = f"{plan.name} plan, {_month(now)}: {plan.credits:g} credits a month"
+    item = {"kind": "plan", "plan": plan_id}
+    if _hosted(provider):
+        return _start(db, provider, owner, item, description, amount, currency, acct, seller_state)
     checkout = _pay(provider, owner, description, amount, currency, acct, seller_state)
     with db.tx() as c:
-        c.execute("UPDATE billing_accounts SET plan = ? WHERE owner = ?", (plan_id, owner))
-        period = _month(now)
-        # Changing plan this month: the new plan's credits for this month, once per plan.
-        if not c.execute("SELECT 1 FROM credit_grants WHERE owner = ? AND kind = 'plan' AND period = ? AND reference LIKE ?",
-                         (owner, period, f"{plan.name} plan%")).fetchone():
-            _grant_in(c, owner, "plan", plan.credits, period, f"{plan.name} plan, {period}")
-        return _invoice_in(c, owner, acct, "plan", description, amount, currency, checkout, seller_state)
+        return _complete(c, owner, acct, item, description, amount, currency, checkout, seller_state, now)
 
 
 def buy_topup(db, owner: str, credits_: float, seller_state: str, provider: BillingProvider | None = None) -> dict:
@@ -260,10 +345,81 @@ def buy_topup(db, owner: str, credits_: float, seller_state: str, provider: Bill
     provider = provider or provider_for(acct["country"])
     amount, currency = topup_price(credits_, acct["country"])
     description = f"Top-up: {credits_:g} credits"
+    item = {"kind": "topup", "credits": float(credits_)}
+    if _hosted(provider):
+        return _start(db, provider, owner, item, description, amount, currency, acct, seller_state)
     checkout = _pay(provider, owner, description, amount, currency, acct, seller_state)
     with db.tx() as c:
-        _grant_in(c, owner, "topup", credits_, None, description)
-        return _invoice_in(c, owner, acct, "topup", description, amount, currency, checkout, seller_state)
+        return _complete(c, owner, acct, item, description, amount, currency, checkout, seller_state)
+
+
+def pending(db, provider_name: str, reference: str) -> dict | None:
+    """What a real checkout (a Stripe session id, a Razorpay order id) was opened to buy."""
+    with db.tx() as c:
+        row = c.execute("SELECT value FROM meta WHERE key = ?", (_pending_key(provider_name, reference),)).fetchone()
+    return json.loads(row[0]) if row else None
+
+
+def fulfil(db, provider_name: str, reference: str, payment_ref: str, seller_state: str, *, test_mode: bool,
+           paid_minor: int | None = None, paid_currency: str | None = None, now: datetime | None = None) -> dict | None:
+    """Item 7: a confirmed payment grants what it bought, once. `reference` is
+    the checkout (session or order) id, `payment_ref` what a refund needs (the
+    payment intent, the payment id). None when it is not ours, does not match
+    what was asked, or was granted already (a retried webhook, or Razorpay's
+    signed payment and its webhook both arriving)."""
+    rec = pending(db, provider_name, reference)
+    if rec is None:
+        log.warning("%s payment for %s: no checkout of ours; nothing granted", provider_name, reference)
+        return None
+    if paid_minor is not None and (paid_minor != minor(rec["total"]) or (paid_currency or "").upper() != rec["currency"]):
+        log.error("%s payment for %s: paid %s %s, asked %s %s; nothing granted", provider_name, reference, paid_minor,
+                  paid_currency, minor(rec["total"]), rec["currency"])
+        return None
+    owner = rec["owner"]
+    acct = account(db, owner, now)
+    item = {k: rec[k] for k in ("kind", "plan", "credits") if k in rec}
+    checkout = Checkout(payment_ref, provider_name, "paid", rec["total"], rec["currency"], test_mode)
+    with db.tx() as c:
+        claimed = c.execute("INSERT OR IGNORE INTO meta (key, value) VALUES (?, ?)",
+                            (_paid_key(provider_name, reference), json.dumps({"payment": payment_ref, "at": now_iso()})))
+        if claimed.rowcount == 0:
+            return None
+        return _complete(c, owner, acct, item, rec["description"], rec["subtotal"], rec["currency"], checkout, seller_state, now)
+
+
+def refund(db, owner: str, invoice_id: int, provider: BillingProvider | None = None) -> dict:
+    """Item 7: refund an invoice in full through the provider that took it and
+    take back the credits it granted (and the plan it started). Once only."""
+    inv = invoice(db, owner, invoice_id)
+    if inv is None:
+        raise BillingError("That invoice is not yours or does not exist.")
+    provider = provider or provider_named(inv["provider"])
+    with db.tx() as c:
+        claimed = c.execute("INSERT OR IGNORE INTO meta (key, value) VALUES (?, ?)", (_refund_key(invoice_id), now_iso()))
+        if claimed.rowcount == 0:
+            raise BillingError("That payment was refunded already.")
+        row = c.execute("SELECT value FROM meta WHERE key = ?", (_bought_key(invoice_id),)).fetchone()
+    bought = json.loads(row[0]) if row else {"credits": 0.0, "plan": None}
+    try:
+        refund_id = provider.refund(inv["checkout_id"], inv["total"], inv["currency"], idempotency_key=f"refund-{inv['number']}")
+    except ProviderError as exc:
+        log.warning("%s refund of %s failed: %s", provider.name, inv["number"], exc)
+        with db.tx() as c:
+            c.execute("DELETE FROM meta WHERE key = ?", (_refund_key(invoice_id),))
+        raise BillingError("The refund did not go through. Nothing changed; try again.") from None
+    taken = float(bought.get("credits") or 0.0)
+    with db.tx() as c:
+        c.execute("UPDATE meta SET value = ? WHERE key = ?", (json.dumps({"refund": refund_id, "at": now_iso()}), _refund_key(invoice_id)))
+        if taken:
+            _grant_in(c, owner, "refund", -taken, None, f"Refund of {inv['number']}")
+        if bought.get("plan"):
+            c.execute("UPDATE billing_accounts SET plan = NULL WHERE owner = ? AND plan = ?", (owner, bought["plan"]))
+    return {"invoice": inv, "refund_id": refund_id, "credits_taken_back": taken}
+
+
+def refunded(db, invoice_id: int) -> bool:
+    with db.tx() as c:
+        return c.execute("SELECT 1 FROM meta WHERE key = ?", (_refund_key(invoice_id),)).fetchone() is not None
 
 
 def _invoice(r) -> dict:
