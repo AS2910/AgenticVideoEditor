@@ -14,3 +14,5 @@ What is new in Voltage this week, in short.
 **Reuse and housekeeping.** Deleted things wait in the Bin for 30 days. Pin, archive, search and sort on Home. Save a project as a template. Voltage learns your style from what you add and discard, and suggests one line for the brief at a time.
 
 **Go-live basics.** A sample project to try first, and import from a Google Drive or Dropbox link. Invite people as Editors or Reviewers with their own spend limit. The bell tells you when long work finishes or fails, about review news and spend alerts. Thumbs up or down on any take or reply, with a reason if you like, so we can make Voltage better.
+
+**Billing in test mode.** Plans with monthly credits, top-ups and 5 free credits to start, shown as about how many minutes they buy once that is known. Invoices carry GST for India. No card is asked for and no money moves yet.

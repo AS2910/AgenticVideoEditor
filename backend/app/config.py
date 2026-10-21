@@ -126,6 +126,11 @@ class Settings:
     # connected (app/errors_report.py): reports stay in the log and the
     # local error_reports table until someone wires it (SETUP_NEEDED.md).
     sentry_dsn: str | None = None
+    # G3: who issues invoices (placeholders until the business is set up:
+    # SETUP_NEEDED.md). The state code decides CGST+SGST or IGST.
+    seller_name: str = "Voltage (seller details not set)"
+    seller_gstin: str = ""
+    seller_state: str = "29"
     # D3: run the purge (Bin items older than 30 days) once a day from the
     # server. Off by default: `python -m app.purge` by hand.
     purge_daily: bool = False
@@ -221,6 +226,9 @@ def load_settings() -> Settings:
         user_budget_usd=_amount("AVE_USER_BUDGET_USD", DEFAULT_USER_BUDGET_USD),
         flag_owners=tuple(o.strip() for o in os.environ.get("AVE_FLAG_OWNERS", "local").split(",") if o.strip()),
         sentry_dsn=os.environ.get("SENTRY_DSN") or None,
+        seller_name=os.environ.get("AVE_SELLER_NAME") or "Voltage (seller details not set)",
+        seller_gstin=(os.environ.get("AVE_SELLER_GSTIN") or "").strip().upper(),
+        seller_state=(os.environ.get("AVE_SELLER_STATE") or "29").strip(),
         admin_owners=tuple(o.strip() for o in os.environ.get("AVE_ADMIN_OWNERS", "local").split(",") if o.strip()),
         purge_daily=os.environ.get("AVE_PURGE_DAILY", "").strip().lower() in _TRUTHY,
     )

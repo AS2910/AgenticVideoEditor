@@ -1030,3 +1030,23 @@ export interface AdminFeedback {
   recent: { target: 'take' | 'turn'; video_id: string; target_id: string; vote: 'up' | 'down'; reason: string; owner: string; at: string }[]
   errors?: { count: number; recent: { message: string; source: string; at: string; where: string }[] }
 }
+
+/** G3: billing behind interfaces (fake providers, test mode). Credits are USD-equivalent. */
+export interface BillingPlan { plan_id: string; name: string; credits: number; usd: number; inr: number; blurb: string; price: number; currency: 'USD' | 'INR' }
+export interface BillingInvoice {
+  id: number; number: string; provider: string; checkout_id: string; kind: 'plan' | 'topup'; description: string; currency: 'USD' | 'INR'
+  subtotal: number; cgst: number; sgst: number; igst: number; total: number; tax_kind: 'intra' | 'inter' | 'export'; issued_at: string; test_mode: boolean
+}
+export interface BillingView {
+  account: { owner: string; plan: string | null; country: string | null; legal_name: string; gstin: string; state_code: string | null; created_at: string }
+  /** `minutes`: about how many exported minutes are left, null when the cost per minute is not measured yet. */
+  credits: { granted: number; used: number; left: number; share: number | null; minutes: number | null; grants: { kind: string; credits: number; period: string | null; reference: string; at: string }[] }
+  plan: BillingPlan | null
+  plans: BillingPlan[]
+  topups: { credits: number; price: number; currency: 'USD' | 'INR' }[]
+  provider: { name: string; label: string; test_mode: boolean }
+  trial_credits: number
+  invoices: BillingInvoice[]
+  states: { code: string; name: string }[]
+  invoice?: BillingInvoice
+}

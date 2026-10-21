@@ -67,6 +67,8 @@ SERVER_NAMES = F7_VERBS | frozenset({
     "notification.created", "notification.read", "notification.settings_changed",
     # G8: thumbs on takes and turns.
     "feedback.given",
+    # G3: billing (fake providers): a plan bought, a top-up, paid work paused for credits.
+    "billing.plan_changed", "billing.topped_up", "billing.credits_out",
 })
 # What the browser may post (and nothing else).
 CLIENT_NAMES = frozenset({
@@ -79,7 +81,7 @@ CLIENT_NAMES = frozenset({
     "proposal.discard_reason_given", "learned.card_opened",
     "import.link_pasted", "members.opened", "invite.opened", "signin.email_requested",
     "bell.opened", "bell.item_opened",
-    "admin.opened",
+    "admin.opened", "billing.opened",
 })
 NAMES = SERVER_NAMES | CLIENT_NAMES
 MAX_PROPS = 2000                # bytes of JSON kept per event

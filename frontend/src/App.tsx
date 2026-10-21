@@ -1598,6 +1598,8 @@ function Studio() {
       { id: 'first-failed-take', target: 'transcript-row', when: planItems.some((i) => i.status === 'failed') },
       { id: 'first-word-rule', target: 'transcript-row', when: consistency && planItems.some((i) => !!i.word_rule?.breaks?.length) },
       { id: 'first-ceiling', target: 'spend', when: !!error && /ceiling/i.test(error) },
+      // G3: paid steps paused because the credits are used up.
+      { id: 'first-credits', target: 'spend', when: !!error && /credits are used up/i.test(error) },
       { id: 'first-question', target: 'question', when: !!clarifying && !plan?.question?.gate },
       { id: 'first-voice-design', target: 'composer', when: messages.some((m) => m.kind === 'previews') },
       { id: 'first-undo-after-export', target: 'export', when: undoneAfterExport },

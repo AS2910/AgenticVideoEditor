@@ -381,6 +381,23 @@ def _ensure_spend(project_id: str) -> None:
         filename=record.source.filename if record else "",
         member=_member_limit(),
     )
+    if record is not None:
+        _ensure_credits(record.owner)
+
+
+def _ensure_credits(owner: str) -> None:
+    """G3: with billing on, paid work stops when the owner's credits are used up
+    (the hard ceiling; CreditsUsedUp is a SpendCeilingReached, so every caller
+    already turns it into the sentence)."""
+    if not flags.enabled("golive.g3", owner):
+        return
+    from app import billing
+    if not billing.has_account(database, owner):
+        return
+    ok, got = billing.can_spend(database, owner, lambda at: ledger.spent_usd_by_owner(owner, at))
+    if not ok:
+        analytics.track("billing.credits_out", owner, {"granted": got["granted"], "used": got["used"]})
+        raise billing.CreditsUsedUp(got["used"], got["granted"])
 
 
 def _member_limit() -> tuple[str, str, float] | None:
@@ -506,6 +523,11 @@ def _signed_in(owner: str) -> None:
     analytics.track("signed_up", owner)
     analytics.track("first_sign_in", owner)
     _funnel_started.add(owner)
+    # G3: a new owner (no work yet, Bin included) starts on the free trial's credits.
+    if owner != LOCAL_OWNER and flags.enabled("golive.g3", owner) \
+            and not repo.list_projects(owner, include_deleted=True) and not repo.list(owner, include_deleted=True):
+        from app import billing
+        billing.account(database, owner)
 
 
 @app.get("/auth/login")
@@ -1331,6 +1353,7 @@ def design_my_voice(req: DesignRequest, owner: str = Depends(current_owner)) -> 
     key = _user_store(owner)
     try:
         ledger.ensure_can_spend(key, owner=owner, owner_ceiling_usd=settings.user_budget_usd, filename="Your voices")
+        _ensure_credits(owner)
         previews = list(voice.design_voice(key, description))
     except (SpendCeilingReached, BudgetExceeded) as exc:
         raise HTTPException(status_code=402, detail=str(exc)) from exc
@@ -8343,6 +8366,8 @@ def _after_charge(video_id: str | None, folder_id: str | None) -> None:
         record = repo.get(video_id) if video_id else None
         project = repo.get_project(folder_id) if folder_id else (_folder_of(record) if record else None)
         owner = record.owner if record else (project.owner if project else None)
+        if owner is not None:
+            _credit_alerts(owner)
         if owner is None or not flags.enabled("golive.g4", owner):
             return
         summary = _spend_summary(owner, video_id=video_id) if record else _spend_summary(owner, project_id=project.project_id)
@@ -8368,6 +8393,29 @@ def _after_charge(video_id: str | None, folder_id: str | None) -> None:
                              project_id=scope_id if scope == "project" else None)
     except Exception:  # noqa: BLE001 - an alert never breaks a charge
         log.exception("spend alert after a charge")
+
+
+def _credit_alerts(owner: str) -> None:
+    """G3: 50/80/100% of the owner's credits, each said once per amount granted
+    (a top-up or a new month starts again), through G4's bell and digest."""
+    try:
+        if not (flags.enabled("golive.g3", owner) and flags.enabled("golive.g4", owner)):
+            return
+        from app import billing
+        if not billing.has_account(database, owner):
+            return
+        got = billing.credits(database, owner, lambda at: ledger.spent_usd_by_owner(owner, at))
+        hit = inbox.crossed(got["used"], got["granted"])
+        if hit is None:
+            return
+        with database.tx() as c:
+            if not inbox.spend_alert_once(c, owner, "credits", owner, f"granted:{got['granted']:.2f}", hit):
+                return
+            said = (f"You have used {hit}% of your credits ({got['used']:.2f} of {got['granted']:.2f})."
+                    if hit < 100 else "You have used all your credits. Paid steps are paused until you top up or pick a plan.")
+            inbox.add_in(c, owner, "spend_alert", said, link="#billing")
+    except Exception:  # noqa: BLE001 - an alert never breaks a charge
+        log.exception("credit alert after a charge")
 
 
 ledger.on_record = _after_charge
@@ -8412,7 +8460,7 @@ async def _roles(request: Request, call_next):
 
 def _mount_optional_routers() -> None:
     import importlib
-    for name in ("app.onboarding", "app.help", "app.tutorial", "app.workspace_api", "app.notify_api", "app.analytics_api", "app.feedback_api"):
+    for name in ("app.onboarding", "app.help", "app.tutorial", "app.workspace_api", "app.notify_api", "app.analytics_api", "app.feedback_api", "app.billing_api"):
         try:
             module = importlib.import_module(name)
         except ImportError:

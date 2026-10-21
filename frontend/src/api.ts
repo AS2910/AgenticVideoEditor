@@ -8,7 +8,7 @@ import type {
   ProjectSettings, Autonomy, Effort, Plan, Mix, Selection, Candidate, Reading, Sight, ChatMessage,
   ProjectFolder, ProjectDetailFolder, ProjectFile, HelpArticle, Onboarding, ProjectVoice,
   ActivityJob, TurnView, RenderState, BriefVersion, BriefChange, BriefUpdateRun, ProjectRule, RuleKind, RuleData, CheckPage, Batch, ExportPreset, ExportPresetPage, ExportPresetChange, Preflight, BatchExport, ShareLink, PublicShare,
-  PublicComment, ReviewAnswer, ReviewComment, ReviewLinkRequest, BinItem, BinKind, BinRestored, Pin, SearchResult, ProjectTemplate, LearnedPage, ImportSource, MembersPage, WorkspaceView, InviteView, MemberRole, NotificationItem, NotificationSetting, AdminAnalytics,
+  PublicComment, ReviewAnswer, ReviewComment, ReviewLinkRequest, BinItem, BinKind, BinRestored, Pin, SearchResult, ProjectTemplate, LearnedPage, ImportSource, MembersPage, WorkspaceView, InviteView, MemberRole, NotificationItem, NotificationSetting, AdminAnalytics, BillingView,
 } from './types'
 
 const BASE = '/api'
@@ -610,3 +610,11 @@ export interface FeedbackMark { vote: FeedbackVote; reason: string }
 export const getFeedback = (videoId: string) => get<Record<FeedbackTarget, Record<string, FeedbackMark>>>(`/videos/${videoId}/feedback`)
 export const putFeedback = (videoId: string, body: { target: FeedbackTarget; target_id: string; vote: FeedbackVote | null; reason?: string }) =>
   put<{ target: FeedbackTarget; target_id: string; vote: FeedbackVote | null; reason: string }>(`/videos/${videoId}/feedback`, body)
+
+
+/** G3: billing (fake providers, test mode). */
+export const getBilling = () => get<BillingView>('/billing')
+export const putBillingDetails = (d: { country: string | null; legal_name: string; gstin: string; state_code: string | null }) => put<BillingView>('/billing/details', d)
+export const changePlan = (plan: string) => post<BillingView>('/billing/plan', { plan })
+export const topUp = (credits: number) => post<BillingView>('/billing/topup', { credits })
+export const invoiceUrl = (id: number) => `/api/billing/invoices/${id}`
