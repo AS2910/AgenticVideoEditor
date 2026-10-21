@@ -3,7 +3,7 @@
 Branch `overnight/launch-hardening`, cut from main `dc292d7` (overnight/projects-plan was already merged to main). Worktree `../AgenticVideoEditor-launch`.
 Target: public launch on 4 Nov 2026. Spec: the user's "Overnight run 2" message (items 0 to 11), which replaced an earlier "launch readiness" list mid-run; the work done for that list (0030, launch flags) is item 1a here.
 Decisions without the user: the top section of DECISIONS.md.
-To continue in a new session: read this table; the next item is the first not marked done. Run backend tests with
+Status: every item is done. MORNING.md has the summary, gaps and launch blockers. To continue in a new session: read MORNING.md section 6. Run backend tests with
 `PYTHONPATH=$PWD ../../AgenticVideoEditor/backend/.venv/bin/python -m pytest -q -p no:cacheprovider` from `backend/` (baseline 1243 passed, 5 skipped, 5 min).
 
 | # | Item | Status | Commit | Notes |
@@ -19,8 +19,8 @@ To continue in a new session: read this table; the next item is the first not ma
 | 7 | Real providers, code only | done | ae03f2a (subagent, cherry-picked) | Stripe (Checkout, signed webhook, refunds), Razorpay (Orders, payment signature, signed webhook, refunds), Resend email (10 s timeout, 2 retries, idempotency key), Sentry over HTTP (envelope, secrets stripped). Each replaces its fake only when its keys exist. Webhooks `POST /billing/webhooks/stripe|razorpay`: raw-body signature checks (Stripe 5-minute tolerance), event ids remembered so a repeat grants once. Admin refunds. All HTTP mocked in tests. Integration fix: refunds (negative grants) count as debt in the credit expiry walk. |
 | 8 | Deploy kit | done | 85e9c6f (subagent, cherry-picked) | `backend/Dockerfile` (python slim, ffmpeg, non-root, healthcheck), `frontend/Dockerfile` + `nginx.conf` (SPA, /api proxy, SSE unbuffered, security headers), `backend/app/worker.py` (purge and digests on a loop), `docker-compose.yml` (app, worker, web, postgres, caddy under the https profile), `deploy/Caddyfile`, `.env.example` (every variable; a test fails when code reads one that is missing: tonight's were added in 9e's commit), `.dockerignore`, `DEPLOY.md`. Images not built: no Docker on this machine. |
 | 9 | Quality fixes | done | b075860, 1970306, 510917f, 49176c9, 75f09ea (subagent, cherry-picked) | 9a each take heard by the transcriber before the A3 word check (mocked in tests; charged as take_check). 9b AVE_LANG_MASTER_CONTEXT (default off): language versions no longer send the English master as vendor context. 9c opencv-python-headless declared; libass detected; non-Latin captions without libass skipped with a clear note in pre-flight and export warnings. 9d FTS5 trigram index (migration 0033) narrows Home search, same results as the full scan (19-query comparison test); Postgres reads every row (TODO tsvector). 9e tour tips for the consent read-aloud step and Withdraw consent now. |
-| 10 | Launch profile | todo | | |
-| 11 | Tests and launch check | todo | | |
+| 10 | Launch profile | done | c0d2751 | AVE_LAUNCH_PROFILE=public (flags.PROFILES); A2 split into `projects.check`; GET/PUT /admin/flags and the Admin page card Features for one person; `python -m app.flags profile`. |
+| 11 | Tests and launch check | done | d3e0dfe, a4f0762, d7e8a2a | Waits raised (jobs 120 s, vitest 20 s, Playwright expect 15 s), board test ordering fixed. `make launch-check` (Makefile; app.tools.migration_check, app.tools.env_check). Three runs in a row: backend 1637 passed / 10 skipped, vitest 492, build and lint clean each time; Playwright 43 x3 after the e2e flag fix. Postgres run: 1627 passed + 2 fixed. Env check fails until production secrets exist (expected). |
 
 ---
 
