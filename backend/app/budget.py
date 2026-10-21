@@ -6,6 +6,8 @@ Charged to the usage ledger (Phase 9b), so the budget survives restarts.
 """
 from __future__ import annotations
 
+from typing import Callable
+
 from app.timefmt import now_iso
 
 from datetime import datetime, timezone
@@ -38,6 +40,8 @@ class VoiceBudget:
         self.ceiling = ceiling
         self.ledger = ledger or Ledger()
         self.usd_per_1k = usd_per_1k
+        # Launch item 3: asked before every charge; raises to refuse (the global pause).
+        self.before_charge: Callable[[], None] | None = None
 
     def spent(self, project_id: str) -> int:
         return int(self.ledger.units(project_id, self.VENDOR, self.UNIT))
@@ -54,6 +58,8 @@ class VoiceBudget:
         Check and record happen in one transaction, so concurrent jobs on a
         project can never both squeeze under the ceiling.
         """
+        if self.before_charge is not None:
+            self.before_charge()
         with self.ledger.db.tx() as c:
             row = c.execute(
                 "SELECT COALESCE(SUM(units), 0) AS n FROM usage "

@@ -78,6 +78,22 @@ class SpendCeilingReached(NonRetryableError):
         )
 
 
+class PaidPaused(SpendCeilingReached):
+    """Launch item 3: new paid work is paused for everyone (the admin's
+    switch, or the day's spend across all users reached its cap)."""
+
+    scope = "paused"
+
+    def __init__(self, reason: str = "switch") -> None:
+        self.spent = self.ceiling = 0.0
+        self.reason = reason
+        NonRetryableError.__init__(self, PAUSED_WORDS)
+
+
+PAUSED_WORDS = ("Voltage is pausing new paid work for a little while. Nothing you made is lost; "
+                "free steps still work. Please try again later.")
+
+
 class UserCeilingReached(SpendCeilingReached):
     """The person has spent this month's allowance across everything."""
 
@@ -287,6 +303,18 @@ class Ledger:
                 (project_id,) + ((since,) if since else ()),
             ).fetchall()
         return [UsageLine(r["vendor"], r["what"], r["unit"], r["units"], r["usd"], r["calls"]) for r in rows]
+
+    def spent_usd_everyone_since(self, since: str) -> float:
+        """Everything everyone spent from `since` on (launch item 3: the day's total)."""
+        with self.db.tx() as c:
+            row = c.execute("SELECT COALESCE(SUM(usd), 0) AS usd FROM usage WHERE at >= ?", (since,)).fetchone()
+        return float(row["usd"])
+
+    def by_vendor_since(self, since: str) -> dict[str, float]:
+        with self.db.tx() as c:
+            rows = c.execute("SELECT vendor, COALESCE(SUM(usd), 0) AS usd FROM usage WHERE at >= ? GROUP BY vendor ORDER BY vendor",
+                             (since,)).fetchall()
+        return {r["vendor"]: round(float(r["usd"]), 4) for r in rows}
 
     def spent_usd_by_owner(self, owner: str, since: str | None = None) -> float:
         """Everything one person spent (Phase 9c): their videos, their

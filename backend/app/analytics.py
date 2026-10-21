@@ -62,8 +62,8 @@ SERVER_NAMES = F7_VERBS | frozenset({
     *(n for n, _ in FUNNEL), "video_exported",
     # A3 words; D3 voices; B3/F6 shares and exports; C2 email; G1; G4.
     "words.clip_added", "words.learned_from_transcript", "take.word_rule_broken", "take.word_rule_warned",
-    # Launch item 2.
-    "rate_limited",
+    # Launch items 2 and 3.
+    "rate_limited", "paid.paused_refusal", "paid.switch",
     "voice.restored", "share.opened", "export.file_failed", "export.zip_downloaded",
     "notify.digest_sent", "notify.version_ready_sent", "notify.review_invite_sent",
     "sample.created", "sample.skipped", "import.started", "import.finished", "import.failed",

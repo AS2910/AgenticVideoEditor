@@ -439,9 +439,94 @@ def get_media_token(owner: str = Depends(current_owner)) -> dict:
     return mint_media_token(owner)
 
 
+# ── Launch item 3: spend protection ──────────────────────────────────────────
+# Every paid path asks `_ensure_paid_open` first: new paid work stops for
+# everyone while the admin's switch (`launch.paid_paused`, set for everyone)
+# is on, or once the day's spend across all users reaches AVE_DAILY_SPEND_CAP_USD
+# (until midnight UTC). Free steps keep working; a turn already running
+# stops at its next paid step (voicing checks it too: `budget.before_charge`).
+
+from app.usage import PAUSED_WORDS, PaidPaused  # noqa: E402
+
+
+def _day_start() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT00:00:00.000Z")
+
+
+def paid_state() -> dict:
+    """Whether new paid work is paused, why, and the day's numbers."""
+    today = ledger.spent_usd_everyone_since(_day_start())
+    cap = settings.daily_cap_usd
+    switch = flags.enabled("launch.paid_paused")
+    capped = cap is not None and today >= cap
+    tomorrow = (datetime.now(timezone.utc) + timedelta(days=1)).strftime("%Y-%m-%dT00:00:00.000Z")
+    return {"paused": switch or capped, "reason": "switch" if switch else ("daily_cap" if capped else None),
+            "message": PAUSED_WORDS if (switch or capped) else None,
+            "today_usd": round(today, 4), "cap_usd": cap, "resumes_at": tomorrow if capped and not switch else None}
+
+
+def _ensure_paid_open() -> None:
+    state = paid_state()
+    if state["paused"]:
+        analytics.track("paid.paused_refusal", (acting.get().user if acting.get() else None), {"reason": state["reason"]})
+        raise PaidPaused(state["reason"])
+
+
+budget.before_charge = _ensure_paid_open
+
+
+@app.get("/status")
+def get_status() -> dict:
+    """Public: whether new paid work is paused, for the banner (no numbers)."""
+    state = paid_state()
+    return {"paid_paused": state["paused"], "message": state["message"], "resumes_at": state["resumes_at"]}
+
+
+def _admin_or_404(request: Request) -> str:
+    from app.analytics_api import is_admin
+    me = acting.get()
+    user = me.user if me else current_owner(request)
+    if not is_admin(user):
+        raise HTTPException(status_code=404, detail="Not found")
+    return user
+
+
+@app.get("/admin/spend")
+def get_admin_spend(request: Request) -> dict:
+    """Admins: today's spend across everyone, by vendor, the cap and the switch."""
+    _admin_or_404(request)
+    state = paid_state()
+    return {**state, "by_vendor": ledger.by_vendor_since(_day_start()), "switch": flags.enabled("launch.paid_paused")}
+
+
+class PauseRequest(BaseModel):
+    paused: bool
+
+
+@app.put("/admin/paid-pause")
+def set_paid_pause(req: PauseRequest, request: Request) -> dict:
+    """Admins: the kill switch. On, new paid work stops for everyone and the banner shows."""
+    who = _admin_or_404(request)
+    from app.flags import ALL
+    flags.set("launch.paid_paused", ALL, req.paused)
+    log.warning("paid work %s by %s", "paused" if req.paused else "resumed", who)
+    analytics.track("paid.switch", who, {"paused": req.paused})
+    return get_admin_spend(request)
+
+
+def _ensure_owner_spend(owner: str) -> None:
+    """Paid work not tied to one video (an upload's transcription, a voice of
+    your own): the pause, the person's month and their credits."""
+    _ensure_paid_open()
+    ledger.ensure_can_spend(_user_store(owner), owner=owner, owner_ceiling_usd=settings.user_budget_usd,
+                            filename="Your voices", member=_member_limit())
+    _ensure_credits(owner)
+
+
 def _ensure_spend(project_id: str) -> None:
     """The video's ceiling, its project's when one is set (Folders), and the
     owner's for the month; the refusal names the scope that was reached."""
+    _ensure_paid_open()
     record = repo.get(project_id)
     folder = None
     if record is not None and record.folder_id:
@@ -968,6 +1053,12 @@ def _ingest_staged(staged: Path, filename: str, consent: bool, folder: Project |
     except ingest.IngestError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
+    if transcriber_label.startswith("openai"):
+        # Launch item 3: transcription is paid; it is refused before anything is stored.
+        try:
+            _ensure_owner_spend(owner)
+        except SpendCeilingReached as exc:
+            raise HTTPException(status_code=402, detail=str(exc)) from exc
     project_id = repo.next_id()
     media = artifacts.put_file(
         project_id, staged, kind="video", container=container, duration=probed.duration,
@@ -1234,6 +1325,10 @@ def _voices_can_be_made(attr: str = "can_clone") -> None:
     dry-run a mock id would outlive the setup that made it."""
     if settings.dry_run or not getattr(voice, attr, False):
         raise HTTPException(status_code=503, detail="Voices cannot be made in this setup (no vendor that clones).")
+    try:
+        _ensure_paid_open()            # launch item 3: a clone is paid work at the vendor
+    except PaidPaused as exc:
+        raise HTTPException(status_code=402, detail=str(exc)) from exc
 
 
 @app.get("/voices")
@@ -1434,8 +1529,7 @@ def design_my_voice(req: DesignRequest, owner: str = Depends(current_owner)) -> 
         raise HTTPException(status_code=503, detail="Voices cannot be designed in this setup (no vendor that designs).")
     key = _user_store(owner)
     try:
-        ledger.ensure_can_spend(key, owner=owner, owner_ceiling_usd=settings.user_budget_usd, filename="Your voices")
-        _ensure_credits(owner)
+        _ensure_owner_spend(owner)
         previews = list(voice.design_voice(key, description))
     except (SpendCeilingReached, BudgetExceeded) as exc:
         raise HTTPException(status_code=402, detail=str(exc)) from exc
@@ -3070,7 +3164,13 @@ def _check_estimate(project: Project, texts: list[pcheck.VideoText] | None = Non
 
 
 def _check_spend_refusal(project: Project, usd: float) -> str | None:
-    """The text pass is refused when it would take the project or the month past its ceiling."""
+    """The text pass is refused when it would take the project or the month past its ceiling,
+    while paid work is paused, or when the owner's credits are used up (launch item 3)."""
+    try:
+        _ensure_paid_open()
+        _ensure_credits(project.owner)
+    except SpendCeilingReached as exc:
+        return f"{exc} Run the rule checks only; they are free."
     if project.ceiling_usd is not None and ledger.spent_usd_by_folder(project.project_id) + usd > float(project.ceiling_usd) + 1e-9:
         return (f"{project.name} has reached its {money(float(project.ceiling_usd))} project ceiling. "
                 "Raise it, or run the rule checks only; they are free.")
@@ -3527,7 +3627,13 @@ def _batch_child(video_id: str, goal: str, owner: str, *, lines: list[str] | Non
 
 def _batch_start_refusal(project: Project, owner: str, cap: float) -> str | None:
     """Decision 3: a batch does not start above the project's ceiling (or the
-    month's) until the owner raises it; the sentence names the ceiling."""
+    month's) until the owner raises it; the sentence names the ceiling.
+    Launch item 3: nor while paid work is paused or the credits are used up."""
+    try:
+        _ensure_paid_open()
+        _ensure_credits(owner)
+    except SpendCeilingReached as exc:
+        return str(exc)
     if project.ceiling_usd is not None:
         ours = ledger.spent_usd_by_folder(project.project_id)
         if ours + cap > float(project.ceiling_usd) + 1e-9:
@@ -8795,7 +8901,7 @@ async def _report_errors(request: Request, call_next):
 # their routes; a video or project not shared, and every account-wide page
 # (usage, voices, templates, the Bin, search...), answers 404 as if it were not there.
 
-_REVIEWER_OPEN = re.compile(r"^/(auth/|me(/|$)|invites/|help(/|$)|workspace(/switch)?$|videos$|projects$|health$|ready$|media/)")
+_REVIEWER_OPEN = re.compile(r"^/(auth/|me(/|$)|invites/|help(/|$)|workspace(/switch)?$|videos$|projects$|health$|ready$|status$|media/)")
 _REVIEWER_VIDEO = re.compile(r"^/videos/([^/]+)(/|$)")
 _REVIEWER_PROJECT = re.compile(r"^/projects/([^/]+)(/|$)")
 _REVIEWER_JOB = re.compile(r"^/jobs/([^/]+)$")

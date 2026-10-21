@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { AdminAnalytics } from '../types'
 import type { Me } from '../api'
-import { getAdminAnalytics } from '../api'
+import { getAdminAnalytics, getAdminSpend, setPaidPause } from '../api'
+import type { AdminSpend } from '../api'
 import { track } from '../lib/analytics'
 import { usd } from '../lib/money'
 import { Shell, SideNav } from './Shell'
@@ -40,6 +41,7 @@ export function AdminPage({ me }: { me: Me | null }) {
           </div>
         )}
         {!error && !data && <p className="m-0 text-muted-foreground" role="status" aria-busy="true">Adding up…</p>}
+        <SpendCard card={card} />
         {data && (
           <>
             <section className={`${card} flex flex-col gap-3`} aria-labelledby="funnel-h" data-testid="admin-funnel">
@@ -141,5 +143,47 @@ export function AdminPage({ me }: { me: Me | null }) {
         )}
       </div>
     </Shell>
+  )
+}
+
+/** Launch item 3: today's spend across everyone against the day's cap, by
+ *  vendor, and the kill switch that pauses new paid work for everyone. */
+function SpendCard({ card }: { card: string }) {
+  const [spend, setSpend] = useState<AdminSpend | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [unread, setUnread] = useState(false)
+  useEffect(() => { getAdminSpend().then((v) => { if (typeof v?.today_usd === 'number') setSpend(v) }).catch(() => setUnread(true)) }, [])
+  const flip = async () => {
+    if (!spend) return
+    setBusy(true)
+    setError(null)
+    try { const v = await setPaidPause(!spend.switch); if (typeof v?.today_usd === 'number') setSpend(v) } catch (e) { setError(said(e, 'The switch did not move.')) } finally { setBusy(false) }
+  }
+  return (
+    <section className={`${card} flex flex-col gap-3`} aria-labelledby="spend-h" data-testid="admin-spend">
+      <div className="flex flex-wrap items-baseline gap-2.5">
+        <h2 id="spend-h" className="disp m-0 text-[22px] font-bold">Spend today</h2>
+        <span className="tag text-faint">everyone, since midnight UTC</span>
+        {spend?.paused && <span className="stamp need">{spend.reason === 'daily_cap' ? 'Paused: day cap reached' : 'Paused'}</span>}
+      </div>
+      {unread && <p className="m-0 text-sm text-muted-foreground">Today's spend could not be read.</p>}
+      {error && <p className="m-0 text-sm text-destructive" role="alert">{error}</p>}
+      {spend && (
+        <>
+          <span className="disp text-[30px] font-bold" data-testid="spend-today">{usd(spend.today_usd)}{spend.cap_usd != null && <span className="text-base font-normal text-muted-foreground"> of {usd(spend.cap_usd)} a day</span>}</span>
+          {spend.cap_usd != null && <FillBar share={Math.min(1, spend.today_usd / Math.max(spend.cap_usd, 0.01))} height={10} label="Share of the day's cap" />}
+          <span className="text-[13px] text-muted-foreground">
+            {Object.keys(spend.by_vendor).length ? Object.entries(spend.by_vendor).map(([v, n]) => `${v} ${usd(n)}`).join(' · ') : 'Nothing spent yet today.'}
+          </span>
+          <div className="flex flex-wrap items-center gap-3">
+            <span className="min-w-0 flex-1 text-sm">{spend.switch ? 'New paid work is paused for everyone. Free steps still work, and everyone sees a short notice.' : 'Pausing stops new paid work for everyone at once; running steps stop at their next paid call.'}</span>
+            <button type="button" className={spend.switch ? 'btn volt sm' : 'btn sm'} onClick={() => void flip()} disabled={busy} aria-pressed={spend.switch}>
+              {busy ? 'Moving…' : spend.switch ? 'Resume paid work' : 'Pause paid work'}
+            </button>
+          </div>
+        </>
+      )}
+    </section>
   )
 }

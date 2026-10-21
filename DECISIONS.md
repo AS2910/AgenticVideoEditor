@@ -28,6 +28,11 @@ Each: what, why, how to undo. The projects-plan decisions from the night before 
 - 2: Production mode is `AVE_ENV=production`. It requires AVE_SESSION_SECRET and AVE_SHARE_SECRET (32+ characters), an https AVE_PUBLIC_URL, the three vendor keys, a real email provider and sign-in on, and refuses AVE_CHAOS and AVE_DRY_RUN. The share key is no longer generated into the data dir in production (it is required). API docs are off in production.
 - 2: CORS allows only AVE_CORS_ORIGINS (default the public URL) with cookies, for GET/POST/PUT/PATCH/DELETE and the headers the app sends. Before tonight there was no CORS middleware at all (browsers refused cross-origin reads by default), so this mostly documents the rule.
 - 2: An unhandled error answers 500 with "Something went wrong on our side. It has been reported; please try again." Routes that pass a vendor's own message through (for example a voice the vendor refused) are unchanged: those are messages, not traces.
+- 3: The global day cap defaults to $50 across all users (AVE_DAILY_SPEND_CAP_USD; `none` turns it off). Reaching it pauses new paid work until 00:00 UTC on its own; the admin's switch pauses until switched back. Both say the same friendly sentence to users; only admins see the reason and numbers.
+- 3: "Pauses new paid jobs" is enforced at the start of every paid path and again before every voicing charge, so a turn already running stops at its next paid step rather than finishing. Claude calls already in flight finish (they are charged after the answer). Undo: drop `budget.before_charge`.
+- 3: Clones count as paid work (a vendor slot) and pause too; the credit check does not apply to them (they cost no ledger dollars).
+- 3: The A2 project check and D2 learned pass, and batch starts, now also stop when the owner's credits are used up (before, only turns checked credits).
+- 3: The free trial stays 5 credits (`app/billing/prices.py`, AVE_TRIAL_CREDITS), granted when an owner's billing account is made (first sign-in with golive.g3 on).
 
 ---
 

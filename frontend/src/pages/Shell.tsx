@@ -6,6 +6,7 @@ import { hrefFor } from '../lib/route'
 import { cn } from '@/lib/utils'
 import { initialOf } from './fmt'
 import { useFlags } from '../flags/useFlags'
+import { PausedBanner } from '../components/PausedBanner'
 import { NotificationBell } from '../components/NotificationBell'
 
 export type ShellPage = 'projects' | 'voices' | 'usage' | 'settings' | 'billing' | 'help' | 'bin'
@@ -68,6 +69,7 @@ export function Shell({ active, right, me, children, mainClassName }: ShellProps
     <div className="flex min-h-dvh flex-col bg-background text-foreground">
       {/* The skip link focuses main by hand: a "#main" href would change the route. */}
       <a className="skip" href="#main" onClick={(e) => { e.preventDefault(); document.getElementById('main')?.focus() }}>Skip to content</a>
+      <PausedBanner />
       <header className="flex min-h-[62px] flex-wrap items-center gap-x-[22px] gap-y-2 border-b-[1.5px] border-foreground bg-card px-4 py-2.5 sm:px-6">
         <Wordmark />
         <nav className="nav flex flex-wrap gap-1" aria-label="Main">

@@ -23,6 +23,27 @@ const EMPTY = { funnel: FUNNEL.map((s) => ({ ...s, owners: 0, share: null })), t
 describe('G7: the admin page', () => {
   afterEach(() => { vi.unstubAllGlobals(); trackInTests(false); resetFlags() })
 
+  it('shows today\'s spend against the cap and flips the kill switch (launch item 3)', async () => {
+    let paused = false
+    const calls: string[] = []
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      calls.push(`${init?.method ?? 'GET'} ${url} ${init?.body ?? ''}`.trim())
+      if (url.endsWith('/admin/paid-pause')) paused = JSON.parse(String(init?.body)).paused
+      if (url.includes('/admin/spend') || url.endsWith('/admin/paid-pause')) {
+        return ok({ paused, reason: paused ? 'switch' : null, switch: paused, today_usd: 12.5, cap_usd: 50, resumes_at: null, by_vendor: { anthropic: 10, elevenlabs: 2.5 } })
+      }
+      return ok(DATA)
+    }))
+    render(<AdminPage me={null} />)
+    const card = await screen.findByTestId('admin-spend')
+    expect(await within(card).findByTestId('spend-today')).toHaveTextContent('$12.50 of $50.00 a day')
+    expect(card).toHaveTextContent('anthropic $10.00 · elevenlabs $2.50')
+    await userEvent.click(within(card).getByRole('button', { name: 'Pause paid work' }))
+    expect(await within(card).findByRole('button', { name: 'Resume paid work' })).toBeInTheDocument()
+    expect(card).toHaveTextContent('Paused')
+    expect(calls).toContain('PUT /api/admin/paid-pause {"paused":true}')
+  })
+
   it('routes #admin', () => {
     expect(parseRoute('#admin')).toEqual({ page: 'admin' })
     expect(hrefFor({ page: 'admin' })).toBe('#admin')

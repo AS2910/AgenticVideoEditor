@@ -79,6 +79,7 @@ import type {
   ActivityJob, PlanQuestion, RenderIncludes, RenderRecord, ProjectRule,
 } from './types'
 import { useMediaToken } from './lib/media'
+import { PausedBanner } from './components/PausedBanner'
 import { piecesFromInserts, renderTimeFrom, sourceTimeFrom } from './timeline/selection'
 
 /** What a render is (2026-10-20): its version, when it was made, and the takes it carries. */
@@ -1638,6 +1639,7 @@ function Studio() {
       <div className="grid h-dvh grid-cols-[minmax(0,1fr)] grid-rows-[auto_auto_minmax(0,1fr)] overflow-hidden bg-background text-foreground max-[960px]:block max-[960px]:h-auto max-[960px]:min-h-dvh max-[960px]:overflow-visible" data-testid="editor-shell">
         <a className="skip" href="#main" onClick={(e) => { e.preventDefault(); document.getElementById('main')?.focus() }}>Skip to the transcript</a>
         {/* Volt: the editor's header — the wordmark, the file, the play switch, the autonomy, the spend, Export, the account. */}
+        <PausedBanner floating />
         <header className="z-30 flex min-h-[62px] min-w-0 flex-wrap max-[960px]:sticky max-[960px]:top-0 items-center gap-x-4 gap-y-2 border-b-[1.5px] border-foreground bg-card px-4 py-2 sm:px-6 max-[1600px]:gap-x-3 lg:[&>*:not(h1)]:shrink-0" data-testid="editor-header">
           <Wordmark />
           <span className="text-faint max-[1600px]:hidden" aria-hidden="true">/</span>

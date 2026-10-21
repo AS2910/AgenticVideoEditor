@@ -537,6 +537,10 @@ export const putNotificationSettings = (changes: Record<string, { in_app?: boole
 /** G7: whether the internal admin page is yours, and its numbers (admins only). */
 export const getMeAdmin = async () => (await get<{ admin: boolean }>('/me/admin')).admin
 export const getAdminAnalytics = () => get<AdminAnalytics>('/admin/analytics')
+/** Launch item 3: today's spend across everyone, the cap, and the kill switch. */
+export interface AdminSpend { paused: boolean; reason: 'switch' | 'daily_cap' | null; switch: boolean; today_usd: number; cap_usd: number | null; resumes_at: string | null; by_vendor: Record<string, number> }
+export const getAdminSpend = () => get<AdminSpend>('/admin/spend')
+export const setPaidPause = (paused: boolean) => put<AdminSpend>('/admin/paid-pause', { paused })
 export const getMyFlags = async () => (await get<{ flags: string[] }>('/me/flags')).flags
 /** Everything of yours: every project, take and voice, and the consent records. */
 export async function deleteAccount(): Promise<void> {

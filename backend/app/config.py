@@ -151,6 +151,9 @@ class Settings:
     # Launch item 2: AVE_ENV=production reads secrets only from the real
     # environment (never backend/.env) and refuses to start without them.
     production: bool = False
+    # Launch item 3: what everyone together may spend in a UTC day before new
+    # paid work pauses on its own (None: no cap).
+    daily_cap_usd: float | None = 50.0
     # Origins the browser may call the API from (CORS); the public URL by default.
     cors_origins: tuple[str, ...] = ()
 
@@ -200,6 +203,8 @@ def load_settings() -> Settings:
     public_url = (os.environ.get("AVE_PUBLIC_URL") or "http://localhost:5173").rstrip("/")
     return Settings(
         production=production,
+        daily_cap_usd=(None if (os.environ.get("AVE_DAILY_SPEND_CAP_USD") or "").strip().lower() in ("none", "off")
+                       else _amount("AVE_DAILY_SPEND_CAP_USD", 50.0)),
         cors_origins=tuple(o.strip().rstrip("/") for o in (os.environ.get("AVE_CORS_ORIGINS") or public_url).split(",") if o.strip()),
         openai_api_key=os.environ.get("OPENAI_API_KEY") or None,
         data_dir=Path(os.environ.get("AVE_DATA_DIR", BACKEND_ROOT / "var")),
