@@ -1627,6 +1627,8 @@ function Studio() {
       { id: 'first-upload', target: 'composer', when: !isTutorial && firstRead && statements.length > 0 && !readingBusy },
       // G8: thumbs on a take, once a take is there to rate.
       { id: 'first-thumbs', target: 'transcript-row', when: feedbackOn && planItems.some((i) => i.status === 'ready' && !!i.candidate) },
+      // G6 (9e): the Withdraw consent now row, once consent is on record.
+      { id: 'first-withdraw-consent', target: 'withdraw-consent', when: safetyOn && !!project.consent_granted_at && !consentAsk },
     ]
     const firstTip = tour.tour || !onboarding.loaded ? null : tipCandidates.find((t) => t.when && !onboarding.onboarding.tips.includes(t.id)) ?? null
     const folderOf = project.project_id ? folders.find((f) => f.project_id === project.project_id) ?? null : null

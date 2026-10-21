@@ -19,7 +19,7 @@ describe('Tip', () => {
   afterEach(() => vi.unstubAllGlobals())
 
   it('has its tips, each with a sentence and a Help article', () => {
-    expect(TIPS.map((t) => t.id)).toEqual(['first-upload', 'first-silent', 'first-question', 'first-just-do-it', 'first-voice-design', 'first-project-voice', 'first-background', 'first-undo-after-export', 'first-ceiling', 'first-credits', 'first-failed-take', 'first-word-rule', 'first-brief-changed', 'first-project-check', 'first-batch', 'first-language-sync', 'first-board', 'first-review-comment', 'first-bin', 'first-template', 'first-learned', 'first-thumbs', 'first-home-search', 'first-sample', 'first-members', 'first-notifications', 'first-batch-export'])
+    expect(TIPS.map((t) => t.id)).toEqual(['first-upload', 'first-silent', 'first-question', 'first-just-do-it', 'first-voice-design', 'first-project-voice', 'first-background', 'first-undo-after-export', 'first-ceiling', 'first-credits', 'first-failed-take', 'first-word-rule', 'first-brief-changed', 'first-project-check', 'first-batch', 'first-language-sync', 'first-board', 'first-review-comment', 'first-bin', 'first-template', 'first-learned', 'first-thumbs', 'first-home-search', 'first-sample', 'first-members', 'first-notifications', 'first-consent-liveness', 'first-withdraw-consent', 'first-batch-export'])
     for (const t of TIPS) { expect(t.text.length).toBeGreaterThan(20); expect(t.slug).toMatch(/^[a-z-]+$/) }
   })
 
@@ -52,6 +52,16 @@ describe('Tip', () => {
     await waitFor(() => expect(fetch).toHaveBeenCalled())
     await new Promise((r) => setTimeout(r, 10))
     expect(screen.queryByRole('status')).not.toBeInTheDocument()
+  })
+
+  it('sits in the flow when inline (inside a modal), with no caret and no fixed place', () => {
+    render(<div data-testid="host"><Tip id="first-consent-liveness" target="liveness" inline /></div>)
+    const tip = screen.getByRole('status', { name: 'Tip: Read aloud' })
+    expect(screen.getByTestId('host')).toContainElement(tip)
+    expect(tip.className).toMatch(/relative/)
+    expect(tip.className).not.toMatch(/\bfixed\b/)
+    expect(tip.getAttribute('style')).toBeNull()
+    expect(tip.querySelector('[aria-hidden="true"]')).toBeNull()
   })
 
   it('renders without a provider, and ignores an unknown id', () => {

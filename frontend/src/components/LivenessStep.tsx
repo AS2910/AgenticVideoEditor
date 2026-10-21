@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { sendLiveness, startLiveness } from '../api'
 import { said } from '../pages/fmt'
+import { Tip } from '../guides/Tip'
 
 /** G6: consent with liveness. The speaker reads a fresh sentence aloud; the recording is
  *  checked by the liveness provider (fake in this build, test mode) and kept. Record in the
@@ -42,7 +43,8 @@ export function LivenessStep({ videoId, who, onPassed }: { videoId: string; who?
   }
 
   return (
-    <div className="flex flex-col gap-2.5 rounded-lg bg-sunk p-3" data-testid="liveness">
+    <div className="flex flex-col gap-2.5 rounded-lg bg-sunk p-3" data-testid="liveness" data-tour="liveness">
+      <Tip id="first-consent-liveness" target="liveness" inline />
       <span className="flex flex-wrap items-center gap-2"><span className="tag text-faint">Read this aloud</span>{attempt?.test && <span className="stamp need">Test mode</span>}</span>
       <p className="m-0 text-base font-medium" data-testid="liveness-sentence">{attempt ? `“${attempt.sentence}”` : 'Making a sentence…'}</p>
       <p className="m-0 text-[13px] text-muted-foreground">{who ? `${who} reads` : 'The speaker reads'} it once, so we know they are here and agree. The recording is kept with the consent record.</p>

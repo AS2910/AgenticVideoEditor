@@ -13,7 +13,7 @@ export function WithdrawConsent({ videoId, onWithdrawn }: { videoId: string; onW
     try { const r = await withdrawConsent(videoId); setNote(r.said); setAsking(false); onWithdrawn() } catch (e) { setNote(said(e, 'Consent was not withdrawn. Try again.')) } finally { setBusy(false) }
   }
   return (
-    <div className="flex flex-col gap-2 rounded-xl border-[1.5px] border-line2 bg-card px-4 py-3" data-testid="withdraw-consent">
+    <div className="flex flex-col gap-2 rounded-xl border-[1.5px] border-line2 bg-card px-4 py-3" data-testid="withdraw-consent" data-tour="withdraw-consent">
       <div className="flex flex-wrap items-center gap-3">
         <span className="flex-1 text-sm text-muted-foreground">{note ?? 'Consent to use the speaker\'s voice is on record. Withdrawing it deletes their voice clone now.'}</span>
         {!asking && !note && <button type="button" className="act" onClick={() => setAsking(true)}>Withdraw consent now</button>}

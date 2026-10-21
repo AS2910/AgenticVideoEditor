@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { ConsentSheet } from './ConsentSheet'
 import { AbuseReport } from './AbuseReport'
@@ -7,6 +7,7 @@ import { WithdrawConsent } from './WithdrawConsent'
 import { LegalPage } from '../pages/LegalPage'
 import { YourData } from '../pages/YourData'
 import { parseRoute, hrefFor } from '../lib/route'
+import { Tip } from '../guides/Tip'
 
 const ok = (body: unknown, status = 200) => ({ ok: status < 400, status, json: async () => body, text: async () => JSON.stringify(body) }) as Response
 
@@ -114,5 +115,29 @@ describe('G6: withdraw consent, abuse reports, legal pages, your data', () => {
     expect(await screen.findByRole('link', { name: 'Download zip' })).toHaveAttribute('href', '/api/me/data-export/j9/download')
     await userEvent.click(screen.getByRole('button', { name: 'Delete my data' }))
     expect(onDelete).toHaveBeenCalled()
+  })
+})
+
+describe('9e: tips for the G6 consent and withdraw flows', () => {
+  afterEach(() => vi.unstubAllGlobals())
+
+  it('shows the read-aloud tip inside the consent dialog, where its Got it can be reached', async () => {
+    serve((url) => (url.endsWith('/videos/p1/liveness') ? { attempt_id: 'lv_1', sentence: 'My code is 4 7 1 9.', test_mode: true } : {}))
+    render(<ConsentSheet who="Jeevan" livenessVideoId="p1" onConfirm={() => {}} onCancel={() => {}} />)
+    const dialog = await screen.findByRole('dialog')
+    const tip = within(dialog).getByRole('status', { name: 'Tip: Read aloud' })
+    expect(tip).toHaveTextContent('reads this sentence once, live')
+    expect(tip.className).not.toMatch(/\bfixed\b/)
+    expect(within(tip).getByRole('link', { name: /The speaker's own voice and consent/ })).toHaveAttribute('href', '#help/the-speakers-own-voice-and-consent')
+    expect(within(dialog).getByRole('button', { name: 'Got it' })).toBeEnabled()     // inside the focus trap
+  })
+
+  it('points the withdraw tip at the Withdraw consent now row', async () => {
+    serve(() => ({}))
+    render(<><WithdrawConsent videoId="p1" onWithdrawn={() => {}} /><Tip id="first-withdraw-consent" target="withdraw-consent" /></>)
+    expect(screen.getByTestId('withdraw-consent')).toHaveAttribute('data-tour', 'withdraw-consent')
+    const tip = screen.getByRole('status', { name: 'Tip: Withdraw consent' })
+    expect(tip).toHaveTextContent('the voice clone is deleted at once')
+    expect(within(tip).getByRole('link', { name: /Withdrawing consent/ })).toHaveAttribute('href', '#help/withdrawing-consent')
   })
 })
