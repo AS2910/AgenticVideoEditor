@@ -24,7 +24,7 @@ EXTRA_TABLES = ("project_briefs", "project_rules", "project_events", "purged_ite
                 "project_templates", "proposal_decisions", "learned_items",
                 "workspace_members", "workspace_invites", "login_links",
                 "notifications", "notification_settings", "spend_alerts",
-                "analytics_events")
+                "analytics_events", "feedback", "error_reports")
 
 
 class Database:

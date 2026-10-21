@@ -52,6 +52,7 @@ import { TemplatesPage } from './pages/Templates'
 import { MembersPage } from './pages/MembersPage'
 import { InvitePage } from './pages/InvitePage'
 import { AdminPage } from './pages/AdminPage'
+import { FeedbackProvider } from './components/Thumbs'
 import { NotificationsPage } from './pages/NotificationsPage'
 import { NotificationBell } from './components/NotificationBell'
 import { DiscardWhy } from './components/DiscardWhy'
@@ -184,6 +185,7 @@ function Studio() {
   const reviewOn = useFlags().enabled('projects.review')
   // D4: an archived project's videos are read-only; the header says so.
   const reuseOn = useFlags().enabled('projects.reuse')
+  const feedbackOn = useFlags().enabled('golive.g8')
   // D2: the optional "why?" after a discard.
   const [discardWhy, setDiscardWhy] = useState<{ decisionId: number; line: string } | null>(null)
   const [stageAsk, setStageAsk] = useState<{ message: string; run: () => void } | null>(null)
@@ -1603,6 +1605,8 @@ function Studio() {
       { id: 'first-just-do-it', target: 'autonomy', when: autonomy === 'draft' },
       { id: 'first-silent', target: 'composer', when: !isTutorial && firstRead && statements.length === 0 },
       { id: 'first-upload', target: 'composer', when: !isTutorial && firstRead && statements.length > 0 && !readingBusy },
+      // G8: thumbs on a take, once a take is there to rate.
+      { id: 'first-thumbs', target: 'transcript-row', when: feedbackOn && planItems.some((i) => i.status === 'ready' && !!i.candidate) },
     ]
     const firstTip = tour.tour || !onboarding.loaded ? null : tipCandidates.find((t) => t.when && !onboarding.onboarding.tips.includes(t.id)) ?? null
     const folderOf = project.project_id ? folders.find((f) => f.project_id === project.project_id) ?? null : null
@@ -1614,6 +1618,7 @@ function Studio() {
     const place = sight ? (sight.place_confirmed ?? sight.place_guess) : null
   
     return (
+      <FeedbackProvider videoId={project.video_id}>
       <div className="grid h-dvh grid-cols-[minmax(0,1fr)] grid-rows-[auto_auto_minmax(0,1fr)] overflow-hidden bg-background text-foreground max-[960px]:block max-[960px]:h-auto max-[960px]:min-h-dvh max-[960px]:overflow-visible" data-testid="editor-shell">
         <a className="skip" href="#main" onClick={(e) => { e.preventDefault(); document.getElementById('main')?.focus() }}>Skip to the transcript</a>
         {/* Volt: the editor's header — the wordmark, the file, the play switch, the autonomy, the spend, Export, the account. */}
@@ -1930,6 +1935,7 @@ function Studio() {
           />
         )}
       </div>
+      </FeedbackProvider>
     )
   })()
   const showChecklist = me !== null && !(me.mode === 'google' && (!me.user || signedOut)) && !project?.settings?.tutorial

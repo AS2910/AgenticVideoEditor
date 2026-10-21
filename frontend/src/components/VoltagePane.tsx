@@ -8,6 +8,7 @@ import { ArrowUp, Check, Info, Loader2 } from 'lucide-react'
 import type { Step } from '../jobs/model'
 import { cn } from '@/lib/utils'
 import { Markdown } from './Markdown'
+import { Thumbs } from './Thumbs'
 import { Wave } from './Wordmark'
 
 /** One turn of the thread, as the pane reads it: what you said, the trace, what Voltage said. */
@@ -421,6 +422,8 @@ export function VoltagePane({
                 {t.said.length > 0 && (
                   <div className="flex flex-col gap-2.5 text-[15px] leading-relaxed [&_strong]:font-medium [&_strong]:text-volt">
                     {t.said.map((m, k) => <div key={m.seq ?? k}><span className="sr-only">Voltage: </span><Markdown text={m.text} /></div>)}
+                    {/* G8: a thumb on Voltage's reply, once the turn has said its piece. */}
+                    {t.user && !(isLatest && working) && t.said[t.said.length - 1].seq != null && <Thumbs target="turn" targetId={`m${t.said[t.said.length - 1].seq}`} dark />}
                   </div>
                 )}
                 {isLatest && summary && <Summary summary={summary} />}

@@ -122,6 +122,10 @@ class Settings:
     flag_owners: tuple[str, ...] = ("local",)
     # G7: who sees the internal admin page (#admin): owners, comma-separated.
     admin_owners: tuple[str, ...] = ("local",)
+    # G8: where errors would go. A Sentry-shaped DSN; the provider is NOT
+    # connected (app/errors_report.py): reports stay in the log and the
+    # local error_reports table until someone wires it (SETUP_NEEDED.md).
+    sentry_dsn: str | None = None
     # D3: run the purge (Bin items older than 30 days) once a day from the
     # server. Off by default: `python -m app.purge` by hand.
     purge_daily: bool = False
@@ -216,6 +220,7 @@ def load_settings() -> Settings:
         chaos_force=os.environ.get("AVE_CHAOS_FORCE", "").strip().lower() in _TRUTHY,
         user_budget_usd=_amount("AVE_USER_BUDGET_USD", DEFAULT_USER_BUDGET_USD),
         flag_owners=tuple(o.strip() for o in os.environ.get("AVE_FLAG_OWNERS", "local").split(",") if o.strip()),
+        sentry_dsn=os.environ.get("SENTRY_DSN") or None,
         admin_owners=tuple(o.strip() for o in os.environ.get("AVE_ADMIN_OWNERS", "local").split(",") if o.strip()),
         purge_daily=os.environ.get("AVE_PURGE_DAILY", "").strip().lower() in _TRUTHY,
     )

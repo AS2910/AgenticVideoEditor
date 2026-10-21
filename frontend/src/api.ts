@@ -602,3 +602,11 @@ export async function removeLearned(id: string, itemId: number): Promise<Learned
 }
 export const giveDecisionReason = (videoId: string, decisionId: number, reason: string) =>
   post<{ decision_id: number; reason: string }>(`/videos/${videoId}/decisions/${decisionId}/reason`, { reason })
+
+/** G8: your thumbs on this video's takes and replies, and one vote (null clears it). */
+export type FeedbackTarget = 'take' | 'turn'
+export type FeedbackVote = 'up' | 'down'
+export interface FeedbackMark { vote: FeedbackVote; reason: string }
+export const getFeedback = (videoId: string) => get<Record<FeedbackTarget, Record<string, FeedbackMark>>>(`/videos/${videoId}/feedback`)
+export const putFeedback = (videoId: string, body: { target: FeedbackTarget; target_id: string; vote: FeedbackVote | null; reason?: string }) =>
+  put<{ target: FeedbackTarget; target_id: string; vote: FeedbackVote | null; reason: string }>(`/videos/${videoId}/feedback`, body)

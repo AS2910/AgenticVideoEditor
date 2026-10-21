@@ -31,6 +31,7 @@ import { addKeyOf, keyOf } from '../transcript/keys'
 import type { LineKey } from '../transcript/keys'
 import type { ActivityJob, RenderIncludes } from '../types'
 import { track } from '../lib/analytics'
+import { Thumbs } from './Thumbs'
 import { CHIP_LABEL, aboutEta, isActive, rowChip } from '../jobs/model'
 import type { ChipState, RowChip } from '../jobs/model'
 
@@ -807,6 +808,7 @@ export function LineDoc({
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
           {onMove && placeControl(c.candidate_id, c.plan.selection.start, c.audio.duration, (t) => onMove(item, c, t))}
           {isAdd(item) && levelControl(c.plan, { candidate: c, item }, { text: item.new_text, start: c.plan.selection.start, end: c.plan.selection.end, speaker: null })}
+          <Thumbs target="take" targetId={c.candidate_id} />
         </div>
       </div>
     )

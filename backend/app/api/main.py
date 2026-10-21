@@ -62,7 +62,7 @@ from app.orchestrator.clones import CloneService, VoiceChoice
 from app.orchestrator.pipeline import run_edit
 from app.store.db import Database
 from app.flags import FlagStore
-from app import analytics
+from app import analytics, errors_report
 from app.purge import PurgeScheduler
 from app.usage import (
     Ledger, SpendCeilingReached, WHISPER_USD_PER_MINUTE, claude_usd, current_actor, current_turn, money, month_name, month_start,
@@ -126,6 +126,8 @@ repo = ProjectRepository(database)
 flags = FlagStore(database, settings.flag_owners)
 # G7: every tracked step lands in this database's analytics_events.
 analytics.configure(database)
+# G8: the error-reporting hook (log provider; SENTRY_DSN is read but not connected).
+error_reporter = errors_report.reporter_for(settings.sentry_dsn, database)
 # Every paid call is recorded here; it backs the voice budget and the
 # per-project spend ceiling (Phase 9b).
 ledger = Ledger(database, ceiling_usd=settings.project_budget_usd)
@@ -8371,6 +8373,21 @@ def _after_charge(video_id: str | None, folder_id: str | None) -> None:
 ledger.on_record = _after_charge
 
 
+# ── G8: errors nothing caught ────────────────────────────────────────────────
+# A request that raises is reported (with the route and who) and then raised
+# on as before, so the response and the tests see exactly what they did.
+
+@app.middleware("http")
+async def _report_errors(request: Request, call_next):
+    try:
+        return await call_next(request)
+    except Exception as exc:
+        me = acting.get()
+        error_reporter.capture_exception(exc, {"source": "server", "where": f"{request.method} {request.url.path}",
+                                               "owner": me.user if me else None})
+        raise
+
+
 # ── G2: roles ────────────────────────────────────────────────────────────────
 # Defined last so it is the outermost middleware: who is acting is known
 # before any other middleware or route runs (app/workspace_api.py).
@@ -8395,7 +8412,7 @@ async def _roles(request: Request, call_next):
 
 def _mount_optional_routers() -> None:
     import importlib
-    for name in ("app.onboarding", "app.help", "app.tutorial", "app.workspace_api", "app.notify_api", "app.analytics_api"):
+    for name in ("app.onboarding", "app.help", "app.tutorial", "app.workspace_api", "app.notify_api", "app.analytics_api", "app.feedback_api"):
         try:
             module = importlib.import_module(name)
         except ImportError:
