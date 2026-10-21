@@ -1,3 +1,15 @@
+# Launch hardening decisions (overnight run 2, 2026-10-21 to 22)
+
+Each: what, why, how to undo. The projects-plan decisions from the night before follow below.
+
+- Branch: overnight/projects-plan was already merged to main (fast-forwarded and pushed 2026-10-21), so overnight/launch-hardening is cut from main `dc292d7`.
+- Run 2 arrived while an earlier launch list was being started; work already done for it (0030, launch flags) is committed first as item 1a, since item 1 (scoping) builds on it. Then items 0 to 11 in order.
+- 1a: The migration runner, flag store and workspaces already existed from the projects plan (M0, FLAGS, WS) and no startup ALTERs were left outside it, so item 1 only fills the gaps. Undo: revert the item 1 commit.
+- 1a: `workspace_id` defaults through SQLite AFTER INSERT triggers (migration 0030), not by changing every writer: a writer that forgets still gets the owner's workspace. Exempt tables (no user data, or rows before an account exists): schema_migrations, workspaces, meta, feature_flags, login_links, abuse_reports, and the account/token tables added later tonight. Undo: `python -m app.store.migrate down --db ...` (drops the triggers and the added columns).
+- 1a: Launch switches are flags named `launch.*`, off by default for everyone including `local`. A row with owner `*` sets a flag for everyone; an owner's own row still wins. Set them with `python -m app.flags set <flag> on|off --db backend/var/ave.db`. Undo: revert; rows with owner `*` are then ignored.
+
+---
+
 # Decisions made overnight
 
 Each: what, why, how to undo.

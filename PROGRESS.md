@@ -1,3 +1,29 @@
+# Launch hardening (overnight run 2, 2026-10-21 to 22)
+
+Branch `overnight/launch-hardening`, cut from main `dc292d7` (overnight/projects-plan was already merged to main). Worktree `../AgenticVideoEditor-launch`.
+Target: public launch on 4 Nov 2026. Spec: the user's "Overnight run 2" message (items 0 to 11), which replaced an earlier "launch readiness" list mid-run; the work done for that list (0030, launch flags) is item 1a here.
+Decisions without the user: the top section of DECISIONS.md.
+To continue in a new session: read this table; the next item is the first not marked done. Run backend tests with
+`PYTHONPATH=$PWD ../../AgenticVideoEditor/backend/.venv/bin/python -m pytest -q -p no:cacheprovider` from `backend/` (baseline 1243 passed, 5 skipped, 5 min).
+
+| # | Item | Status | Commit | Notes |
+|---|---|---|---|---|
+| 1a | Workspace column on every user table, launch flags | done | (pending) | Runner, flags and workspaces existed (M0, FLAGS, WS). 0030: workspace_id on the 9 owner-keyed tables that lacked it plus an AFTER INSERT trigger per table defaulting it to the owner's (or the video's) workspace; `launch.*` flags, off by default for everyone, and rows for everyone (owner `*`); `python -m app.flags set launch.invite_only on --db ...`. Test: no schema statement outside migrations. Proven on a copy of the live DB: up, down, up; per-table row counts identical; integrity ok. |
+| 0 | Apply MORNING section 3 decisions | todo | | |
+| 1 | Per-member scoping (code part of G5) | todo | | |
+| 2 | Security | todo | | |
+| 3 | Spend protection | todo | | |
+| 4 | Reliability | todo | | |
+| 5 | Accounts | todo | | |
+| 6 | Postgres ready | todo | | |
+| 7 | Real providers, code only | todo | | |
+| 8 | Deploy kit | todo | | |
+| 9 | Quality fixes | todo | | |
+| 10 | Launch profile | todo | | |
+| 11 | Tests and launch check | todo | | |
+
+---
+
 # Overnight progress: Voltage Projects Build Plan
 
 Branch `overnight/projects-plan` (from main `217db2d`). Spec: docs/overnight/PLAN.md. Agent brief: docs/overnight/BRIEF.md.
