@@ -661,3 +661,15 @@ export interface DataRequest { id: number; kind: 'export' | 'deletion'; status: 
 export const startDataExport = () => post<{ request: DataRequest }>('/me/data-export')
 export const listDataRequests = () => get<{ requests: DataRequest[] }>('/me/data-export')
 export const dataExportUrl = (jobId: string) => signed(`${BASE}/me/data-export/${jobId}/download`)
+
+// Launch item 8: the landing page's prices (public, from app/billing/prices.py), Request access, the admin's waitlist.
+export interface PublicPricing {
+  trial_credits: number; credit_usd: number; topup_months: number; test_mode: boolean; languages: boolean; invite_only: boolean
+  plans: { plan_id: string; name: string; credits: number; blurb: string; usd: number; inr: number }[]
+  topups: { credits: number; usd: number; inr: number }[]
+}
+export const getPricing = () => get<PublicPricing>('/pricing')
+export const joinWaitlist = (r: { email: string; name?: string; use_case?: string }) => post<{ ok: boolean; message: string }>('/waitlist', r)
+export interface WaitlistRow { id: number; email: string; name: string | null; use_case: string | null; created_at: string; invited_at: string | null; invited_by: string | null; status: 'waiting' | 'invited' }
+export const getAdminWaitlist = () => get<{ rows: WaitlistRow[]; invite_only: boolean }>('/admin/waitlist')
+export const sendWaitlistInvite = (id: number) => post<{ row: WaitlistRow }>(`/admin/waitlist/${id}/invite`)

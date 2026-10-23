@@ -32,6 +32,8 @@ export type Route =
   // Launch item 5: a password reset link, and the sign-in page (with an error a link landed on).
   | { page: 'reset'; token: string }
   | { page: 'login'; error?: string | null }
+  // Launch item 8: the public landing page for anyone (signed-out people see it at the start too).
+  | { page: 'welcome' }
 
 export function parseRoute(hash: string): Route {
   const h = hash.replace(/^#\/?/, '').trim()
@@ -54,6 +56,7 @@ export function parseRoute(hash: string): Route {
   if (login) return { page: 'login', error: login[1] ? decodeURIComponent(login[1]) : null }
   const invite = /^invite\/([A-Za-z0-9_.-]+)$/.exec(h)
   if (invite) return { page: 'invite', token: invite[1] }
+  if (h === 'welcome') return { page: 'welcome' }
   if (h === 'members') return { page: 'members' }
   if (h === 'notifications') return { page: 'notifications' }
   if (h === 'admin') return { page: 'admin' }

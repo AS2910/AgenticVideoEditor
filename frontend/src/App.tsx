@@ -54,6 +54,7 @@ import { MembersPage } from './pages/MembersPage'
 import { InvitePage } from './pages/InvitePage'
 import { AdminPage } from './pages/AdminPage'
 import { LegalPage } from './pages/LegalPage'
+import { LandingPage } from './pages/LandingPage'
 import { WithdrawConsent } from './components/WithdrawConsent'
 import { FeedbackProvider } from './components/Thumbs'
 import { NotificationsPage } from './pages/NotificationsPage'
@@ -1377,6 +1378,7 @@ function Studio() {
       )
     }
     if (route.page === 'legal') return <LegalPage doc={route.doc} />     // G6: readable without an account
+    if (route.page === 'welcome') return <LandingPage />
     if (route.page === 'invite' && me.mode !== 'off' && (!me.user || signedOut)) {
       // G2: sign in first, then come back to the invite.
       try { sessionStorage.setItem('voltage-invite', route.token) } catch { /* the link can be opened again */ }
@@ -1384,7 +1386,9 @@ function Studio() {
     if (me.mode !== 'off' && (!me.user || signedOut)) {
       // Launch item 5: a password reset link works signed out.
       if (route.page === 'reset') return <ResetPage token={route.token} onDone={() => window.location.reload()} />
-      return <LoginPage error={signedOut ? 'Your session ended. Sign in again to continue.' : route.page === 'login' ? route.error ?? null : null} />
+      // Launch item 8: the start (`#`, `#home`) is the landing page for someone not signed in.
+      if (route.page === 'projects' && !signedOut) return <LandingPage />
+      return <LoginPage onSignedIn={() => { if (route.page === 'login') window.location.hash = '#home'; window.location.reload() }} error={signedOut ? 'Your session ended. Sign in again to continue.' : route.page === 'login' ? route.error ?? null : null} />
     }
     if (route.page === 'projects') {
       return (

@@ -1321,7 +1321,20 @@ describe('App: moving audio on the timeline (UX-1b)', () => {
 describe('App sign-in (Phase 9c)', () => {
   const ME = { mode: 'google', user: { sub: '42', email: 'ash@example.com', name: 'Ash', picture: null } }
 
+  it('shows the landing page at the start to someone not signed in (launch item 8)', async () => {
+    const base = routeFetch()
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.endsWith('/auth/me')) return ok({ mode: 'accounts', user: null })
+      if (url.endsWith('/pricing')) return ok({ trial_credits: 5, credit_usd: 1, topup_months: 12, test_mode: true, languages: false, invite_only: true, plans: [], topups: [] })
+      return base(url, init)
+    }))
+    render(<App />)
+    expect(await screen.findByTestId('landing-page')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Sign in' })).toHaveAttribute('href', '#login')
+  })
+
   it('shows the door when sign-in is on and nobody is in', async () => {
+    window.location.hash = '#login'
     const base = routeFetch()
     vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
       if (url.endsWith('/auth/me')) return ok({ mode: 'google', user: null })
@@ -1354,7 +1367,9 @@ describe('App sign-in (Phase 9c)', () => {
     act(() => { window.location.hash = 'settings' })
     await user.click(await screen.findByRole('button', { name: 'Sign out' }))
     expect(calls.some((c) => c.url.endsWith('/auth/logout') && c.init?.method === 'POST')).toBe(true)
-    expect(await screen.findByRole('link', { name: /continue with google/i })).toBeInTheDocument()
+    // Launch item 8: signed out, the start is the landing page, with Sign in on it.
+    expect(await screen.findByTestId('landing-page')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Sign in' })).toHaveAttribute('href', '#login')
   })
 
   it('goes back to the door when the session ends', async () => {

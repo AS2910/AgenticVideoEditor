@@ -8,6 +8,7 @@ import { usd } from '../lib/money'
 import { Shell, SideNav } from './Shell'
 import { FillBar } from './bits'
 import { said } from './fmt'
+import { AdminWaitlist } from './AdminWaitlist'
 
 const pct = (n: number | null) => (n == null ? null : `${Math.round(n * 100)}%`)
 
@@ -43,6 +44,7 @@ export function AdminPage({ me }: { me: Me | null }) {
         {!error && !data && <p className="m-0 text-muted-foreground" role="status" aria-busy="true">Adding up…</p>}
         <SpendCard card={card} />
         <FlagsCard card={card} />
+        <AdminWaitlist card={card} />
         {data && (
           <>
             <section className={`${card} flex flex-col gap-3`} aria-labelledby="funnel-h" data-testid="admin-funnel">
