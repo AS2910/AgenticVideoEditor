@@ -132,8 +132,9 @@ def test_email_sign_in_by_a_one_use_link(sign_in_on, monkeypatch):
     flags.set("golive.g2", "local", True)
     client = TestClient(app)
     assert client.get("/auth/email").json() == {"available": True}
-    assert client.post("/auth/email", json={"email": "nope"}).status_code == 422
-    assert client.post("/auth/email", json={"email": "New@X.io"}).json() == {"sent": True, "email": "new@x.io"}
+    assert client.post("/auth/email", json={"email": "nope"}).status_code == 403     # item 5: the CSRF header, like every write
+    assert client.post("/auth/email", json={"email": "nope"}, headers=H).status_code == 422
+    assert client.post("/auth/email", json={"email": "New@X.io"}, headers=H).json() == {"sent": True, "email": "new@x.io"}
     [mail] = email_mod.outbox(database, kind="sign_in")
     link = re.search(r"callback\?token=(\S+)", mail["body"]).group(1)
     back = client.get(f"/auth/email/callback?token={link}", follow_redirects=False)
@@ -145,7 +146,7 @@ def test_email_sign_in_by_a_one_use_link(sign_in_on, monkeypatch):
     # An address a Google sign-in remembered reaches that same account.
     email_mod.remember_address(database, A, "a@x.io")
     client2 = TestClient(app)
-    client2.post("/auth/email", json={"email": "a@x.io"})
+    client2.post("/auth/email", json={"email": "a@x.io"}, headers=H)
     link2 = re.search(r"callback\?token=(\S+)", email_mod.outbox(database, kind="sign_in", to="a@x.io")[0]["body"]).group(1)
     client2.get(f"/auth/email/callback?token={link2}", follow_redirects=False)
     client2.post("/projects", json={"name": "A again"}, headers=H)

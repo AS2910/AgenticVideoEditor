@@ -19,6 +19,15 @@ _CHUNK = 1 << 20  # 1 MiB; video files get large from Phase 1 onward
 _HEX64 = re.compile(r"[0-9a-f]{64}")
 
 
+def _safe_key(key: str) -> bool:
+    """A store key names a folder under the root (launch item 5): one or more
+    `/`-separated parts (`projects/<id>/words` is a key), none of them empty,
+    `.` or `..`, and no backslash, NUL or leading slash."""
+    if not key or "\\" in key or "\0" in key or key.startswith("/"):
+        return False
+    return all(part not in ("", ".", "..") for part in key.split("/"))
+
+
 def _hash_file(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as handle:
@@ -32,6 +41,8 @@ class ArtifactStore:
         self.root = Path(root)
 
     def _dest(self, project_id: str, sha256: str, container: str) -> Path:
+        if not _safe_key(project_id) or not re.fullmatch(r"[A-Za-z0-9]{1,8}", container):
+            raise ValueError(f"not a storage key: {project_id!r} / {container!r}")
         return self.root / project_id / f"{sha256}.{container}"
 
     def _commit(self, project_id: str, sha256: str, kind: str, container: str,
@@ -76,7 +87,7 @@ class ArtifactStore:
         `sha256` arrives from the URL, so it is validated as a bare hex digest
         rather than trusted — otherwise it would be a path-traversal hole.
         """
-        if not _HEX64.fullmatch(sha256):
+        if not _HEX64.fullmatch(sha256) or not _safe_key(project_id):
             return None
         matches = sorted((self.root / project_id).glob(f"{sha256}.*"))
         for match in matches:

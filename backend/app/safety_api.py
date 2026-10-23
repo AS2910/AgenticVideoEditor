@@ -26,6 +26,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from app import analytics
+from app.filenames import safe_filename
 from app.ratelimit import RateLimit
 from app.safety import liveness as liveness_mod
 from app.timefmt import now_iso
@@ -88,7 +89,7 @@ async def check_liveness(video_id: str, attempt_id: str, file: UploadFile = File
     if row["status"] != "waiting":
         raise HTTPException(status_code=409, detail="That sentence was used already. Start again for a new one.")
     with tempfile.TemporaryDirectory() as tmp:
-        staged = Path(tmp) / Path(file.filename or "liveness.webm").name
+        staged = Path(tmp) / safe_filename(file.filename, "liveness.webm")
         await api._spool(file, staged, "audio")
         if staged.stat().st_size > MAX_RECORDING_BYTES:
             raise HTTPException(status_code=422, detail="That recording is too long. Just the sentence is enough.")

@@ -72,6 +72,7 @@ from app.usage import (
 )
 from app import auth
 from app import linkimport
+from app.filenames import safe_filename, unique_names
 import httpx
 from app.store.workspaces import personal
 from app.store import briefs, checks as checks_store, events as activity_log, rules, stages
@@ -1143,7 +1144,7 @@ async def create_project(
     folder = _owned_project(project_id, owner) if project_id else None
     if folder is not None:
         _not_archived(folder.project_id, owner)
-    filename = Path(file.filename or "upload.mp4").name
+    filename = safe_filename(file.filename, "upload.mp4")
     with tempfile.TemporaryDirectory() as tmp:
         staged = Path(tmp) / filename
         await _spool(file, staged)
@@ -1302,7 +1303,7 @@ def _run_import(job_id: str, resolved, folder: Project | None, consent: bool, ow
                         detail={"bytes": got, "total_bytes": total})
     try:
         with tempfile.TemporaryDirectory() as tmp:
-            client = _link_http or httpx.Client()
+            client = _link_http or linkimport.safe_client()
             try:
                 path = linkimport.download(resolved, Path(tmp), client=client, on_progress=progress)
             finally:
@@ -1487,7 +1488,7 @@ async def add_my_voice(
     _voices_can_be_made(owner=owner)
     label = _voice_name_or_422(name)
     _no_voice_called(owner, label)
-    filename = Path(file.filename or "voice.wav").name
+    filename = safe_filename(file.filename, "voice.wav")
     with tempfile.TemporaryDirectory() as tmp:
         staged = Path(tmp) / filename
         await _spool(file, staged, "audio")
@@ -2927,7 +2928,7 @@ async def add_word_audio(project_id: str, rule_id: int, file: UploadFile = File(
     _consistency_on(owner)
     _owned_project(project_id, owner)
     rule = _pronounce_rule_or_404(project_id, rule_id)
-    filename = Path(file.filename or "word.wav").name
+    filename = safe_filename(file.filename, "word.wav")
     with tempfile.TemporaryDirectory() as tmp:
         staged = Path(tmp) / filename
         await _spool(file, staged, "audio")
@@ -5001,6 +5002,7 @@ def list_folder_videos(project_id: str, owner: str = Depends(current_owner)) -> 
 MAX_FILE_BYTES = 20 << 20
 MAX_FILE_TEXT = 20_000
 TEXT_KINDS = ("txt", "md", "json", "csv")
+MAX_DOCX_XML = 20 * 1024 * 1024   # a .docx's text XML, unpacked
 
 
 def _extract_text(name: str, data: bytes) -> str:
@@ -5017,7 +5019,12 @@ def _extract_text(name: str, data: bytes) -> str:
             import re as _re
             import zipfile
             with zipfile.ZipFile(io.BytesIO(data)) as z:
-                xml = z.read("word/document.xml").decode("utf-8", errors="replace")
+                # Launch item 5: a zip bomb is refused by its declared size, and the read stops at the cap anyway.
+                info = z.getinfo("word/document.xml")
+                if info.file_size > MAX_DOCX_XML:
+                    raise ValueError("document.xml is too large to read")
+                with z.open(info) as member:
+                    xml = member.read(MAX_DOCX_XML + 1)[:MAX_DOCX_XML].decode("utf-8", errors="replace")
             xml = _re.sub(r"</w:p>", "\n", xml)
             text = _re.sub(r"<[^>]+>", "", xml)
         elif kind == "pdf":
@@ -5039,20 +5046,20 @@ async def add_folder_file(project_id: str, file: UploadFile = File(...), owner: 
     """Add a reference file (a brief, a script, notes). Its text is kept so
     Voltage can search it."""
     _owned_project(project_id, owner)
-    name = Path(file.filename or "file").name
+    name = safe_filename(file.filename, "file")
     data = await file.read(MAX_FILE_BYTES + 1)
     if len(data) > MAX_FILE_BYTES:
         raise HTTPException(status_code=413, detail="That file is too large (20 MB at most).")
     if not data:
         raise HTTPException(status_code=422, detail="That file is empty.")
     try:
-        sniff.document(data[:sniff.HEAD_BYTES], name)
+        sniffed = sniff.document(data[:sniff.HEAD_BYTES], name)
     except sniff.SniffError as exc:
         raise HTTPException(status_code=415, detail=str(exc)) from None
-    return await run_in_threadpool(_keep_folder_file, project_id, name, data)
+    return await run_in_threadpool(_keep_folder_file, project_id, name, data, sniffed)
 
 
-def _keep_folder_file(project_id: str, name: str, data: bytes) -> dict:
+def _keep_folder_file(project_id: str, name: str, data: bytes, sniffed: str) -> dict:
     """The write and the text extraction (a PDF is slow), off the event loop (rehearsal item 3)."""
     sha256 = hashlib.sha256(data).hexdigest()
     folder = _files_dir(project_id)
@@ -5062,7 +5069,7 @@ def _keep_folder_file(project_id: str, name: str, data: bytes) -> dict:
         tmp = dest.with_name(f"{sha256}.tmp")
         tmp.write_bytes(data)
         tmp.replace(dest)
-    entry = {"name": name, "sha256": sha256, "size": len(data), "kind": Path(name).suffix.lstrip(".").lower() or "file",
+    entry = {"name": name, "sha256": sha256, "size": len(data), "kind": sniffed,
              "at": _now(), "text": _extract_text(name, data)}
     _set_project_files(project_id, [*(f for f in _project_files(project_id) if f["sha256"] != sha256), entry])
     return _file_dict(entry)
@@ -5075,9 +5082,20 @@ def get_folder_file(project_id: str, sha256: str, owner: str = Depends(media_own
     path = _files_dir(project_id) / sha256
     if entry is None or not path.is_file():
         raise HTTPException(status_code=404, detail="file not found")
-    import mimetypes
-    media_type = mimetypes.guess_type(entry["name"])[0] or "application/octet-stream"
-    return FileResponse(path, media_type=media_type, filename=entry["name"])
+    # Launch item 5: the type comes from what the file is, never its name. Any
+    # UTF-8 text is accepted as a reference file, so a file named x.html or
+    # x.svg would otherwise run as a page on Voltage's own address.
+    media_type, inline = _REFERENCE_TYPES.get(entry.get("kind") or "", ("application/octet-stream", False))
+    headers = {} if media_type == "application/pdf" else {"Content-Security-Policy": "default-src 'none'; sandbox"}
+    return FileResponse(path, media_type=media_type, filename=entry["name"], headers=headers,
+                        content_disposition_type="inline" if inline else "attachment")
+
+
+_REFERENCE_TYPES = {
+    "pdf": ("application/pdf", True),
+    "docx": ("application/vnd.openxmlformats-officedocument.wordprocessingml.document", False),
+    **{k: ("text/plain; charset=utf-8", True) for k in ("txt", "md", "json", "csv")},
+}
 
 
 @app.delete("/projects/{project_id}/files/{sha256}", status_code=204)
@@ -8791,9 +8809,11 @@ class _ZipPipe(io.RawIOBase):
 def _zip_stream(files: list[dict]):
     """A zip of the files, built while it streams (stored, not squeezed: MP4 is compressed already)."""
     pipe = _ZipPipe()
+    # Launch item 5: entry names are bare, safe and unique (no zip-slip on unzip, no overwrites).
+    names = unique_names([f["name"] for f in files], "video.mp4")
     with zipfile.ZipFile(pipe, "w", zipfile.ZIP_STORED, allowZip64=True) as zf:
-        for f in files:
-            with zf.open(f["name"], "w", force_zip64=True) as dst, open(f["path"], "rb") as src:
+        for f, entry in zip(files, names):
+            with zf.open(entry, "w", force_zip64=True) as dst, open(f["path"], "rb") as src:
                 while chunk := src.read(1 << 20):
                     dst.write(chunk)
                     yield pipe.take()
@@ -9223,6 +9243,28 @@ async def _roles(request: Request, call_next):
     finally:
         acting.reset(a)
         current_actor.reset(b)
+
+
+# ── Launch item 5: one CSRF check for every write ────────────────────────────
+# Defined after the roles middleware, so it is outer and runs first. With
+# sign-in on, every POST/PUT/PATCH/DELETE must carry the header a cross-site
+# form, image or beacon cannot set (`current_owner` checked it per route;
+# routes that read the cookie another way, such as the workspace switch, an
+# invite accept, sign-out or the admin switches, did not). Only the payment
+# webhooks are exempt: their callers are Stripe and Razorpay, the signature
+# is the check, and they read no cookie.
+
+CSRF_EXEMPT = re.compile(r"^(/api)?/billing/webhooks/[a-z]+$")
+CSRF_REFUSED = "This request did not come from Voltage."
+
+
+@app.middleware("http")
+async def _csrf_header(request: Request, call_next):
+    if (settings.auth_mode != "off" and request.method in ("POST", "PUT", "PATCH", "DELETE")
+            and request.headers.get(auth.CSRF_HEADER) != auth.CSRF_VALUE
+            and not CSRF_EXEMPT.match(request.url.path)):
+        return JSONResponse(status_code=403, content={"detail": CSRF_REFUSED, "code": "csrf"})
+    return await call_next(request)
 
 
 # ── Help, the tutorial, onboarding: the coordinator's routers ────────────────

@@ -14,6 +14,8 @@
 """
 from __future__ import annotations
 
+import re
+
 import json
 
 import base64
@@ -70,9 +72,16 @@ def _mac(key: str, *parts: str) -> str:
     return base64.urlsafe_b64encode(digest[:18]).decode().rstrip("=")
 
 
+# Launch item 5: an address becomes an owner id (`email:<address>`) and so a
+# storage folder name; only the plain characters real addresses use are
+# accepted (no slashes, backslashes, quotes, control characters or `..`).
+_EMAIL = re.compile(r"[a-z0-9!#$%&'*+=?^_`{|}~-]+(\.[a-z0-9!#$%&'*+=?^_`{|}~-]+)*"
+                    r"@[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+")
+
+
 def clean_email(email: str | None) -> str:
     text = (email or "").strip().lower()
-    if not text or len(text) > 254 or "@" not in text or " " in text or text.startswith("@") or "." not in text.split("@")[-1]:
+    if not text or len(text) > 254 or not _EMAIL.fullmatch(text) or len(text.split("@")[0]) > 64:
         raise MemberError("Enter an email address like name@example.com.")
     return text
 
