@@ -6,15 +6,18 @@ import { getWorkspace } from '../api'
  *  golive.g2 on; with it off everyone is their own owner). Null until known. Rehearsal
  *  2026-10-23: Billing is the owner's, so Editors and Reviewers are not offered it. */
 let roleAsked: Promise<MemberRole | null> | null = null
-export function useWorkspaceRole(on: boolean): MemberRole | null {
-  const [role, setRole] = useState<MemberRole | null>(on ? null : 'owner')
+export function useWorkspaceRole(on: boolean, flagsLoading = false): MemberRole | null {
+  // Rehearsal item 7: while the flags are still loading the role is not known yet (null),
+  // so a Reviewer never sees the owner's controls flash up first.
+  const [role, setRole] = useState<MemberRole | null>(on || flagsLoading ? null : 'owner')
   useEffect(() => {
+    if (flagsLoading) { setRole(null); return }
     if (!on) { setRole('owner'); return }
     let live = true
     roleAsked ??= getWorkspace().then((v) => v.you.role).catch(() => { roleAsked = null; return null })
     void roleAsked.then((r) => { if (live) setRole(r) })
     return () => { live = false }
-  }, [on])
+  }, [on, flagsLoading])
   return role
 }
 

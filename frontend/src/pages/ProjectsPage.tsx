@@ -108,7 +108,8 @@ export function ProjectsPage({ me, projects, folders = [], onOpen, onUpload, onS
   // G1: the sample project and import from a link.
   const g1 = useFlags().enabled('golive.g1')
   // Rehearsal item 7: a Reviewer watches; nothing to upload, make, move or delete.
-  const watching = useWorkspaceRole(useFlags().enabled('golive.g2')) === 'reviewer'
+  const flagsNow = useFlags()
+  const watching = useWorkspaceRole(flagsNow.enabled('golive.g2'), flagsNow.loading) === 'reviewer'
   useEffect(() => {
     if (!g1 || sampleAsked) return
     sampleAsked = true

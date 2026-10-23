@@ -203,7 +203,9 @@ function Studio() {
   const reuseOn = useFlags().enabled('projects.reuse')
   const feedbackOn = useFlags().enabled('golive.g8')
   // Rehearsal item 7: a Reviewer watches; the editor leaves out Export and asking for changes, and its lines are read-only.
-  const watching = useWorkspaceRole(useFlags().enabled('golive.g2')) === 'reviewer'
+  const flagsNow = useFlags()
+  const role = useWorkspaceRole(flagsNow.enabled('golive.g2'), flagsNow.loading)
+  const watching = role === 'reviewer'
   const safetyOn = useFlags().enabled('golive.g6')
   const [withdrew, setWithdrew] = useState(false)       // G6: keep the sentence on screen after a withdrawal
   // D2: the optional "why?" after a discard.
@@ -1425,7 +1427,7 @@ function Studio() {
           onFolderMade={() => void refreshProjects()}
           onMoved={() => void refreshProjects()}
           onSampleMade={() => void refreshProjects()}
-          banner={!watching && onboarding.loaded && !onboarding.onboarding.tour.finished && !onboarding.onboarding.tour.skipped ? (
+          banner={role !== null && !watching && onboarding.loaded && !onboarding.onboarding.tour.finished && !onboarding.onboarding.tour.skipped ? (
             <div className="rise flex flex-wrap items-center gap-4 rounded-xl bg-pane px-5 py-4 text-ptext shadow-volt" data-testid="tour-offer">
               <span className="flex flex-1 basis-[260px] flex-col gap-0.5">
                 <span className="disp text-lg font-bold">New here? Make one real edit in three minutes.</span>

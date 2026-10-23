@@ -82,7 +82,7 @@ export function ProjectPage({ me, projectId, onUpload, uploading, error, onDelet
   const [over, setOver] = useState(false)
   // A1 (projects.consistency): the brief's history, open under it.
   const [history, setHistory] = useState(false)
-  const { enabled } = useFlags()
+  const { enabled, loading: flagsLoading } = useFlags()
   const consistency = enabled('projects.consistency')
   // B1 (projects.batch): one goal across every video; a Fix in all from the check lands here.
   const batchOn = enabled('projects.batch')
@@ -99,7 +99,7 @@ export function ProjectPage({ me, projectId, onUpload, uploading, error, onDelet
   // D4 (projects.reuse): archive (read-only until unarchived) and pin to Home.
   const reuseOn = enabled('projects.reuse')
   // Rehearsal item 7: a Reviewer watches; the page leaves out uploads and menus and its panels are read-only.
-  const watching = useWorkspaceRole(enabled('golive.g2')) === 'reviewer'
+  const watching = useWorkspaceRole(enabled('golive.g2'), flagsLoading) === 'reviewer'
   const [pinned, setPinned] = useState(false)
   // D1 (projects.reuse): Save as template.
   const [templating, setTemplating] = useState(false)
