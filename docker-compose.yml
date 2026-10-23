@@ -66,6 +66,8 @@ services:
     # Loopback only: Caddy (or an SSH tunnel) is the way in.
     ports:
       - "127.0.0.1:8080:8080"
+    # `edge` is where Caddy reaches it; nginx believes X-Forwarded-For only from Caddy's address there.
+    networks: [default, edge]
     restart: unless-stopped
     logging:
       driver: json-file
@@ -107,10 +109,20 @@ services:
       - caddyconfig:/config
     depends_on:
       - web
+    networks:
+      edge:
+        ipv4_address: 172.31.250.10     # frontend/nginx.conf trusts X-Forwarded-For from this address only
     restart: unless-stopped
     logging:
       driver: json-file
       options: { max-size: "20m", max-file: "5" }
+
+networks:
+  default: {}
+  edge:
+    ipam:
+      config:
+        - subnet: 172.31.250.0/24
 
 volumes:
   avedata:
