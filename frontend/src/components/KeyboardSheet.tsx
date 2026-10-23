@@ -2,6 +2,7 @@ import { useRef } from 'react'
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
 import { hrefFor } from '../lib/route'
 import { cn } from '@/lib/utils'
+import { openFeedback } from './FeedbackDialog'
 
 interface KeyboardSheetProps { open: boolean; onClose: () => void }
 
@@ -70,6 +71,7 @@ export function KeyboardSheet({ open, onClose }: KeyboardSheetProps) {
         <div className="flex flex-wrap items-center gap-3 border-t-[1.5px] border-foreground pt-3.5 text-[13px] text-muted-foreground">
           <span>Shortcuts never spend money on their own: anything paid still goes through Voltage's gate.</span>
           <span className="flex-1" />
+          <button type="button" className="act" onClick={() => { onClose(); openFeedback() }}>Send feedback</button>
           <a href={hrefFor({ page: 'help' })} className="tag text-foreground no-underline hover:underline" onClick={onClose}>All of Help →</a>
         </div>
       </DialogContent>

@@ -9,6 +9,7 @@ import { Markdown } from '../components/Markdown'
 import { Bolt, Shell } from './Shell'
 import { said } from './fmt'
 import { AbuseReport } from '../components/AbuseReport'
+import { openFeedback } from '../components/FeedbackDialog'
 import { LegalLinks } from './LegalPage'
 
 export interface HelpPageProps {
@@ -122,9 +123,10 @@ export function HelpPage({ me, articles: given, initialSlug = null, onReplay, on
       <section className="pane flex flex-wrap items-center gap-5 rounded-[14px] px-7 py-6">
         <div className="flex flex-[1_1_360px] flex-col gap-1">
           <span className="disp text-2xl font-bold">Still stuck?</span>
-          <span className="pm">Ask Voltage in any project. Press <kbd className="tnum text-volt not-italic">?</kbd> in the editor for every shortcut.</span>
+          <span className="pm">Ask Voltage in any project, or send us feedback. Press <kbd className="tnum text-volt not-italic">?</kbd> in the editor for every shortcut.</span>
         </div>
         <button type="button" className="btn ghost" onClick={() => setKeys(true)}>Keyboard shortcuts</button>
+        <button type="button" className="btn volt" onClick={openFeedback}>Send feedback</button>
       </section>
       <KeyboardSheet open={keys} onClose={() => setKeys(false)} />
       {/* G6: report misuse (shown where reports are taken), and the policies. */}

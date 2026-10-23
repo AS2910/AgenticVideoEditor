@@ -7,6 +7,7 @@ and refuses the rest with a sentence fit to show the user.
     video(head)      -> "mp4" | "mov" | "webm" | "mkv" | "avi"
     audio(head)      -> "wav" | "mp3" | "m4a" | "ogg" | "webm" | "flac" | "aac" (or a video container)
     document(head, name) -> "txt" | "md" | "json" | "csv" | "pdf" | "docx"
+    image(head)      -> "png" | "jpg" | "webp"      (item 11: a feedback screenshot)
 """
 from __future__ import annotations
 
@@ -17,6 +18,7 @@ HEAD_BYTES = 4096
 VIDEO_HELP = "Upload an MP4, MOV, WebM, MKV or AVI video."
 AUDIO_HELP = "Upload a WAV, MP3, M4A, OGG, FLAC or WebM recording (a video with sound works too)."
 DOCUMENT_HELP = "Upload a text, Markdown, CSV, JSON, PDF or Word (.docx) file."
+IMAGE_HELP = "Attach a PNG, JPEG or WebP image."
 TEXT_KINDS = ("txt", "md", "json", "csv")
 
 
@@ -86,6 +88,16 @@ def document(head: bytes, name: str) -> str:
                 raise SniffError(f"That file is not readable text. {DOCUMENT_HELP}") from None
         return kind if kind in TEXT_KINDS else "txt"
     raise SniffError(f"That file is not a document we can take. {DOCUMENT_HELP}")
+
+
+def image(head: bytes) -> str:
+    if head.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "png"
+    if head.startswith(b"\xff\xd8\xff"):
+        return "jpg"
+    if head[:4] == b"RIFF" and head[8:12] == b"WEBP":
+        return "webp"
+    raise SniffError(f"That file is not an image we can take. {IMAGE_HELP}")
 
 
 def head_of(path: str | Path) -> bytes:

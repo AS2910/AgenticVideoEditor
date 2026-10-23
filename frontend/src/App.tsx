@@ -30,6 +30,7 @@ import { ResetPage } from './pages/ResetPage'
 import { ExportPage } from './pages/ExportPage'
 import { HelpPage } from './pages/HelpPage'
 import { KeyboardSheet } from './components/KeyboardSheet'
+import { FeedbackHost } from './components/FeedbackDialog'
 import { StatusStrip } from './components/StatusStrip'
 import { ActivityDrawer } from './components/ActivityDrawer'
 import { Toaster } from './components/Toaster'
@@ -1987,6 +1988,7 @@ function Studio() {
     <>
       {page}
       {showChecklist && <Checklist onShowMe={showMe} />}
+      {me !== null && !(me.mode !== 'off' && (!me.user || signedOut)) && <FeedbackHost />}
     </>
   )
 }

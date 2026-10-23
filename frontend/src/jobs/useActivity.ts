@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { eventsUrl, getJobs, getLatestRender } from '../api'
 import type { ActivityJob, RenderState, TurnView } from '../types'
 import { isActive, mergeJob } from './model'
+import { noteJob } from '../lib/lastJob'
 
 export interface Activity {
   jobs: ActivityJob[]
@@ -36,6 +37,7 @@ export function useActivity(videoId: string | null, onJob?: JobListener, busy = 
     // A finished job never goes back (an event that arrives late is older news).
     if (before && !isActive(before) && isActive(job)) return
     known.current.set(job.job_id, job)
+    noteJob(job.job_id, job.created_at ?? '')          // item 11: what "Send feedback" attaches
     setJobs((all) => mergeJob(all, job))
     if (!before || before.status !== job.status || before.step_label !== job.step_label) listener.current?.(job, before)
   }, [])

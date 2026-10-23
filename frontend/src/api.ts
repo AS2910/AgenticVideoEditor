@@ -588,6 +588,25 @@ export const revokeAdminShare = (link: string, reason: string) => {
   const id = link.trim().split('#s/').pop()?.split('.')[0] ?? ''
   return post<{ share_id: string; owner: string; state: string }>(`/admin/shares/${encodeURIComponent(id)}/revoke`, { reason })
 }
+/** Rehearsal item 11: "Send feedback" from the help menu, and the admins' list of it. */
+export interface BetaFeedbackSend { message: string; route: string; video_id: string | null; job_id: string | null; app_version: string; screenshot: File | null }
+export async function sendBetaFeedback(f: BetaFeedbackSend): Promise<{ id: number; said: string }> {
+  const body = new FormData()
+  body.append('message', f.message)
+  body.append('route', f.route)
+  if (f.video_id) body.append('video_id', f.video_id)
+  if (f.job_id) body.append('job_id', f.job_id)
+  body.append('app_version', f.app_version)
+  if (f.screenshot) body.append('screenshot', f.screenshot)
+  const res = await fetch(`${BASE}/beta-feedback`, { method: 'POST', headers: FROM_VOLTAGE, body })
+  if (!res.ok) return failure(res)
+  return (await res.json()) as { id: number; said: string }
+}
+export type BetaStatus = 'new' | 'seen' | 'done'
+export interface BetaFeedbackItem { id: number; owner: string; message: string; route: string; video_id: string | null; job_id: string | null; app_version: string; user_agent: string; screenshot: boolean; screenshot_type: string | null; status: BetaStatus; status_by: string | null; status_at: string | null; created_at: string }
+export const listBetaFeedback = (status?: BetaStatus) => get<{ items: BetaFeedbackItem[]; counts: Record<BetaStatus, number> }>(`/admin/beta-feedback${status ? `?status=${status}` : ''}`)
+export const setBetaFeedbackStatus = (id: number, status: BetaStatus) => put<BetaFeedbackItem>(`/admin/beta-feedback/${id}`, { status })
+export const betaScreenshotUrl = (id: number) => `${BASE}/admin/beta-feedback/${id}/screenshot`
 export const getAdminAudit = async (limit = 50) => (await get<{ entries: AdminAuditEntry[] }>(`/admin/audit?limit=${limit}`)).entries
 export const getMyFlags = async () => (await get<{ flags: string[] }>('/me/flags')).flags
 /** Everything of yours: every project, take and voice, and the consent records. */

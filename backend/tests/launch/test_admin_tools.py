@@ -93,7 +93,7 @@ def test_every_admin_route_is_404_to_everyone_else(world):
     assert {("GET", "/admin/users"), ("POST", "/admin/users/{owner}/suspend"), ("GET", "/admin/audit")} <= set(found)
     for client in (world["bo"], world["sam"], world["mo"]):
         for method, path in found:
-            path = re.sub(r"{\w+}", SAM, path)
+            path = re.sub(r"{\w+}", SAM, re.sub(r"{\w+_id}", "1", path))
             resp = client.request(method, path, headers=H, params={"owner": SAM}, json={"reason": "because", "credits": 1, "paused": True,
                                                                  "owner": SAM, "flag": "golive.g3", "invoice_id": 1})
             assert resp.status_code == 404, f"{method} {path} -> {resp.status_code}"
