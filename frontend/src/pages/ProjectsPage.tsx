@@ -435,7 +435,7 @@ export function ProjectsPage({ me, projects, folders = [], onOpen, onUpload, onS
           <section aria-labelledby="recent-h" className="flex flex-col gap-3.5" data-testid="recent-videos">
             <div className="flex flex-wrap items-center gap-3.5">
               <h2 id="recent-h" className="disp m-0 text-[26px] font-bold">Recent videos</h2>
-              <div className="segs" role="tablist" aria-label="Which videos">
+              <div className="segs max-w-full flex-wrap" role="tablist" aria-label="Which videos">
                 {([['all', `All · ${onHome.length}`], ['in', `In projects · ${inProjects.length}`], ['none', `No project · ${standalone.length}`]] as const).map(([k, text]) => (
                   <button key={k} type="button" role="tab" className="seg" aria-selected={tab === k} onClick={() => setTab(k)}>{text}</button>
                 ))}

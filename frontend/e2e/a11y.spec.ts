@@ -6,7 +6,7 @@ import { resolve } from 'node:path'
 
 /** Rehearsal item 7: every screen a public user can reach, in the public profile (API mocked),
  *  at desktop and at 375 px: axe finds no serious or critical issue, nothing scrolls sideways,
- *  and no page error or React warning is logged. At 375 px (a touch phone) the screens a
+ *  and no page error or React warning is logged; desktop again in the dark theme. At 375 px (a touch phone) the screens a
  *  first visit meets (landing, sign-in, Home, the share and review pages, Billing, the policies)
  *  also keep every tap target at 44 px or more. SHOTS=<dir> saves screenshots. */
 
@@ -41,14 +41,16 @@ const VIDEO = {
   messages: [{ role: 'user', text: 'Make it forty percent', kind: 'say', seq: 1 }, { role: 'assistant', text: 'One line, ready to hear.', kind: 'say', seq: 2 }],
 }
 const base = { duration: 31, edits: 0, state: 'new', last_change: 'Nothing changed yet', open_comments: 0, brief_changed: false, out_of_sync: false, stage: 'draft' }
+const MORE = Array.from({ length: 11 }, (_, i) => ({ ...base, video_id: `q${i}`, project_id: 'f1', project_name: 'Diwali 2026', filename: `cut-${i}.mp4`, created_at: ago(60 + i), last_edited_at: ago(60 + i) }))
 const VIDEOS = [
+  ...MORE,
   { ...base, video_id: 'p1', project_id: 'f1', project_name: 'Diwali 2026', filename: 'bhaji-cam-ad.mp4', created_at: ago(50), last_edited_at: ago(1) },
   { ...base, video_id: 'p2', project_id: null, project_name: null, filename: 'alone.mp4', created_at: ago(5), last_edited_at: ago(5) },
 ]
 const FOLDER = { project_id: 'f1', name: 'Diwali 2026', brief: 'Brand is Bhaji Cam, said BAH-jee cam.', settings: { autonomy: 'ask', turn_usd: 0.5, effort: 'high' }, ceiling_usd: 10, spent_usd: 1.94,
   created_at: AT, video_count: 1, brief_version: 2, brief_edited_by: 'acct:9aaddbd873949cc9', brief_edited_by_name: 'ann@studio.test', brief_edited_at: ago(3), stale_count: 0 }
 const DETAIL = {
-  project: FOLDER, videos: [VIDEOS[0]],
+  project: FOLDER, videos: VIDEOS.filter((v) => v.video_id === 'p1'),
   voices: [{ voice_id: 'v1', name: 'Diwali Narrator', kind: 'designed', seconds: 0, at: AT, used_in: 1, consent_granted_at: null, consent_needed: false }],
   files: [{ name: 'brand-guide.pdf', sha256: 'a'.repeat(64), size: 1200, kind: 'pdf', at: AT }],
   suggestions: [],
@@ -139,7 +141,8 @@ async function serve(page: Page, who: Who) {
     if (path === '/api/videos/p1/renders/latest') return json({ mode: 'final', current_hash: 'h1', stale: false, in_progress: null, latest: null })
     if (path === '/api/videos/p1/messages') return json([])
     if (path === '/api/videos/p1/arrangement') return json(null, 404)
-    if (path === '/api/videos/p1/understanding') return json({ version: 1, read: null, beats: [], corrections: [], style: null })
+    if (path === '/api/videos/p1/understanding') return json({ version: 1, read: { format: 'ad', genre: 'retail', summary: 'A shopkeeper offers a discount to camera.', setting: 'A small shop' },
+      beats: [], corrections: [], style: { line: 'Warm, quick, one offer.', accepted: false, by: 'voltage' } })
     if (path === '/api/videos/p1/usage') return json({ spent_usd: 0, ceiling_usd: 2, lines: [] })
     if (path === '/api/videos/p1/suggestions') return json({ suggestions: [] })
     if (path.includes('/events')) return route.fulfill({ status: 404, body: '' })
@@ -168,6 +171,7 @@ const SCREENS: Screen[] = [
   { name: 'home', who: 'owner', hash: '/#home', ready: visible('video-card'), targets: true },
   { name: 'project', who: 'owner', hash: '/#p/f1', ready: visible('brief') },
   { name: 'editor', who: 'owner', hash: '/#v/p1', ready: visible('transcript-list') },
+  { name: 'editor-what-i-see', who: 'owner', hash: '/#v/p1', ready: async (p) => { await p.getByRole('button', { name: /What I see/i }).first().click(); await expect(p.getByRole('button', { name: 'Correct it' })).toBeVisible() } },
   { name: 'export', who: 'owner', hash: '/#v/p1/export', ready: async (p) => { await expect(p.getByRole('status').filter({ hasText: /Rendered/ }).first()).toBeVisible() } },
   { name: 'voices', who: 'owner', hash: '/#voices', ready: async (p) => { await expect(p.getByRole('heading', { level: 1 })).toBeVisible() } },
   { name: 'usage', who: 'owner', hash: '/#usage', ready: async (p) => { await expect(p.getByRole('heading', { level: 1 })).toBeVisible() } },
@@ -217,7 +221,7 @@ async function smallTargets(page: Page): Promise<string[]> {
   })
 }
 
-for (const [label, width, height] of [['desktop', 1280, 900], ['375 px', 375, 812]] as const) {
+for (const [label, width, height, scheme] of [['desktop', 1280, 900, 'light'], ['375 px', 375, 812, 'light'], ['desktop, dark', 1280, 900, 'dark']] as const) {
   test.describe(`public screens at ${label}`, () => {
     if (width === 375) test.use({ hasTouch: true, isMobile: true })
     for (const s of SCREENS) {
@@ -227,13 +231,13 @@ for (const [label, width, height] of [['desktop', 1280, 900], ['375 px', 375, 81
         page.on('console', (m) => { if (m.type() === 'error' && !/Failed to load resource|net::ERR/.test(m.text())) errors.push(`console: ${m.text().slice(0, 200)}`) })
         await page.setViewportSize({ width, height })
         // The entrance motion is off (prefers-reduced-motion), so axe reads each screen as it settles.
-        await page.emulateMedia({ reducedMotion: 'reduce' })
+        await page.emulateMedia({ reducedMotion: 'reduce', colorScheme: scheme })
         await serve(page, s.who)
         await page.goto(s.hash)
         await s.ready(page)
         await expect(page.getByRole('status', { name: /^Opening/ })).toHaveCount(0)
         await page.waitForTimeout(300)
-        if (SHOTS) await page.screenshot({ path: `${SHOTS}/a11y-${s.name}-${width}.png`, fullPage: true })
+        if (SHOTS) await page.screenshot({ path: `${SHOTS}/a11y-${s.name}-${width}-${scheme}.png`, fullPage: true })
         expect(await axeProblems(page), 'serious or critical axe issues').toEqual([])
         expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth), 'no sideways scroll').toBeLessThanOrEqual(0)
         if (width === 375 && s.targets) expect(await smallTargets(page), 'tap targets under 44 px').toEqual([])

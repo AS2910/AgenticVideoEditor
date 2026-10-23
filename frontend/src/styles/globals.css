@@ -267,6 +267,8 @@
   .act:hover { background: var(--sunk); color: var(--foreground); }
   .act:disabled { opacity: .5; cursor: not-allowed; }
   .act:focus-visible { outline: 3px solid color-mix(in oklch, var(--ring) 50%, transparent); outline-offset: 2px; }
+  /* Rehearsal item 7: a quiet verb on the black pane reads in the pane's muted colour (the page's is too dark there). */
+  .pane .act { color: var(--pmuted); }
   .pane .act:hover { background: var(--psunk); color: var(--ptext); }
   /* Segmented control: mono uppercase; the active segment ink-filled with volt text */
   .segs { display: inline-flex; padding: 3px; gap: 2px; border: 1.5px solid var(--foreground); border-radius: 9px; }

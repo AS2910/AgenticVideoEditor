@@ -1927,7 +1927,7 @@ function Studio() {
               before={firstRead ? (
                 <div className="flex flex-col gap-3.5" data-testid="first-read">
                   {readingBusy && !reading ? (
-                    <p className="pm m-0 text-[15px]" role="status">Taking the clip in…</p>
+                    <p className="pm m-0 text-[15px]" role="status">Taking the video in…</p>
                   ) : reading ? (
                     <p className="m-0 text-[15px] leading-relaxed">{reading.opening}</p>
                   ) : (
