@@ -31,7 +31,11 @@ def accounts_on(monkeypatch):
 
 
 def _mail(kind: str, to: str) -> str:
-    return email_mod.outbox(database, kind=kind, to=to)[-1]["body"]
+    row = email_mod.outbox(database, kind=kind, to=to)[-1]
+    # Item 9: each account email comes from its template, with an HTML part.
+    from app.notify import templates
+    assert row["subject"] == templates.preview(kind).subject and row["html"].startswith("<!doctype html>")
+    return row["body"]
 
 
 def _link(body: str, pattern: str) -> str:

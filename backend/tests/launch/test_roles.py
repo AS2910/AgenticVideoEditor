@@ -42,6 +42,7 @@ def _join(ann: TestClient, who: TestClient, email: str, role: str, **shares) -> 
     assert out.status_code == 201, out.text
     [mail] = email_mod.outbox(database, kind="workspace_invite", to=email)
     token = re.search(r"#invite/(\S+)", mail["body"]).group(1)
+    assert mail["html"] and f"#invite/{token}" in mail["html"]          # item 9: the template, both parts
     joined = who.post(f"/invites/{token}/accept", headers=H)
     assert joined.status_code == 200, joined.text
     who.cookies.set("ave_workspace", joined.json()["workspace_id"])

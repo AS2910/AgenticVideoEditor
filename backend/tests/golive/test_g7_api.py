@@ -115,3 +115,21 @@ def test_a_word_learned_from_the_transcript_is_counted(client):
     client.post("/projects/f1/rules", json={"kind": "banned", "data": {"word": "cheap"}})
     seen = names()
     assert seen.count("words.learned_from_transcript") == 1 and seen.count("rule.added") == 2
+
+
+def test_the_email_preview_is_for_admins_only_and_sends_nothing(client, monkeypatch):
+    """Item 9: GET /admin/emails/preview lists the kinds; one kind is its subject, HTML and text."""
+    from app.notify import email as email_mod, templates
+    before = len(email_mod.outbox(database))
+    kinds = client.get("/admin/emails/preview").json()["kinds"]
+    assert [k["kind"] for k in kinds] == list(templates.KINDS)
+    for k in templates.KINDS:
+        one = client.get(f"/admin/emails/preview/{k}").json()
+        assert one["subject"] and one["html"].startswith("<!doctype html>") and one["text"]
+    invoice = client.get("/admin/emails/preview/invoice").json()
+    assert main.settings.seller_name in invoice["text"]
+    assert client.get("/admin/emails/preview/nope").status_code == 404
+    assert len(email_mod.outbox(database)) == before                       # never sends
+    monkeypatch.setattr(main, "settings", replace(main.settings, admin_owners=("someone-else",)))
+    assert client.get("/admin/emails/preview").status_code == 404
+    assert client.get("/admin/emails/preview/verify_email").status_code == 404

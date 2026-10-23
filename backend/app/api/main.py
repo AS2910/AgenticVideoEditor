@@ -87,6 +87,7 @@ from app.notify import inbox
 from app.notify import digest as digest_mod, email as email_mod
 from app import diskroom
 from starlette.concurrency import run_in_threadpool
+from app.notify import templates as email_templates
 from app.render import captions as captions_mod, deliver as deliver_mod
 from app.jobs import exports as exports_mod
 from app.agent import project_check as pcheck
@@ -8100,14 +8101,9 @@ def _invite_reviewer(share: shares_store.Share, token: str, title: str) -> None:
     if not address:
         return
     try:
-        email_sender.send(email_mod.Email(
-            to=address, kind="review_invite", owner=share.owner,
-            subject=f"Please review {title}",
-            body="\n".join([f"Hi {share.name}," if share.name else "Hi,", "",
-                            f"You have been asked to review {title}. Watch it, leave comments at the moment they are about, "
-                            "then approve it or ask for changes. No account needed.", "",
-                            f"Open the review: {_share_url(token)}", "",
-                            f"The link works until {share.expires_at[:10]}."])))
+        email_sender.send(email_templates.email(
+            "review_invite", address, public_url=settings.public_url, owner=share.owner,
+            name=share.name, title=title, link=_share_url(token), expires=share.expires_at[:10]))
     except Exception:  # noqa: BLE001 - the link is made; the email is a courtesy
         log.exception("review invite for %s", share.share_id)
 
@@ -8129,13 +8125,10 @@ def _tell_reviewers(video_id: str, version: int) -> None:
             if version <= told:
                 continue
             repo.set_meta(key, str(version))
-            email_sender.send(email_mod.Email(
-                to=share.data["email"], kind="version_ready", owner=share.owner,
-                subject=f"v{version} of {record.source.filename} is ready to review",
-                body="\n".join([f"Hi {share.name}," if share.name else "Hi,", "",
-                                f"A new version (v{version}) of {record.source.filename} is ready. "
-                                "The review page shows what changed since the last one.", "",
-                                f"Open the review: {_share_url(shares_store.token_for(share_key, share))}"])))
+            email_sender.send(email_templates.email(
+                "version_ready", share.data["email"], public_url=settings.public_url, owner=share.owner,
+                name=share.name, filename=record.source.filename, version=version,
+                link=_share_url(shares_store.token_for(share_key, share))))
     except Exception:  # noqa: BLE001 - news, never the render
         log.exception("new version email for %s", video_id)
 
@@ -8149,7 +8142,7 @@ def flush_review_digests(now: datetime | None = None) -> list:
     return digest_mod.flush(
         database, email_sender, now or digest_mod.utcnow(),
         lambda owner: email_mod.address_for(database, owner, settings.notify_owner_email if owner == LOCAL_OWNER else None),
-        link_for)
+        link_for, public_url=settings.public_url)
 
 
 review_digests = digest_mod.DigestScheduler(flush_review_digests, every=60)
@@ -8940,8 +8933,12 @@ def _job_notice(job) -> None:
             title, body, kind = f"{what}{of} is done.", job.step_label or "", "job_done"
         # Launch item 1: the notice goes to whoever started the work (a member), else the owner.
         to = job.detail.get("started_by") or owner
+        # Item 9: a failure emailed on its own reads as the job-failed email (the digest's text stays the same).
+        mail = ({"text": title + (f" {body}" if body else ""),
+                 "email": {"template": "job_failed", "what": what, "name": name, "reason": body, "link": link}}
+                if kind == "job_failed" else None)
         with database.tx() as c:
-            inbox.add_in(c, to, kind, title, body=body, link=link,
+            inbox.add_in(c, to, kind, title, body=body, link=link, digest_payload=mail,
                          video_id=job.video_id if (link or "").startswith("#v/") else None,
                          project_id=job.video_id if (link or "").startswith("#p/") else None)
     except Exception:  # noqa: BLE001 - a notice never breaks the work it reports
@@ -8980,7 +8977,11 @@ def _after_charge(video_id: str | None, folder_id: str | None) -> None:
                             if hit < 100 else f"You have reached {whose} ({money(float(s['ceiling_usd']))}). Paid steps stop until it is raised.")
                     if to != owner:
                         said = said.replace("You have used", "This workspace has used").replace("You have reached", "This workspace has reached").replace("your monthly", "its monthly")
-                    inbox.add_in(c, to, "spend_alert", said, link=link,
+                    mail = {"text": said, "email": {
+                        "template": "spend_alert", "threshold": hit, "workspace": to != owner, "link": link,
+                        "what": whose.replace("your monthly", "its monthly") if to != owner else whose,
+                        "used": money(float(s["spent_usd"])), "limit": money(float(s["ceiling_usd"]))}}
+                    inbox.add_in(c, to, "spend_alert", said, link=link, digest_payload=mail,
                                  video_id=video_id if scope == "video" else None,
                                  project_id=scope_id if scope == "project" else None)
     except Exception:  # noqa: BLE001 - an alert never breaks a charge
@@ -9005,7 +9006,9 @@ def _credit_alerts(owner: str) -> None:
                 return
             said = (f"You have used {hit}% of your credits ({got['used']:.2f} of {got['granted']:.2f})."
                     if hit < 100 else "You have used all your credits. Paid steps are paused until you top up or pick a plan.")
-            inbox.add_in(c, owner, "spend_alert", said, link="#billing")
+            inbox.add_in(c, owner, "spend_alert", said, link="#billing", digest_payload={"text": said, "email": {
+                "template": "spend_alert", "threshold": hit, "credits": True, "what": "your credits", "link": "#billing",
+                "used": f"{got['used']:.2f}", "limit": f"{got['granted']:.2f}"}})
     except Exception:  # noqa: BLE001 - an alert never breaks a charge
         log.exception("credit alert after a charge")
 
@@ -9271,7 +9274,7 @@ async def _csrf_header(request: Request, call_next):
 
 def _mount_optional_routers() -> None:
     import importlib
-    for name in ("app.onboarding", "app.help", "app.tutorial", "app.workspace_api", "app.accounts_api", "app.notify_api", "app.analytics_api", "app.feedback_api", "app.billing_api", "app.safety_api", "app.landing_api"):
+    for name in ("app.onboarding", "app.help", "app.tutorial", "app.workspace_api", "app.accounts_api", "app.notify_api", "app.analytics_api", "app.feedback_api", "app.billing_api", "app.safety_api", "app.landing_api", "app.emails_api"):
         try:
             module = importlib.import_module(name)
         except ImportError:

@@ -162,9 +162,9 @@ def report_abuse(req: AbuseReport, request: Request) -> dict:
         analytics.track_in(c, "abuse.reported", reporter or "public", {"kind": req.kind})
         for admin in api.settings.admin_owners:
             api.inbox.add_in(c, admin, "abuse_report", title, body=req.location.strip()[:300], link="#admin")
-    api.email_sender.send(api.email_mod.Email(to=api.settings.trust_email, subject=title, kind="abuse_report",
-                                              body=f"{title}\nWhere: {req.location}\nDetails: {req.details or '(none)'}\n"
-                                                   f"Contact: {req.contact or '(none)'}"))
+    from app.notify import templates
+    api.email_sender.send(templates.email("abuse_report", api.settings.trust_email, public_url=api.settings.public_url,
+                                          title=title, location=req.location, details=req.details, contact=req.contact))
     return {"report_id": report_id, "said": "Thank you. We read every report and act on it."}
 
 

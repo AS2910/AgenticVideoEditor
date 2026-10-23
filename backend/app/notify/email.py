@@ -9,7 +9,9 @@ out. Item 7: `ResendEmail` sends through Resend's API, chosen when
 (provider `resend`) as the record of what went out. Any other name, or
 resend without a key, falls back to the outbox with a warning.
 
-    Email(to, subject, body, kind, owner=None, workspace_id=None)
+    Email(to, subject, body, kind, owner=None, workspace_id=None, html=None)
+    (item 9: `body` is the plain text, `html` the HTML; both are sent and kept.
+    The bodies come from `app/notify/templates.py`.)
     sender_for(name, db, api_key=None, from_addr=None) -> EmailSender
     outbox(db, kind=None, to=None) -> [dict]  newest last
     remember_address(db, owner, email) / address_for(db, owner, fallback=None)
@@ -43,12 +45,26 @@ class Email:
     kind: str                      # digest | version_ready | review_invite (G4 adds its own)
     owner: str | None = None
     workspace_id: str | None = None
+    html: str | None = None        # item 9: the HTML part (multipart with `body`)
 
 
 class EmailSender(Protocol):
     name: str
 
     def send(self, email: Email) -> None: ...
+
+
+# Item 9: the HTML part is kept beside the outbox row (no column for it yet:
+# meta `notify_outbox_html:<id>`), and `outbox()` gives it back as `html`.
+HTML_KEY = "notify_outbox_html:"
+
+
+def _record_in(c, email: Email, provider: str) -> None:
+    cur = c.execute("INSERT INTO notify_outbox (workspace_id, owner, to_addr, kind, subject, body, provider, created_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    (email.workspace_id, email.owner, email.to, email.kind, email.subject, email.body, provider, now_iso()))
+    if email.html:
+        c.execute("INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)", (f"{HTML_KEY}{cur.lastrowid}", email.html))
 
 
 # G7: what each email kind is called in analytics.
@@ -66,9 +82,7 @@ class OutboxEmail:
 
     def send(self, email: Email) -> None:
         with self.db.tx() as c:
-            c.execute("INSERT INTO notify_outbox (workspace_id, owner, to_addr, kind, subject, body, provider, created_at) "
-                      "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                      (email.workspace_id, email.owner, email.to, email.kind, email.subject, email.body, self.name, now_iso()))
+            _record_in(c, email, self.name)
             sent = SENT_EVENTS.get(email.kind)
             if sent and email.owner:
                 analytics.safe_in(c, sent, email.owner, {"kind": email.kind}, workspace_id=email.workspace_id)
@@ -95,6 +109,8 @@ class ResendEmail(OutboxEmail):
 
     def _post(self, email: Email, key: str) -> bool:
         body = {"from": self.from_addr, "to": [email.to], "subject": email.subject, "text": email.body}
+        if email.html:
+            body["html"] = email.html
         headers = {"Authorization": f"Bearer {self.api_key}", "Idempotency-Key": key}
         for attempt in range(self.RETRIES + 1):
             try:
@@ -116,10 +132,7 @@ class ResendEmail(OutboxEmail):
     def send(self, email: Email) -> None:
         sent = self._post(email, f"{email.kind}-{uuid.uuid4().hex}")
         with self.db.tx() as c:
-            c.execute("INSERT INTO notify_outbox (workspace_id, owner, to_addr, kind, subject, body, provider, created_at) "
-                      "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                      (email.workspace_id, email.owner, email.to, email.kind, email.subject, email.body,
-                       self.name if sent else f"{self.name} (failed)", now_iso()))
+            _record_in(c, email, self.name if sent else f"{self.name} (failed)")
             event = SENT_EVENTS.get(email.kind)
             if sent and event and email.owner:
                 analytics.safe_in(c, event, email.owner, {"kind": email.kind}, workspace_id=email.workspace_id)
@@ -152,7 +165,11 @@ def outbox(db: Database, kind: str | None = None, to: str | None = None) -> list
             sql += f" AND {column} = ?"
             args.append(value)
     with db.tx() as c:
-        return [dict(r) for r in c.execute(sql + " ORDER BY id", args).fetchall()]
+        rows = [dict(r) for r in c.execute(sql + " ORDER BY id", args).fetchall()]
+        for r in rows:
+            found = c.execute("SELECT value FROM meta WHERE key = ?", (f"{HTML_KEY}{r['id']}",)).fetchone()
+            r["html"] = found[0] if found else None
+    return rows
 
 
 def remember_address(db: Database, owner: str, address: str | None) -> None:

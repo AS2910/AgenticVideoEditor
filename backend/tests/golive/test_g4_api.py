@@ -123,3 +123,19 @@ def test_the_flag_off_keeps_the_review_digest_and_hides_the_bell(client, video):
     activity.fail(failed.job_id, "x", "no")
     with database.tx() as c:
         assert c.execute("SELECT COUNT(*) FROM notifications").fetchone()[0] == 0
+
+
+def test_a_failed_job_and_a_spend_alert_are_emailed_with_their_templates(client, video):
+    """Item 9: the same people, at the same time (the digest), each in its own email."""
+    from app.notify import email as email_mod
+    failed = activity.create("f1", "check")
+    activity.start(failed.job_id)
+    activity.fail(failed.job_id, "check_failed", "The check stopped: no transcript.")
+    [sent] = main.flush_review_digests(digest.utcnow() + timedelta(minutes=11))
+    assert sent.kind == "digest" and sent.subject == "The project check of Diwali failed"
+    assert "What happened: The check stopped: no transcript." in sent.body and "/#p/f1" in sent.body and sent.html
+    client.patch("/projects/f1", json={"ceiling_usd": 1.0})
+    ledger.record(video, "anthropic", "turn", 1, "tokens", 0.85)
+    [alert] = main.flush_review_digests(digest.utcnow() + timedelta(minutes=22))
+    assert alert.subject == "You have used 80% of the ceiling of Diwali" and "($0.85 of $1)" in alert.body
+    assert [r["kind"] for r in email_mod.outbox(database)][-2:] == ["digest", "digest"]

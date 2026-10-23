@@ -77,10 +77,12 @@ def _link(path: str) -> str:
     return f"{_api().settings.public_url}/api{path}"
 
 
-def _send(to: str, kind: str, subject: str, lines: list[str], owner: str | None = None) -> None:
+def _send(to: str, kind: str, owner: str | None = None, **data) -> None:
+    """Item 9: the email from its template (HTML and text), through the sender."""
     api = _api()
     try:
-        api.email_sender.send(api.email_mod.Email(to=to, kind=kind, subject=subject, body="\n".join(lines), owner=owner))
+        from app.notify import templates
+        api.email_sender.send(templates.email(kind, to, public_url=api.settings.public_url, owner=owner, **data))
     except Exception:  # noqa: BLE001 - the answer is the same; the log says what failed
         api.log.exception("%s email", kind)
 
@@ -164,14 +166,9 @@ def sign_up(req: SignUp, request: Request) -> dict:
         account, token = store.sign_up(api.database, address, req.password, TERMS_VERSION)
     except store.AccountError:
         # Taken: say the same as for a new address, and tell the owner of the address instead.
-        _send(address, "account_exists", "Someone tried to sign up with your address",
-              ["Hi,", "", "Someone (perhaps you) tried to make a Voltage account with this address, which already has one.",
-               "", f"To sign in, or reset your password, go to {api.settings.public_url}/#login", "",
-               "If it was not you, you can ignore this email."])
+        _send(address, "account_exists", link="#login")
         return {"sent": True, "message": SENT}
-    _send(address, "verify_email", "Confirm your email for Voltage",
-          ["Hi,", "", "Open this link to confirm your address and sign in. It works once, for 48 hours.", "",
-           _link(f"/auth/verify?token={token}"), "", "If you did not sign up, you can ignore this email."], account.owner)
+    _send(address, "verify_email", account.owner, link=_link(f"/auth/verify?token={token}"))
     api.analytics.track("account.created", account.owner, {"terms_version": TERMS_VERSION})
     return {"sent": True, "message": SENT}
 
@@ -191,9 +188,7 @@ def resend_verify(req: EmailOnly, request: Request) -> dict:
         account = None
     if account is not None and not account.verified:
         token = store.new_token(api.database, account, "verify", account.email)
-        _send(account.email, "verify_email", "Confirm your email for Voltage",
-              ["Hi,", "", "Open this link to confirm your address and sign in. It works once, for 48 hours.", "",
-               _link(f"/auth/verify?token={token}")], account.owner)
+        _send(account.email, "verify_email", account.owner, link=_link(f"/auth/verify?token={token}"))
     return {"sent": True, "message": SENT}
 
 
@@ -249,10 +244,7 @@ def forgot(req: EmailOnly, request: Request) -> dict:
         account = None
     if account is not None:
         token = store.new_token(api.database, account, "reset", account.email)
-        _send(account.email, "password_reset", "Reset your Voltage password",
-              ["Hi,", "", "Open this link to choose a new password. It works once, for one hour.", "",
-               f"{api.settings.public_url}/#reset/{token}", "",
-               "If you did not ask for it, you can ignore this email; your password stays as it is."], account.owner)
+        _send(account.email, "password_reset", account.owner, link=f"#reset/{token}")
     return {"sent": True, "message": SENT}
 
 
@@ -315,12 +307,8 @@ def change_email(req: ChangeEmail, request: Request) -> dict:
     if store.by_email(api.database, address) is not None:
         raise HTTPException(status_code=422, detail="Another account uses that address.")
     token = store.new_token(api.database, account, "change_email", address)
-    _send(address, "change_email", "Confirm your new email for Voltage",
-          ["Hi,", "", "Open this link to make this your Voltage address. It works once, for 24 hours.", "",
-           _link(f"/auth/change-email/confirm?token={token}")], account.owner)
-    _send(account.email, "change_email_notice", "Your Voltage address is changing",
-          ["Hi,", "", f"Someone signed in to your account asked to change its address to {address}.",
-           "If it was not you, reset your password now and the change will not go through."], account.owner)
+    _send(address, "change_email", account.owner, link=_link(f"/auth/change-email/confirm?token={token}"))
+    _send(account.email, "change_email_notice", account.owner, new_address=address, link="#login")
     return {"sent": True, "message": f"We sent a link to {address}. Open it to finish the change."}
 
 

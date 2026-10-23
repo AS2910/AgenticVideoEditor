@@ -177,12 +177,10 @@ def send_invite(req: InviteRequest, owner: str = Depends(_owner)) -> dict:
     word = members_store.ROLE_WORDS[row["role"]]
     can = "watch and comment on videos" if row["role"] == "reviewer" else "edit videos and projects"
     try:
-        api.email_sender.send(api.email_mod.Email(
-            to=row["email"], kind="workspace_invite", owner=owner, workspace_id=wid,
-            subject="You are invited to a Voltage workspace",
-            body="\n".join(["Hi,", "", f"You have been invited to a Voltage workspace as {'a' if word != 'Editor' else 'an'} {word}, "
-                            f"so you can {can}.", "", f"Accept the invite: {_url(f'#invite/{token}')}", "",
-                            f"The link works until {row['expires_at'][:10]}."])))
+        from app.notify import templates
+        api.email_sender.send(templates.email(
+            "workspace_invite", row["email"], public_url=api.settings.public_url, owner=owner, workspace_id=wid,
+            role=word, can=can, link=_url(f"#invite/{token}"), expires=row["expires_at"][:10]))
     except Exception:  # noqa: BLE001 - the invite is made; the page shows the link to copy
         api.log.exception("workspace invite email")
     with api.database.tx() as c:
@@ -355,11 +353,10 @@ def send_sign_in_link(req: EmailSignIn) -> dict:
     if not allow or address in {a.lower() for a in allow}:
         token = members_store.login_link(api.database, _key(), address)
         try:
-            api.email_sender.send(api.email_mod.Email(
-                to=address, kind="sign_in", subject="Your Voltage sign-in link",
-                body="\n".join(["Hi,", "", "Open this link to sign in to Voltage. It works once, for 15 minutes.", "",
-                                f"{api.settings.public_url}/api/auth/email/callback?token={token}", "",
-                                "If you did not ask for it, you can ignore this email."])))
+            from app.notify import templates
+            api.email_sender.send(templates.email(
+                "sign_in", address, public_url=api.settings.public_url,
+                link=f"{api.settings.public_url}/api/auth/email/callback?token={token}"))
         except Exception:  # noqa: BLE001
             api.log.exception("sign-in email")
     return {"sent": True, "email": address}

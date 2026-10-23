@@ -98,7 +98,9 @@ def test_abuse_reports_are_public_stored_told_and_limited(client):
     assert sent.status_code == 201 and sent.json()["said"] == "Thank you. We read every report and act on it."
     bell = client.get("/me/notifications").json()["items"]
     assert bell[0]["kind"] == "abuse_report" and bell[0]["title"].startswith("Abuse report #1")
-    assert outbox(database, kind="abuse_report")[-1]["to_addr"] == main.settings.trust_email
+    told = outbox(database, kind="abuse_report")[-1]
+    assert told["to_addr"] == main.settings.trust_email
+    assert "Details: Not my voice" in told["body"] and "Not my voice" in told["html"]          # item 9: the template
     assert client.get("/admin/analytics").json()["abuse_reports"][0]["details"] == "Not my voice"
     with database.tx() as c:
         assert c.execute("SELECT owner FROM analytics_events WHERE name = 'abuse.reported'").fetchone()[0] == "public"

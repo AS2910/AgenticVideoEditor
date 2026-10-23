@@ -137,6 +137,7 @@ def test_email_sign_in_by_a_one_use_link(sign_in_on, monkeypatch):
     assert client.post("/auth/email", json={"email": "New@X.io"}, headers=H).json() == {"sent": True, "email": "new@x.io"}
     [mail] = email_mod.outbox(database, kind="sign_in")
     link = re.search(r"callback\?token=(\S+)", mail["body"]).group(1)
+    assert mail["subject"] == "Your Voltage sign-in link" and link in mail["html"]          # item 9: the template
     back = client.get(f"/auth/email/callback?token={link}", follow_redirects=False)
     assert back.status_code == 302 and back.headers["location"] == "http://localhost:5173/"
     assert client.get("/auth/me").json()["user"]["email"] == "new@x.io"

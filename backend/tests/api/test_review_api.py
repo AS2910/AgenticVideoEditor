@@ -223,6 +223,7 @@ def test_the_owners_digest_batches_ten_minutes_of_news_into_one_email(client, tw
     assert sent.to == "owner@agency.example" and sent.subject == "2 updates from your reviewers"
     assert 'Priya commented on ad.mp4 at 0:01 (v1): "Logo bigger"' in sent.body and "Priya approved ad.mp4 v1." in sent.body
     assert "/#p/f1" in sent.body
+    assert sent.html and "Open the project" in sent.html and "/#notifications" in sent.body          # item 9: the digest template
     assert main.flush_review_digests(first + timedelta(minutes=30)) == []         # nothing new
     assert [e["kind"] for e in email_mod.outbox(database, kind="digest")] == ["digest"]
 
@@ -231,6 +232,7 @@ def test_a_reviewer_with_an_email_hears_about_a_new_version_once(client, two_ver
     link = client.post("/videos/p1/review-links", json={"name": "Priya", "email": "priya@client.example"}).json()
     [invite] = email_mod.outbox(database, kind="review_invite")
     assert invite["to_addr"] == "priya@client.example" and token_of(link) in invite["body"]
+    assert invite["subject"].startswith("Please review") and token_of(link) in invite["html"]          # item 9
     assert email_mod.outbox(database, kind="version_ready") == []                 # the version it was sent on
     plan_id = voiced(client, monkeypatch, text="Get 40% off today only.")["plan"]["plan_id"]
     client.post(f"/videos/p1/plans/{plan_id}/approve", json={"items": ["i1"]})
@@ -239,3 +241,4 @@ def test_a_reviewer_with_an_email_hears_about_a_new_version_once(client, two_ver
     [told] = email_mod.outbox(database, kind="version_ready")
     newest = client.get(f"/share/{token_of(link)}").json()["review"]["videos"][0]["current_version"]
     assert told["to_addr"] == "priya@client.example" and told["subject"] == f"v{newest} of ad.mp4 is ready to review"
+    assert told["html"] and "Hi Priya," in told["body"]          # item 9: the template

@@ -44,7 +44,7 @@ def test_news_within_ten_minutes_is_one_email_sent_ten_minutes_after_the_first(d
         "- Priya approved ad.mp4 v4.",
         '- Priya asked for changes on ad.mp4 v4: "Shorter"',
     ]
-    assert sent.body.endswith("Open the project: http://x/#p/f1")
+    assert "\nOpen the project: http://x/#p/f1\n" in sent.body and sent.html and "http://x/#p/f1" in sent.html
     assert [r["subject"] for r in email.outbox(db)] == ["3 updates from your reviewers"]
     assert flush(db, 30) == [] and digest.pending(db) == []
 

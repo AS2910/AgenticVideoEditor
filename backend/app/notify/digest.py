@@ -11,7 +11,8 @@ in the running server.
 
     queue_in(c, owner, kind, project_id=, video_id=, payload=)
     pending(db, owner=None) -> [dict]
-    flush(db, sender, now, address_for, link_for=None) -> [Email]
+    flush(db, sender, now, address_for, link_for=None, public_url=None) -> [Email]
+        (item 9: the bodies come from templates.py; one failed job or spend alert reads as its own email)
     sentence(item) -> the line an item reads as
 """
 from __future__ import annotations
@@ -20,9 +21,11 @@ import json
 import logging
 import sqlite3
 import threading
-from datetime import datetime, timedelta, timezone
-from typing import Callable
+from collections.abc import Callable
+from datetime import UTC, datetime, timedelta
+from urllib.parse import urlsplit
 
+from app.notify import templates
 from app.notify.email import Email, EmailSender
 from app.store.db import Database
 from app.timefmt import iso, now_iso
@@ -85,8 +88,30 @@ def _subject(items: list[dict]) -> str:
     return f"{len(items)} updates from Voltage"
 
 
+def _origin(link: str | None) -> str | None:
+    if not link:
+        return None
+    u = urlsplit(link)
+    return f"{u.scheme}://{u.netloc}" if u.scheme and u.netloc else None
+
+
+def _email(owner: str, to: str, items: list[dict], link: str | None, public_url: str | None) -> Email:
+    """Item 9: one item that carries its own email (a failed job, a spend alert) reads as that
+    email; anything else is the digest. Either way it is sent as kind `digest`."""
+    base = public_url or _origin(link)
+    wid = items[0]["workspace_id"]
+    own = items[0]["payload"].get("email") if len(items) == 1 else None
+    if isinstance(own, dict) and own.get("template") in ("job_failed", "spend_alert"):
+        data = {k: v for k, v in own.items() if k != "template"}
+        data["link"] = data.get("link") or link
+        return templates.email(own["template"], to, public_url=base, owner=owner, workspace_id=wid, sent_as="digest", **data)
+    reviewers = all(i["kind"] in REVIEW_KINDS for i in items)
+    return templates.email("digest", to, public_url=base, owner=owner, workspace_id=wid, sent_as="digest",
+                           subject=_subject(items), items=[sentence(i) for i in items], link=link, reviewers=reviewers)
+
+
 def flush(db: Database, sender: EmailSender, now: datetime, address_for: Callable[[str], str | None],
-          link_for: Callable[[dict], str | None] | None = None) -> list[Email]:
+          link_for: Callable[[dict], str | None] | None = None, public_url: str | None = None) -> list[Email]:
     """Send each owner whose oldest waiting item is WINDOW_S old one digest of everything waiting."""
     cutoff = iso(now - timedelta(seconds=WINDOW_S))
     sent: list[Email] = []
@@ -97,12 +122,8 @@ def flush(db: Database, sender: EmailSender, now: datetime, address_for: Callabl
     for owner, items in by_owner.items():
         if items[0]["at"] > cutoff:
             continue                                   # the first is not 10 minutes old yet: wait for more
-        lines = [f"- {sentence(i)}" for i in items]
         link = link_for(items[0]) if link_for else None
-        intro = "Here is what your reviewers said." if all(i["kind"] in REVIEW_KINDS for i in items) else "Here is what happened in Voltage."
-        body = "\n".join([intro, "", *lines, *(["", f"Open the project: {link}"] if link else [])])
-        email = Email(to=address_for(owner) or f"owner:{owner}", subject=_subject(items), body=body, kind="digest",
-                      owner=owner, workspace_id=items[0]["workspace_id"])
+        email = _email(owner, address_for(owner) or f"owner:{owner}", items, link, public_url)
         sender.send(email)
         with db.tx() as c:
             c.executemany("UPDATE notify_queue SET digested_at = ? WHERE id = ?", [(iso(now), i["id"]) for i in items])
@@ -128,7 +149,7 @@ class DigestScheduler:
         while not self._stop.wait(self.every):
             try:
                 self.tick()
-            except Exception:  # noqa: BLE001 - the next minute tries again
+            except Exception:
                 log.exception("review digest")
 
     def stop(self) -> None:
@@ -136,4 +157,4 @@ class DigestScheduler:
 
 
 def utcnow() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
