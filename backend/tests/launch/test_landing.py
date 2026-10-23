@@ -114,6 +114,10 @@ def test_admin_lists_the_waitlist_and_an_invite_lets_the_address_sign_up_while_i
     invited = sent.json()["row"]
     assert invited["status"] == "invited" and invited["invited_by"] == admin_owner and invited["invited_at"]
     mail = email_mod.outbox(database, kind="waitlist_invite", to="cy@example.com")[-1]
+    assert mail["html"] and "Make my account" in mail["html"]              # item 9's access invite template
+    from app import admin as admin_mod
+    assert any(a["action"] == "waitlist_invite" and a["target"] == "cy@example.com"
+               for a in admin_mod.recent_audit(database))                         # item 10: in the audit trail
     assert "Hi Cy," in mail["body"] and "http://localhost:5173/#login" in mail["body"]
 
     joined = public.post("/auth/signup", json={"email": "Cy@Example.com", "password": PASSWORD, "accept_terms": True}, headers=H)

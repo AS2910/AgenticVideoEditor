@@ -95,15 +95,15 @@ def admin_invite(row_id: int, request: Request) -> dict:
     if row is None:
         raise HTTPException(status_code=404, detail="Not found")
     row = waitlist.invite(api.database, row_id, who)
-    hello = f"Hi {row['name']}," if row.get("name") else "Hi,"
     try:
-        api.email_sender.send(api.email_mod.Email(
-            to=row["email"], kind="waitlist_invite", subject="Your invite to Voltage",
-            body="\n".join([hello, "", "You asked for access to Voltage, and your place is ready.", "",
-                            f"Make your account with this address ({row['email']}) here:",
-                            f"{api.settings.public_url}/#login", "",
-                            "If you did not ask, you can ignore this email."])))
+        from app.notify import templates
+        # Item 9's access invite (HTML and text); the outbox kind stays waitlist_invite.
+        api.email_sender.send(templates.email("access_invite", row["email"], public_url=api.settings.public_url,
+                                              link=f"{api.settings.public_url}/#login", name=row.get("name"),
+                                              sent_as="waitlist_invite"))
     except Exception:  # noqa: BLE001 - the row says invited; the log says the email failed
         api.log.exception("waitlist invite email")
     api.log.warning("waitlist %s invited by %s", row_id, who)
+    from app import admin as admin_mod                     # item 10: every admin action is in the audit trail
+    admin_mod.audit(api.database, who, "waitlist_invite", row["email"], "", {"waitlist_id": row_id})
     return {"row": row}
