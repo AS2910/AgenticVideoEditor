@@ -116,7 +116,10 @@ export function SettingsPage({ me, onSignedOut }: SettingsPageProps) {
 
   const who = me?.user
   const displayName = who?.name ?? who?.email ?? 'Local'
-  const signedWith = me?.mode === 'google' ? 'Signed in with Google' : 'Local, sign-in is off'
+  // Rehearsal item 7: an email-and-password account said it was "Local, sign-in is off".
+  const signedWith = me?.mode === 'off' || !me?.user ? 'Local, sign-in is off'
+    : who?.provider === 'google' || me.mode === 'google' && !who?.provider ? 'Signed in with Google'
+    : who?.provider === 'email' ? 'Signed in with an emailed link' : 'Signed in with your email and password'
   const sect = 'rise flex scroll-mt-6 flex-col gap-[18px] border-b-[1.5px] border-line pb-9'
 
   return (

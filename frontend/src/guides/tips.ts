@@ -3,7 +3,7 @@
 export interface TipDef { id: string; title: string; text: string; link: string; slug: string }
 
 export const TIPS: TipDef[] = [
-  { id: 'first-upload', title: 'First video', text: 'Voltage reads the clip first: who speaks, what they say, and what the picture shows. Nothing is changed until you ask.', link: 'Your first edit', slug: 'your-first-edit' },
+  { id: 'first-upload', title: 'First video', text: 'Voltage reads the video first: who speaks, what they say, and what the picture shows. Nothing is changed until you ask.', link: 'Your first edit', slug: 'your-first-edit' },
   { id: 'first-silent', title: 'No speech', text: 'No one speaks in this clip, so Voltage looked at the picture instead. Ask for a voice-over and it writes and voices one.', link: 'What videos work best', slug: 'what-videos-work-best' },
   { id: 'first-question', title: 'First question', text: 'Voltage asks only when it cannot decide, with its own guess first. Saying go takes the guess.', link: 'When Voltage asks you', slug: 'when-voltage-asks-you' },
   { id: 'first-just-do-it', title: 'Just do it', text: 'Voltage now voices and fixes on its own, inside your turn cap. Exporting, cloning and designing a voice still ask first.', link: 'Check with me or Just do it', slug: 'check-with-me-or-just-do-it' },

@@ -365,7 +365,7 @@ export function VoicesPage({ me }: VoicesPageProps) {
 
               {showCatalogue && (
                 <section className="flex flex-col gap-3.5" aria-labelledby={`${uid}-cat`}>
-                  <div className="flex items-baseline gap-2.5"><h2 id={`${uid}-cat`} className="disp m-0 text-2xl font-bold">Catalogue</h2><span className="tag text-faint">{catalogue.length} voices · Voltage browses these first</span></div>
+                  <div className="flex items-baseline gap-2.5"><h2 id={`${uid}-cat`} className="disp m-0 text-2xl font-bold">Catalogue</h2><span className="tag text-faint">{catalogue.length} {catalogue.length === 1 ? 'voice' : 'voices'} · Voltage browses these first</span></div>
                   {catalogue.length === 0 ? <p className="m-0 text-muted-foreground">The catalogue is empty on this server.</p> : (
                     <ul className="m-0 flex list-none flex-wrap gap-2 p-0">
                       {catalogue.map((c) => (

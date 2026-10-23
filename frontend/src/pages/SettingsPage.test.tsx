@@ -108,4 +108,11 @@ describe('SettingsPage', () => {
     expect(screen.queryByRole('button', { name: 'Sign out' })).not.toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Account' })).toHaveTextContent('V')
   })
+
+  it('names how an email-and-password account signed in (rehearsal item 7)', async () => {
+    routeFetch()
+    render(<SettingsPage me={{ mode: 'accounts', user: { sub: 'a1', email: 'ann@x.io', name: null, picture: null, provider: 'acct' } }} onSignedOut={() => {}} />)
+    expect(await screen.findByText('Signed in with your email and password')).toBeInTheDocument()
+    expect(screen.queryByText('Local, sign-in is off')).toBeNull()
+  })
 })

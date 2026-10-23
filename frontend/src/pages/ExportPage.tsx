@@ -144,7 +144,7 @@ export function ExportPage({ projectId, me, onBack }: ExportPageProps) {
               <button type="button" className="btn flex-[1_1_150px]" onClick={() => void variant()} disabled={variantBusy}>{variantBusy ? 'Making…' : 'Make a variant'}</button>
             </div>
             {copyError && <p className="m-0 text-[13px] text-destructive" role="alert">{copyError}</p>}
-            <span className="text-[13px] text-muted-foreground">A variant copies the clip and its plan as a draft, ready for the next version.{project?.project_name ? ` It lands in ${project.project_name} too.` : ''}</span>
+            <span className="text-[13px] text-muted-foreground">A variant copies the video and its plan as a draft, ready for the next version.{project?.project_name ? ` It lands in ${project.project_name} too.` : ''}</span>
           </div>
 
           <div className="flex flex-col">

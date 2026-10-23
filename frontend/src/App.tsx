@@ -1425,7 +1425,7 @@ function Studio() {
           onFolderMade={() => void refreshProjects()}
           onMoved={() => void refreshProjects()}
           onSampleMade={() => void refreshProjects()}
-          banner={onboarding.loaded && !onboarding.onboarding.tour.finished && !onboarding.onboarding.tour.skipped ? (
+          banner={!watching && onboarding.loaded && !onboarding.onboarding.tour.finished && !onboarding.onboarding.tour.skipped ? (
             <div className="rise flex flex-wrap items-center gap-4 rounded-xl bg-pane px-5 py-4 text-ptext shadow-volt" data-testid="tour-offer">
               <span className="flex flex-1 basis-[260px] flex-col gap-0.5">
                 <span className="disp text-lg font-bold">New here? Make one real edit in three minutes.</span>
@@ -1818,7 +1818,7 @@ function Studio() {
               {firstRead && speakers.length === 0 && statements.length > 0 && (
                 <div className="flex items-center gap-3 rounded-xl border-[1.5px] border-line2 bg-card p-4">
                   <span className="meta flex-1">Voltage hasn't told the speakers apart yet.</span>
-                  <button type="button" className="btn sm" onClick={() => void findSpeakers()} disabled={detecting} aria-busy={detecting || undefined}>{detecting ? 'Listening…' : 'Find who speaks'}</button>
+                  {!watching && <button type="button" className="btn sm" onClick={() => void findSpeakers()} disabled={detecting} aria-busy={detecting || undefined}>{detecting ? 'Listening…' : 'Find who speaks'}</button>}
                 </div>
               )}
               <LineDoc

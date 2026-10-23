@@ -1537,7 +1537,7 @@ export function LineDoc({
         {drag && dropIndexFor(drag.to) === rows.length && dropMarker()}
         {statements.length > 0 && lastLine !== null && !(editing?.order === lastLine && editing.mode === 'add') && (
           <div className="mt-2 pl-[94px]" role="listitem">
-            <button type="button" className="act -ml-2" onClick={() => open(lastLine, 'add')}><span className="tag">+ Add a line</span></button>
+            <button type="button" className="act -ml-2" onClick={() => open(lastLine, 'add')} disabled={disabled}><span className="tag">+ Add a line</span></button>
           </div>
         )}
         {statements.length === 0 && duration && !placingAnother && (
