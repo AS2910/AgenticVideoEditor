@@ -63,6 +63,9 @@ def _scan() -> dict[str, list[str]]:
     files += [(p, _ts_hits) for p in (ROOT / "frontend/src").rglob("*.ts*") if ".test." not in p.name]
     files += [(p, _text_hits) for p in (ROOT / "help").rglob("*.md")]
     files += [(p, _text_hits) for p in (ROOT / "backend/app").rglob("*.json")]
+    # Rehearsal item 7: the page shell (its tab title) and the static files beside it.
+    files += [(ROOT / "frontend/index.html", _text_hits)]
+    files += [(p, _text_hits) for p in (ROOT / "frontend/public").rglob("*.svg")]
     for path, scan in files:
         rel = str(path.relative_to(ROOT))
         if rel in ALLOWED:

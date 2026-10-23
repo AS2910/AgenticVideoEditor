@@ -16,7 +16,7 @@ describe('BillingPage', () => {
     }))
     render(<BillingPage me={{ mode: 'off', user: null }} />)
     expect(screen.getByText('No plan yet')).toBeInTheDocument()
-    expect(screen.getByText(/Billing isn't set up in this build/)).toBeInTheDocument()
+    expect(screen.getByText(/Billing isn't open yet/)).toBeInTheDocument()
     expect(screen.getByText(/Nothing on file/)).toBeInTheDocument()
     expect(screen.getByText(/No invoices/)).toBeInTheDocument()
     expect(document.body.textContent).not.toMatch(/\[[A-Z0-9/ ]+\]/)

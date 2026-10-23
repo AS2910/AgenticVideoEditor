@@ -1508,7 +1508,7 @@ export function LineDoc({
         <div className="waiting flex flex-col gap-2 rounded-[10px] px-3.5 py-3" role="status" data-testid="overrun">
           <span className="font-semibold">Runs {arranged.overrun.toFixed(1)} s past the end</span>
           <span className="text-sm text-muted-foreground">
-            {arrangement.end === 'trim' ? 'The last line fades out where the clip ends.'
+            {arrangement.end === 'trim' ? 'The last line fades out where the video ends.'
               : arranged.ease_ok ? 'For now the picture holds its last frame until the line ends. Nothing is cut.'
               : 'For now the picture holds its last frame until the line ends, longer than it should. Nothing is cut.'}
           </span>

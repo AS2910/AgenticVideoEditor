@@ -166,7 +166,7 @@ export function SettingsPage({ me, onSignedOut }: SettingsPageProps) {
                 <span className="tnum text-xl font-semibold">{usd(projectCap)}</span>
               </Row>
             )}
-            <Row title="How hard Voltage thinks" desc="Higher is slower and costs more, but handles hard clips better.">
+            <Row title="How hard Voltage thinks" desc="Higher is slower and costs more, but handles hard videos better.">
               <div role="group" aria-label="Effort" className="segs">
                 {EFFORTS.map((e) => (
                   <button key={e.key} type="button" className="seg" aria-pressed={settings?.effort === e.key} disabled={!settings} onClick={() => { if (settings?.effort !== e.key) void save({ effort: e.key }) }}>{e.label}</button>

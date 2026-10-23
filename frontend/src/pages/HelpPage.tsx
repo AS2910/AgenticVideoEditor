@@ -8,6 +8,7 @@ import { KeyboardSheet } from '../components/KeyboardSheet'
 import { Markdown } from '../components/Markdown'
 import { Bolt, Shell } from './Shell'
 import { said } from './fmt'
+import { track } from '../lib/analytics'
 import { AbuseReport } from '../components/AbuseReport'
 import { openFeedback } from '../components/FeedbackDialog'
 import { LegalLinks } from './LegalPage'
@@ -168,10 +169,10 @@ function Reader({ article, onClose, onAsk, onShowMe }: { article: HelpArticle; o
       <div className="mt-auto flex flex-wrap items-center gap-2.5 border-t-[1.5px] border-line pt-4">
         <span className="text-muted-foreground">Was this helpful?</span>
         {rated
-          ? <span className="text-faint" role="status">Thanks. Noted here only, for now.</span>
+          ? <span className="text-faint" role="status">Thanks for telling us.</span>
           : <>
-            <button type="button" className="btn sm" onClick={() => setRated('yes')}>Yes</button>
-            <button type="button" className="btn sm" onClick={() => setRated('no')}>No</button>
+            <button type="button" className="btn sm" onClick={() => { setRated('yes'); track('help.rated', { slug: article.slug, helpful: true }) }}>Yes</button>
+            <button type="button" className="btn sm" onClick={() => { setRated('no'); track('help.rated', { slug: article.slug, helpful: false }) }}>No</button>
           </>}
       </div>
     </aside>

@@ -22,7 +22,7 @@ const MODES: { value: Autonomy; label: string; help: string }[] = [
 const EFFORTS: { value: Effort; label: string; help: string }[] = [
   { value: 'medium', label: 'Quick', help: 'Less thinking, cheaper turns.' },
   { value: 'high', label: 'Careful', help: 'The usual.' },
-  { value: 'xhigh', label: 'Thorough', help: 'For a hard clip; slower and dearer.' },
+  { value: 'xhigh', label: 'Thorough', help: 'For a hard video; slower and dearer.' },
 ]
 
 /** "What Voltage may do" (20d): a real modal off the autonomy switch — the

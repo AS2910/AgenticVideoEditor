@@ -104,7 +104,7 @@ export function PlaceEditor({
         <Button type="button" variant="outline" size="sm" aria-label="End earlier" onClick={() => nudge('end', -0.1)}>◀</Button>
         <Button type="button" variant="outline" size="sm" aria-label="End later" onClick={() => nudge('end', 0.1)}>▶</Button>
         <span className={invalid ? 'text-destructive' : 'text-muted-foreground'} role={invalid ? 'alert' : undefined}>
-          {invalid ? `Times like 0:00.50, inside the clip's ${timecode(duration)}.` : 'Drag the block on the bar above, or type the times.'}
+          {invalid ? `Times like 0:00.50, inside the video's ${timecode(duration)}.` : 'Drag the block on the bar above, or type the times.'}
         </span>
       </ControlRow>
       <Textarea

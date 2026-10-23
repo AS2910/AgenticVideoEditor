@@ -15,6 +15,7 @@ export const CLIENT_EVENTS = [
   'import.link_pasted', 'members.opened', 'invite.opened', 'signin.email_requested',
   'bell.opened', 'bell.item_opened',
   'admin.opened', 'billing.opened', 'legal.opened',
+  'help.rated',
 ] as const
 export type ClientEvent = (typeof CLIENT_EVENTS)[number]
 

@@ -24,7 +24,7 @@ const TABS: { key: Tab; label: string }[] = [
 const WAYS: { key: Way; h: string; d: string }[] = [
   { key: 'record', h: 'Record or upload', d: 'Your voice, or anyone who said yes' },
   { key: 'describe', h: 'Describe it', d: 'Voltage designs it from words' },
-  { key: 'clone', h: 'From a project speaker', d: 'Keep someone from a clip' },
+  { key: 'clone', h: 'From a project speaker', d: 'Keep someone from a video' },
 ]
 const cap = (s: string) => s.replace(/_/g, ' ').replace(/^\w/, (c) => c.toUpperCase())
 const mmss = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`

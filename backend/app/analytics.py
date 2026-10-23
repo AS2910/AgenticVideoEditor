@@ -90,6 +90,8 @@ CLIENT_NAMES = frozenset({
     "import.link_pasted", "members.opened", "invite.opened", "signin.email_requested",
     "bell.opened", "bell.item_opened",
     "admin.opened", "billing.opened", "legal.opened",
+    # Rehearsal item 7: Help's "Was this helpful?" is counted.
+    "help.rated",
 })
 NAMES = SERVER_NAMES | CLIENT_NAMES
 MAX_PROPS = 2000                # bytes of JSON kept per event

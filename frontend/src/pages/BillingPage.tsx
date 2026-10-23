@@ -53,7 +53,7 @@ export function BillingPage({ me }: { me: Me | null }) {
           <div className="flex flex-[1_1_280px] flex-col gap-1.5">
             <span className="tag text-volt">Your plan</span>
             <span className="disp text-4xl font-bold">No plan yet</span>
-            <span className="text-pmuted">Billing isn't set up in this build. Nothing is charged; spend is only counted against the monthly ceiling below.</span>
+            <span className="text-pmuted">Billing isn't open yet. Nothing is charged; spend is only counted against the monthly ceiling below.</span>
           </div>
         </div>
         )}
@@ -62,7 +62,7 @@ export function BillingPage({ me }: { me: Me | null }) {
           <div className="flex flex-wrap items-baseline gap-2.5"><h2 id="ceil-h" className="disp m-0 text-[22px] font-bold">Monthly ceiling</h2><span className="tag text-faint">across every project and video</span></div>
           <span className="disp text-[30px] font-bold">{month ? `${month.label}: ${usd(month.spent_usd)}` : '…'} <span className="text-base text-muted-foreground">of {month?.ceiling_usd != null ? ceilingWord(month.ceiling_usd) : '…'}</span></span>
           <FillBar share={share} height={10} strong label="Spent against the monthly ceiling" />
-          <p className="m-0 text-[13px] text-muted-foreground">New paid work stops when the month reaches it; it resets on the first of the month. The ceiling is fixed by this build; there is no way to raise it yet.</p>
+          <p className="m-0 text-[13px] text-muted-foreground">New paid work stops when the month reaches it; it resets on the first of the month. To change it, write to us with Send feedback in Help.</p>
           <a className="act self-start" href={hrefFor({ page: 'usage' })}>See where it went in Usage →</a>
         </section>
 
@@ -70,7 +70,7 @@ export function BillingPage({ me }: { me: Me | null }) {
           <>
         <section className={`${card} flex flex-wrap items-center gap-[18px]`} aria-labelledby="pay-h">
           <span aria-hidden="true" className="h-9 w-[54px] rounded-md border-[1.5px] border-foreground bg-sunk" />
-          <div className="flex flex-[1_1_220px] flex-col"><h2 id="pay-h" className="m-0 text-sm font-semibold">Payment method</h2><span className="text-muted-foreground">Nothing on file. This build doesn't take payments.</span></div>
+          <div className="flex flex-[1_1_220px] flex-col"><h2 id="pay-h" className="m-0 text-sm font-semibold">Payment method</h2><span className="text-muted-foreground">Nothing on file. No payments are taken yet.</span></div>
         </section>
 
         <section className={card} aria-labelledby="inv-h">

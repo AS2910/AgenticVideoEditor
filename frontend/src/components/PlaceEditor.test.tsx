@@ -42,7 +42,7 @@ describe('placing a voice-over', () => {
     await userEvent.clear(end)
     await userEvent.type(end, '0:09.00')
     expect(end).toHaveAttribute('aria-invalid', 'true')
-    expect(screen.getByRole('alert')).toHaveTextContent("inside the clip's 0:07.50")
+    expect(screen.getByRole('alert')).toHaveTextContent("inside the video's 0:07.50")
     await userEvent.type(screen.getByRole('textbox', { name: 'Words for the voice-over' }), 'Hello')
     expect(screen.getByRole('button', { name: 'Voice it' })).toBeDisabled()
   })
