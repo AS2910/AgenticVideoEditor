@@ -121,7 +121,7 @@ export function UsagePage({ me, scope: routed = null }: { me: Me | null; scope?:
           {t?.ceiling_usd != null && <FillBar share={share} height={18} strong label={`${t.label}: spent against its ceiling`} />}
           {loading
             ? <span className="text-[13px] text-muted-foreground" role="status">Adding up {word.toLowerCase()}…</span>
-            : <span className="text-[13px] text-muted-foreground">New paid work stops at the first ceiling it meets, and the refusal names it. <a href={hrefFor({ page: 'billing' })} className="text-foreground">Your plan and monthly ceiling</a></span>}
+            : <span className="text-[13px] text-muted-foreground">New paid work stops at the first ceiling it meets, and the refusal names it. <a href={hrefFor({ page: 'billing' })} className="text-foreground underline underline-offset-2">Your plan and monthly ceiling</a></span>}
         </div>
         <div className="grid flex-[1_1_260px] grid-cols-2 gap-3">
           <Tile label="Turns" value={r ? r.turns : dash} />

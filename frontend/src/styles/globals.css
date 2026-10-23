@@ -375,4 +375,13 @@
   .lane-n { font-family: var(--font-mono); font-size: 12px; letter-spacing: .05em; text-transform: uppercase; color: var(--faint); }
   .blk { position: absolute; top: 0; height: 22px; border-radius: 4px; font-size: 12px; line-height: 20px; padding: 0 6px; overflow: hidden; white-space: nowrap; color: var(--foreground); font-family: var(--font-mono); background: var(--lane); transform-origin: left center; animation: grow .6s cubic-bezier(.2, .8, .2, 1) both; }
   .blk.p { background: var(--volt); border: 1.5px solid var(--ink); color: var(--ink); }
+  /* Rehearsal item 7: on a touch screen every control is at least 44 px (MASTER.md Targets).
+     A utility on the element still wins, for the few that are sized on purpose. */
+  @media (pointer: coarse) {
+    .btn, .btn.sm, .act, .seg, .pill, .sugg, button, [role="button"], summary, select,
+    input:not([type="checkbox"], [type="radio"], [type="range"], [type="file"], [type="hidden"]) { min-height: 44px; }
+    .btn, .act, button, [role="button"] { min-width: 44px; }
+    nav a { display: inline-flex; align-items: center; min-height: 44px; min-width: 44px; }
+    label:has(> input[type="radio"]), label:has(> input[type="checkbox"]) { min-height: 44px; }
+  }
 }

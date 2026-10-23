@@ -62,7 +62,7 @@ import { DISCARD_REASONS } from './lib/learned'
 import { StageWarning } from './pages/StageWarning'
 import { approvedWords } from './pages/feedWords'
 import { LearnWord } from './components/LearnWord'
-import { go, hrefFor, useRoute } from './lib/route'
+import { go, hrefFor, parseRoute, useRoute } from './lib/route'
 import { cn } from '@/lib/utils'
 import { clock } from './transcript/format'
 import {
@@ -454,7 +454,9 @@ function Studio() {
     // no speech is looked at); one with a plan or edits opens as it was.
     wantReading.current = !loaded.plan && !edited
     opening.current = loaded.video_id
-    go({ page: 'editor', projectId: loaded.video_id })
+    // Rehearsal item 7: an export page opened directly (a link, a reload) stays on the export page.
+    const here = parseRoute(window.location.hash)
+    if (!(here.page === 'export' && here.projectId === loaded.video_id)) go({ page: 'editor', projectId: loaded.video_id })
   }
 
   const load = async (file: File, projectId: string | null = null) => {
@@ -502,7 +504,7 @@ function Studio() {
       const blob = await res.blob()
       await load(new File([blob], 'sample-ad.mp4', { type: 'video/mp4' }))
     } catch {
-      setError('Could not load the sample clip.')
+      setError('Could not load the sample video.')
       setLoading(false)
     }
   }
@@ -1635,7 +1637,7 @@ function Studio() {
     }
     // O flips Edited ↔ As shot (from With proposals, to As shot).
     flipRef.current = route.page === 'editor' && changes > 0 ? () => switchView(view === 'original' ? 'final' : 'original') : null
-    const scanning = turnBusy ? strip.text : readingBusy ? 'Voltage is reading the clip' : null
+    const scanning = turnBusy ? strip.text : readingBusy ? 'Voltage is reading the video' : null
     const isTutorial = !!project.settings?.tutorial
     const tipCandidates: { id: string; target: string; when: boolean }[] = [
       { id: 'first-review-comment', target: 'scrubber', when: reviewOn && (review.comments ?? []).some((c) => c.status === 'open') },
@@ -1871,7 +1873,7 @@ function Studio() {
                   <button type="button" className="btn sm" onClick={() => setReviewOpen(true)} aria-haspopup="dialog" data-testid="send-review-open">Send for review</button>
                 </div>
               )}
-              {safetyOn && (project.consent_granted_at || withdrew) && (
+              {safetyOn && !watching && (project.consent_granted_at || withdrew) && (
                 <WithdrawConsent videoId={project.video_id} onWithdrawn={() => { consentGiven.current = false; setWithdrew(true); setProject((p) => (p ? { ...p, consent_granted_at: null } : p)) }} />
               )}
               {reviewOn && (
