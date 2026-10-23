@@ -3,6 +3,8 @@
 Each: what, why, how to undo. Run 2's decisions follow below.
 
 - Setup: Docker was not installed. Installed Colima, the Docker CLI, compose and buildx, k6 and gitleaks with Homebrew (local tools only; `brew uninstall colima docker docker-compose docker-buildx k6 gitleaks` and `colima delete` undo it). The Colima VM has 4 CPUs, 6 GB and a 60 GB disk.
+- 7: Reviewer controls are hidden (not shown disabled) on Home and in the editor; the project page's side panels are a disabled fieldset; the server still refuses every change. Undo: the `watching` checks (search `REVIEWER_NOTE`).
+- 7: "In the preview" is a new row state for a proposal the with-proposals preview carries. A workspace shown to anyone but its owner reads "<owner's email>'s workspace" (display only, no data changed). A brief save is credited to the person who made it. One touch-size rule (44 px) in `globals.css`. Undo each: see the 7b to 7g commits.
 - 5: One CSRF middleware for every write when sign-in is on (only the two payment webhooks exempt), instead of per-route checks. Undo: drop `_csrf_header` in main.py.
 - 5: SSRF guard allows any public address after a redirect (not only Google Drive and Dropbox hosts). Undo: revert 5a.
 - 5: Owner email addresses must be plain (no `/`, no quoted local parts). Undo: `members.clean_email`.
