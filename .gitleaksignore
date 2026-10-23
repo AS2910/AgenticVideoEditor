@@ -1,0 +1,3 @@
+# A fake sk_live_ string in a test that proves keys are scrubbed from errors (SECURITY.md, secret scan).
+ae03f2a2d6a70e1e94f79e3c2ac6836878a846f5:backend/tests/golive/test_item7_providers.py:stripe-access-token:372
+c806fcc9b15aa7e95e8557f3842bd5db83826426:backend/tests/golive/test_item7_providers.py:stripe-access-token:372
