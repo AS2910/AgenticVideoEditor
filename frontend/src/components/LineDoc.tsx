@@ -202,7 +202,7 @@ const StatusBadge = ({ status, children, role }: { status: string; children: Rea
 )
 /** The row's one chip (2026-10-20): Original · Queued · Voicing · Ready to hear · Rendering · In the video · Failed. */
 const CHIP_TONE: Record<ChipState, string> = {
-  original: 'quiet', planned: 'in', waiting: 'need', queued: 'live', voicing: 'live', ready: '', rendering: 'live', 'in-video': 'in', removed: 'in', failed: 'need',
+  original: 'quiet', planned: 'in', waiting: 'need', queued: 'live', voicing: 'live', ready: '', rendering: 'live', 'in-preview': 'in', 'in-video': 'in', removed: 'in', failed: 'need',
 }
 const RowStamp = ({ chip }: { chip: RowChip }) => (
   <span className={cn('stamp', CHIP_TONE[chip.state])} role="status" data-status={chip.state} data-testid="row-chip" title={chip.reason ?? undefined}>

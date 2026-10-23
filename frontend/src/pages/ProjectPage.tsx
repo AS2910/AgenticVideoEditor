@@ -14,6 +14,7 @@ import { usd, usdShort } from './fmt'
 import { ceilingWord } from '../lib/money'
 import { FillBar, Frame } from './bits'
 import { useFlags } from '../flags/useFlags'
+import { REVIEWER_NOTE, useWorkspaceRole } from '../lib/useWorkspaceRole'
 import { BriefHistory, BriefMeta, StaleLine } from './BriefVersions'
 import { Tip } from '../guides/Tip'
 import { ProjectWords } from './ProjectWords'
@@ -97,6 +98,8 @@ export function ProjectPage({ me, projectId, onUpload, uploading, error, onDelet
   const reviewOn = enabled('projects.review')
   // D4 (projects.reuse): archive (read-only until unarchived) and pin to Home.
   const reuseOn = enabled('projects.reuse')
+  // Rehearsal item 7: a Reviewer watches; the page leaves out uploads and menus and its panels are read-only.
+  const watching = useWorkspaceRole(enabled('golive.g2')) === 'reviewer'
   const [pinned, setPinned] = useState(false)
   // D1 (projects.reuse): Save as template.
   const [templating, setTemplating] = useState(false)
@@ -291,7 +294,7 @@ export function ProjectPage({ me, projectId, onUpload, uploading, error, onDelet
             </span>
             {ceiling ? <FillBar share={(ours?.spent_usd ?? project.spent_usd) / ceiling} height={8} strong className="max-w-[320px]" label={`Project ${project.name}: ${usd(ours?.spent_usd ?? project.spent_usd)} of its ${ceilingWord(ceiling)} project ceiling`} /> : null}
           </div>
-          <div className="relative" data-menu>
+          {!watching && <div className="relative" data-menu>
             <button type="button" className="btn" aria-label="More for this project" aria-haspopup="menu" aria-expanded={menu} onClick={() => setMenu((m) => !m)}>•••</button>
             {menu && (
               <div role="menu" className="rise absolute right-0 z-10 mt-1 flex w-56 flex-col rounded-xl border-[1.5px] border-ink bg-card p-1.5 shadow-volt">
@@ -302,10 +305,11 @@ export function ProjectPage({ me, projectId, onUpload, uploading, error, onDelet
                 <button type="button" role="menuitem" className="act justify-start" onClick={() => { setMenu(false); setDeleting(true) }}>Delete project…</button>
               </div>
             )}
-          </div>
-          <button type="button" className="btn volt shine" onClick={() => fileInput.current?.click()} disabled={uploading || (reuseOn && !!project.archived_at)}>{uploading ? 'Uploading…' : '+ Upload to this project'}</button>
+          </div>}
+          {!watching && <button type="button" className="btn volt shine" onClick={() => fileInput.current?.click()} disabled={uploading || (reuseOn && !!project.archived_at)}>{uploading ? 'Uploading…' : '+ Upload to this project'}</button>}
           <input ref={fileInput} className="sr-only" type="file" accept="video/*" aria-label="Choose a video for this project" tabIndex={-1} onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) onUpload(f, projectId) }} />
         </div>
+        {watching && <p className="m-0 text-sm text-muted-foreground" data-testid="reviewer-note">{REVIEWER_NOTE}</p>}
         {reuseOn && project.archived_at && (
           <div className="flex flex-wrap items-center gap-3 rounded-xl border-[1.5px] border-foreground bg-sunk p-4" role="status" data-testid="archived-banner">
             <span className="stamp quiet">Archived</span>
@@ -380,21 +384,16 @@ export function ProjectPage({ me, projectId, onUpload, uploading, error, onDelet
                 </div>
               )
             })}
-            <div
+            {!watching && <div
               role="group" aria-label="Drop a video here" data-over={over || undefined}
               className={cn('m-3 grid min-h-[200px] cursor-pointer place-items-center rounded-xl border-[1.5px] border-dashed border-foreground p-5 text-center text-muted-foreground transition-colors hover:bg-sunk', over && 'bg-sunk')}
               onClick={() => fileInput.current?.click()}
               onDragOver={(e) => { e.preventDefault(); if (!uploading) setOver(true) }} onDragLeave={() => setOver(false)} onDrop={onDrop}
             >
               <span><span className="disp block text-lg font-bold text-foreground">Drop a video here</span>It joins {project.name} with its brief and voices.</span>
-            </div>
+            </div>}
           </div>
-          {batchOn ? <LazyPart><BatchPanel projectId={projectId} videos={detail.videos} fix={fixAll} onFixHandled={() => setFixAll(null)} refresh={batchTick} onAdded={() => { void load(); setFeedTick((t) => t + 1) }} /></LazyPart> : (
-            <div className="flex items-center gap-3 rounded-xl bg-pane px-4 py-3.5 text-ptext">
-              <span className="tag text-volt">Later</span>
-              <span className="flex-1 text-sm">One goal across every video here, like “make all three 25% off”, is planned as a batch turn.</span>
-            </div>
-          )}
+          {batchOn && <LazyPart><BatchPanel projectId={projectId} videos={detail.videos} fix={fixAll} onFixHandled={() => setFixAll(null)} refresh={batchTick} onAdded={() => { void load(); setFeedTick((t) => t + 1) }} /></LazyPart>}
           {batchOn && <LazyPart><BatchExport projectId={projectId} presets={exportPresets} /></LazyPart>}
           {consistency && enabled('projects.check') && <LazyPart><ProjectCheck projectId={projectId} briefVersion={project.brief_version}
             onFixAll={batchOn ? (issue) => { setFixAll({ issueId: issue.issue_id, message: issue.message, videoIds: [...new Set(issue.places.map((p) => p.video_id))] }); document.querySelector('[data-testid="batch"]')?.scrollIntoView({ behavior: 'smooth', block: 'start' }) } : undefined} /></LazyPart>}
@@ -412,6 +411,8 @@ export function ProjectPage({ me, projectId, onUpload, uploading, error, onDelet
         </section>
 
         <aside aria-label="Shared with every video" className="flex min-w-0 flex-[1_1_340px] flex-col gap-3.5">
+          {/* A Reviewer reads these panels; every control in them is off. */}
+          <fieldset disabled={watching} className="contents">
           <div className="rise flex flex-col gap-3 rounded-xl border-[1.5px] border-foreground bg-card p-[18px] shadow-volt-lg" data-testid="brief">
             <div className="flex flex-wrap items-center gap-2"><span className="disp text-xl font-bold">Brief</span><span className="tag text-faint">Voltage reads this in every turn</span><span className="flex-1" />{savedAt && <span className="tag text-faint" role="status">Saved</span>}</div>
             {consistency && <BriefMeta project={project} me={me} open={history} onHistory={() => setHistory((h) => !h)} />}
@@ -506,6 +507,7 @@ export function ProjectPage({ me, projectId, onUpload, uploading, error, onDelet
             </div>
             <span className="text-[13px] text-muted-foreground">Each video keeps its own settings; these are what a new one starts with. The lowest ceiling wins.</span>
           </div>
+          </fieldset>
         </aside>
       </div>
     </Shell>

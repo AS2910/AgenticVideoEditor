@@ -2713,6 +2713,8 @@ def _folder_dict(project: Project) -> dict:
         "brief_version": project.brief_version,
         # A1: who saved the current version and when, and how many videos were made with an older one.
         "brief_edited_by": now.created_by if now else None,
+        # Rehearsal item 7: the person by their address, so no page shows an owner id.
+        "brief_edited_by_name": email_mod.person_address(database, now.created_by) if now else None,
         "brief_edited_at": now.created_at if now else None,
         "stale_count": len(briefs.stale_videos(database, project.project_id)),
         "settings": {k: v for k, v in _defaults_for(project.owner, project).items() if k in SETTING_KEYS},
@@ -2899,7 +2901,8 @@ def update_folder(project_id: str, req: ProjectUpdate, owner: str = Depends(curr
         raise HTTPException(status_code=422, detail="The ceiling is a positive amount, or null for none.")
     before = repo.get_project(project_id).brief_version
     project = repo.update_project(
-        project_id, name=name, brief=req.brief.strip() if req.brief is not None else None, by=owner,
+        # Rehearsal item 7: the version names the person who saved it (an Editor, not the owner they act for).
+        project_id, name=name, brief=req.brief.strip() if req.brief is not None else None, by=(acting.get().user if acting.get() else owner),
         settings=_clean_defaults(req.settings) if req.settings is not None else None,
         ceiling_usd=req.ceiling_usd, clear_ceiling="ceiling_usd" in req.model_fields_set and req.ceiling_usd is None,
     )
@@ -2912,7 +2915,9 @@ def update_folder(project_id: str, req: ProjectUpdate, owner: str = Depends(curr
 def list_brief_versions(project_id: str, owner: str = Depends(current_owner)) -> dict:
     """F2: every version of the project's brief, newest first."""
     project = _owned_project(project_id, owner)
-    return {"current": project.brief_version, "versions": [v.to_dict() for v in briefs.history(database, project_id)]}
+    return {"current": project.brief_version,
+            "versions": [{**v.to_dict(), "created_by_name": email_mod.person_address(database, v.created_by)}
+                         for v in briefs.history(database, project_id)]}
 
 
 @app.get("/projects/{project_id}/briefs/diff")

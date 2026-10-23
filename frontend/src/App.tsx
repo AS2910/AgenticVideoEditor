@@ -48,6 +48,7 @@ import { Checklist } from './guides/Checklist'
 import { Tip } from './guides/Tip'
 import { useReviewComments } from './review/useReviewComments'
 import { useFlags } from './flags/useFlags'
+import { REVIEWER_NOTE, useWorkspaceRole } from './lib/useWorkspaceRole'
 import { MembersPage } from './pages/MembersPage'
 import { InvitePage } from './pages/InvitePage'
 import { LegalPage } from './pages/LegalPage'
@@ -201,6 +202,8 @@ function Studio() {
   // D4: an archived project's videos are read-only; the header says so.
   const reuseOn = useFlags().enabled('projects.reuse')
   const feedbackOn = useFlags().enabled('golive.g8')
+  // Rehearsal item 7: a Reviewer watches; the editor leaves out Export and asking for changes, and its lines are read-only.
+  const watching = useWorkspaceRole(useFlags().enabled('golive.g2')) === 'reviewer'
   const safetyOn = useFlags().enabled('golive.g6')
   const [withdrew, setWithdrew] = useState(false)       // G6: keep the sentence on screen after a withdrawal
   // D2: the optional "why?" after a discard.
@@ -1728,14 +1731,14 @@ function Studio() {
             ))}
           </div>
           <span className="flex-1 lg:hidden" />
-          <button type="button" className="act" onClick={() => { setMayDoOpen(true); tour.notify('autonomy-opened') }} data-tour="autonomy" data-tour-action="autonomy" aria-haspopup="dialog" aria-label={`${autonomy === 'ask' ? 'Check with me' : 'Just do it'}. What Voltage may do`}>
+          {!watching && <button type="button" className="act" onClick={() => { setMayDoOpen(true); tour.notify('autonomy-opened') }} data-tour="autonomy" data-tour-action="autonomy" aria-haspopup="dialog" aria-label={`${autonomy === 'ask' ? 'Check with me' : 'Just do it'}. What Voltage may do`}>
             <span className="tag">{autonomy === 'ask' ? 'Check with me' : 'Just do it'}</span>
             <svg width="12" height="12" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>
-          </button>
+          </button>}
           <SpendPill summary={spend} videoId={project.video_id} />
-          <a className={cn('btn ink sm', exporting && 'opacity-70')} href={hrefFor({ page: 'export', projectId: project.video_id })} aria-busy={exporting || undefined} data-tour="export" data-tour-action="export">
+          {!watching && <a className={cn('btn ink sm', exporting && 'opacity-70')} href={hrefFor({ page: 'export', projectId: project.video_id })} aria-busy={exporting || undefined} data-tour="export" data-tour-action="export">
             {exporting ? 'Rendering…' : 'Export'}
-          </a>
+          </a>}
           <NotificationBell />
           <AccountDot me={me} />
           {batchOn && languagesOpen && <LazyPart quiet><LanguageDialog videoId={project.video_id} filename={project.filename} projectId={project.project_id} onClose={() => setLanguagesOpen(false)}
@@ -1826,7 +1829,7 @@ function Studio() {
                 currentTime={sourceClock}
                 pendingLines={pendingLines}
                 items={planItems}
-                disabled={turnBusy}
+                disabled={turnBusy || watching}
                 usdPerChar={usdPerChar}
                 playing={playingTake}
                 onSeek={seekToStatement}
@@ -1885,6 +1888,7 @@ function Studio() {
           {/* Voltage: black in both themes. */}
           <aside className="pane flex min-h-0 w-[400px] min-w-0 max-w-full shrink-0 flex-col overflow-clip max-[960px]:h-[85dvh] max-[960px]:min-h-[60dvh] max-[960px]:w-auto" aria-label="Voltage" aria-busy={turnBusy || undefined}>
             <VoltagePane
+              readOnly={watching ? REVIEWER_NOTE : null}
               messages={messages}
               projectId={project.video_id}
               state={stateWord}

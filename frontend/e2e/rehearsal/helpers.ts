@@ -197,11 +197,11 @@ export async function turnToProposal(page: Page, ask: string, rec?: Recorder): P
   }
   await expect(proposal).toHaveAttribute('data-state', 'ready', { timeout: 5_000 })
   // data-state "ready" is the row's Proposed state. Its chip says what is happening to it
-  // (Rendering the preview), then settles: Ready to hear, or In the video once the
-  // with-proposals preview carries it (see the report: that label is questioned).
+  // (Rendering the preview), then settles: Ready to hear, or In the preview once the
+  // with-proposals preview carries it (rehearsal item 7: no longer "In the video").
   const chip = proposal.getByTestId('row-chip')
-  await expect(chip).toHaveAttribute('data-status', /ready|rendering|in-video|voicing|queued/)
-  await expect(chip).toHaveAttribute('data-status', /^(ready|in-video)$/, { timeout: 150_000 })
+  await expect(chip).toHaveAttribute('data-status', /ready|rendering|in-preview|voicing|queued/)
+  await expect(chip).toHaveAttribute('data-status', /^(ready|in-preview)$/, { timeout: 150_000 })
   // The turn ends (its preview rendered); then the row's Add it is live.
   await expect(proposal.getByRole('button', { name: /Add it/ })).toBeEnabled({ timeout: 150_000 })
   await expect(status).not.toContainText(/working/i)

@@ -629,7 +629,7 @@ describe('LineDoc: one chip per line, read from the jobs (2026-10-20)', () => {
     expect(chips()).toEqual(['Original', 'Original', 'Original'])
   })
 
-  it('goes Queued, Voicing with a slim bar, Ready to hear, Rendering, In the video', () => {
+  it('goes Queued, Voicing with a slim bar, Ready to hear, Rendering, In the preview', () => {
     const planned = item({ status: 'planned', candidate: null })
     const { rerender } = render(<LineDoc statements={STATEMENTS} currentTime={0} {...handlers()} items={[planned]} activity={{ jobs: [job()], video: null, rendering: null }} />)
     expect(screen.getAllByTestId('row-chip')[1]).toHaveTextContent('Queued')
@@ -644,7 +644,8 @@ describe('LineDoc: one chip per line, read from the jobs (2026-10-20)', () => {
     rerender(<LineDoc statements={STATEMENTS} currentTime={0} {...handlers()} items={[item()]} activity={{ jobs: done, video: none, rendering: { ...none, candidate_ids: ['c1'] } }} />)
     expect(screen.getAllByTestId('row-chip')[1]).toHaveTextContent('Rendering')
     rerender(<LineDoc statements={STATEMENTS} currentTime={0} {...handlers()} items={[item()]} activity={{ jobs: done, video: { ...none, item_ids: ['i1'] }, rendering: null }} />)
-    expect(screen.getAllByTestId('row-chip')[1]).toHaveTextContent('In the video')
+    // Rehearsal item 7: a proposal not yet added is in the with-proposals preview, not in the video.
+    expect(screen.getAllByTestId('row-chip')[1]).toHaveTextContent('In the preview')
   })
 
   it('a failed line says why and retries the same job inline', async () => {

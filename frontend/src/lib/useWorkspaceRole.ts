@@ -17,3 +17,7 @@ export function useWorkspaceRole(on: boolean): MemberRole | null {
   }, [on])
   return role
 }
+
+/** Rehearsal item 7: a Reviewer only watches, so the pages leave out what they cannot do
+ *  and say so once, in these words (the server refuses each change anyway). */
+export const REVIEWER_NOTE = 'You are a Reviewer in this workspace, so you can watch what is shared with you. Ask the owner to make you an Editor to change things.'

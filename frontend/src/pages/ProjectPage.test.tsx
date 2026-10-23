@@ -58,7 +58,8 @@ describe('ProjectPage (a folder of videos)', () => {
     expect(within(screen.getByTestId('files')).getByText('brand-guide.pdf')).toBeInTheDocument()
     expect(screen.getByRole('meter', { name: 'Project Diwali 2026: $1.94 of its $10 project ceiling' })).toHaveAttribute('aria-valuenow', '19')
     expect(unlabelledMoney(document.body)).toEqual([])
-    expect(screen.getByText(/planned as a batch turn/)).toBeInTheDocument()
+    // Rehearsal item 7: no "Later" explainer for batch turns while projects.batch is off.
+    expect(screen.queryByText(/planned as a batch turn/)).toBeNull()
   })
 
   it('shows the project ceiling meter only when one is set', async () => {

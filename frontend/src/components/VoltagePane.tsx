@@ -278,6 +278,8 @@ interface VoltagePaneProps {
   steps?: Step[]
   /** The latest turn's closing line, with Hear changes and Undo all. */
   summary?: TurnSummary | null
+  /** Rehearsal item 7: a Reviewer cannot ask for changes; this sentence stands where the chips and the composer would. */
+  readOnly?: string | null
 }
 
 /** Voltage's pane (Volt, 2026-10-18): black in both themes. The avatar and the
@@ -285,7 +287,7 @@ interface VoltagePaneProps {
  *  a question as a gate card — then the chips and the composer. */
 export function VoltagePane({
   messages, projectId, state, busy, need, engine, chips = [], cap, spend, question, onAnswer, turnCap, onSubmit, placeholder = 'Say what to change…', sendLabel = 'Send',
-  inputRef, seed, suggestions = [], onChipEvent, seeing, before, children, working, empty, onShowMe, picked, steps = [], summary,
+  inputRef, seed, suggestions = [], onChipEvent, seeing, before, children, working, empty, onShowMe, picked, steps = [], summary, readOnly,
 }: VoltagePaneProps) {
   const [prompt, setPrompt] = useState('')
   const [openTrace, setOpenTrace] = useState<number | null>(null)
@@ -455,6 +457,11 @@ export function VoltagePane({
         )}
       </div>
 
+      {readOnly ? (
+        <div className="flex min-w-0 flex-none flex-col px-5.5 pt-3.5 pb-5.5 @max-[380px]:px-4">
+          <p className="pm m-0 rounded-xl border-[1.5px] border-pline bg-psunk px-3.5 py-3 text-sm" data-testid="read-only-note">{readOnly}</p>
+        </div>
+      ) : (
       <div className="flex min-w-0 flex-none flex-col gap-3 px-5.5 pt-3.5 pb-5.5 @max-[380px]:px-4">
         {chipsShown.length > 0 && (
           <div className="flex min-w-0 flex-wrap gap-1.5" role="group" aria-label="Suggestions for this video" data-testid="chips">
@@ -486,6 +493,7 @@ export function VoltagePane({
           </div>
         </div>
       </div>
+      )}
     </aside>
   )
 }

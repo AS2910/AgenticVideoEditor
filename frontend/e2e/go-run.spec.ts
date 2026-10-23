@@ -293,9 +293,9 @@ test.describe('one processing model: a 5-line Go', () => {
     await expect(page.getByTestId('render-note')).toHaveText(/v2 rendering…/)
     await shot(page, '4-rendering')
 
-    // Ready: paused, so it swaps in at the playhead; the rows are In the video; one summary closes the turn.
+    // Ready: paused, so it swaps in at the playhead; the proposals are In the preview (not yet added); one summary closes the turn.
     await expect(page.getByTestId('mode-badge')).toHaveText('Playing v2 · With proposals', { timeout: 10_000 })
-    for (const k of [0, 1, 2, 3, 4]) await expect(chip(page, k)).toHaveText('✓ In the video')
+    for (const k of [0, 1, 2, 3, 4]) await expect(chip(page, k)).toHaveText('In the preview')
     await expect(page.getByTestId('turn-summary')).toContainText('Done. 5 lines voiced, v2 is playing. $0.09 spent.')
     await expect(page.getByTestId('turn-summary').getByRole('button', { name: 'Hear changes' })).toBeVisible()
     await expect(page.getByTestId('turn-summary').getByRole('button', { name: 'Undo all' })).toBeVisible()
@@ -337,7 +337,7 @@ test.describe('one processing model: a 5-line Go', () => {
     await expect(page.getByTestId('turn-summary')).toContainText('Done. 4 lines voiced, 1 failed', { timeout: 15_000 })
     await row.getByRole('button', { name: 'Retry' }).click()
     await expect(chip(page, 2)).toHaveText('Voicing')
-    await expect(chip(page, 2)).toHaveText(/Ready to hear|In the video/, { timeout: 10_000 })
+    await expect(chip(page, 2)).toHaveText(/Ready to hear|In the preview|In the video/, { timeout: 10_000 })
   })
 
   test('one driver at a time: a line Voltage is voicing cannot be voiced by hand until it is done', async ({ page }) => {

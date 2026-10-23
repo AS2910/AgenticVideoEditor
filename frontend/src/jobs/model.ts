@@ -44,7 +44,7 @@ const checking = (j: ActivityJob) => /fit|check/i.test(j.step_label)
 
 // ── Row states ───────────────────────────────────────────────────────────────
 
-export type ChipState = 'original' | 'planned' | 'waiting' | 'queued' | 'voicing' | 'ready' | 'rendering' | 'in-video' | 'removed' | 'failed'
+export type ChipState = 'original' | 'planned' | 'waiting' | 'queued' | 'voicing' | 'ready' | 'rendering' | 'in-preview' | 'in-video' | 'removed' | 'failed'
 export interface RowChip {
   state: ChipState
   label: string
@@ -60,7 +60,7 @@ export interface RowChip {
 
 export const CHIP_LABEL: Record<ChipState, string> = {
   original: 'Original', planned: 'Planned', waiting: 'Waiting on you', queued: 'Queued', voicing: 'Voicing',
-  ready: 'Ready to hear', rendering: 'Rendering', 'in-video': 'In the video', removed: 'Removed', failed: 'Failed',
+  ready: 'Ready to hear', rendering: 'Rendering', 'in-preview': 'In the preview', 'in-video': 'In the video', removed: 'Removed', failed: 'Failed',
 }
 
 const carries = (inc: RenderIncludes | null | undefined, ids: (string | null | undefined)[]) =>
@@ -81,7 +81,7 @@ export interface RowFacts {
   rendering?: RenderIncludes | null
 }
 
-/** Exactly one chip per line: Original · Queued · Voicing · Ready to hear · Rendering · In the video · Failed (reason). */
+/** Exactly one chip per line: Original · Queued · Voicing · Ready to hear · Rendering · In the preview (a proposal the playing preview carries) · In the video · Failed (reason). */
 export function rowChip({ item, editId, candidateId, removed, jobs, video, videoUnknown, rendering }: RowFacts): RowChip {
   const chip = (state: ChipState, extra: Partial<RowChip> = {}): RowChip => ({ state, label: CHIP_LABEL[state], ...extra })
   const live = item && item.status !== 'approved' && item.status !== 'dismissed' ? item : null
@@ -97,7 +97,8 @@ export function rowChip({ item, editId, candidateId, removed, jobs, video, video
     if (live.status === 'planned') return chip('planned')
     if (live.status === 'ready' && live.candidate) {
       const ids = [live.candidate.candidate_id, live.item_id]
-      if (carries(video, ids)) return chip('in-video')
+      // Rehearsal item 7: a proposal not yet added plays in the with-proposals preview, not in the video.
+      if (carries(video, ids)) return chip('in-preview')
       if (carries(rendering, ids)) return chip('rendering')
       return chip('ready')
     }

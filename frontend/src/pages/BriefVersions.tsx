@@ -16,7 +16,7 @@ export function BriefMeta({ project, me, open, onHistory }: { project: ProjectFo
     <span className="flex flex-wrap items-center gap-x-2 gap-y-1" data-testid="brief-meta">
       <span className="tag text-muted-foreground">
         v{project.brief_version}
-        {project.brief_edited_at ? ` · edited by ${editorName(project.brief_edited_by, me)}, ${agoLabel(project.brief_edited_at)}` : ''}
+        {project.brief_edited_at ? ` · edited by ${editorName(project.brief_edited_by, me, project.brief_edited_by_name)}, ${agoLabel(project.brief_edited_at)}` : ''}
       </span>
       <button type="button" className="act" aria-expanded={open} onClick={onHistory} data-tour="brief-history">History</button>
     </span>
@@ -85,7 +85,7 @@ export function BriefHistory({ projectId, me, current, onClose }: { projectId: s
               <li key={v.version} className="flex items-baseline gap-2 border-t border-line py-1.5 first:border-t-0">
                 <span className="tnum w-8 flex-none font-semibold">v{v.version}</span>
                 <span className="min-w-0 flex-1 truncate text-[13px]" title={v.text}>{v.text || 'Empty'}</span>
-                <span className="tag flex-none text-faint">{editorName(v.created_by, me)} · {formatRelative(v.created_at)}</span>
+                <span className="tag flex-none text-faint">{editorName(v.created_by, me, v.created_by_name)} · {formatRelative(v.created_at)}</span>
               </li>
             ))}
           </ol>

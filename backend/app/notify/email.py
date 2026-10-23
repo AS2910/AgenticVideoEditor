@@ -184,3 +184,20 @@ def address_for(db: Database, owner: str, fallback: str | None = None) -> str | 
     with db.tx() as c:
         row = c.execute("SELECT value FROM meta WHERE key = ?", (f"notify_email:{owner}",)).fetchone()
     return row[0] if row else (fallback if valid_address(fallback) else None)
+
+
+def person_address(db: Database, owner: str | None) -> str | None:
+    """Rehearsal item 7: how a page names a person to someone else: their address, never an
+    owner id. The remembered address first, then a password account's, then an `email:` owner's."""
+    if not owner:
+        return None
+    found = address_for(db, owner)
+    if found:
+        return found
+    if owner.startswith("acct:"):
+        with db.tx() as c:
+            row = c.execute("SELECT email FROM accounts WHERE id = ? AND deleted_at IS NULL", (owner[5:],)).fetchone()
+        return row["email"] if row else None
+    if owner.startswith("email:") and valid_address(owner[6:]):
+        return owner[6:]
+    return None

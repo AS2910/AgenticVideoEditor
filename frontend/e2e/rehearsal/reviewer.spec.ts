@@ -18,12 +18,15 @@ test('reviewer: invited, watches the shared video, changes nothing', async ({ pa
       await noErrorBanner(page)
     })
 
-    await test.step('Home shows only the shared project', async () => {
+    await test.step('Home shows only the shared project, with nothing to upload', async () => {
       const side = page.getByTestId('projects-side')
       await expect(side.getByRole('link', { name: /Sample: bhaji-cam ad/ })).toBeVisible()
       await expect(page.getByTestId('video-card').filter({ hasText: 'spring-ad.mp4' })).toBeVisible()
       await expect(page.getByTestId('video-card')).toHaveCount(2)              // the sample and the shared upload
       await expect(page.getByText('private-ad.mp4')).toHaveCount(0)           // never the owner's unshared video
+      await expect(page.getByTestId('reviewer-note')).toBeVisible()            // rehearsal item 7: watching only
+      await expect(page.getByTestId('drop-zone')).toHaveCount(0)
+      await expect(page.getByRole('button', { name: '+ New project' })).toHaveCount(0)
       await rec.shot()
       await noErrorBanner(page)
     })
@@ -36,13 +39,12 @@ test('reviewer: invited, watches the shared video, changes nothing', async ({ pa
       await rec.shot()
     })
 
-    await test.step('a change is refused, plainly', async () => {
-      // There is no comment box for workspace Reviewers in the public profile (projects.review is
-      // off), so watching is what a Reviewer does here; a change is refused in words.
-      const box = page.getByLabel('Describe a change')
-      await box.fill('Add a short line at the start')
-      await box.press('Enter')
-      await expect(page.getByText('As a Reviewer you can watch and comment.').first()).toBeVisible()
+    await test.step('nothing to change: no composer, no Export, said plainly', async () => {
+      // Rehearsal item 7: a Reviewer watches. The editor leaves out the composer and Export
+      // and says why in one sentence (the server would refuse each change anyway).
+      await expect(page.getByTestId('read-only-note')).toContainText('You are a Reviewer in this workspace')
+      await expect(page.getByLabel('Describe a change')).toHaveCount(0)
+      await expect(page.getByTestId('editor-header').getByRole('link', { name: 'Export' })).toHaveCount(0)
       await rec.shot()
     })
 

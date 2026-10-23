@@ -45,7 +45,7 @@ export function LegalPage({ doc }: { doc: LegalDoc }) {
   useEffect(() => { track('legal.opened', { doc }) }, [doc])
   return (
     <div className="min-h-dvh bg-background text-foreground">
-      <header className="flex h-[62px] items-center gap-4 border-b-[1.5px] border-foreground bg-card px-4 sm:px-6"><a href={hrefFor({ page: 'projects' })} className="no-underline"><Wordmark /></a></header>
+      <header className="flex h-[62px] items-center gap-4 border-b-[1.5px] border-foreground bg-card px-4 sm:px-6"><Wordmark href={hrefFor({ page: 'projects' })} label="Voltage, home" /></header>
       <main className="mx-auto flex w-full max-w-[760px] flex-col gap-6 px-4 pt-10 pb-20 sm:px-6" data-testid="legal-page">
         <div className="flex flex-col gap-3">
           <span className="stamp need self-start" data-testid="legal-draft">Draft, needs legal review</span>

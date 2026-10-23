@@ -16,6 +16,7 @@ import { FillBar } from './bits'
 import { whenLabel } from './fmt'
 import { MoveDialog } from '../components/MoveDialog'
 import { useFlags } from '../flags/useFlags'
+import { REVIEWER_NOTE, useWorkspaceRole } from '../lib/useWorkspaceRole'
 import { HomeSearch } from './HomeSearch'
 import { Tip } from '../guides/Tip'
 import { LinkImport } from './LinkImport'
@@ -106,6 +107,8 @@ export function ProjectsPage({ me, projects, folders = [], onOpen, onUpload, onS
   const input = useRef<HTMLInputElement>(null)
   // G1: the sample project and import from a link.
   const g1 = useFlags().enabled('golive.g1')
+  // Rehearsal item 7: a Reviewer watches; nothing to upload, make, move or delete.
+  const watching = useWorkspaceRole(useFlags().enabled('golive.g2')) === 'reviewer'
   useEffect(() => {
     if (!g1 || sampleAsked) return
     sampleAsked = true
@@ -237,7 +240,7 @@ export function ProjectsPage({ me, projects, folders = [], onOpen, onUpload, onS
     <Shell active="projects" me={me} right={<MonthSpend />} mainClassName="flex flex-wrap">
       {/* The projects, down the side. */}
       <aside className="flex min-w-0 basis-full flex-col gap-1 border-b-[1.5px] border-line px-4 py-6 sm:flex-[0_1_260px] sm:border-r-[1.5px] sm:border-b-0" aria-label="Projects" data-testid="projects-side">
-        {onNewFolder && !adding && <button type="button" className="btn volt shine mb-3.5 w-full" onClick={() => setAdding(true)}>+ New project</button>}
+        {onNewFolder && !adding && !watching && <button type="button" className="btn volt shine mb-3.5 w-full" onClick={() => setAdding(true)}>+ New project</button>}
         {adding && (
           <form
             className="rise mb-3.5 flex w-full min-w-0 flex-col gap-2.5 rounded-lg border-[1.5px] border-foreground bg-card p-3"
@@ -356,9 +359,17 @@ export function ProjectsPage({ me, projects, folders = [], onOpen, onUpload, onS
           {reuseOn && <HomeSearch />}
           {reuseOn && onHome.length > 1 && <Tip id="first-home-search" target="home-search" />}
           <section aria-labelledby="new-h" className="flex flex-col gap-[18px]">
+            {watching ? (
+              <>
+                <h1 id="new-h" className="disp rise m-0 max-w-[820px] text-[clamp(32px,4.5vw,48px)] leading-none font-bold">Shared with you</h1>
+                <p className="m-0 max-w-[640px] text-muted-foreground" data-testid="reviewer-note">{REVIEWER_NOTE}</p>
+              </>
+            ) : (
             <h1 id="new-h" className="disp rise m-0 max-w-[820px] text-[clamp(36px,4.5vw,56px)] leading-none font-bold">
               What should your next video <span className="rounded-md bg-volt px-2 text-ink">say?</span>
             </h1>
+            )}
+            {!watching && (<>
             {/* A div with real buttons, not the mock's <label>: a <button> may not sit inside a <label>. The whole zone still opens the picker. */}
             <div
               role="group"
@@ -418,6 +429,7 @@ export function ProjectsPage({ me, projects, folders = [], onOpen, onUpload, onS
             </span>
             {g1 && <LinkImport projectId={destId} disabled={uploading} onDone={onOpen} />}
             {g1 && folders.some((f) => f.sample) && <Tip id="first-sample" target="link-import" />}
+            </>)}
           </section>
 
           <section aria-labelledby="recent-h" className="flex flex-col gap-3.5" data-testid="recent-videos">
@@ -491,7 +503,7 @@ export function ProjectsPage({ me, projects, folders = [], onOpen, onUpload, onS
                             <span className="tag text-faint">{whenLabel(p.created_at)}</span>
                           </div>
                           {/* The card's menu: Move to project…, Delete. Quiet until the card is under the pointer; always there on a touch screen. */}
-                          <div className="absolute top-4 right-4" data-menu>
+                          {!watching && <div className="absolute top-4 right-4" data-menu>
                             <button
                               type="button"
                               className="act bg-card/90 opacity-0 group-hover/card:opacity-100 focus-visible:opacity-100 aria-expanded:opacity-100 pointer-coarse:opacity-100"
@@ -507,7 +519,7 @@ export function ProjectsPage({ me, projects, folders = [], onOpen, onUpload, onS
                                 <button type="button" role="menuitem" className="act justify-start" onClick={() => { setMenu(null); setConfirming(id) }}>Delete…</button>
                               </div>
                             )}
-                          </div>
+                          </div>}
                         </article>
                       )}
                     </li>

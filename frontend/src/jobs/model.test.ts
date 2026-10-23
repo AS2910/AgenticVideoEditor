@@ -42,7 +42,7 @@ describe('jobs merge', () => {
 })
 
 describe('row chip: exactly one state per line', () => {
-  it('goes Queued -> Voicing -> Ready to hear -> Rendering -> In the video', () => {
+  it('goes Queued -> Voicing -> Ready to hear -> Rendering -> In the preview', () => {
     const q = job({ line_ids: ['i1'] })
     expect(rowChip({ item: item(), jobs: [q] }).label).toBe('Queued')
     const r = { ...q, status: 'running' as const, progress: 0.4, step_label: 'Voicing' }
@@ -53,7 +53,7 @@ describe('row chip: exactly one state per line', () => {
     const d = { ...q, status: 'done' as const }
     expect(rowChip({ item: ready, jobs: [d] }).label).toBe('Ready to hear')
     expect(rowChip({ item: ready, jobs: [d], rendering: { candidate_ids: ['c7'], edit_ids: [], item_ids: [] } }).label).toBe('Rendering')
-    expect(rowChip({ item: ready, jobs: [d], video: { candidate_ids: [], edit_ids: [], item_ids: ['i1'] } }).label).toBe('In the video')
+    expect(rowChip({ item: ready, jobs: [d], video: { candidate_ids: [], edit_ids: [], item_ids: ['i1'] } }).label).toBe('In the preview')
   })
   it('a failed job is Failed with its reason and the job to retry', () => {
     const f = job({ line_ids: ['i1'], status: 'failed', error_code: 'vendor_failed', error_text: 'The voice service did not answer.' })

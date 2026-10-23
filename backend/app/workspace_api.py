@@ -96,6 +96,20 @@ def _who(user: str) -> dict:
     return {"member": user, "email": email, "name": None}
 
 
+# Every workspace is made as "My workspace"; shown to someone else it is named after its owner.
+_DEFAULT_NAMES = ("", "My workspace")
+
+
+def shown_name(ws: dict | None) -> str:
+    """Rehearsal item 7: a workspace's name as someone other than its owner sees it."""
+    if not ws:
+        return "A shared workspace"
+    if (ws.get("name") or "") not in _DEFAULT_NAMES:
+        return ws["name"]
+    address = _api().email_mod.person_address(_api().database, ws.get("owner"))
+    return f"{address}'s workspace" if address else "A shared workspace"
+
+
 # ── reading ──
 
 @router.get("/workspace")
@@ -107,9 +121,11 @@ def get_workspace(owner: str = Depends(_owner)) -> dict:
     user = me.user if me else owner
     wid = members_store.workspace_of(api.database, owner)
     ws = members_store.workspace(api.database, wid)
-    return {"workspace": {"workspace_id": wid, "name": ws["name"] if ws else "My workspace", "own": user == owner},
+    own = user == owner
+    return {"workspace": {"workspace_id": wid, "name": (ws["name"] if ws else "My workspace") if own else shown_name(ws), "own": own},
             "you": {"user": user, "role": me.role if me else "owner"},
-            "workspaces": members_store.workspaces_for(api.database, user)}
+            "workspaces": [w if w["own"] else {**w, "name": shown_name({"name": w["name"], "owner": w.get("owner")})}
+                           for w in members_store.workspaces_for(api.database, user)]}
 
 
 def _members_page(owner: str) -> dict:
@@ -291,7 +307,7 @@ def open_invite(token: str) -> dict:
     ws = members_store.workspace(api.database, row["workspace_id"])
     inviter = api.email_mod.address_for(api.database, row["invited_by"])
     return {"email": row["email"], "role": row["role"], "role_word": members_store.ROLE_WORDS[row["role"]],
-            "workspace_name": ws["name"] if ws else "A workspace", "invited_by": inviter, "expires_at": row["expires_at"],
+            "workspace_name": shown_name(ws), "invited_by": inviter, "expires_at": row["expires_at"],
             "sign_in": api.settings.auth_mode != "off"}
 
 
@@ -318,7 +334,7 @@ def accept_invite(token: str, request: Request, response: Response) -> dict:
                                 workspace_id=joined.workspace_id)
     response.set_cookie(WORKSPACE_COOKIE, joined.workspace_id, max_age=api.auth.SESSION_SECONDS, httponly=True,
                         samesite="lax", secure=api._secure(), path="/")
-    return {"workspace_id": joined.workspace_id, "workspace_name": ws["name"] if ws else "", "role": joined.role,
+    return {"workspace_id": joined.workspace_id, "workspace_name": shown_name(ws), "role": joined.role,
             "role_word": members_store.ROLE_WORDS[joined.role]}
 
 

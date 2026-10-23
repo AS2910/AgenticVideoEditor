@@ -549,6 +549,8 @@ export interface ProjectFolder {
   /** F2/A1: the current brief version, who saved it and when, and how many videos were made with an older one. */
   brief_version?: number | null
   brief_edited_by?: string | null
+  /** Rehearsal item 7: that person's address, so no page shows an owner id. */
+  brief_edited_by_name?: string | null
   brief_edited_at?: string | null
   stale_count?: number
   /** D4: set while archived (hidden from Home, read-only). */
@@ -557,7 +559,7 @@ export interface ProjectFolder {
   sample?: boolean
 }
 /** F2: one saved version of a project's brief. */
-export interface BriefVersion { project_id: string; version: number; text: string; created_by: string; created_at: string }
+export interface BriefVersion { project_id: string; version: number; text: string; created_by: string; created_by_name?: string | null; created_at: string }
 /** F2: a word-level run of a diff between two versions. */
 export interface BriefChange { op: 'same' | 'added' | 'removed'; text: string }
 /** A1: one video in a "Bring up to date" run. */
