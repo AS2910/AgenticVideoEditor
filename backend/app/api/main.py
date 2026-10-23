@@ -2545,7 +2545,19 @@ def _delete_project(project_id: str) -> None:
 def delete_account(owner: str = Depends(current_owner)) -> Response:
     """Everything of the caller's goes: every project with its media and the
     voices made for it, every voice of their own (deleted at the vendor; a
-    failure is logged by name), their samples and their defaults."""
+    failure is logged by name), their samples and their defaults.
+
+    The account is always the signed-in person's own. A member working in
+    someone else's workspace deletes only themselves, never the workspace
+    owner's work (the rehearsal found an Editor's DELETE /account wiping the
+    owner's account), and leaves every workspace they had joined."""
+    me = acting.get()
+    if me is not None and me.user != me.owner:
+        owner = me.user
+    from app.store import members as members_store
+    for ws in members_store.workspaces_for(database, owner):
+        if not ws.get("own"):
+            members_store.remove(database, ws["workspace_id"], owner)
     for r in repo.list(owner, include_deleted=True):
         _delete_project(r.source.project_id)
     for v in _all_my_voices(owner):
@@ -6047,6 +6059,9 @@ def _export(record: ProjectRecord, proposals: bool = False, request_id: int | No
                                   "started_at": _now(), "job_id": job_id, "includes": includes}
         _tell_render(project_id, mode)
         try:
+            if settings.mock_vendors:                  # the rehearsal: a render takes as long as a real one
+                from app.adapters.mock_claude import wait
+                wait("AVE_MOCK_RENDER_SECONDS", "5-20")
             out = _render_now(record, edits, previewed, proposals)
         except Exception as exc:
             activity.fail(job_id, "render_failed", f"The render failed: {exc}")
@@ -7073,7 +7088,7 @@ def _message_dict(m) -> dict:
 
 
 def _agent_on() -> bool:
-    return bool(settings.agent and settings.anthropic_api_key)
+    return bool(settings.agent and settings.has_anthropic)
 
 
 _agent_instance: agent_loop.Agent | None = None
@@ -7082,6 +7097,9 @@ _agent_instance: agent_loop.Agent | None = None
 def _agent() -> agent_loop.Agent:
     """The agent over one Anthropic client, made on first use (tests swap it)."""
     global _agent_instance
+    if _agent_instance is None and settings.mock_vendors:
+        from app.adapters.selection import anthropic_client
+        _agent_instance = agent_loop.Agent(anthropic_client(settings, chaos), model=settings.agent_model, effort=settings.agent_effort)
     if _agent_instance is None:
         import anthropic
         headers = {"anthropic-workspace-id": settings.anthropic_workspace_id} if settings.anthropic_workspace_id else None
@@ -9087,7 +9105,7 @@ async def _report_errors(request: Request, call_next):
 # their routes; a video or project not shared, and every account-wide page
 # (usage, voices, templates, the Bin, search...), answers 404 as if it were not there.
 
-_REVIEWER_OPEN = re.compile(r"^/(auth/|me(/|$)|invites/|help(/|$)|workspace(/switch)?$|videos$|projects$|health$|ready$|status$|media/)")
+_REVIEWER_OPEN = re.compile(r"^/(auth/|me(/|$)|invites/|help(/|$)|workspace(/switch)?$|videos$|projects$|health$|ready$|status$|media/|account$)")
 _REVIEWER_VIDEO = re.compile(r"^/videos/([^/]+)(/|$)")
 _REVIEWER_PROJECT = re.compile(r"^/projects/([^/]+)(/|$)")
 _REVIEWER_JOB = re.compile(r"^/jobs/([^/]+)$")

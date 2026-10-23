@@ -2,6 +2,7 @@ import type { ReactNode } from 'react'
 import { useEffect, useState } from 'react'
 import type { Me } from '../api'
 import { getMeAdmin } from '../api'
+import { useWorkspaceRole } from '../lib/useWorkspaceRole'
 import { hrefFor } from '../lib/route'
 import { cn } from '@/lib/utils'
 import { initialOf } from './fmt'
@@ -111,6 +112,7 @@ export function SideNav({ active, onSection }: { active: SideSection | 'usage' |
   const membersOn = flagged.enabled('golive.g2')
   const notesOn = flagged.enabled('golive.g4')
   const admin = useAdmin(flagged.enabled('golive.g7'))
+  const role = useWorkspaceRole(membersOn)
   const item = 'block rounded-lg px-3 py-[9px] text-left font-medium text-muted-foreground no-underline hover:bg-sunk hover:text-foreground'
   const on = 'border-[1.5px] border-foreground bg-card text-foreground'
   return (
@@ -121,7 +123,7 @@ export function SideNav({ active, onSection }: { active: SideSection | 'usage' |
       {membersOn && <a href={hrefFor({ page: 'members' })} className={cn(item, active === 'members' && on)} aria-current={active === 'members' ? 'page' : undefined}>Members</a>}
       {notesOn && <a href={hrefFor({ page: 'notifications' })} className={cn(item, active === 'notifications' && on)} aria-current={active === 'notifications' ? 'page' : undefined}>Notifications</a>}
       <a href={hrefFor({ page: 'usage' })} className={cn(item, active === 'usage' && on)}>Usage</a>
-      <a href={hrefFor({ page: 'billing' })} className={cn(item, active === 'billing' && on)} aria-current={active === 'billing' ? 'page' : undefined}>Billing</a>
+      {role === 'owner' && <a href={hrefFor({ page: 'billing' })} className={cn(item, active === 'billing' && on)} aria-current={active === 'billing' ? 'page' : undefined}>Billing</a>}
       {admin && <a href={hrefFor({ page: 'admin' })} className={cn(item, active === 'admin' && on)} aria-current={active === 'admin' ? 'page' : undefined}>Admin</a>}
     </nav>
   )

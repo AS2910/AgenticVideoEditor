@@ -20,6 +20,8 @@ from app.chaos import Chaos
 
 
 def select_transcriber(settings: Settings, chaos: Chaos | None = None):
+    if settings.mock_vendors:
+        return MockTranscriptionAdapter(), "mock:rehearsal"
     if settings.dry_run:
         return MockTranscriptionAdapter(), "dry-run"
     if settings.has_openai:
@@ -30,6 +32,9 @@ def select_transcriber(settings: Settings, chaos: Chaos | None = None):
 
 
 def select_voice(settings: Settings, store: ArtifactStore, budget: VoiceBudget, chaos: Chaos | None = None):
+    if settings.mock_vendors:
+        from app.adapters.rehearsal import RehearsalVoiceAdapter
+        return RehearsalVoiceAdapter(store, budget, chaos, settings.takes_per_line), "mock:rehearsal"
     if settings.dry_run:
         return MockVoiceAdapter(store), "dry-run"
     if settings.has_elevenlabs:
@@ -63,6 +68,10 @@ def anthropic_client(settings: Settings, chaos: Chaos | None = None):
     and at most two retries of the SDK's own (launch item 4), instead of the
     SDK's ten-minute default that let a hung call hold a worker (the chaos
     pass); wrapped by chaos when faults are on."""
+    if settings.mock_vendors:
+        from app.adapters.mock_claude import MockAnthropic
+        client = MockAnthropic()
+        return chaos.anthropic_client(client) if chaos else client
     import anthropic
     headers = {"anthropic-workspace-id": settings.anthropic_workspace_id} if settings.anthropic_workspace_id else None
     client = anthropic.Anthropic(api_key=settings.anthropic_api_key, default_headers=headers,
@@ -78,7 +87,7 @@ def select_planner(settings: Settings, chaos: Chaos | None = None):
     nothing — there is no offline stand-in; without a key the routes that
     need it say so (20d: no non-agentic behaviour)."""
     if settings.has_anthropic and not settings.dry_run:
-        planner = ClaudePlanner(settings.anthropic_api_key, settings.anthropic_workspace_id,
+        planner = ClaudePlanner(settings.anthropic_api_key or "mock", settings.anthropic_workspace_id,
                                 client=anthropic_client(settings, chaos))
-        return planner, f"anthropic:{CLAUDE_MODEL}"
+        return planner, "mock:rehearsal" if settings.mock_vendors else f"anthropic:{CLAUDE_MODEL}"
     return None, "none"

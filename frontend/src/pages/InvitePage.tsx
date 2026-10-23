@@ -50,7 +50,11 @@ export function InvitePage({ token }: { token: string }) {
         {joined && (
           <section className="flex flex-col gap-4 rounded-xl border-[1.5px] border-foreground bg-card p-[22px]" role="status">
             <p className="disp m-0 text-xl font-bold">{joined}</p>
-            <a className="btn volt self-start" href={hrefFor({ page: 'projects' })}>Open Home</a>
+            {/* A full load, not a hash change: the media token, flags and lists were read for
+                the person's own workspace and must be read again for this one (rehearsal: the
+                video did not play for a new Reviewer until they reloaded). */}
+            <a className="btn volt self-start" href={hrefFor({ page: 'projects' })}
+              onClick={(e) => { e.preventDefault(); window.location.hash = hrefFor({ page: 'projects' }); window.location.reload() }}>Open Home</a>
           </section>
         )}
         {error && <div className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive" role="alert">{error}</div>}

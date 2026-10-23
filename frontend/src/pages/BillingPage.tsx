@@ -5,6 +5,7 @@ import { getSpend } from '../api'
 import { hrefFor } from '../lib/route'
 import { ceilingWord, usd } from '../lib/money'
 import { Shell, SideNav } from './Shell'
+import { useWorkspaceRole } from '../lib/useWorkspaceRole'
 import { FillBar } from './bits'
 import { BillingCredits } from './BillingCredits'
 import { useFlags } from '../flags/useFlags'
@@ -16,14 +17,20 @@ import { track } from '../lib/analytics'
  *  are not, and the page says so instead of pretending. */
 export function BillingPage({ me }: { me: Me | null }) {
   // G3 (golive.g3): plan, credits, top-ups and invoices through fake providers, in test mode.
-  const billingOn = useFlags().enabled('golive.g3')
+  const flagged = useFlags()
+  const billingOn = flagged.enabled('golive.g3')
+  // Rehearsal 2026-10-23: an Editor or a Reviewer is told plainly whose page this is,
+  // instead of an error and a Try again that can never work.
+  const role = useWorkspaceRole(flagged.enabled('golive.g2'))
+  const member = role === 'editor' || role === 'reviewer'
   useEffect(() => { if (billingOn) track('billing.opened') }, [billingOn])
   const [spend, setSpend] = useState<SpendSummary | null>(null)
   useEffect(() => {
+    if (member) return
     let live = true
     getSpend().then((s) => { if (live) setSpend(s) }).catch(() => { /* the tile says so */ })
     return () => { live = false }
-  }, [])
+  }, [member])
   const month = spend?.month ?? null
   const share = month?.ceiling_usd ? month.spent_usd / month.ceiling_usd : 0
   const card = 'rounded-xl border-[1.5px] border-foreground bg-card p-[22px]'
@@ -34,6 +41,13 @@ export function BillingPage({ me }: { me: Me | null }) {
       <div className="flex min-w-0 flex-1 flex-col gap-[22px]">
         <h1 className="disp rise m-0 mb-3 text-[56px] leading-none font-bold">Billing</h1>
 
+        {member ? (
+          <p className="m-0 max-w-[640px] rounded-xl border-[1.5px] border-foreground bg-card p-[22px]" role="status" data-testid="billing-not-owner">
+            <span className="stamp in mr-2">{role === 'editor' ? 'Editor' : 'Reviewer'}</span>
+            Billing belongs to the workspace owner. Ask them to top up or change the plan.
+          </p>
+        ) : (
+        <>
         {billingOn ? <BillingCredits /> : (
         <div className="rise flex flex-wrap items-center gap-6 rounded-xl border-[1.5px] border-ink bg-ink p-[22px] text-ptext shadow-volt-lg">
           <div className="flex flex-[1_1_280px] flex-col gap-1.5">
@@ -64,6 +78,8 @@ export function BillingPage({ me }: { me: Me | null }) {
           <p className="m-0 text-muted-foreground">No invoices. Nothing has been charged.</p>
         </section>
           </>
+        )}
+        </>
         )}
       </div>
     </Shell>

@@ -153,9 +153,16 @@ class _ChaosMessages:
         self._chaos = chaos
 
     def parse(self, *args, **kwargs):
+        return self._call(self._inner.parse, *args, **kwargs)
+
+    def create(self, *args, **kwargs):
+        # The agent's turns (rehearsal drills): the same faults as the planner's reads.
+        return self._call(self._inner.create, *args, **kwargs)
+
+    def _call(self, call, *args, **kwargs):
         f = self._chaos._fault("anthropic")
         if f is None:
-            return self._inner.parse(*args, **kwargs)
+            return call(*args, **kwargs)
         import anthropic
         import httpx
         request = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
@@ -171,7 +178,7 @@ class _ChaosMessages:
             raise anthropic.APITimeoutError(request=request)
         if f.kind == "slow":
             self._chaos._sleep(f.arg)
-            return self._inner.parse(*args, **kwargs)
+            return call(*args, **kwargs)
         raise anthropic.APIConnectionError(message="chaos: connection reset", request=request)
 
     def __getattr__(self, name):
@@ -182,6 +189,9 @@ class _ChaosAnthropic:
     def __init__(self, inner, chaos: Chaos) -> None:
         self._inner = inner
         self.messages = _ChaosMessages(inner.messages, chaos)
+        if getattr(inner, "beta", None) is not None and getattr(inner.beta, "messages", None) is not None:
+            from types import SimpleNamespace
+            self.beta = SimpleNamespace(messages=_ChaosMessages(inner.beta.messages, chaos))
 
     def __getattr__(self, name):
         return getattr(self._inner, name)

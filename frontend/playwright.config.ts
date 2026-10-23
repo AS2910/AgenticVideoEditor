@@ -7,6 +7,8 @@ const port = Number(process.env.PW_PORT || 5181)
 
 export default defineConfig({
   testDir: './e2e',
+  // The launch rehearsal journeys hit the real stack: playwright.rehearsal.config.ts runs them.
+  testIgnore: ['rehearsal/**'],
   timeout: 60_000,
   // Launch item 11: a loaded machine can take more than 5 s to settle a focus or a scroll.
   expect: { timeout: 15_000 },

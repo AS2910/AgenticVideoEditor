@@ -179,3 +179,16 @@ def test_work_started_by_a_member_carries_who_into_its_charges():
             break
         time.sleep(0.05)
     assert main.jobs.get(job.job_id).result == {"who": B}
+
+
+@pytest.mark.parametrize("role", ["editor", "reviewer"])
+def test_a_member_deleting_their_account_deletes_only_their_own(sign_in_on, role):
+    """Rehearsal P0: an Editor's DELETE /account, sent while working in the owner's
+    workspace, deleted the owner's account and every video in it."""
+    a, b = as_user("a", "a@x.io"), as_user("b", "b@x.io")
+    made = a.post("/projects", json={"name": "Diwali"}, headers=H).json()["project_id"]
+    invite_and_join(a, b, "b@x.io", role)
+    assert b.delete("/account", headers=H).status_code == 204          # a Reviewer may delete their own too
+    assert repo.get_project(made) is not None                          # the owner's work is all there
+    assert [p["name"] for p in a.get("/projects").json()["projects"]] == ["Diwali"]
+    assert a.get("/workspace/members").json()["members"] == []         # and B left the workspace

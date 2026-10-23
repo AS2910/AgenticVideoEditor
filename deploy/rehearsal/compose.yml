@@ -1,0 +1,27 @@
+# The launch rehearsal: the shipped stack (app, worker, web, Postgres) with
+# mocked vendors and the public launch profile. scripts/rehearsal.sh runs it;
+# RH_NAME and RH_PORT run a second copy beside it (the load test and drills).
+services:
+  app:
+    env_file: [deploy/rehearsal/rehearsal.env]
+    environment:
+      AVE_PUBLIC_URL: http://localhost:${RH_PORT:-8080}
+      AVE_CORS_ORIGINS: http://localhost:${RH_PORT:-8080}
+      # Drills and the load test pass these through from the shell.
+      AVE_CHAOS: ${AVE_CHAOS:-}
+      AVE_CHAOS_FORCE: ${AVE_CHAOS_FORCE:-}
+      AVE_RATE_TURNS: ${AVE_RATE_TURNS:-}
+      AVE_RATE_UPLOADS: ${AVE_RATE_UPLOADS:-}
+      AVE_RATE_AUTH: ${AVE_RATE_AUTH:-}
+      AVE_RATE_SYNTH: ${AVE_RATE_SYNTH:-}
+      AVE_JOB_WORKERS: ${AVE_JOB_WORKERS:-}
+      AVE_WORK_WORKERS: ${AVE_WORK_WORKERS:-}
+      AVE_HTTP_THREADS: ${AVE_HTTP_THREADS:-}
+      AVE_DAILY_SPEND_CAP_USD: ${AVE_DAILY_SPEND_CAP_USD:-}
+  worker:
+    env_file: [deploy/rehearsal/rehearsal.env]
+  postgres:
+    env_file: [deploy/rehearsal/rehearsal.env]
+  web:
+    ports: !override
+      - "127.0.0.1:${RH_PORT:-8080}:8080"

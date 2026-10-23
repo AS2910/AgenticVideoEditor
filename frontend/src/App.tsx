@@ -287,7 +287,9 @@ function Studio() {
 
   // G2: an invite opened before signing in comes back once signed in.
   useEffect(() => {
-    if (me?.mode !== 'google' || !me.user) return
+    // Any sign-in (Google or an email and password), not only Google: rehearsal found
+    // an invite opened before signing up was lost once the account was confirmed.
+    if (!me || me.mode === 'off' || !me.user) return
     let token: string | null = null
     try { token = sessionStorage.getItem('voltage-invite'); sessionStorage.removeItem('voltage-invite') } catch { /* nothing waiting */ }
     if (token) go({ page: 'invite', token })

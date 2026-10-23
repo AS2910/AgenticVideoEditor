@@ -73,6 +73,9 @@ class Settings:
     voice_budget_chars: int = DEFAULT_VOICE_BUDGET_CHARS
     # When set, no paid generation vendor is ever called, whatever keys exist.
     dry_run: bool = False
+    # The launch rehearsal (AVE_MOCK_VENDORS=1): every vendor, Claude included, is
+    # an offline stand-in that waits and charges like the real one. Never in production.
+    mock_vendors: bool = False
     max_regenerations: int = DEFAULT_MAX_REGENERATIONS
     anthropic_api_key: str | None = None
     # Required when the key is not scoped to a workspace (the API says so).
@@ -172,7 +175,7 @@ class Settings:
 
     @property
     def has_anthropic(self) -> bool:
-        return bool(self.anthropic_api_key)
+        return bool(self.anthropic_api_key) or self.mock_vendors
 
     @property
     def has_openai(self) -> bool:
@@ -227,6 +230,7 @@ def load_settings() -> Settings:
         elevenlabs_voice_id=os.environ.get("ELEVENLABS_VOICE_ID") or DEFAULT_ELEVENLABS_VOICE_ID,
         voice_budget_chars=_whole_number("AVE_VOICE_BUDGET_CHARS", DEFAULT_VOICE_BUDGET_CHARS),
         dry_run=os.environ.get("AVE_DRY_RUN", "").strip().lower() in _TRUTHY,
+        mock_vendors=os.environ.get("AVE_MOCK_VENDORS", "").strip().lower() in _TRUTHY,
         max_regenerations=_whole_number("AVE_MAX_REGENERATIONS", DEFAULT_MAX_REGENERATIONS),
         anthropic_api_key=os.environ.get("ANTHROPIC_API_KEY") or None,
         anthropic_workspace_id=os.environ.get("ANTHROPIC_WORKSPACE_ID") or None,
@@ -336,6 +340,8 @@ def production_problems(env: dict[str, str] | None = None) -> list[str]:
         problems.append("AVE_CHAOS injects faults; unset it.")
     if (env.get("AVE_DRY_RUN") or "").strip().lower() in _TRUTHY:
         problems.append("AVE_DRY_RUN is on, so no paid step would run.")
+    if (env.get("AVE_MOCK_VENDORS") or "").strip().lower() in _TRUTHY:
+        problems.append("AVE_MOCK_VENDORS is on, so every vendor is a stand-in; unset it.")
     return problems
 
 
