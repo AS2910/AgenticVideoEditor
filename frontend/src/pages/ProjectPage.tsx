@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from 'react'
+import { lazy, useEffect, useRef, useState } from 'react'
+import { LazyPart } from '../lib/lazy'
 import { track } from '../lib/analytics'
 import type { DragEvent } from 'react'
 import type { ProjectDetailFolder, ProjectFolder, ProjectSummary, MyVoice, MadeVoice, SpendSummary } from '../types'
@@ -16,20 +17,23 @@ import { useFlags } from '../flags/useFlags'
 import { BriefHistory, BriefMeta, StaleLine } from './BriefVersions'
 import { Tip } from '../guides/Tip'
 import { ProjectWords } from './ProjectWords'
-import { ProjectCheck } from './ProjectCheck'
-import { BatchPanel } from './BatchPanel'
 import type { FixRequest } from './BatchPanel'
-import { BatchExport } from './BatchExport'
-import { ExportPresets } from './ExportPresets'
 import type { ExportPreset } from '../types'
-import { LanguageDialog, SyncChip } from './LanguageVersions'
-import { ProjectBoard } from './ProjectBoard'
-import { SendForReview } from '../review/SendForReview'
 import { STAGE_LABEL } from './feedWords'
-import { ProjectFeed } from './ProjectFeed'
-import { SaveTemplateDialog } from './Templates'
-import { LearnedStyle } from './LearnedStyle'
 import type { Stage } from '../types'
+
+// Rehearsal item 7: behind flags that are off for the public (phases B, C, D and A2); loaded on first use.
+const ProjectCheck = lazy(() => import('./ProjectCheck').then((m) => ({ default: m.ProjectCheck })))
+const BatchPanel = lazy(() => import('./BatchPanel').then((m) => ({ default: m.BatchPanel })))
+const BatchExport = lazy(() => import('./BatchExport').then((m) => ({ default: m.BatchExport })))
+const ExportPresets = lazy(() => import('./ExportPresets').then((m) => ({ default: m.ExportPresets })))
+const LanguageDialog = lazy(() => import('./LanguageVersions').then((m) => ({ default: m.LanguageDialog })))
+const SyncChip = lazy(() => import('./LanguageVersions').then((m) => ({ default: m.SyncChip })))
+const ProjectBoard = lazy(() => import('./ProjectBoard').then((m) => ({ default: m.ProjectBoard })))
+const SendForReview = lazy(() => import('../review/SendForReview').then((m) => ({ default: m.SendForReview })))
+const ProjectFeed = lazy(() => import('./ProjectFeed').then((m) => ({ default: m.ProjectFeed })))
+const SaveTemplateDialog = lazy(() => import('./Templates').then((m) => ({ default: m.SaveTemplateDialog })))
+const LearnedStyle = lazy(() => import('./LearnedStyle').then((m) => ({ default: m.LearnedStyle })))
 
 interface ProjectPageProps {
   me: Me | null
@@ -309,7 +313,7 @@ export function ProjectPage({ me, projectId, onUpload, uploading, error, onDelet
             <button type="button" className="btn sm" onClick={() => void setArchivedTo(false)} disabled={busy === 'archive'} aria-busy={busy === 'archive' || undefined}>{busy === 'archive' ? 'Unarchiving…' : 'Unarchive'}</button>
           </div>
         )}
-        {reuseOn && templating && <SaveTemplateDialog projectId={projectId} projectName={project.name} onClose={() => setTemplating(false)} />}
+        {reuseOn && templating && <LazyPart quiet><SaveTemplateDialog projectId={projectId} projectName={project.name} onClose={() => setTemplating(false)} /></LazyPart>}
         {deleting && (
           <div className="flex flex-wrap items-center gap-3 rounded-xl border-[1.5px] border-destructive bg-card p-4" role="group" aria-label={`Delete ${project.name}?`} data-testid="delete-project">
             <span className="flex-1 text-sm">Delete <strong>{project.name}</strong>? Its {detail.videos.length} {detail.videos.length === 1 ? 'video' : 'videos'} can go with it, or stay as standalone videos. {enabled('projects.reuse') ? 'It goes to the Bin for 30 days and can be restored from there; after that, project voices go unless kept in your voices.' : 'It is kept for 30 days, then goes for good; project voices go with it unless kept in your voices.'}</span>
@@ -338,7 +342,7 @@ export function ProjectPage({ me, projectId, onUpload, uploading, error, onDelet
           {reviewOn && view === 'board' && (
             detail.videos.length === 0
               ? <p className="m-0 text-sm text-muted-foreground">No videos here yet. Upload one and it starts in Draft.</p>
-              : <ProjectBoard videos={detail.videos} briefChips={consistency} syncChips={batchOn} onMoved={staged} />
+              : <LazyPart><ProjectBoard videos={detail.videos} briefChips={consistency} syncChips={batchOn} onMoved={staged} /></LazyPart>
           )}
           {reviewOn && view === 'board' && detail.videos.length > 0 && <Tip id="first-board" target="board-toggle" />}
           <div className={cn('-mx-3 grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-2.5', reviewOn && view === 'board' && 'hidden')}>
@@ -367,7 +371,7 @@ export function ProjectPage({ me, projectId, onUpload, uploading, error, onDelet
                       {versions.map((c) => (
                         <li key={c.video_id} className="flex flex-wrap items-center gap-2">
                           <a className="stamp in whitespace-nowrap no-underline" href={hrefFor({ page: 'editor', projectId: c.video_id })} aria-label={`Open the ${c.language_label} version`}>{c.language_label}</a>
-                          {c.out_of_sync ? <SyncChip videoId={c.video_id} compact onStarted={() => void load()} onSettled={() => void load()} /> : <span className="tag text-faint">In step</span>}
+                          {c.out_of_sync ? <LazyPart quiet><SyncChip videoId={c.video_id} compact onStarted={() => void load()} onSettled={() => void load()} /></LazyPart> : <span className="tag text-faint">In step</span>}
                         </li>
                       ))}
                     </ul>
@@ -385,25 +389,25 @@ export function ProjectPage({ me, projectId, onUpload, uploading, error, onDelet
               <span><span className="disp block text-lg font-bold text-foreground">Drop a video here</span>It joins {project.name} with its brief and voices.</span>
             </div>
           </div>
-          {batchOn ? <BatchPanel projectId={projectId} videos={detail.videos} fix={fixAll} onFixHandled={() => setFixAll(null)} refresh={batchTick} onAdded={() => { void load(); setFeedTick((t) => t + 1) }} /> : (
+          {batchOn ? <LazyPart><BatchPanel projectId={projectId} videos={detail.videos} fix={fixAll} onFixHandled={() => setFixAll(null)} refresh={batchTick} onAdded={() => { void load(); setFeedTick((t) => t + 1) }} /></LazyPart> : (
             <div className="flex items-center gap-3 rounded-xl bg-pane px-4 py-3.5 text-ptext">
               <span className="tag text-volt">Later</span>
               <span className="flex-1 text-sm">One goal across every video here, like “make all three 25% off”, is planned as a batch turn.</span>
             </div>
           )}
-          {batchOn && <BatchExport projectId={projectId} presets={exportPresets} />}
-          {consistency && enabled('projects.check') && <ProjectCheck projectId={projectId} briefVersion={project.brief_version}
-            onFixAll={batchOn ? (issue) => { setFixAll({ issueId: issue.issue_id, message: issue.message, videoIds: [...new Set(issue.places.map((p) => p.video_id))] }); document.querySelector('[data-testid="batch"]')?.scrollIntoView({ behavior: 'smooth', block: 'start' }) } : undefined} />}
+          {batchOn && <LazyPart><BatchExport projectId={projectId} presets={exportPresets} /></LazyPart>}
+          {consistency && enabled('projects.check') && <LazyPart><ProjectCheck projectId={projectId} briefVersion={project.brief_version}
+            onFixAll={batchOn ? (issue) => { setFixAll({ issueId: issue.issue_id, message: issue.message, videoIds: [...new Set(issue.places.map((p) => p.video_id))] }); document.querySelector('[data-testid="batch"]')?.scrollIntoView({ behavior: 'smooth', block: 'start' }) } : undefined} /></LazyPart>}
           {consistency && <ProjectWords projectId={projectId} languages={batchOn} />}
           {batchOn && langFor && (
-            <LanguageDialog videoId={langFor.video_id} filename={langFor.filename} projectId={projectId} onClose={() => setLangFor(null)}
-              onMade={() => { setLangFor(null); setBatchTick((t) => t + 1); void load(); document.querySelector('[data-testid="batch"]')?.scrollIntoView({ behavior: 'smooth', block: 'start' }) }} />
+            <LazyPart quiet><LanguageDialog videoId={langFor.video_id} filename={langFor.filename} projectId={projectId} onClose={() => setLangFor(null)}
+              onMade={() => { setLangFor(null); setBatchTick((t) => t + 1); void load(); document.querySelector('[data-testid="batch"]')?.scrollIntoView({ behavior: 'smooth', block: 'start' }) }} /></LazyPart>
           )}
           {batchOn && detail.videos.some((v) => v.out_of_sync) && <Tip id="first-language-sync" target="out-of-sync" />}
           {reviewOn && reviewing && (
-            <SendForReview
+            <LazyPart quiet><SendForReview
               target={{ kind: 'project', projectId, title: project.name, videos: detail.videos.map((v) => ({ video_id: v.video_id, filename: v.filename, stage_label: STAGE_LABEL[v.stage as keyof typeof STAGE_LABEL] })) }}
-              onClose={() => setReviewing(false)} onSent={() => { void load(); setFeedTick((t) => t + 1) }} />
+              onClose={() => setReviewing(false)} onSent={() => { void load(); setFeedTick((t) => t + 1) }} /></LazyPart>
           )}
         </section>
 
@@ -423,9 +427,9 @@ export function ProjectPage({ me, projectId, onUpload, uploading, error, onDelet
             ))}
           </div>
 
-          {reuseOn && <LearnedStyle projectId={projectId} onProject={(p) => { setDetail((d) => (d ? { ...d, project: p } : d)); setBrief(p.brief) }} />}
+          {reuseOn && <LazyPart><LearnedStyle projectId={projectId} onProject={(p) => { setDetail((d) => (d ? { ...d, project: p } : d)); setBrief(p.brief) }} /></LazyPart>}
 
-          {reviewOn && <ProjectFeed projectId={projectId} tick={feedTick} nameOf={(id) => detail.videos.find((v) => v.video_id === id)?.filename ?? null} />}
+          {reviewOn && <LazyPart><ProjectFeed projectId={projectId} tick={feedTick} nameOf={(id) => detail.videos.find((v) => v.video_id === id)?.filename ?? null} /></LazyPart>}
 
           <div className="rise d1 flex flex-col gap-2 rounded-xl border-[1.5px] border-foreground bg-card p-[18px]" data-testid="shared-voices">
             <div className="flex items-center gap-2"><span className="disp text-xl font-bold">Shared voices</span><span className="flex-1" /><button type="button" className="btn sm" onClick={() => void openAdd()} aria-expanded={adding}>+ Add</button></div>
@@ -471,7 +475,7 @@ export function ProjectPage({ me, projectId, onUpload, uploading, error, onDelet
             ))}
           </div>
 
-          {batchOn && <ExportPresets projectId={projectId} onChanged={setExportPresets} />}
+          {batchOn && <LazyPart><ExportPresets projectId={projectId} onChanged={setExportPresets} /></LazyPart>}
 
           <div className="rise d3 flex flex-col gap-2 rounded-xl border-[1.5px] border-foreground bg-card p-[18px]" data-testid="defaults">
             <span className="disp text-xl font-bold">Defaults for new videos</span>

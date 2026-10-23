@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from 'react'
+import { lazy, useEffect, useRef, useState } from 'react'
+import { LazyPart } from '../lib/lazy'
 import { track } from '../lib/analytics'
 import type React from 'react'
 import type { DragEvent } from 'react'
@@ -14,13 +15,14 @@ import { Shell } from './Shell'
 import { FillBar } from './bits'
 import { whenLabel } from './fmt'
 import { MoveDialog } from '../components/MoveDialog'
-import { LanguageChips } from './LanguageVersions'
 import { useFlags } from '../flags/useFlags'
 import { HomeSearch } from './HomeSearch'
 import { Tip } from '../guides/Tip'
 import { LinkImport } from './LinkImport'
 
 import type { Sort } from '../lib/home'
+// Rehearsal item 7: language versions (phase B, off for the public) load on first use.
+const LanguageChips = lazy(() => import('./LanguageVersions').then((m) => ({ default: m.LanguageChips })))
 import { SORTS, STAGES, needsAttention, sortVideos } from '../lib/home'
 
 /** A pin glyph; filled when pinned. */
@@ -479,7 +481,7 @@ export function ProjectsPage({ me, projects, folders = [], onOpen, onUpload, onS
                             <span className="truncate px-0.5 font-semibold">{p.filename}{languageChips && p.language_label ? ` · ${p.language_label}` : ''}</span>
                           </a>
                           {languageChips && p.out_of_sync && <span className="stamp need self-start whitespace-nowrap" data-testid="out-of-sync">Out of sync with master</span>}
-                          {languageChips && (p.languages?.length ?? 0) > 0 && <LanguageChips languages={p.languages ?? []} className="px-0.5" />}
+                          {languageChips && (p.languages?.length ?? 0) > 0 && <LazyPart quiet><LanguageChips languages={p.languages ?? []} className="px-0.5" /></LazyPart>}
                           <div className="flex items-center gap-2 px-0.5">
                             <span className={cn('inline-flex h-6 max-w-[60%] items-center gap-1.5 truncate rounded-full border px-2 text-xs font-medium', p.project_id ? 'border-line2 bg-card text-foreground' : 'border-dashed border-line2 text-faint')} data-testid="project-chip">
                               <Folder dashed={!p.project_id} size={12} />

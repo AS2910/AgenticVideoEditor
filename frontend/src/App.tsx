@@ -1,4 +1,5 @@
-import { Fragment, useCallback, useEffect, useRef, useState } from 'react'
+import { Fragment, lazy, useCallback, useEffect, useRef, useState } from 'react'
+import { LazyPage, LazyPart } from './lib/lazy'
 import { ConsentSheet } from './components/ConsentSheet'
 import { Player, timecode } from './components/Player'
 import type { Marker } from './components/Player'
@@ -45,16 +46,10 @@ import type { Tour } from './tour/types'
 import { OnboardingProvider, useOnboarding } from './guides/onboarding'
 import { Checklist } from './guides/Checklist'
 import { Tip } from './guides/Tip'
-import { SendForReview } from './review/SendForReview'
-import { ReviewComments } from './review/Comments'
 import { useReviewComments } from './review/useReviewComments'
 import { useFlags } from './flags/useFlags'
-import { BinPage } from './pages/BinPage'
-import { TemplatesPage } from './pages/Templates'
 import { MembersPage } from './pages/MembersPage'
 import { InvitePage } from './pages/InvitePage'
-import { AdminPage } from './pages/AdminPage'
-import { AdminEmails } from './pages/AdminEmails'
 import { LegalPage } from './pages/LegalPage'
 import { LandingPage } from './pages/LandingPage'
 import { WithdrawConsent } from './components/WithdrawConsent'
@@ -63,7 +58,6 @@ import { NotificationsPage } from './pages/NotificationsPage'
 import { NotificationBell } from './components/NotificationBell'
 import { DiscardWhy } from './components/DiscardWhy'
 import { DISCARD_REASONS } from './lib/learned'
-import { LanguageDialog, SyncChip } from './pages/LanguageVersions'
 import { StageWarning } from './pages/StageWarning'
 import { approvedWords } from './pages/feedWords'
 import { LearnWord } from './components/LearnWord'
@@ -85,6 +79,16 @@ import type {
 import { useMediaToken } from './lib/media'
 import { PausedBanner } from './components/PausedBanner'
 import { piecesFromInserts, renderTimeFrom, sourceTimeFrom } from './timeline/selection'
+
+// Rehearsal item 7: behind flags that are off for the public (phases B, C, D and the admin pages); loaded on first use.
+const SendForReview = lazy(() => import('./review/SendForReview').then((m) => ({ default: m.SendForReview })))
+const ReviewComments = lazy(() => import('./review/Comments').then((m) => ({ default: m.ReviewComments })))
+const BinPage = lazy(() => import('./pages/BinPage').then((m) => ({ default: m.BinPage })))
+const TemplatesPage = lazy(() => import('./pages/Templates').then((m) => ({ default: m.TemplatesPage })))
+const AdminPage = lazy(() => import('./pages/AdminPage').then((m) => ({ default: m.AdminPage })))
+const AdminEmails = lazy(() => import('./pages/AdminEmails').then((m) => ({ default: m.AdminEmails })))
+const LanguageDialog = lazy(() => import('./pages/LanguageVersions').then((m) => ({ default: m.LanguageDialog })))
+const SyncChip = lazy(() => import('./pages/LanguageVersions').then((m) => ({ default: m.SyncChip })))
 
 /** What a render is (2026-10-20): its version, when it was made, and the takes it carries. */
 interface RenderFacts { version?: number; at?: string; includes?: RenderIncludes; hash?: string }
@@ -1442,13 +1446,13 @@ function Studio() {
     if (route.page === 'usage') return <UsagePage me={me} scope={route.scope ?? null} />
     if (route.page === 'settings') return <SettingsPage me={me} onSignedOut={signedOutNow} />
     if (route.page === 'billing') return <BillingPage me={me} />
-    if (route.page === 'bin') return <BinPage me={me} onRestored={() => void refreshProjects()} />
+    if (route.page === 'bin') return <LazyPage><BinPage me={me} onRestored={() => void refreshProjects()} /></LazyPage>
     if (route.page === 'members') return <MembersPage me={me} />
     if (route.page === 'notifications') return <NotificationsPage me={me} />
-    if (route.page === 'admin') return <AdminPage me={me} />
-    if (route.page === 'adminEmails') return <AdminEmails me={me} />
+    if (route.page === 'admin') return <LazyPage><AdminPage me={me} /></LazyPage>
+    if (route.page === 'adminEmails') return <LazyPage><AdminEmails me={me} /></LazyPage>
     if (route.page === 'invite') return <InvitePage token={route.token} />
-    if (route.page === 'templates') return <TemplatesPage me={me} onMade={() => void refreshProjects()} />
+    if (route.page === 'templates') return <LazyPage><TemplatesPage me={me} onMade={() => void refreshProjects()} /></LazyPage>
     if (route.page === 'export') {
       return <ExportPage projectId={route.projectId} me={me} onBack={() => go({ page: 'editor', projectId: route.projectId })} />
     }
@@ -1709,7 +1713,7 @@ function Studio() {
           {batchOn && project.master_id && (
             <a className="stamp in whitespace-nowrap no-underline" href={hrefFor({ page: 'editor', projectId: project.master_id })} title={`The ${project.language_label} version of ${project.master_filename ?? 'its master'}. Open the master.`} data-testid="language-of">{project.language_label} · of {project.master_filename ?? 'master'}</a>
           )}
-          {batchOn && project.master_id && project.out_of_sync && <SyncChip videoId={project.video_id} compact onSettled={() => void settleSync(project.video_id)} />}
+          {batchOn && project.master_id && project.out_of_sync && <LazyPart quiet><SyncChip videoId={project.video_id} compact onSettled={() => void settleSync(project.video_id)} /></LazyPart>}
           </div>
           ) : null}
           <span className="text-faint max-[1600px]:hidden" aria-hidden="true">/</span>
@@ -1734,10 +1738,10 @@ function Studio() {
           </a>
           <NotificationBell />
           <AccountDot me={me} />
-          {batchOn && languagesOpen && <LanguageDialog videoId={project.video_id} filename={project.filename} projectId={project.project_id} onClose={() => setLanguagesOpen(false)}
-            onMade={(pid) => { setLanguagesOpen(false); if (pid) go({ page: 'folder', projectId: pid }) }} />}
-          {reviewOn && reviewOpen && <SendForReview target={{ kind: 'video', videoId: project.video_id, title: project.filename }} onClose={() => setReviewOpen(false)}
-            onSent={() => setProject((p) => (p ? { ...p, stage: 'in_review' } : p))} />}
+          {batchOn && languagesOpen && <LazyPart quiet><LanguageDialog videoId={project.video_id} filename={project.filename} projectId={project.project_id} onClose={() => setLanguagesOpen(false)}
+            onMade={(pid) => { setLanguagesOpen(false); if (pid) go({ page: 'folder', projectId: pid }) }} /></LazyPart>}
+          {reviewOn && reviewOpen && <LazyPart quiet><SendForReview target={{ kind: 'video', videoId: project.video_id, title: project.filename }} onClose={() => setReviewOpen(false)}
+            onSent={() => setProject((p) => (p ? { ...p, stage: 'in_review' } : p))} /></LazyPart>}
           <WhatVoltageMayDo open={mayDoOpen} value={mayDo} onChange={(c) => void changeMayDo(c)} onClose={() => setMayDoOpen(false)} />
         </header>
         <StatusStrip state={strip} open={activityOpen} onOpen={openActivity} onStop={canStop ? () => void stopAll() : undefined} stopping={stopping} />
@@ -1868,10 +1872,12 @@ function Studio() {
                 <WithdrawConsent videoId={project.video_id} onWithdrawn={() => { consentGiven.current = false; setWithdrew(true); setProject((p) => (p ? { ...p, consent_granted_at: null } : p)) }} />
               )}
               {reviewOn && (
-                <ReviewComments videoId={project.video_id} comments={review.comments} error={review.error} busy={turnBusy}
-                  onReload={review.reload} onChanged={review.replace}
-                  onSeek={(time) => { setSeekRequest((r) => ({ time, id: (r?.id ?? 0) + 1 })); setCurrentTime(time) }}
-                  onAsk={(goal) => void takeTurn(goal)} />
+                <LazyPart>
+                  <ReviewComments videoId={project.video_id} comments={review.comments} error={review.error} busy={turnBusy}
+                    onReload={review.reload} onChanged={review.replace}
+                    onSeek={(time) => { setSeekRequest((r) => ({ time, id: (r?.id ?? 0) + 1 })); setCurrentTime(time) }}
+                    onAsk={(goal) => void takeTurn(goal)} />
+                </LazyPart>
               )}
             </div>
           </main>
