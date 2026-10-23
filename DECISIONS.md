@@ -3,6 +3,8 @@
 Each: what, why, how to undo. Run 2's decisions follow below.
 
 - Setup: Docker was not installed. Installed Colima, the Docker CLI, compose and buildx, k6 and gitleaks with Homebrew (local tools only; `brew uninstall colima docker docker-compose docker-buildx k6 gitleaks` and `colima delete` undo it). The Colima VM has 4 CPUs, 6 GB and a 60 GB disk.
+- 3: Capacity defaults changed: AVE_JOB_WORKERS 4 to 16, AVE_WORK_WORKERS 2 to 4 (about one per vCPU), AVE_HTTP_THREADS 40 to 100 (anyio's limit for plain routes). Undo: set the three variables back. The renders on Add still run inside the request; making Add return at once with the render as a job is a product change left for you (MORNING.md).
+- 3: The load test raised the sign-in limit (one address for every virtual user) and turned the day cap off, on the load stack only.
 - 2: The rehearsal stand-ins live in the app behind AVE_MOCK_VENDORS=1 (refused in production by `production_problems`), not in a separate fake-vendor server: the real adapters' HTTP is not exercised, but the app's own paths (budget charges, refunds, retries, chaos faults, renders) are. The mock Claude makes one move a turn (a placed line from 0.3 s, up to 2 s, inside the clip). Undo: drop the `mock_vendors` branches in `app/adapters/selection.py` and `main._agent`.
 - 2: The rehearsal stack uses Postgres (`DATABASE_URL`), the first time the app has run on Postgres in containers; its env file holds public, rehearsal-only secrets.
 - 2: The journeys restart the app between runs: the sign-in limit (20 per 10 minutes per address) is in memory and one run makes about 13 sign-ins from one machine. The limit itself is unchanged (see MORNING: an office behind one NAT would meet it).

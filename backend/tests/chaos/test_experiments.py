@@ -234,5 +234,6 @@ def test_e6d_the_openai_wrapper_fails_as_the_adapter_expects(tmp_path):
 
 def test_e7_health_shows_the_pool_and_that_no_chaos_is_on(client):
     body = client.get("/health").json()
-    assert body["jobs"] == {"workers": 4, "running": 0, "queued": 0}
+    import app.api.main as main
+    assert body["jobs"] == {"workers": main.settings.job_workers, "running": 0, "queued": 0}      # 16 by default (LOAD.md)
     assert body["chaos"] is None

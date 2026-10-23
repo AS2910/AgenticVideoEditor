@@ -20,6 +20,7 @@ import secrets
 import tempfile
 from pathlib import Path
 
+from starlette.concurrency import run_in_threadpool
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
@@ -91,11 +92,15 @@ async def check_liveness(video_id: str, attempt_id: str, file: UploadFile = File
         await api._spool(file, staged, "audio")
         if staged.stat().st_size > MAX_RECORDING_BYTES:
             raise HTTPException(status_code=422, detail="That recording is too long. Just the sentence is enough.")
-        result = api.liveness.verify(staged, row["sentence"])
-        sha = None
-        if staged.stat().st_size:
-            container = staged.suffix.lstrip(".") or "webm"
-            sha = api.artifacts.put_file(f"liveness-{owner}", staged, kind="audio", container=container, duration=0.0).sha256
+
+        def check() -> tuple:           # the provider's call and the store block: off the event loop (rehearsal item 3)
+            result = api.liveness.verify(staged, row["sentence"])
+            sha = None
+            if staged.stat().st_size:
+                container = staged.suffix.lstrip(".") or "webm"
+                sha = api.artifacts.put_file(f"liveness-{owner}", staged, kind="audio", container=container, duration=0.0).sha256
+            return result, sha
+        result, sha = await run_in_threadpool(check)
     status = "passed" if result.passed else "failed"
     with api.database.tx() as c:
         c.execute("UPDATE liveness_attempts SET status = ?, reason = ?, audio_sha = ?, checked_at = ? WHERE id = ?",

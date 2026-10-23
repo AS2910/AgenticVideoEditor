@@ -84,6 +84,7 @@ from app.store import learned as learned_store
 from app.store import members as members_store
 from app.notify import inbox
 from app.notify import digest as digest_mod, email as email_mod
+from starlette.concurrency import run_in_threadpool
 from app.render import captions as captions_mod, deliver as deliver_mod
 from app.jobs import exports as exports_mod
 from app.agent import project_check as pcheck
@@ -169,8 +170,9 @@ clones = CloneService(repo, artifacts, voice, enabled=settings.clone and not set
                       min_seconds=settings.clone_min_seconds)
 planner, planner_label = select_planner(settings, chaos)
 jobs = JobStore()
-# Four workers: a batch (F4) runs three videos' turns at a time, and one more stays free for the editor.
-runner = JobRunner(jobs, max_workers=4)
+# AVE_JOB_WORKERS (default 16, rehearsal item 3, LOAD.md): at four, 50 people's turns queued for two
+# minutes behind each other. A batch (F4) still runs three videos' turns at a time.
+runner = JobRunner(jobs, max_workers=settings.job_workers)
 # 2026-10-20 (one processing model): every piece of work the user waits on is
 # an Activity job, persisted; the editor hears each change on its live channel.
 events = EventBus()
@@ -185,7 +187,7 @@ activity = ActivityJobs(database, on_change=_on_job)
 activity.interrupt_leftovers()
 # Renders and retries started from the editor run here, off the request thread
 # and apart from the turns' pool, so a long turn never holds a preview back.
-work_pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix="ave-work")
+work_pool = ThreadPoolExecutor(max_workers=settings.work_workers, thread_name_prefix="ave-work")
 # Phase 9c: who signs people in. None while AVE_AUTH=off.
 oidc: auth.Provider | None = (
     auth.GoogleProvider(settings.google_client_id or "", settings.google_client_secret or "")
@@ -1142,7 +1144,9 @@ async def create_project(
     with tempfile.TemporaryDirectory() as tmp:
         staged = Path(tmp) / filename
         await _spool(file, staged)
-        return _ingest_staged(staged, filename, consent, folder, owner)
+        # Rehearsal item 3 (the load test): the probe, the store and the transcription are slow and
+        # blocking; on the event loop they froze every other request while one upload ran.
+        return await run_in_threadpool(_ingest_staged, staged, filename, consent, folder, owner)
 
 
 def _ingest_staged(staged: Path, filename: str, consent: bool, folder: Project | None, owner: str) -> dict:
@@ -1484,18 +1488,21 @@ async def add_my_voice(
     with tempfile.TemporaryDirectory() as tmp:
         staged = Path(tmp) / filename
         await _spool(file, staged, "audio")
-        try:
-            wav, seconds = ffmpeg.extract_audio(staged, Path(tmp) / "voice.wav", sample_rate=44100)
-        except Exception:  # noqa: BLE001 — a file ffmpeg cannot read is the user's to replace
-            raise HTTPException(status_code=422, detail="That file has no audio I can read. A WAV, MP3, M4A or a video with sound works.") from None
-        if seconds < MIN_MY_VOICE_SECONDS:
-            raise HTTPException(status_code=422, detail=f"That is {seconds:.0f} s; at least {MIN_MY_VOICE_SECONDS:.0f} s of your voice is needed to clone it.")
-        try:
-            voice_id = voice.create_clone(f"voltage-mine-{label}", wav)
-        except Exception as exc:  # noqa: BLE001 — the vendor's refusal, in its own words
-            raise HTTPException(status_code=502, detail=str(exc) or "The voice could not be made.") from None
-        # The recording stays with the owner, so the voices page can play it back.
-        sample = artifacts.put_file(_user_store(owner), wav, kind="audio", container="wav", duration=seconds)
+
+        def make() -> tuple:            # off the event loop (rehearsal item 3): ffmpeg and the vendor block
+            try:
+                wav, seconds = ffmpeg.extract_audio(staged, Path(tmp) / "voice.wav", sample_rate=44100)
+            except Exception:  # noqa: BLE001 — a file ffmpeg cannot read is the user's to replace
+                raise HTTPException(status_code=422, detail="That file has no audio I can read. A WAV, MP3, M4A or a video with sound works.") from None
+            if seconds < MIN_MY_VOICE_SECONDS:
+                raise HTTPException(status_code=422, detail=f"That is {seconds:.0f} s; at least {MIN_MY_VOICE_SECONDS:.0f} s of your voice is needed to clone it.")
+            try:
+                voice_id = voice.create_clone(f"voltage-mine-{label}", wav)
+            except Exception as exc:  # noqa: BLE001 — the vendor's refusal, in its own words
+                raise HTTPException(status_code=502, detail=str(exc) or "The voice could not be made.") from None
+            # The recording stays with the owner, so the voices page can play it back.
+            return voice_id, seconds, artifacts.put_file(_user_store(owner), wav, kind="audio", container="wav", duration=seconds)
+        voice_id, seconds, sample = await run_in_threadpool(make)
     ticked = _now()   # the request carries the ticked box: this is the moment of consent
     entry = {"voice_id": voice_id, "name": label, "seconds": round(seconds, 1), "at": ticked,
              "kind": "recorded", "sample_sha": sample.sha256, "description": None, "consent_granted_at": ticked}
@@ -2923,13 +2930,16 @@ async def add_word_audio(project_id: str, rule_id: int, file: UploadFile = File(
         await _spool(file, staged, "audio")
         if staged.stat().st_size > MAX_WORD_CLIP_BYTES:
             raise HTTPException(status_code=422, detail="That clip is too big. A few seconds of audio is all a word needs.")
-        try:
-            wav, seconds = ffmpeg.extract_audio(staged, Path(tmp) / "word.wav", sample_rate=44100)
-        except Exception:  # noqa: BLE001 - a file ffmpeg cannot read is the user's to replace
-            raise HTTPException(status_code=422, detail="That file has no audio I can read. A WAV, MP3, M4A or WebM works.") from None
-        if seconds > MAX_WORD_CLIP_SECONDS:
-            raise HTTPException(status_code=422, detail=f"That clip is {seconds:.0f} s. Keep it under {MAX_WORD_CLIP_SECONDS:.0f} s: just the word, said right.")
-        clip = artifacts.put_file(_words_store(project_id), wav, kind="audio", container="wav", duration=seconds)
+
+        def store() -> tuple:           # off the event loop (rehearsal item 3)
+            try:
+                wav, seconds = ffmpeg.extract_audio(staged, Path(tmp) / "word.wav", sample_rate=44100)
+            except Exception:  # noqa: BLE001 - a file ffmpeg cannot read is the user's to replace
+                raise HTTPException(status_code=422, detail="That file has no audio I can read. A WAV, MP3, M4A or WebM works.") from None
+            if seconds > MAX_WORD_CLIP_SECONDS:
+                raise HTTPException(status_code=422, detail=f"That clip is {seconds:.0f} s. Keep it under {MAX_WORD_CLIP_SECONDS:.0f} s: just the word, said right.")
+            return seconds, artifacts.put_file(_words_store(project_id), wav, kind="audio", container="wav", duration=seconds)
+        seconds, clip = await run_in_threadpool(store)
     analytics.track("words.clip_added", owner, {"project_id": project_id, "seconds": round(seconds, 1)})
     return _rule_or_422(lambda: rules.update(database, project_id, rule_id, {**rule.data, "audio": clip.sha256}, owner)).to_dict()
 
@@ -5036,7 +5046,11 @@ async def add_folder_file(project_id: str, file: UploadFile = File(...), owner: 
         sniff.document(data[:sniff.HEAD_BYTES], name)
     except sniff.SniffError as exc:
         raise HTTPException(status_code=415, detail=str(exc)) from None
-    import hashlib
+    return await run_in_threadpool(_keep_folder_file, project_id, name, data)
+
+
+def _keep_folder_file(project_id: str, name: str, data: bytes) -> dict:
+    """The write and the text extraction (a PDF is slow), off the event loop (rehearsal item 3)."""
     sha256 = hashlib.sha256(data).hexdigest()
     folder = _files_dir(project_id)
     folder.mkdir(parents=True, exist_ok=True)
@@ -8152,6 +8166,9 @@ _lifespan_before_lease = app.router.lifespan_context
 @contextlib.asynccontextmanager
 async def _lifespan_with_lease(a):
     from app import lease as lease_mod
+    import anyio.to_thread
+    # Rehearsal item 3: how many plain (sync) routes run at once (AVE_HTTP_THREADS; anyio's default is 40).
+    anyio.to_thread.current_default_thread_limiter().total_tokens = settings.http_threads
     held = lease_mod.acquire(database)          # raises LeaseHeld: the server does not start
     held.start()
     try:

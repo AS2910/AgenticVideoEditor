@@ -76,6 +76,14 @@ class Settings:
     # The launch rehearsal (AVE_MOCK_VENDORS=1): every vendor, Claude included, is
     # an offline stand-in that waits and charges like the real one. Never in production.
     mock_vendors: bool = False
+    # Rehearsal item 3 (the load test): how much runs at once in the one API
+    # process. job_workers: turns, uploads' processing and voicing (the job
+    # runner); work_workers: renders and retries started from the editor;
+    # http_threads: requests served by plain (sync) routes at once. The
+    # defaults are what the load test settled on for a 4 vCPU VM (LOAD.md).
+    job_workers: int = 16
+    work_workers: int = 4
+    http_threads: int = 100
     max_regenerations: int = DEFAULT_MAX_REGENERATIONS
     anthropic_api_key: str | None = None
     # Required when the key is not scoped to a workspace (the API says so).
@@ -231,6 +239,9 @@ def load_settings() -> Settings:
         voice_budget_chars=_whole_number("AVE_VOICE_BUDGET_CHARS", DEFAULT_VOICE_BUDGET_CHARS),
         dry_run=os.environ.get("AVE_DRY_RUN", "").strip().lower() in _TRUTHY,
         mock_vendors=os.environ.get("AVE_MOCK_VENDORS", "").strip().lower() in _TRUTHY,
+        job_workers=max(1, _whole_number("AVE_JOB_WORKERS", 16)),
+        work_workers=max(1, _whole_number("AVE_WORK_WORKERS", 4)),
+        http_threads=max(4, _whole_number("AVE_HTTP_THREADS", 100)),
         max_regenerations=_whole_number("AVE_MAX_REGENERATIONS", DEFAULT_MAX_REGENERATIONS),
         anthropic_api_key=os.environ.get("ANTHROPIC_API_KEY") or None,
         anthropic_workspace_id=os.environ.get("ANTHROPIC_WORKSPACE_ID") or None,
