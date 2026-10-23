@@ -3,6 +3,15 @@
 Each: what, why, how to undo. Run 2's decisions follow below.
 
 - Setup: Docker was not installed. Installed Colima, the Docker CLI, compose and buildx, k6 and gitleaks with Homebrew (local tools only; `brew uninstall colima docker docker-compose docker-buildx k6 gitleaks` and `colima delete` undo it). The Colima VM has 4 CPUs, 6 GB and a 60 GB disk.
+- 5: One CSRF middleware for every write when sign-in is on (only the two payment webhooks exempt), instead of per-route checks. Undo: drop `_csrf_header` in main.py.
+- 5: SSRF guard allows any public address after a redirect (not only Google Drive and Dropbox hosts). Undo: revert 5a.
+- 5: Owner email addresses must be plain (no `/`, no quoted local parts). Undo: `members.clean_email`.
+- 5: The lockfile was regenerated with npm 11 (npm 10.9.3 crashes on it). Run `npx playwright install` is not needed: the e2e use the installed Chrome.
+- 5d: Caddy has a fixed address (172.31.250.10) on a new compose network `edge`; nginx trusts X-Forwarded-For only from it and forwards one address. A deployment without Caddy (nginx at the edge) now uses the peer address, as it should. Undo: revert 5d.
+- 8: Before and after demo: the "after" is the tutorial's recorded edit rendered by the app ($0), shipped as `public/sample-ad-after.mp4` (made by `scripts/landing_sample.py`). Quote and logo slots show only in dev builds. The Request access form shows only when invite-only is on; otherwise Make an account. An invite admits the address with no expiry. Sign out lands on the landing page.
+- 9: The HTML of each sent email is kept in meta (`notify_outbox_html:<id>`), not a new column, to avoid a migration. Receipts, invoices and the account-deleted email have templates and previews but nothing sends them yet (nothing did before); adding the sends is listed in MORNING.md.
+- 10: Non-admins get 404 on admin routes. Members of a suspended owner are blocked only inside that workspace. Admins cannot be suspended from the page. Migrations 0036 and 0037 refuse to go down while they hold rows (the audit is evidence). `budget.before_charge` now receives the video id so a suspended owner stops in job threads too.
+- 11: The screenshot is an attached image file (no page-capture library). Beta feedback is on for every signed-in person (no flag).
 - 4: Open charges are kept in meta (`charge_open:<id>`, with the process's id) rather than a new table or a column, so no migration: one row per in-flight vendor call, deleted when it returns. Undo: replace `held` with the old charge/refund pairs.
 - 4: Disk guard at 95% used or 1 GB free (AVE_DISK_FULL_PCT): refuses uploads and renders only; voicing, reads and downloads continue; `/ready` stays 200 so the server is not taken out of rotation for it. Undo: drop the two `diskroom.check` calls.
 - 4: While Postgres is unreachable a request answers 503 with Retry-After 5 and a sentence; the next transaction reconnects once (a transaction cut off midway still fails, once).
