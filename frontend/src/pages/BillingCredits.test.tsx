@@ -80,6 +80,36 @@ describe('G3: billing', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('That GSTIN does not look right.')
   })
 
+  it('with real keys, verifies Razorpay\'s signed payment and shows the invoice', async () => {
+    const checkout = { provider: 'razorpay', checkout_id: 'order_1', url: '', total: 999, currency: 'INR' as const, test_mode: true,
+      client: { key_id: 'rzp_test_x', order_id: 'order_1', amount: 99900, currency: 'INR', description: 'Top-up: 10 credits' } }
+    ;(window as unknown as { Razorpay: unknown }).Razorpay = class { o: Record<string, unknown>; constructor(o: Record<string, unknown>) { this.o = o } open() {
+      (this.o.handler as (r: unknown) => void)({ razorpay_order_id: 'order_1', razorpay_payment_id: 'pay_1', razorpay_signature: 'sig' }) } }
+    const calls = serve(['golive.g3'], (url) => {
+      if (url.endsWith('/billing/topup')) return VIEW({ checkout })
+      if (url.endsWith('/billing/razorpay/verify')) return VIEW({ invoices: [INVOICE], invoice: INVOICE })
+      return VIEW()
+    })
+    render(<BillingPage me={{ mode: 'off', user: null }} />)
+    await userEvent.click(await screen.findByRole('button', { name: '10 credits · $12.00' }))
+    expect(await screen.findByTestId('billing-status')).toHaveTextContent('Paid. Invoice VLT-202610-00001.')
+    expect(calls).toContain('POST /api/billing/razorpay/verify {"order_id":"order_1","payment_id":"pay_1","signature":"sig"}')
+    delete (window as unknown as { Razorpay?: unknown }).Razorpay
+  })
+
+  it('back from Stripe\'s page, says the payment is being confirmed and reads billing again', async () => {
+    window.history.replaceState(null, '', '/?checkout=done#billing')
+    serve(['golive.g3'], () => VIEW())
+    render(<BillingPage me={{ mode: 'off', user: null }} />)
+    expect(await screen.findByTestId('billing-status')).toHaveTextContent('Payment received.')
+    expect(window.location.search).toBe('')
+    expect(window.location.hash).toBe('#billing')
+    window.history.replaceState(null, '', '/?checkout=cancelled#billing')
+    render(<BillingPage me={{ mode: 'off', user: null }} />)
+    expect(await screen.findByText('Payment cancelled. Nothing was charged.')).toBeInTheDocument()
+    window.history.replaceState(null, '', '/')
+  })
+
   it('says so when billing cannot be read, with Try again', async () => {
     serve(['golive.g3'], () => ok({ detail: 'Not found' }, 404))
     render(<BillingPage me={{ mode: 'off', user: null }} />)

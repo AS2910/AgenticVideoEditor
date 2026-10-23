@@ -8,6 +8,7 @@ export type Flag =
   | 'projects.review'
   | 'projects.reuse'
   | 'projects.check'
+  | 'voices.cloning'
   | `golive.${string}`
 
 export interface Flags {

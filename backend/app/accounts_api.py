@@ -17,6 +17,7 @@ workspace invite for its address or one of the codes in AVE_INVITE_CODES.
 """
 from __future__ import annotations
 
+import json
 import os
 
 from fastapi import APIRouter, HTTPException, Request, Response
@@ -30,6 +31,30 @@ router = APIRouter(tags=["accounts"])
 # The version of the Terms a sign-up accepts (the pages are drafts until legal replaces them).
 TERMS_VERSION = os.environ.get("AVE_TERMS_VERSION") or "draft-2026-10-22"
 SENT = "If that address can use Voltage, an email is on its way. It can take a minute."
+
+
+def _terms_key(owner: str) -> str:
+    return f"terms:{owner}"
+
+
+def terms_record(db, owner: str) -> dict | None:
+    """Which Terms a Google sign-up accepted, and when (password sign-ups keep theirs on the account row)."""
+    with db.tx() as c:
+        row = c.execute("SELECT value FROM meta WHERE key = ?", (_terms_key(owner),)).fetchone()
+    return json.loads(row["value"]) if row else None
+
+
+def record_terms(db, owner: str, version: str, via: str) -> None:
+    from app.timefmt import now_iso
+    value = json.dumps({"version": version, "at": now_iso(), "via": via})
+    with db.tx() as c:
+        c.execute("INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value",
+                  (_terms_key(owner), value))
+
+
+def forget_terms(db, owner: str) -> None:
+    with db.tx() as c:
+        c.execute("DELETE FROM meta WHERE key = ?", (_terms_key(owner),))
 
 
 def _api():

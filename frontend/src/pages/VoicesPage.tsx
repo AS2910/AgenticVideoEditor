@@ -102,6 +102,7 @@ export function VoicesPage({ me }: VoicesPageProps) {
         setInProject(v.value.project ?? [])
         setCatalogue(v.value.voices.filter((x) => x.category !== 'mine'))
         setSlots(v.value.slots ?? null)
+        if (v.value.cloning === false) { setCloningClosed(true); setWay('describe') }
       } else setLoadError(said(v.reason, 'Your voices could not be read.'))
       if (m.status === 'fulfilled') setMade(m.value.voices)
       if (s.status === 'fulfilled') setSpeakers(s.value.speakers)
@@ -139,6 +140,8 @@ export function VoicesPage({ me }: VoicesPageProps) {
 
   // The pane: one form, three ways in.
   const [way, setWay] = useState<Way>('record')
+  // Rehearsal item 1: cloning waits for a real liveness check; only describing a voice is open.
+  const [cloningClosed, setCloningClosed] = useState(false)
   const [consent, setConsent] = useState(false)
   const [busy, setBusy] = useState(false)
   const [formError, setFormError] = useState<string | null>(null)
@@ -389,8 +392,9 @@ export function VoicesPage({ me }: VoicesPageProps) {
           <h2 id={`${uid}-new`} className="disp m-0 text-[28px] font-bold">Add a voice to keep</h2>
         </div>
 
+        {cloningClosed && <p className="m-0 text-[13px] text-pmuted" data-testid="cloning-closed">Cloning a voice opens once we can check that it is really yours. For now, describe a voice and Voltage designs it.</p>}
         <div role="radiogroup" aria-label="How to make it" className="flex flex-col gap-2">
-          {WAYS.map((w) => (
+          {WAYS.filter((w) => !cloningClosed || w.key === 'describe').map((w) => (
             <button
               key={w.key} type="button" role="radio" aria-checked={way === w.key} data-way={w.key} tabIndex={way === w.key ? 0 : -1}
               className={cn('flex flex-col gap-1 rounded-[10px] border-[1.5px] px-3.5 py-3 text-left text-ptext transition-colors', way === w.key ? 'border-volt bg-psunk' : 'border-pline hover:border-pmuted')}

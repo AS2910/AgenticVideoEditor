@@ -13,7 +13,7 @@ from app.flags import KNOWN, PROFILES, FlagStore, main as flags_main
 from app.store.db import Database
 
 PUBLIC_ON = {"projects.consistency", "golive.g1", "golive.g2", "golive.g3", "golive.g4", "golive.g6", "golive.g7", "golive.g8"}
-PUBLIC_OFF = {"projects.batch", "projects.review", "projects.reuse", "projects.check", "golive.g5"}
+PUBLIC_OFF = {"projects.batch", "projects.review", "projects.reuse", "projects.check", "golive.g5", "voices.cloning"}
 
 
 def test_the_public_profile_turns_on_exactly_the_launch_features():

@@ -6,9 +6,9 @@
 
 {$VOLTAGE_DOMAIN} {
 	encode zstd gzip
-	# Uploads up to the backend's 500 MB limit.
+	# Uploads up to the backend's 2 GB limit (AVE_MAX_UPLOAD_MB), with room for the form.
 	request_body {
-		max_size 520MB
+		max_size 2100MB
 	}
 	header {
 		Strict-Transport-Security "max-age=31536000; includeSubDomains"

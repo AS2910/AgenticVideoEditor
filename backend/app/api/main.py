@@ -10,6 +10,7 @@ import threading
 import statistics
 from concurrent.futures import ThreadPoolExecutor
 import hashlib
+import os
 import logging
 import tempfile
 from contextvars import ContextVar
@@ -746,6 +747,9 @@ def _me(request: Request) -> dict:
     }
 
 
+GOOGLE_TERMS_FIRST = "To make an account with Google, use the button on this page: it shows the Terms you accept."
+
+
 def _new_person_refused(owner: str, email: str | None) -> bool:
     """Launch item 5: with invite-only on, someone who has never signed in
     may not start now without an invite (Google and emailed links alike)."""
@@ -781,16 +785,20 @@ def _signed_in(owner: str) -> None:
 
 
 @app.get("/auth/login")
-def auth_login(request: Request) -> Response:
+def auth_login(request: Request, terms: str | None = None) -> Response:
     """Off to Google. The state and the PKCE verifier ride in a short-lived
-    signed cookie, so the callback can check them."""
+    signed cookie, so the callback can check them. `terms=1` comes from the
+    sign-in page's button, which says that continuing accepts the Terms and
+    the Privacy notice (rehearsal item 1: a Google sign-up records it)."""
     if oidc is None:
         raise HTTPException(status_code=404, detail="Sign-in is off.")
+    from app.accounts_api import TERMS_VERSION
     state = auth._b64(auth.secrets.token_bytes(16))
     verifier, challenge = auth.pkce_pair()
     response = RedirectResponse(oidc.authorize_url(_redirect_uri(), state, challenge), status_code=302)
+    login = {"state": state, "verifier": verifier, **({"terms": TERMS_VERSION} if terms == "1" else {})}
     response.set_cookie(
-        auth.LOGIN_COOKIE, auth.sign({"state": state, "verifier": verifier}, settings.session_secret or ""),
+        auth.LOGIN_COOKIE, auth.sign(login, settings.session_secret or ""),
         max_age=auth.LOGIN_SECONDS, httponly=True, samesite="lax", secure=_secure(), path="/",
     )
     return response
@@ -815,6 +823,13 @@ def auth_callback(request: Request, code: str | None = None, state: str | None =
     if _new_person_refused(who.owner, who.email):
         from app.accounts_api import INVITE_ONLY
         raise HTTPException(status_code=403, detail=INVITE_ONLY)
+    from app.accounts_api import record_terms, terms_record
+    if terms_record(database, who.owner) is None:
+        if not login.get("terms") and not email_mod.address_for(database, who.owner):
+            # A new person who reached Google without the sign-in page's Terms line: back to it.
+            return RedirectResponse(settings.public_url + "/#login?error=" + quote(GOOGLE_TERMS_FIRST), status_code=302)
+        if login.get("terms"):
+            record_terms(database, who.owner, str(login["terms"]), via="google")
     email_mod.remember_address(database, who.owner, who.email)      # C2: where their review digest goes
     _signed_in(who.owner)                                             # G7: the funnel's first steps
     try:                                                              # G1: a new owner's sample project
@@ -1413,9 +1428,16 @@ def _no_voice_called(owner: str, label: str) -> None:
         raise HTTPException(status_code=409, detail=f"You already have a voice called {label}.")
 
 
-def _voices_can_be_made(attr: str = "can_clone") -> None:
+CLONING_CLOSED = ("Voice cloning is not open yet. Pick a voice from the library or design one; "
+                  "cloning opens once we can check that a voice is really yours.")
+
+
+def _voices_can_be_made(attr: str = "can_clone", owner: str | None = None) -> None:
     """Making a voice of the user's own needs a vendor that keeps it; under
-    dry-run a mock id would outlive the setup that made it."""
+    dry-run a mock id would outlive the setup that made it. A clone also
+    needs `voices.cloning` for the owner (rehearsal item 1)."""
+    if attr == "can_clone" and owner is not None and not flags.enabled("voices.cloning", owner):
+        raise HTTPException(status_code=403, detail=CLONING_CLOSED)
     if settings.dry_run or not getattr(voice, attr, False):
         raise HTTPException(status_code=503, detail="Voices cannot be made in this setup (no vendor that clones).")
     try:
@@ -1440,6 +1462,7 @@ def list_voices(owner: str = Depends(current_owner)) -> dict:
         # Folders: the voices shared in the caller's projects.
         "project": [{**_voice_entry(v, used.get(v["voice_id"], 0)), "project_id": p.project_id, "project_name": p.name} for p, v in shared],
         "slots": _slots(),
+        "cloning": flags.enabled("voices.cloning", owner),     # rehearsal item 1: closed for the public
     }
 
 
@@ -1454,7 +1477,7 @@ async def add_my_voice(
     or one they may use."""
     if not consent:
         raise HTTPException(status_code=403, detail="Say it is your voice, or one you have the right to use.")
-    _voices_can_be_made()
+    _voices_can_be_made(owner=owner)
     label = _voice_name_or_422(name)
     _no_voice_called(owner, label)
     filename = Path(file.filename or "voice.wav").name
@@ -1578,7 +1601,7 @@ def add_my_voice_from_speaker(req: FromSpeakerRequest, owner: str = Depends(curr
     record = _owned(req.video_id, owner)        # someone else's video is not found, before anything else is said
     if not req.consent:
         raise HTTPException(status_code=403, detail="Say it is your voice, or one you have the right to use.")
-    _voices_can_be_made()
+    _voices_can_be_made(owner=owner)
     label = _voice_name_or_422(req.name)
     _no_voice_called(owner, label)
     spk = next((s for s in repo.speakers(req.video_id) if s.label == req.label), None)
@@ -2533,7 +2556,7 @@ def delete_account(owner: str = Depends(current_owner)) -> Response:
                                              owner, v.get("name"), v["voice_id"], exc)
     # Launch item 5: the sample and onboarding records go too, so an account
     # made again with the same id starts fresh (and gets the sample again).
-    for key in ("my_voices", "prefs", "designs", "sample", "onboarding"):
+    for key in ("my_voices", "prefs", "designs", "sample", "onboarding", "terms"):
         repo.delete_meta(f"{key}:{owner}")
     _funnel_started.discard(owner)
     if owner.startswith("acct:"):
@@ -5303,6 +5326,11 @@ def _voice_for(project_id: str, record: ProjectRecord, selection: Selection, req
         if figure and not any(s["label"] == speaker and s["voice_id"] for s in _speakers(project_id)):
             analytics.track("clone.public_figure_refused", record.owner, {"video_id": project_id})
             return VoiceChoice(requested, (f"Stock voice: {figures_mod.REFUSAL}",))
+    if not flags.enabled("voices.cloning", record.owner):
+        picked = next((s["voice_id"] for s in _speakers(project_id) if s["label"] == speaker and s["voice_id"]), None)
+        if picked:
+            return VoiceChoice(picked)
+        return VoiceChoice(requested, ("Stock voice: voice cloning is not open yet.",))
     return clones.resolve(project_id, record.source, record.transcript, speaker, requested)
 
 
@@ -7112,7 +7140,7 @@ def _workbench() -> Workbench:
         add_from_library=getattr(voice, "add_from_library", None),
         delete_voice=getattr(voice, "delete_voice", None),
         slots=getattr(voice, "slots", lambda: None), put_audio=put_audio,
-        speakers=repo.speakers, voice_for=_voice_for, remove_words=_remove_words, shift_words=_shift_by_pin, move_take=_moved,
+        speakers=repo.speakers, voice_for=_voice_for, cloning_open=lambda o: flags.enabled("voices.cloning", o), remove_words=_remove_words, shift_words=_shift_by_pin, move_take=_moved,
         project=_project_view, suggest=_suggest_brief, help_search=lambda query: search_help_articles(query, limit=3),
         spend=lambda pid: _spend_summary(repo.get(pid).owner if repo.get(pid) else LOCAL_OWNER, video_id=pid),
         measured=lambda: getattr(voice, "last_measure", None), held_take=_held_take, jobs=line_jobs,
@@ -8062,8 +8090,10 @@ _lifespan_before_c2 = app.router.lifespan_context
 
 @contextlib.asynccontextmanager
 async def _lifespan_with_digests(a):
-    """The running server sends due digests once a minute (a TestClient used without `with` never starts it)."""
-    review_digests.start()
+    """The running server sends due digests once a minute (a TestClient used without `with` never starts it),
+    unless the worker sends them (AVE_WORKER_DIGESTS=1; rehearsal item 1: never both)."""
+    if os.environ.get("AVE_WORKER_DIGESTS", "").strip().lower() not in {"1", "true", "yes", "on"}:
+        review_digests.start()
     async with _lifespan_before_c2(a) as state:
         yield state
 
@@ -8095,6 +8125,25 @@ async def _lifespan_with_purge(a):
 
 
 app.router.lifespan_context = _lifespan_with_purge
+
+
+# Rehearsal item 1 (launch blocker 8): one API process per database (app/lease.py).
+_lifespan_before_lease = app.router.lifespan_context
+
+
+@contextlib.asynccontextmanager
+async def _lifespan_with_lease(a):
+    from app import lease as lease_mod
+    held = lease_mod.acquire(database)          # raises LeaseHeld: the server does not start
+    held.start()
+    try:
+        async with _lifespan_before_lease(a) as state:
+            yield state
+    finally:
+        held.release()
+
+
+app.router.lifespan_context = _lifespan_with_lease
 
 
 # The reviewer's side (no account; the link is the key).

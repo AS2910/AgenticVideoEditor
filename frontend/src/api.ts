@@ -220,7 +220,7 @@ export const updateOnboarding = (change: Partial<Onboarding>) => put<Onboarding>
 /** The guided run: the sample ad as a tutorial video whose turns replay a recording; nothing is spent. */
 export const startTutorial = () => post<Project>('/tutorial', {})
 
-export const listVoices = () => get<{ default: string; voices: Voice[]; mine?: MyVoice[]; project?: ProjectVoice[]; slots?: { used: number; limit: number } | null }>('/voices')
+export const listVoices = () => get<{ default: string; voices: Voice[]; mine?: MyVoice[]; project?: ProjectVoice[]; slots?: { used: number; limit: number } | null; cloning?: boolean }>('/voices')
 
 /** 20i: your own voice, uploaded under a name; the server clones it once. */
 export async function uploadMyVoice(name: string, file: File): Promise<MyVoice> {
@@ -452,7 +452,8 @@ export const resetPassword = (token: string, password: string) => post<{ signed_
 export const changeEmail = (newEmail: string, password: string) => post<{ sent: boolean; message: string }>('/auth/change-email', { new_email: newEmail, password })
 export const getMe = () => get<Me>('/auth/me')
 /** Where the browser goes to sign in (a redirect to Google). */
-export const loginUrl = `${BASE}/auth/login`
+/** `terms=1`: the button beside it says continuing accepts the Terms (a new Google account records it). */
+export const loginUrl = `${BASE}/auth/login?terms=1`
 export const logout = () => post<{ signed_out: boolean }>('/auth/logout')
 
 // ── The arrangement (2026-10-19): the transcript's order is the playback order ──
@@ -642,6 +643,7 @@ export const putBillingDetails = (d: { country: string | null; legal_name: strin
 export const changePlan = (plan: string) => post<BillingView>('/billing/plan', { plan })
 export const topUp = (credits: number) => post<BillingView>('/billing/topup', { credits })
 export const invoiceUrl = (id: number) => `/api/billing/invoices/${id}`
+export const verifyRazorpay = (paid: { order_id: string; payment_id: string; signature: string }) => post<BillingView>('/billing/razorpay/verify', paid)
 
 /** G6: trust and safety (fake providers, test mode). */
 export const startLiveness = (videoId: string, speaker?: string | null) => post<{ attempt_id: string; sentence: string; test_mode: boolean }>(`/videos/${videoId}/liveness`, { speaker: speaker ?? null })

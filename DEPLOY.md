@@ -12,7 +12,7 @@ Backups and restores are in `OPS.md` (`scripts/backup.sh`, `scripts/restore.sh`)
 
 | Service    | Image                         | What it does |
 |------------|-------------------------------|--------------|
-| `app`      | `backend/Dockerfile`          | The FastAPI API (uvicorn, port 8000, not published). Runs every request-triggered job (turns, renders, exports, imports) on threads inside itself, and still sends review digests. Applies database migrations at start. |
+| `app`      | `backend/Dockerfile`          | The FastAPI API (uvicorn, port 8000, not published). Runs every request-triggered job (turns, renders, exports, imports) on threads inside itself, and sends review digests unless the worker does. Applies database migrations at start. |
 | `worker`   | the same image, `python -m app.worker` | Periodic maintenance: the daily Bin purge (`AVE_PURGE_DAILY`, on here, off on `app`), and the review digests when `AVE_WORKER_DIGESTS=1`. |
 | `web`      | `frontend/Dockerfile`         | nginx serving the built app and proxying `/api/` to `app` (port 8080, loopback only). |
 | `postgres` | `postgres:16-alpine`          | Ready for `DATABASE_URL`. Blank `DATABASE_URL` (the default) keeps SQLite. |
@@ -26,16 +26,20 @@ SQLite is opened by one API process. Do not `--scale app=2`.
 
 ### The worker
 
-The API process still runs its own review-digest scheduler, so the worker's
-digests are off (`AVE_WORKER_DIGESTS=0`) to avoid sending one twice. When the
-API's scheduler gets a switch to turn it off, turn it off there and set
-`AVE_WORKER_DIGESTS=1`. The purge runs only in the worker (compose sets
-`AVE_PURGE_DAILY=0` on `app`); its first run is a day after the worker starts.
+Review digests come from one place: the API by default, or the worker with
+`AVE_WORKER_DIGESTS=1` in `.env` (compose passes it to both, and the API then
+stops its own scheduler, so a digest is never sent twice). The purge runs only
+in the worker (compose sets `AVE_PURGE_DAILY=0` on `app`); its first run is a
+day after the worker starts.
+
+Run **one** `app` container. A second API process on the same database refuses
+to start (`app/lease.py`): rate limits, the spend pause and jobs live in its
+memory. `docker compose up --scale app=2` fails on purpose.
 
 ## 1. The machine
 
 - Ubuntu 24.04 LTS, 4 vCPU, 8 GB RAM, 100 GB+ disk (media is the bulk; size the
-  disk for the uploads you expect, each source up to 500 MB, plus renders).
+  disk for the uploads you expect, each source up to 2 GB, plus renders).
 - A DNS `A` record (and `AAAA` if IPv6) for your domain pointing at the VM.
 - Install Docker Engine and the Compose plugin (docs.docker.com/engine/install/ubuntu),
   then add your deploy user to the `docker` group.

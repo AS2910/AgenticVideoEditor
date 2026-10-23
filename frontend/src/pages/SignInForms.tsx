@@ -66,6 +66,11 @@ export function SignInForms({ onSignedIn }: { onSignedIn: () => void }) {
           Continue with Google
         </a>
       )}
+      {(options?.google ?? true) && (
+        <p className="m-0 text-[13px] text-muted-foreground" data-testid="google-terms">
+          New to Voltage? Continuing with Google accepts the <a href="#terms" target="_blank" rel="noreferrer">Terms</a> and the <a href="#privacy" target="_blank" rel="noreferrer">Privacy notice</a>.
+        </p>
+      )}
       {options?.password && (
         <form className="flex flex-col gap-2.5" aria-label={mode === 'signup' ? 'Make an account' : mode === 'forgot' ? 'Reset your password' : 'Sign in with email and password'}
           onSubmit={(e) => { e.preventDefault(); if (ready && !busy) submit() }}>

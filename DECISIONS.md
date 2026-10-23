@@ -1,3 +1,18 @@
+# Launch rehearsal decisions (overnight run 3, 2026-10-23)
+
+Each: what, why, how to undo. Run 2's decisions follow below.
+
+- Setup: Docker was not installed. Installed Colima, the Docker CLI, compose and buildx, k6 and gitleaks with Homebrew (local tools only; `brew uninstall colima docker docker-compose docker-buildx k6 gitleaks` and `colima delete` undo it). The Colima VM has 4 CPUs, 6 GB and a 60 GB disk.
+- 1: Payments: the Billing page leaves only for an https page on checkout.stripe.com (anything else is refused with "Nothing was charged"), so a bad server answer cannot become an open redirect. Razorpay's checkout.js is loaded from checkout.razorpay.com only when a Razorpay checkout is opened. Undo: revert `lib/checkout.ts` and the `buy` function in BillingCredits.
+- 1: Terms for Google sign-ups: the sign-in page says under the Google button "Continuing with Google accepts the Terms and the Privacy notice" and the button carries `terms=1`; the version and time are stored per owner (`terms:<owner>` in meta, with `via: google`). A clickwrap-style notice, not a checkbox: a checkbox would also stop every returning Google user. A lawyer may want a checkbox; then add one beside the button and send `terms=1` only when ticked. A new person who reached Google without the page is sent back to it with a sentence; anyone who signed in before is never stopped.
+- 1: Cloning stays closed for the public until a real liveness check exists: new flag `voices.cloning`, on for the default owners (AVE_FLAG_OWNERS) and off in the public profile. With it off: POST /voices/mine and /voices/mine/from-speaker answer 403 with a sentence; a speaker's line uses a hand-picked voice or the voice asked for, with the note "Stock voice: voice cloning is not open yet."; the agent's clone_speaker says so before changing anything; the Voices page offers only Describe it. Designed voices stay open. Turn it on for one person on the Admin page (Features). Undo: add `voices.cloning` to `PROFILES["public"]`.
+- 1: One API process per database: a lease row in meta (`api_lease`, renewed every 30 s). A second process refuses to start while the holder is alive: on another host, seen in the last 90 s; on the same host (a container restart), only while its pid runs, so a crashed container restarts at once. AVE_ALLOW_SECOND_API=1 skips it. Undo: drop `_lifespan_with_lease`.
+- 1: Review digests: with AVE_WORKER_DIGESTS=1 the API no longer starts its own digest scheduler (compose now passes the variable to the app too), so turning the worker's on is enough.
+- 1: `tests/store/test_bin.py::test_the_purge_keeps_the_consent_record` failed on main from 23 Oct: it soft-deleted at the real clock but purged at a fixed 21 Oct + 31 days. It now soft-deletes on the test's own clock. Not a product bug.
+- 1: Building the images found three deploy-kit bugs, fixed as part of blocker 1: the image now installs the `postgres` extra (psycopg); Caddy's VOLTAGE_DOMAIN and ACME_EMAIL use `:-` instead of `:?` (`:?` stopped every compose command, with or without the https profile); nginx and Caddy take 2.1 GB bodies (they capped uploads at 520 MB while the app takes 2 GB).
+
+---
+
 # Launch hardening decisions (overnight run 2, 2026-10-21 to 22)
 
 Each: what, why, how to undo. The projects-plan decisions from the night before follow below.

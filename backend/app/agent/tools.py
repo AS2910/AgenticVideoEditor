@@ -59,6 +59,7 @@ class Workbench:
     # 20c: speech clips. None = this setup cannot.
     speakers: Callable[[str], Sequence[Any]] = lambda project_id: []            # -> [Speaker(label, name, voice_id, clone_voice_id)]
     voice_for: Callable[..., Any] | None = None       # (project_id, record, selection, requested, speaker) -> VoiceChoice
+    cloning_open: Callable[[str], bool] | None = None  # owner -> may clone voices (voices.cloning); None: open
     remove_words: Callable[[str, Any, Selection], dict] | None = None           # -> {edit_id, candidate_id, selection}
     shift_words: Callable[[str, Any, Selection, float], dict] | None = None     # -> {edit_id, removed_edit_id, candidate, from, selection}
     move_take: Callable[..., Any] | None = None       # (project_id, record, candidate, start, mix) -> candidate
@@ -1430,6 +1431,8 @@ def _line_at(wb: Workbench, turn: Turn, line_no: Any):
 def _clone_speaker(wb: Workbench, turn: Turn, args: dict) -> ToolResult:
     if wb.voice_for is None:
         return ToolResult("Voices cannot be cloned in this setup.")
+    if wb.cloning_open is not None and not wb.cloning_open(turn.record.owner):
+        return ToolResult("Voice cloning is not open for this account yet. Use a library voice or design one, and say so to the user.")
     spk = _speaker_label(wb, turn, args.get("speaker") or "")
     if spk is None:
         names = ", ".join(f"{s.name} ({s.label})" for s in wb.speakers(turn.project_id)) or "none"

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { BillingView } from '../types'
-import { changePlan, getBilling, invoiceUrl, putBillingDetails, topUp } from '../api'
+import { changePlan, getBilling, invoiceUrl, putBillingDetails, topUp, verifyRazorpay } from '../api'
+import { clearCheckoutParam, returnedFromCheckout, startCheckout } from '../lib/checkout'
 import { cn } from '@/lib/utils'
 import { FillBar } from './bits'
 import { said } from './fmt'
@@ -10,7 +11,8 @@ const money = (n: number, currency: 'USD' | 'INR') => (currency === 'INR' ? `₹
 const credits = (n: number) => `${Number.isInteger(n) ? n : n.toFixed(2)} ${Math.abs(n) === 1 ? 'credit' : 'credits'}`
 
 /** G3 (golive.g3): plan, credits, top-ups, billing details and invoices. Payments go through a
- *  fake provider (Stripe outside India, Razorpay in India), clearly in test mode: no card, no money.
+ *  fake provider (Stripe outside India, Razorpay in India), clearly in test mode: no card, no money;
+ *  with real keys, through the provider's own checkout (lib/checkout.ts).
  *  Credits are dollars of work; "about N minutes" shows only once a cost per exported minute is measured. */
 export function BillingCredits() {
   const [view, setView] = useState<BillingView | null>(null)
@@ -30,9 +32,36 @@ export function BillingCredits() {
   }, [take])
   useEffect(() => { load() }, [load])
 
+  // Back from Stripe's page: the webhook grants the credits, usually within seconds, so read again twice.
+  useEffect(() => {
+    const back = returnedFromCheckout()
+    if (!back) return
+    clearCheckoutParam()
+    if (back === 'cancelled') { setStatus('Payment cancelled. Nothing was charged.'); return }
+    setStatus('Payment received. Your credits show here as soon as the payment is confirmed.')
+    const timers = [3000, 10000].map((ms) => window.setTimeout(load, ms))
+    return () => timers.forEach((t) => window.clearTimeout(t))
+  }, [load])
+
   const run = async (key: string, call: () => Promise<BillingView>, done: (v: BillingView) => string) => {
     setBusy(key); setActionError(null); setStatus(null)
     try { const v = await call(); take(v); setStatus(done(v)) } catch (e) { setActionError(said(e, 'That did not go through. Try again.')) } finally { setBusy(null) }
+  }
+
+  /** A plan or a top-up. A fake provider pays at once (an invoice); a real one answers with a checkout:
+   *  Stripe's page (we leave for it) or Razorpay's window (its signed payment is verified here). */
+  const buy = async (key: string, call: () => Promise<BillingView>, done: (v: BillingView) => string) => {
+    setBusy(key); setActionError(null); setStatus(null)
+    let leaving = false
+    try {
+      const v = await call(); take(v)
+      if (!v.checkout) { setStatus(done(v)); return }
+      const out = await startCheckout(v.checkout)
+      if (out.kind === 'left') { leaving = true; setStatus('Opening the payment page…'); return }
+      if (out.kind === 'closed') { setStatus('Payment window closed. Nothing was charged.'); return }
+      const paid = await verifyRazorpay(out.paid); take(paid)
+      setStatus(`Paid. Invoice ${paid.invoice?.number ?? ''}.`.replace(' .', '.'))
+    } catch (e) { setActionError(said(e, 'That did not go through. Nothing was charged. Try again.')) } finally { if (!leaving) setBusy(null) }
   }
 
   const card = 'rounded-xl border-[1.5px] border-foreground bg-card p-[22px]'
@@ -72,7 +101,7 @@ export function BillingCredits() {
             <span className="tnum">{money(p.price, p.currency)} a month</span>
             {view.account.plan === p.plan_id ? <span className="stamp">Your plan</span> : (
               <button type="button" className="btn sm" disabled={busy !== null} aria-busy={busy === `plan-${p.plan_id}` || undefined}
-                onClick={() => void run(`plan-${p.plan_id}`, () => changePlan(p.plan_id), (v) => `You are on ${p.name}. ${credits(p.credits)} added for this month. Paid in test mode: no money moved. Invoice ${v.invoice?.number ?? ''}.`.replace(' .', '.'))}>
+                onClick={() => void buy(`plan-${p.plan_id}`, () => changePlan(p.plan_id), (v) => `You are on ${p.name}. ${credits(p.credits)} added for this month. Paid in test mode: no money moved. Invoice ${v.invoice?.number ?? ''}.`.replace(' .', '.'))}>
                 {busy === `plan-${p.plan_id}` ? 'Paying…' : `Switch to ${p.name}`}
               </button>
             )}
@@ -86,7 +115,7 @@ export function BillingCredits() {
         <div className="flex flex-wrap gap-2.5">
           {view.topups.map((t) => (
             <button key={t.credits} type="button" className="btn" disabled={busy !== null} aria-busy={busy === `top-${t.credits}` || undefined}
-              onClick={() => void run(`top-${t.credits}`, () => topUp(t.credits), () => `${credits(t.credits)} added. Paid in test mode: no money moved.`)}>
+              onClick={() => void buy(`top-${t.credits}`, () => topUp(t.credits), () => `${credits(t.credits)} added. Paid in test mode: no money moved.`)}>
               {busy === `top-${t.credits}` ? 'Paying…' : `${credits(t.credits)} · ${money(t.price, t.currency)}`}
             </button>
           ))}

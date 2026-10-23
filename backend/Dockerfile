@@ -26,7 +26,9 @@ WORKDIR /srv/backend
 # Dependencies first (cached until pyproject.toml changes): install the
 # package from a stub so only the dependency layer is built here.
 COPY backend/pyproject.toml ./
-RUN mkdir -p app && touch app/__init__.py && pip install . && rm -rf app build *.egg-info
+# The postgres extra (psycopg) too: DATABASE_URL picks Postgres (the rehearsal
+# found the image without it, so a postgres:// URL failed at start).
+RUN mkdir -p app && touch app/__init__.py && pip install ".[postgres]" && rm -rf app build *.egg-info
 
 # The source. The app runs from this tree (PYTHONPATH), not from site-packages:
 # it finds bench/rungs.json and ../help/articles relative to its own files,

@@ -30,6 +30,8 @@ services:
       DATABASE_URL: ${DATABASE_URL:-}
       # The purge runs in the worker, never here as well.
       AVE_PURGE_DAILY: "0"
+      # When the worker sends review digests, the API does not (never both).
+      AVE_WORKER_DIGESTS: ${AVE_WORKER_DIGESTS:-0}
     depends_on:
       postgres:
         condition: service_healthy
@@ -91,8 +93,10 @@ services:
     profiles: ["https"]
     image: caddy:2.8-alpine
     environment:
-      VOLTAGE_DOMAIN: ${VOLTAGE_DOMAIN:?set VOLTAGE_DOMAIN in .env}
-      ACME_EMAIL: ${ACME_EMAIL:?set ACME_EMAIL in .env}
+      # Only Caddy needs these; `:?` here would stop every compose command without the https
+      # profile too (found in the rehearsal), so Caddy refuses a blank domain itself.
+      VOLTAGE_DOMAIN: ${VOLTAGE_DOMAIN:-}
+      ACME_EMAIL: ${ACME_EMAIL:-}
     ports:
       - "80:80"
       - "443:443"

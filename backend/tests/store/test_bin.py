@@ -52,7 +52,7 @@ def test_the_purge_keeps_the_consent_record(repo, tmp_path):
         {"voice_id": "V1", "name": "Mine", "consent_granted_at": "2026-09-01T00:00:00.000Z", "consent_approximate": True,
          "deleted_at": "2026-09-02T00:00:00.000Z", "deleted_by": "local"},
         {"voice_id": "V2", "name": "Designed", "deleted_at": "2026-09-02T00:00:00.000Z"}]))
-    repo.soft_delete("p1", "local")
+    repo.soft_delete("p1", "local", at="2026-10-21T12:00:00.000Z")     # on NOW's clock, not today's (it went stale on 23 Oct)
     report = purge(repo.db, tmp_path / "artifacts", 30, now=NOW + timedelta(days=31))
     assert sorted(report.consent_kept) == ["video:p1", "voice:local:V1"]
     kept = {r["item_id"]: r["consent"] for r in consent_records(repo.db, "local")}

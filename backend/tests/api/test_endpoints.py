@@ -1534,9 +1534,9 @@ def signed_in(monkeypatch, who=("42", "ash@example.com", "Ash", None), allow=(),
 HEADERS = {"X-Requested-With": "voltage"}
 
 
-def login(client):
+def login(client, terms=True):
     from urllib.parse import parse_qs, urlparse
-    sent = client.get("/auth/login", follow_redirects=False)
+    sent = client.get("/auth/login?terms=1" if terms else "/auth/login", follow_redirects=False)
     assert sent.status_code == 302
     state = parse_qs(urlparse(sent.headers["location"]).query)["state"][0]
     return client.get(f"/auth/callback?code=c0de&state={state}", follow_redirects=False)
@@ -1579,6 +1579,28 @@ def test_with_sign_in_on_nothing_is_reachable_until_you_sign_in(client, sample_v
 def main_owner_of(project_id):
     import app.api.main as main
     return main.repo.get(project_id).owner
+
+
+def test_a_google_sign_up_records_the_terms_it_accepted(client, monkeypatch):
+    """Rehearsal item 1 (launch blocker 2): the sign-in page's Google button says continuing accepts
+    the Terms; a new person who came another way is sent back to it, and someone who signed in
+    before is never stopped."""
+    import app.api.main as main
+    from app.accounts_api import TERMS_VERSION, terms_record
+    signed_in(monkeypatch, who=("51", "new@example.com", "N", None))
+    back = login(client, terms=False)
+    assert back.status_code == 302 and back.headers["location"].startswith("http://localhost:5173/#login?error=")
+    assert client.get("/auth/me").json()["user"] is None
+    assert terms_record(main.database, "google:51") is None
+    back = login(client)
+    assert back.status_code == 302 and back.headers["location"] == "http://localhost:5173/"
+    rec = terms_record(main.database, "google:51")
+    assert rec["version"] == TERMS_VERSION and rec["via"] == "google" and rec["at"]
+    # Signed in before (an address is on file): no Terms line needed to come back.
+    client.post("/auth/logout", headers=HEADERS)
+    main.email_mod.remember_address(main.database, "google:52", "old@example.com")
+    signed_in(monkeypatch, who=("52", "old@example.com", "O", None))
+    assert login(client, terms=False).headers["location"] == "http://localhost:5173/"
 
 
 def test_a_stale_or_mismatched_login_is_refused(client, monkeypatch):

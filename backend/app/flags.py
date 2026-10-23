@@ -22,13 +22,18 @@ GOLIVE_FLAGS = tuple(f"golive.g{n}" for n in range(1, 9))
 # the default owners included; they are usually set for everyone at once
 # with the owner `*` (`FlagStore.set(flag, ALL, True)`).
 LAUNCH_FLAGS = ("launch.invite_only", "launch.paid_paused")
-KNOWN = PHASE_FLAGS + GOLIVE_FLAGS + LAUNCH_FLAGS
+# Rehearsal item 1 (launch blocker 4): cloning a voice (your own, or a
+# speaker's) waits for a real liveness check. On for the default owners, not
+# in the public profile; an admin turns it on per person (Features).
+VOICE_FLAGS = ("voices.cloning",)
+KNOWN = PHASE_FLAGS + GOLIVE_FLAGS + LAUNCH_FLAGS + VOICE_FLAGS
 # The owner a row names to set a flag for everyone. An owner's own row still wins.
 ALL = "*"
 # Launch item 10: AVE_LAUNCH_PROFILE=public turns these on for everyone: the
 # core editor and folders (never flagged), A1 and A3 (projects.consistency),
 # G1 to G4 and G6 to G8 (the admin page itself stays admins only). Phases B,
-# C, D and A2 stay off; an admin turns them on per owner (a row).
+# C, D and A2 stay off, and so does voices.cloning; an admin turns them on per
+# owner (a row).
 PROFILES = {
     "public": frozenset({"projects.consistency", "golive.g1", "golive.g2", "golive.g3", "golive.g4",
                          "golive.g6", "golive.g7", "golive.g8"}),

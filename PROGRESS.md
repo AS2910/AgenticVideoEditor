@@ -1,3 +1,15 @@
+# Launch rehearsal (overnight run 3, 2026-10-23)
+
+Branch `overnight/launch-rehearsal`, cut from main `47ff162` (overnight/launch-hardening was merged). Worktree `../AgenticVideoEditor-rehearsal`.
+Target: public launch on 4 Nov 2026. Spec: the user's "Overnight run 3" message (items 1 to 11). No new product features.
+Decisions without the user: the top section of DECISIONS.md. Each commit is gated by `make launch-check SKIP_ENV=1` run in a clean worktree of that commit (no production secrets on this laptop).
+
+| # | Item | Status | Commit | Notes |
+|---|---|---|---|---|
+| 1 | Launch blockers fixable in code | done | (this) | Payments: Billing follows a real checkout (Stripe page only on checkout.stripe.com; Razorpay checkout.js and /billing/razorpay/verify); back from Stripe it says the payment is being confirmed and reads billing again. Terms: Google sign-ups record version and time (`terms:<owner>` in meta, forgotten with the account). Cloning: `voices.cloning` (off in the public profile) gates own-voice, from-speaker, the agent's clone_speaker and speakers' lines. One server: `app/lease.py`. Digests: the API stops its scheduler when AVE_WORKER_DIGESTS=1. Images built for the first time (Colima on this laptop): three deploy bugs fixed (psycopg missing from the image, compose `:?` on Caddy vars, 520 MB upload caps). Left for you: see MORNING.md LAUNCH BLOCKERS. |
+
+---
+
 # Launch hardening (overnight run 2, 2026-10-21 to 22)
 
 Branch `overnight/launch-hardening`, cut from main `dc292d7` (overnight/projects-plan was already merged to main). Worktree `../AgenticVideoEditor-launch`.

@@ -4,7 +4,7 @@ off for everyone else; a stored row wins over the default."""
 from fastapi.testclient import TestClient
 
 from app.config import load_settings
-from app.flags import GOLIVE_FLAGS, PHASE_FLAGS, FlagStore
+from app.flags import GOLIVE_FLAGS, VOICE_FLAGS, PHASE_FLAGS, FlagStore
 from app.store.db import Database
 
 
@@ -14,7 +14,7 @@ def test_phase_and_golive_flags_are_on_for_the_default_owners_only():
         assert flags.enabled(flag, "local") and flags.enabled(flag, "team@example.com")
         assert not flags.enabled(flag, "someone@example.com")
     assert not flags.enabled("made.up", "local")                    # an unknown flag is off by default
-    assert flags.enabled_for("local") == sorted((*PHASE_FLAGS, *GOLIVE_FLAGS))
+    assert flags.enabled_for("local") == sorted((*PHASE_FLAGS, *GOLIVE_FLAGS, *VOICE_FLAGS))
     assert flags.enabled_for("someone@example.com") == []
 
 

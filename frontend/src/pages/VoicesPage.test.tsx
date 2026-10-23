@@ -23,13 +23,13 @@ const PREVIEWS = [1, 2, 3].map((n) => ({ generated_voice_id: `g${n}`, sha256: St
 
 type Call = { url: string; method: string; body: Record<string, unknown> | undefined }
 /** Routes by URL and records every write. */
-function routeFetch() {
+function routeFetch(cloning?: boolean) {
   const calls: Call[] = []
   const f = vi.fn(async (url: string, init?: RequestInit) => {
     const method = init?.method ?? 'GET'
     const body = typeof init?.body === 'string' ? JSON.parse(init.body) : undefined
     if (method !== 'GET') calls.push({ url, method, body })
-    if (url.endsWith('/voices') && method === 'GET') return ok({ default: 'c1', voices: CATALOGUE, mine: MINE, slots: { used: 14, limit: 30 } })
+    if (url.endsWith('/voices') && method === 'GET') return ok({ default: 'c1', voices: CATALOGUE, mine: MINE, slots: { used: 14, limit: 30 }, ...(cloning === undefined ? {} : { cloning }) })
     if (url.endsWith('/voices/made')) return ok({ voices: MADE })
     if (url.endsWith('/voices/speakers')) return ok({ speakers: SPEAKERS })
     if (url.endsWith('/voices/mine/keep')) return ok({ voice_id: 'm1', name: 'Diwali Narrator', seconds: 0, at: '2026-10-18T10:00:00Z', kind: 'designed' })
@@ -180,5 +180,13 @@ describe('VoicesPage', () => {
     await waitFor(() => expect(calls).toContainEqual({ url: '/api/voices/mine/v1', method: 'DELETE', body: undefined }))
     await waitFor(() => expect(screen.queryByText('Your own voice, from a 42 s recording')).not.toBeInTheDocument())
     expect(screen.getByText(/Voice slots/)).toHaveTextContent('13 / 30')
+  })
+  it('offers only Describe it while cloning is closed for the account', async () => {
+    routeFetch(false)
+    render(<VoicesPage me={ME} />)
+    expect(await screen.findByTestId('cloning-closed')).toHaveTextContent('Cloning a voice opens once we can check that it is really yours.')
+    const ways = screen.getByRole('radiogroup', { name: 'How to make it' })
+    expect(within(ways).getAllByRole('radio').map((r) => r.dataset.way)).toEqual(['describe'])
+    expect(within(ways).getByRole('radio')).toHaveAttribute('aria-checked', 'true')
   })
 })

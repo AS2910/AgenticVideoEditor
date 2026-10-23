@@ -1057,4 +1057,10 @@ export interface BillingView {
   invoices: BillingInvoice[]
   states: { code: string; name: string }[]
   invoice?: BillingInvoice
+  /** A real provider's open checkout (Stripe's page url, or what Razorpay's checkout.js needs). */
+  checkout?: BillingCheckout
+}
+export interface BillingCheckout {
+  provider: string; checkout_id: string; url: string; total: number; currency: 'USD' | 'INR'; test_mode: boolean
+  client: { key_id: string; order_id: string; amount: number; currency: string; description: string } | null
 }

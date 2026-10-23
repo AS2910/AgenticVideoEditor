@@ -1329,7 +1329,7 @@ describe('App sign-in (Phase 9c)', () => {
     }))
     render(<App />)
     const door = await screen.findByRole('link', { name: /continue with google/i })
-    expect(door).toHaveAttribute('href', '/api/auth/login')
+    expect(door).toHaveAttribute('href', '/api/auth/login?terms=1')
     expect(screen.queryByRole('button', { name: /sample ad/i })).not.toBeInTheDocument()
   })
 

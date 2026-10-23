@@ -6,7 +6,8 @@ describe('LoginPage', () => {
   it('offers Google sign-in and says what Voltage does', () => {
     const { container } = render(<LoginPage />)
     expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('Change what your video says.')
-    expect(screen.getByRole('link', { name: 'Continue with Google' })).toHaveAttribute('href', '/api/auth/login')
+    expect(screen.getByRole('link', { name: 'Continue with Google' })).toHaveAttribute('href', '/api/auth/login?terms=1')
+    expect(screen.getByTestId('google-terms')).toHaveTextContent('Continuing with Google accepts the Terms and the Privacy notice.')
     expect(screen.getByText(/Private by default/)).toBeInTheDocument()
     expect(screen.getByText(/Videos up to 10 min/)).toBeInTheDocument()
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
