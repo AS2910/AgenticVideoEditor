@@ -58,7 +58,13 @@ export async function noErrorBanner(page: Page): Promise<void> {
 
 /** Make an account on the sign-in page (Terms accepted), then open the confirm link from the outbox. */
 export async function signUp(page: Page, email: string, rec?: Recorder): Promise<void> {
-  if (!/#invite\//.test(page.url())) await page.goto('/')
+  if (!/#invite\//.test(page.url())) {
+    // Item 8: a signed-out visitor at / sees the landing page (its pricing read from the server).
+    await page.goto('/')
+    await expect(page.getByTestId('landing-pricing')).toBeVisible({ timeout: 60_000 })
+    await expect(page.getByTestId('plan-card').first()).toBeVisible()
+    await page.goto('/#login')
+  }
   await page.getByRole('button', { name: 'New here? Make an account' }).click()
   await page.getByLabel('Email').fill(email)
   await page.getByLabel('Password').fill(PASSWORD)
@@ -234,8 +240,11 @@ export async function deleteAccount(page: Page, email: string, rec?: Recorder): 
   await ask.getByRole('textbox').fill('DELETE')
   await rec?.shot()
   await ask.getByRole('button', { name: 'Delete everything' }).click()
-  await expect(page.getByTestId('sign-in-forms')).toBeVisible({ timeout: 60_000 })
+  // Signed out: the landing page (item 8), then the sign-in page.
+  await expect(page.getByTestId('landing-pricing')).toBeVisible({ timeout: 60_000 })
   await rec?.shot()
+  await page.goto('/#login')
+  await expect(page.getByTestId('sign-in-forms')).toBeVisible({ timeout: 60_000 })
   await signIn(page, email)
   await expect(page.getByTestId('sign-in-forms').getByRole('alert')).toBeVisible()
   await expect(page.getByTestId('sign-in-forms')).toBeVisible()
