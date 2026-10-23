@@ -17,21 +17,48 @@ share link into one that downloads the file itself.
 `download` streams with a size cap (2 GB), sniffs what arrived (a web page
 or a file that is not a video is refused with a sentence), and reports
 progress. The HTTP client is injected, so tests never touch the network.
+
+SSRF (launch item 5): only Drive and Dropbox links are accepted, but a
+redirect could point anywhere, so `download` follows redirects itself (at
+most `MAX_REDIRECTS`), checks every hop's address (`check_url`: http(s) on
+ports 80/443, no metadata or internal names, no literal private address), and
+the real client (`safe_client`) resolves each host once at connect time,
+refuses it when any address is not public (`check_ip`: private, CGNAT,
+loopback, link-local, unique-local, IPv4-mapped/6to4/Teredo of those,
+multicast, reserved, 0.0.0.0) and connects to the address it checked, so a
+DNS answer that changes between the check and the connect (rebinding) has
+nothing to change. TLS still verifies the original host name (SNI and the
+certificate come from the URL, not the socket). No proxies from the
+environment: a proxy would connect for us and skip the check.
 """
 from __future__ import annotations
 
+import ipaddress
 import re
+import socket
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Protocol
 from urllib.parse import parse_qs, quote, unquote, urlencode, urlparse, urlunparse
 
+import httpcore
 import httpx
+
+from app.filenames import safe_filename
 
 MAX_LINK_BYTES = 2 * 1024 ** 3          # 2 GB
 CHUNK = 1 << 20
 SNIFF_BYTES = 64
 VIDEO_SUFFIXES = (".mp4", ".mov", ".m4v", ".webm", ".mkv", ".avi", ".ts")
+MAX_REDIRECTS = 5
+ALLOWED_PORTS = (80, 443)
+# Names that reach cloud metadata or the machine itself whatever DNS says.
+BLOCKED_NAMES = ("localhost", "metadata", "metadata.google.internal", "metadata.goog", "instance-data",
+                 "instance-data.ec2.internal", "metadata.azure.com", "kubernetes.default", "kubernetes.default.svc")
+BLOCKED_SUFFIXES = (".localhost", ".local", ".internal", ".intranet", ".lan", ".home.arpa", ".svc",
+                    ".cluster.local")
+# Tests swap this for a fake DNS; the real one is the system resolver.
+resolver: Callable[..., list] = socket.getaddrinfo
 
 
 class ImportRefused(ValueError):
@@ -110,6 +137,94 @@ IMPORTERS: tuple[LinkImporter, ...] = (GoogleDrive(), Dropbox(), YouTubeOwned())
 NOT_A_LINK = "Paste a share link from Google Drive or Dropbox."
 
 
+BLOCKED = "Voltage only downloads from public addresses. That link points somewhere it cannot go."
+_CGNAT = ipaddress.ip_network("100.64.0.0/10")
+
+
+def check_ip(ip: ipaddress.IPv4Address | ipaddress.IPv6Address | str) -> None:
+    """Refuse any address that is not plainly public (raises ImportRefused)."""
+    ip = ipaddress.ip_address(ip) if isinstance(ip, str) else ip
+    if isinstance(ip, ipaddress.IPv6Address):
+        # An IPv6 form of an IPv4 address is judged as that IPv4 address.
+        inner = ip.ipv4_mapped or ip.sixtofour or (ip.teredo[1] if ip.teredo else None)
+        if inner is None and ip.packed[:12] == bytes(12) and int(ip) > 1:   # ::a.b.c.d (IPv4-compatible)
+            inner = ipaddress.IPv4Address(ip.packed[12:])
+        if inner is None and ip.packed[:12] == bytes.fromhex("0064ff9b0000000000000000"):  # NAT64 64:ff9b::/96
+            inner = ipaddress.IPv4Address(ip.packed[12:])
+        if inner is not None:
+            check_ip(inner)
+    if (ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_multicast or ip.is_reserved
+            or ip.is_unspecified or not ip.is_global
+            or (isinstance(ip, ipaddress.IPv4Address) and ip in _CGNAT)
+            or (isinstance(ip, ipaddress.IPv6Address) and ip.is_site_local)):
+        raise ImportRefused(BLOCKED)
+
+
+def check_url(url: str) -> None:
+    """Refuse a download address before any connection: not http(s), an odd
+    port, credentials in it, a metadata or internal name, or a literal
+    address that is not public. Names are resolved and checked at connect
+    time (`safe_client`)."""
+    try:
+        parts = httpx.URL(url)
+    except Exception:  # noqa: BLE001 - an address httpx cannot read is refused
+        raise ImportRefused(BLOCKED) from None
+    if parts.scheme not in ("http", "https") or not parts.host:
+        raise ImportRefused(BLOCKED)
+    if parts.userinfo:
+        raise ImportRefused(BLOCKED)
+    if (parts.port or (443 if parts.scheme == "https" else 80)) not in ALLOWED_PORTS:
+        raise ImportRefused(BLOCKED)
+    host = parts.host.rstrip(".").lower()
+    if host in BLOCKED_NAMES or host.endswith(BLOCKED_SUFFIXES) or "." not in host.strip("[]") and ":" not in host:
+        raise ImportRefused(BLOCKED)
+    try:
+        literal = ipaddress.ip_address(host.strip("[]"))
+    except ValueError:
+        return
+    check_ip(literal)
+
+
+def resolve_public(host: str, port: int) -> str:
+    """Resolve `host` once and return one address to connect to, refusing
+    when any answer is not public (one bad answer is enough to refuse: a
+    rebinding name often mixes a public and a private one)."""
+    name = host.strip("[]").rstrip(".").lower()
+    if name in BLOCKED_NAMES or name.endswith(BLOCKED_SUFFIXES):
+        raise ImportRefused(BLOCKED)
+    try:
+        answers = resolver(name, port, 0, socket.SOCK_STREAM)
+    except OSError:
+        raise httpcore.ConnectError(f"could not resolve {name}") from None
+    ips = [ipaddress.ip_address(a[4][0].split("%", 1)[0]) for a in answers]
+    if not ips:
+        raise httpcore.ConnectError(f"could not resolve {name}")
+    for ip in ips:
+        check_ip(ip)
+    return str(ips[0])
+
+
+class _GuardedBackend(httpcore.SyncBackend):
+    """Resolve, check, then connect to the checked address (not the name)."""
+
+    def connect_tcp(self, host, port, timeout=None, local_address=None, socket_options=None):
+        if port not in ALLOWED_PORTS:
+            raise ImportRefused(BLOCKED)
+        return super().connect_tcp(resolve_public(host, port), port, timeout=timeout,
+                                   local_address=local_address, socket_options=socket_options)
+
+    def connect_unix_socket(self, *args, **kwargs):  # pragma: no cover - never for a link
+        raise ImportRefused(BLOCKED)
+
+
+def safe_client() -> httpx.Client:
+    """The real client for link downloads: checked connects, no env proxies,
+    no automatic redirects (`download` follows and checks each one)."""
+    transport = httpx.HTTPTransport(retries=0)
+    transport._pool._network_backend = _GuardedBackend()  # httpcore 1.x: read when each connection opens
+    return httpx.Client(transport=transport, trust_env=False, follow_redirects=False)
+
+
 def importer_for(url: str) -> LinkImporter:
     parts = urlparse(url.strip())
     if parts.scheme not in ("http", "https") or not parts.netloc:
@@ -148,15 +263,45 @@ def _filename(response: httpx.Response, fallback: str | None) -> str | None:
     cd = response.headers.get("content-disposition", "")
     star = re.search(r"filename\*\s*=\s*[^']*''([^;]+)", cd, re.I)
     if star:
-        return Path(unquote(star.group(1).strip().strip('"'))).name or fallback
+        return safe_filename(unquote(star.group(1).strip().strip('"')), fallback or "import")
     plain = re.search(r'filename\s*=\s*"?([^";]+)"?', cd, re.I)
     if plain:
-        return Path(plain.group(1).strip()).name or fallback
+        return safe_filename(plain.group(1).strip(), fallback or "import")
     return fallback
 
 
 def size_words(n: int) -> str:
     return f"{n / 1024 ** 3:.1f} GB" if n >= 1024 ** 3 else f"{max(1, round(n / 1024 ** 2))} MB"
+
+
+class _Follow:
+    """`client.stream` that follows redirects itself, checking every hop."""
+
+    def __init__(self, client: httpx.Client, url: str) -> None:
+        self.client, self.url, self._cm = client, url, None
+
+    def __enter__(self) -> httpx.Response:
+        url = self.url
+        for _ in range(MAX_REDIRECTS + 1):
+            check_url(url)
+            cm = self.client.stream("GET", url, follow_redirects=False, timeout=httpx.Timeout(30.0, read=120.0))
+            response = cm.__enter__()
+            if response.is_redirect and response.headers.get("location"):
+                nxt = str(response.url.join(response.headers["location"]))
+                cm.__exit__(None, None, None)
+                url = nxt
+                continue
+            self._cm = cm
+            return response
+        raise ImportRefused("That link redirects too many times. Copy the share link again and paste it.")
+
+    def __exit__(self, *exc) -> None:
+        if self._cm is not None:
+            self._cm.__exit__(*exc)
+
+
+def _open(client: httpx.Client, url: str) -> _Follow:
+    return _Follow(client, url)
 
 
 def download(resolved: Resolved, dest_dir: Path, *, client: httpx.Client, cap: int = MAX_LINK_BYTES,
@@ -166,7 +311,7 @@ def download(resolved: Resolved, dest_dir: Path, *, client: httpx.Client, cap: i
     anything over the cap, anything that is not a video."""
     where = resolved.label
     try:
-        with client.stream("GET", resolved.url, follow_redirects=True, timeout=httpx.Timeout(30.0, read=120.0)) as response:
+        with _open(client, resolved.url) as response:
             if response.status_code in (401, 403):
                 raise ImportRefused(f"{where} would not share that file. Set it to anyone with the link and try again.")
             if response.status_code == 404:
