@@ -128,7 +128,7 @@ def _rows(conn) -> dict:
 
 
 # Numbers held for steps on other branches (0032 accounts, 0033 search index).
-RESERVED = {32, 33, 36, 37, 38}
+RESERVED = {32, 33, 38}
 
 
 def test_versions_are_numbered_from_one_without_gaps():
@@ -175,7 +175,8 @@ def test_a_database_made_before_the_runner_is_recognised_and_left_as_it_was():
 @pytest.mark.parametrize("migration", all_migrations(), ids=lambda m: f"{m.version:04d}_{m.name}")
 def test_each_step_goes_down_to_the_shape_before_it_and_up_again(migration):
     conn = _conn()
-    migrate.up(conn, migration.version - 1)
+    # Count the steps before it (a reserved number not landed yet leaves a gap).
+    migrate.up(conn, [m.version for m in all_migrations()].index(migration.version))
     before = _shape(conn)
     migrate.up(conn, 1)
     after = _shape(conn)

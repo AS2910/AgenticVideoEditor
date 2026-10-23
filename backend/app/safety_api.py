@@ -154,13 +154,15 @@ def report_abuse(req: AbuseReport, request: Request) -> dict:
         reporter = api.signed_in_user(request) if api.settings.auth_mode != "off" else None
     except HTTPException:
         reporter = None
+    from app.admin import admin_owner_ids
+    admins = admin_owner_ids(api.database, api.settings.admin_owners)     # item 10: ids, and admins named by address
     with api.database.tx() as c:
         cur = c.execute("INSERT INTO abuse_reports (location, kind, details, contact, reporter, created_at) VALUES (?, ?, ?, ?, ?, ?)",
                         (req.location.strip(), req.kind, req.details.strip(), req.contact.strip(), reporter, now_iso()))
         report_id = int(cur.lastrowid)
         title = f"Abuse report #{report_id}: {ABUSE_KINDS[req.kind]}."
         analytics.track_in(c, "abuse.reported", reporter or "public", {"kind": req.kind})
-        for admin in api.settings.admin_owners:
+        for admin in admins:
             api.inbox.add_in(c, admin, "abuse_report", title, body=req.location.strip()[:300], link="#admin")
     from app.notify import templates
     api.email_sender.send(templates.email("abuse_report", api.settings.trust_email, public_url=api.settings.public_url,

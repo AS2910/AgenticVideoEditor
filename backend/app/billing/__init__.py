@@ -417,6 +417,21 @@ def refund(db, owner: str, invoice_id: int, provider: BillingProvider | None = N
     return {"invoice": inv, "refund_id": refund_id, "credits_taken_back": taken}
 
 
+def admin_grant(db, owner: str, credits_: float, reason: str) -> dict:
+    """Item 10: credits an admin gives (kind `admin`, never lapse), or takes back
+    as a credit reversal (a negative `refund` grant, owed from what is left)."""
+    if not credits_ or abs(float(credits_)) > 10_000:
+        raise BillingError("Give between 0.01 and 10,000 credits.")
+    account(db, owner)
+    with db.tx() as c:
+        if credits_ > 0:
+            _grant_in(c, owner, "admin", float(credits_), None, f"Given by Voltage: {reason}"[:200])
+        else:
+            _grant_in(c, owner, "refund", float(credits_), None, f"Credit reversal: {reason}"[:200])
+        gid = int(c.execute("SELECT MAX(id) FROM credit_grants WHERE owner = ?", (owner,)).fetchone()[0])
+    return {"grant_id": gid, "credits": float(credits_)}
+
+
 def refunded(db, invoice_id: int) -> bool:
     with db.tx() as c:
         return c.execute("SELECT 1 FROM meta WHERE key = ?", (_refund_key(invoice_id),)).fetchone() is not None

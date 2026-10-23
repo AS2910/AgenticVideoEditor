@@ -561,6 +561,34 @@ export const setPaidPause = (paused: boolean) => put<AdminSpend>('/admin/paid-pa
 export interface AdminFlags { owner: string; profile: string | null; flags: { flag: string; on: boolean; source: 'owner' | 'everyone' | 'profile' | 'default_owner' | 'off' }[] }
 export const getAdminFlags = (owner: string) => get<AdminFlags>(`/admin/flags?owner=${encodeURIComponent(owner)}`)
 export const setAdminFlag = (owner: string, flag: string, enabled: boolean | null) => put<AdminFlags>('/admin/flags', { owner, flag, enabled })
+/** Rehearsal item 10: find a person, read their account, act on it; every action lands in the audit trail. */
+export interface AdminUserHit { owner: string; emails: string[]; kind: string; seen_as: string[]; suspended: boolean }
+export interface AdminAuditEntry { id: number; at: string; actor: string; action: string; target: string | null; reason: string; details: Record<string, unknown> }
+export interface AdminUser {
+  owner: string; emails: string[]; kind: string; is_admin: boolean
+  account: { created_at: string; verified_at: string | null; deleted_at: string | null } | null
+  suspended: { reason: string; suspended_by: string; suspended_at: string } | null
+  workspace: { workspace_id: string; name: string | null; members: { member: string; email: string | null; name: string | null; role: string; joined_at: string; spend_limit_usd: number | null }[] }
+  member_of: { workspace_id: string; name: string; role: string; owner?: string }[]
+  spend: { today_usd: number; month_usd: number; all_time_usd: number; by_vendor: Record<string, number>; by_vendor_month: Record<string, number> }
+  credits: { granted: number; used: number; left: number; lapsed: number; grants: { kind: string; credits: number; reference: string; at: string; expires_at: string | null; left: number }[] } | null
+  invoices: { id: number; number: string; description: string; total: number; currency: string; provider: string; test_mode: boolean; issued_at: string; refunded: boolean }[]
+  jobs: { job_id: string; video_id: string; kind: string; status: string; error_code: string | null; error_text: string | null; created_at: string; finished_at: string | null; cost_usd: number | null }[]
+  errors: { id: number; owner: string | null; source: string; message: string; location: string; at: string }[]
+  audit: AdminAuditEntry[]
+}
+const ownerPath = (owner: string) => `/admin/users/${encodeURIComponent(owner)}`
+export const findAdminUsers = async (q: string) => (await get<{ users: AdminUserHit[] }>(`/admin/users?q=${encodeURIComponent(q)}`)).users
+export const getAdminUser = (owner: string) => get<AdminUser>(ownerPath(owner))
+export const grantAdminCredits = (owner: string, credits: number, reason: string) => post<AdminUser>(`${ownerPath(owner)}/grant`, { credits, reason })
+export const refundAdmin = (owner: string, reason: string, target: { invoice_id: number } | { credits: number }) => post<AdminUser>(`${ownerPath(owner)}/refund`, { reason, ...target })
+export const suspendAdminUser = (owner: string, reason: string) => post<AdminUser>(`${ownerPath(owner)}/suspend`, { reason })
+export const unsuspendAdminUser = (owner: string, reason: string) => post<AdminUser>(`${ownerPath(owner)}/unsuspend`, { reason })
+export const revokeAdminShare = (link: string, reason: string) => {
+  const id = link.trim().split('#s/').pop()?.split('.')[0] ?? ''
+  return post<{ share_id: string; owner: string; state: string }>(`/admin/shares/${encodeURIComponent(id)}/revoke`, { reason })
+}
+export const getAdminAudit = async (limit = 50) => (await get<{ entries: AdminAuditEntry[] }>(`/admin/audit?limit=${limit}`)).entries
 export const getMyFlags = async () => (await get<{ flags: string[] }>('/me/flags')).flags
 /** Everything of yours: every project, take and voice, and the consent records. */
 export async function deleteAccount(): Promise<void> {

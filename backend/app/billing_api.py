@@ -197,6 +197,7 @@ async def razorpay_webhook(request: Request) -> dict:
 class RefundRequest(BaseModel):
     owner: str
     invoice_id: int
+    reason: str = ""          # item 10: kept in the audit trail
 
 
 @router.post("/admin/billing/refund")
@@ -217,5 +218,8 @@ def admin_refund(req: RefundRequest, request: Request) -> dict:
         done = billing.refund(api.database, req.owner, req.invoice_id, provider_named(found["provider"], api.settings))
     except billing.BillingError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from None
+    from app import admin
+    admin.audit(api.database, user, "refund", req.owner, req.reason,
+                {"invoice": found["number"], "refund_id": done["refund_id"], "credits_taken_back": done["credits_taken_back"]})
     analytics.track("billing.refunded", req.owner, {"invoice": found["number"], "currency": found["currency"]})
     return done

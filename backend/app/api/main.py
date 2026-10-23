@@ -491,7 +491,15 @@ def media_owner(request: Request, mt: str | None = None) -> str:
     payload = auth.verify(mt, share_key, max_age=MEDIA_SECONDS)
     if not payload or payload.get("k") != MEDIA_KIND or not isinstance(payload.get("o"), str):
         raise HTTPException(status_code=403, detail="This media link has expired. Reload the page to get a fresh one.")
+    _refuse_suspended(payload["o"])
     return payload["o"]
+
+
+def _refuse_suspended(owner: str | None) -> None:
+    """Item 10: 403 with the sentence when the owner is suspended."""
+    from app import admin as admin_mod
+    if owner and admin_mod.any_suspended(database) and admin_mod.suspension(database, owner):
+        raise HTTPException(status_code=403, detail=admin_mod.SUSPENDED)
 
 
 @app.get("/me/media-token")
@@ -526,11 +534,44 @@ def paid_state() -> dict:
             "today_usd": round(today, 4), "cap_usd": cap, "resumes_at": tomorrow if capped and not switch else None}
 
 
-def _ensure_paid_open() -> None:
+def _ensure_paid_open(project_id: str | None = None) -> None:
     state = paid_state()
     if state["paused"]:
         analytics.track("paid.paused_refusal", (acting.get().user if acting.get() else None), {"reason": state["reason"]})
         raise PaidPaused(state["reason"])
+    # Item 10: a suspended owner (or someone acting in their workspace) stops at the next paid step.
+    me = acting.get()
+    owners = {me.owner, me.user} if me else set()
+    if project_id:
+        if project_id.startswith("user-"):
+            owners.add(project_id[5:])
+        else:
+            record = repo.get(project_id)
+            if record is not None:
+                owners.add(record.owner)
+    _ensure_not_suspended(*owners)
+
+
+def _ensure_not_suspended(*owners: str | None) -> None:
+    from app import admin as admin_mod
+    if not admin_mod.any_suspended(database):
+        return
+    for who in owners:
+        if who and admin_mod.suspension(database, who):
+            raise admin_mod.AccountSuspended()
+
+
+def stop_work_of(owner: str) -> int:
+    """Item 10: cancel every queued or running job in the owner's workspace (a suspension)."""
+    wid = members_store.workspace_of(database, owner)
+    with database.tx() as c:
+        ids = [r[0] for r in c.execute("SELECT job_id FROM jobs WHERE status IN ('queued', 'running') "
+                                       "AND (workspace_id = ? OR project_id = ?)", (wid, f"user-{owner}"))]
+    stopped = 0
+    for job_id in ids:
+        if activity.cancel(job_id, "Stopped: this account is suspended."):
+            stopped += 1
+    return stopped
 
 
 budget.before_charge = _ensure_paid_open
@@ -563,6 +604,7 @@ def get_admin_spend(request: Request) -> dict:
 
 class PauseRequest(BaseModel):
     paused: bool
+    reason: str = ""          # item 10: kept in the audit trail
 
 
 @app.put("/admin/paid-pause")
@@ -571,6 +613,8 @@ def set_paid_pause(req: PauseRequest, request: Request) -> dict:
     who = _admin_or_404(request)
     from app.flags import ALL
     flags.set("launch.paid_paused", ALL, req.paused)
+    from app import admin as admin_mod
+    admin_mod.audit(database, who, "pause" if req.paused else "resume", None, (req.reason or "").strip(), {})
     log.warning("paid work %s by %s", "paused" if req.paused else "resumed", who)
     analytics.track("paid.switch", who, {"paused": req.paused})
     return get_admin_spend(request)
@@ -600,6 +644,9 @@ def set_admin_flag(req: FlagChange, request: Request) -> dict:
         flags.clear(req.flag, req.owner.strip())
     else:
         flags.set(req.flag, req.owner.strip(), req.enabled)
+    from app import admin as admin_mod
+    admin_mod.audit(database, who, "flag", req.owner.strip(), "",
+                    {"flag": req.flag, "enabled": req.enabled})
     log.warning("flag %s for %s set to %s by %s", req.flag, req.owner, req.enabled, who)
     return get_admin_flags(request, req.owner.strip())
 
@@ -639,6 +686,7 @@ def _ensure_credits(owner: str) -> None:
     """G3: with billing on, paid work stops when the owner's credits are used up
     (the hard ceiling; CreditsUsedUp is a SpendCeilingReached, so every caller
     already turns it into the sentence)."""
+    _ensure_not_suspended(owner)          # item 10: before credits, so the sentence says why
     if not flags.enabled("golive.g3", owner):
         return
     from app import billing
@@ -830,6 +878,8 @@ def auth_callback(request: Request, code: str | None = None, state: str | None =
     if _new_person_refused(who.owner, who.email):
         from app.accounts_api import INVITE_ONLY
         raise HTTPException(status_code=403, detail=INVITE_ONLY)
+    if suspended_sign_in(who.owner):                                  # item 10: no session for a suspended owner
+        return suspended_landing()
     from app.accounts_api import record_terms, terms_record
     if terms_record(database, who.owner) is None:
         if not login.get("terms") and not email_mod.address_for(database, who.owner):
@@ -852,6 +902,17 @@ def auth_callback(request: Request, code: str | None = None, state: str | None =
     )
     response.delete_cookie(auth.LOGIN_COOKIE, path="/")
     return response
+
+
+def suspended_sign_in(owner: str) -> bool:
+    from app import admin as admin_mod
+    return admin_mod.any_suspended(database) and admin_mod.suspension(database, owner) is not None
+
+
+def suspended_landing() -> RedirectResponse:
+    """Back to the sign-in page with the sentence (a link or Google's redirect lands here)."""
+    from app import admin as admin_mod
+    return RedirectResponse(f"{settings.public_url}/#login?error={quote(admin_mod.SUSPENDED)}", status_code=302)
 
 
 @app.post("/auth/logout")
@@ -7787,6 +7848,10 @@ def _shared(token: str) -> tuple[shares_store.Share, dict]:
     """The live share and what it shows, or the refusal as an HTTP error with its sentence."""
     try:
         share = shares_store.resolve(database, share_key, token)
+        from app import admin as admin_mod
+        if admin_mod.any_suspended(database) and admin_mod.suspension(database, share.owner):
+            # Item 10: a suspended owner's links (reviewers' included) stop until they are unsuspended.
+            raise HTTPException(status_code=403, detail=admin_mod.SHARE_SUSPENDED, headers={"X-Share-Refused": "suspended"})
         if share.project_id and repo.get_project(share.project_id) is None:
             raise shares_store.ShareRefused("gone")
         contents = SHARE_CONTENTS[share.scope](share)
@@ -9226,6 +9291,28 @@ async def _rate_limited(request: Request, call_next):
     return await call_next(request)
 
 
+# ── Item 10: a suspended owner, and their members in their workspace ─────────
+# Everything answers 403 with one sentence, except signing out and the public
+# pages; a member may still switch back to their own workspace.
+
+_SUSPENDED_OPEN = re.compile(r"^/(auth/logout$|status$|health$|ready$|share/|abuse-reports)")
+_MEMBER_ESCAPE = re.compile(r"^/(workspace(/switch)?$|auth/)")
+
+
+def _suspended_refusal(me: Acting, path: str) -> str | None:
+    from app import admin as admin_mod
+    if not admin_mod.any_suspended(database):
+        return None
+    path = path[4:] if path.startswith("/api/") else path
+    if _SUSPENDED_OPEN.match(path):
+        return None
+    if admin_mod.suspension(database, me.user):
+        return admin_mod.SUSPENDED
+    if me.owner != me.user and admin_mod.suspension(database, me.owner) and not _MEMBER_ESCAPE.match(path):
+        return admin_mod.WORKSPACE_SUSPENDED
+    return None
+
+
 # ── G2: roles ────────────────────────────────────────────────────────────────
 # Defined last so it is the outermost middleware: who is acting is known
 # before any other middleware or route runs (app/workspace_api.py).
@@ -9236,6 +9323,10 @@ async def _roles(request: Request, call_next):
     me = _resolve_acting(request) if settings.auth_mode == "off" else await asyncio.to_thread(_resolve_acting, request)
     a, b = acting.set(me), current_actor.set(me.user if me else None)
     try:
+        if me is not None and settings.auth_mode != "off":
+            blocked = await asyncio.to_thread(_suspended_refusal, me, request.url.path)
+            if blocked:
+                return JSONResponse(status_code=403, content={"detail": blocked, "code": "suspended"})
         if me is not None and me.role != "owner":
             refusal = role_refusal(me.role, request.method, request.url.path)
             if refusal:
@@ -9274,7 +9365,7 @@ async def _csrf_header(request: Request, call_next):
 
 def _mount_optional_routers() -> None:
     import importlib
-    for name in ("app.onboarding", "app.help", "app.tutorial", "app.workspace_api", "app.accounts_api", "app.notify_api", "app.analytics_api", "app.feedback_api", "app.billing_api", "app.safety_api", "app.landing_api", "app.emails_api"):
+    for name in ("app.onboarding", "app.help", "app.tutorial", "app.workspace_api", "app.accounts_api", "app.notify_api", "app.analytics_api", "app.feedback_api", "app.billing_api", "app.safety_api", "app.landing_api", "app.emails_api", "app.admin_api"):
         try:
             module = importlib.import_module(name)
         except ImportError:

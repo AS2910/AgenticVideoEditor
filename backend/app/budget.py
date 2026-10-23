@@ -56,7 +56,8 @@ class VoiceBudget:
         self.ledger = ledger or Ledger()
         self.usd_per_1k = usd_per_1k
         # Launch item 3: asked before every charge; raises to refuse (the global pause).
-        self.before_charge: Callable[[], None] | None = None
+        # Item 10: it is told which video (or voice store) is charged, so a suspended owner stops too.
+        self.before_charge: Callable[[str], None] | None = None
 
     def spent(self, project_id: str) -> int:
         return int(self.ledger.units(project_id, self.VENDOR, self.UNIT))
@@ -74,7 +75,7 @@ class VoiceBudget:
         project can never both squeeze under the ceiling.
         """
         if self.before_charge is not None:
-            self.before_charge()
+            self.before_charge(project_id)
         with self.ledger.db.tx() as c:
             row = c.execute(
                 "SELECT COALESCE(SUM(units), 0) AS n FROM usage "

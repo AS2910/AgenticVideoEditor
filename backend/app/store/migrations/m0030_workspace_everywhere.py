@@ -37,6 +37,8 @@ EXEMPT = frozenset({
     # 0031 onwards: accounts and their one-use tokens live outside any workspace.
     "accounts", "auth_tokens", "spend_days", "idempotency",
     "waitlist",  # 0035: asked for access, no account yet
+    # 0036: the admin's audit trail and suspensions (admin-only, like abuse_reports).
+    "admin_audit", "suspensions",
 })
 # How a table's row finds its owner, in order of preference.
 VIDEO_KEYS = ("video_id", "project_id")

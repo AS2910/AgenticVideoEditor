@@ -360,6 +360,16 @@ class Ledger:
         return [{"video_id": r["video_id"], "folder_id": r["folder_id"], "vendor": r["vendor"], "usd": float(r["usd"])}
                 for r in rows]
 
+    def by_vendor_for_owner(self, owner: str, since: str | None = None) -> dict[str, float]:
+        """One person's spend by vendor (item 10, the admin's user view)."""
+        with self.db.tx() as c:
+            rows = c.execute(
+                "SELECT u.vendor AS vendor, COALESCE(SUM(u.usd), 0) AS usd FROM usage u WHERE (" + _OWNED + ")"
+                + (" AND u.at >= ?" if since else "") + " GROUP BY u.vendor ORDER BY u.vendor",
+                (owner, f"user-{owner}", owner, owner, owner) + ((since,) if since else ()),
+            ).fetchall()
+        return {r["vendor"]: round(float(r["usd"]), 4) for r in rows}
+
     def ensure_can_spend(self, project_id: str, owner: str | None = None,
                          owner_ceiling_usd: float | None = None, folder: tuple[str, float, str] | None = None,
                          filename: str = "", member: tuple[str, str, float] | None = None) -> None:

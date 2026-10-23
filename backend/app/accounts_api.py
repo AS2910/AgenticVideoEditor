@@ -96,6 +96,12 @@ def _session(response: Response, account: store.Account) -> None:
         max_age=api.auth.SESSION_SECONDS, httponly=True, samesite="lax", secure=api._secure(), path="/")
 
 
+def _refuse_suspended(owner: str) -> None:
+    from app import admin
+    if _api().suspended_sign_in(owner):
+        raise HTTPException(status_code=403, detail=admin.SUSPENDED)
+
+
 def _welcome(account: store.Account) -> None:
     """The first steps of a new person: the funnel, their address for email, the sample."""
     api = _api()
@@ -205,6 +211,8 @@ def verify(token: str | None = None) -> Response:
     except store.AccountError as exc:
         return _landing(f"login?error={api.quote(str(exc))}")
     api.analytics.track("account.verified", account.owner, {})
+    if api.suspended_sign_in(account.owner):          # item 10: verified, but no session
+        return api.suspended_landing()
     _welcome(account)
     response = _landing("home")
     _session(response, account)
@@ -228,6 +236,7 @@ def password_login(req: PasswordLogin, request: Request, response: Response) -> 
     if not account.verified:
         raise HTTPException(status_code=403, detail={"code": "unverified", "message":
                             "Confirm your email first: open the link we sent. Not there? Send it again."})
+    _refuse_suspended(account.owner)
     _welcome(account)
     _session(response, account)
     return {"signed_in": True, "email": account.email}
@@ -269,6 +278,7 @@ def reset(req: Reset, request: Request, response: Response) -> dict:
             c.execute("UPDATE accounts SET verified_at = ? WHERE id = ?", (api.now_iso(), account.id))
         account = store.by_id(api.database, account.id)
     api.analytics.track("account.password_reset", account.owner, {})
+    _refuse_suspended(account.owner)                  # item 10: the password changes; no session
     _session(response, account)
     return {"signed_in": True, "email": account.email}
 

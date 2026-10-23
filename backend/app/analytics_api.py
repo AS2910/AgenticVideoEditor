@@ -40,7 +40,12 @@ def _user(request: Request, flag: str = "golive.g7") -> str:
 
 
 def is_admin(user: str) -> bool:
-    return user in _api().settings.admin_owners
+    """An owner id in AVE_ADMIN_OWNERS, or (item 10) an entry with "@" that is this
+    person's proven address: a verified password account's, or the one a Google or
+    emailed-link sign-in gave (case-insensitive)."""
+    api = _api()
+    from app import admin
+    return admin.is_admin_owner(api.database, user, api.settings.admin_owners)
 
 
 class ClientEvent(BaseModel):

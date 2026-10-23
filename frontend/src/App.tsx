@@ -70,7 +70,7 @@ import { go, hrefFor, useRoute } from './lib/route'
 import { cn } from '@/lib/utils'
 import { clock } from './transcript/format'
 import {
-  createProject, confirmPlace, exportProject, artifactUrl, stageHold, pollJob, PollCancelled, ApiError, listVideos, listFolders, createFolder, createFolderFrom, startTutorial, getProject, deleteProject, getUsage, getSpend, listVoices, updateSpeaker, detectSpeakers, revertEdit, updateSettings, removeLine, dismissItem, easeItem, setEditRole, setCandidateRole, roleQuestion, moveCandidate, moveEdit, getArrangement, putArrangement, undoArrangement, getPlan, approvePlan, readProject, grantConsent, getMe, postTurn, postAllowMore, getMessages, chipEvent, getUnderstanding, correctUnderstanding, setStyle,
+  createProject, confirmPlace, exportProject, artifactUrl, stageHold, pollJob, PollCancelled, ApiError, listVideos, listFolders, createFolder, createFolderFrom, startTutorial, getProject, deleteProject, getUsage, getSpend, listVoices, updateSpeaker, detectSpeakers, revertEdit, updateSettings, removeLine, dismissItem, easeItem, setEditRole, setCandidateRole, roleQuestion, moveCandidate, moveEdit, getArrangement, putArrangement, undoArrangement, getPlan, approvePlan, readProject, grantConsent, getMe, logout, postTurn, postAllowMore, getMessages, chipEvent, getUnderstanding, correctUnderstanding, setStyle,
   retryJob, stopJobs, getLatestRender, startRender, getJobs, listRules,
 } from './api'
 import type { ArrangementView, Me, PlanApproval, RoleChange, RoleQuestion } from './api'
@@ -175,6 +175,7 @@ function Studio() {
   const [seen, setSeen] = useState<Understanding | null>(null)
   const [pendingTour, setPendingTour] = useState<Tour | null>(null)
   const [keysOpen, setKeysOpen] = useState(false)
+  const [suspended, setSuspended] = useState<string | null>(null)
   const [undoneAfterExport, setUndoneAfterExport] = useState(false)
   // The guided run's step 5 moves on once the take was heard in place and Original was played.
   const heard = useRef({ take: false, original: false })
@@ -284,7 +285,16 @@ function Studio() {
   useEffect(() => {
     getMe()
       .then(setMe)
-      .catch(() => setMe({ mode: 'off', user: null }))   // an older server: open as before
+      .catch((e) => {
+        // Item 10: a suspended account is signed out and told why, on the sign-in page.
+        if (e instanceof ApiError && e.status === 403 && (e.body as { code?: string } | null)?.code === 'suspended') {
+          setSuspended(e.message)
+          void logout().catch(() => undefined)
+          setMe({ mode: 'google', user: null })
+          return
+        }
+        setMe({ mode: 'off', user: null })   // an older server: open as before
+      })
   }, [])
 
   // G2: an invite opened before signing in comes back once signed in.
@@ -1389,7 +1399,7 @@ function Studio() {
       if (route.page === 'reset') return <ResetPage token={route.token} onDone={() => window.location.reload()} />
       // Launch item 8: the start (`#`, `#home`) is the landing page for someone not signed in.
       if (route.page === 'projects' && !signedOut) return <LandingPage />
-      return <LoginPage onSignedIn={() => { if (route.page === 'login') window.location.hash = '#home'; window.location.reload() }} error={signedOut ? 'Your session ended. Sign in again to continue.' : route.page === 'login' ? route.error ?? null : null} />
+      return <LoginPage onSignedIn={() => { if (route.page === 'login') window.location.hash = '#home'; window.location.reload() }} error={suspended ?? (signedOut ? 'Your session ended. Sign in again to continue.' : route.page === 'login' ? route.error ?? null : null)} />
     }
     if (route.page === 'projects') {
       return (

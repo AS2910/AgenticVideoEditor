@@ -4,12 +4,12 @@ import type { Me } from '../api'
 import { getAdminAnalytics, getAdminFlags, getAdminSpend, setAdminFlag, setPaidPause } from '../api'
 import type { AdminFlags, AdminSpend } from '../api'
 import { track } from '../lib/analytics'
-import { hrefFor } from '../lib/route'
 import { usd } from '../lib/money'
 import { Shell, SideNav } from './Shell'
 import { FillBar } from './bits'
 import { said } from './fmt'
-import { AdminWaitlist } from './AdminWaitlist'
+import { PeopleSection } from './admin/PeopleSection'
+import { ADMIN_SECTIONS } from './admin/sections'
 
 const pct = (n: number | null) => (n == null ? null : `${Math.round(n * 100)}%`)
 
@@ -22,10 +22,15 @@ export function AdminPage({ me }: { me: Me | null }) {
   const [error, setError] = useState<string | null>(null)
   const load = useCallback(() => {
     setError(null)
-    getAdminAnalytics().then(setData).catch((e) => setError(said(e, 'The numbers could not be read.')))
+    getAdminAnalytics().then((d) => setData(Array.isArray(d?.funnel) ? d : null)).catch((e) => setError(said(e, 'The numbers could not be read.')))
   }, [])
   useEffect(() => { load(); track('admin.opened') }, [load])
   const card = 'rounded-xl border-[1.5px] border-foreground bg-card p-[22px]'
+  // Item 10: the user view's "Features for this person" opens the flags card on them.
+  const [flagsFor, setFlagsFor] = useState<{ owner: string; n: number } | null>(null)
+  const jump = (id: string) => document.getElementById(id)?.scrollIntoView({ block: 'start' })
+  const JUMPS = [{ id: 'admin-spend-s', label: 'Spend today' }, { id: 'admin-people-s', label: 'People' }, { id: 'admin-flags-s', label: 'Features' },
+    ...ADMIN_SECTIONS.map((x) => ({ id: `admin-${x.id}-s`, label: x.label, href: x.href })), { id: 'admin-numbers-s', label: 'Numbers' }]
   const top = data?.funnel[0]?.owners ?? 0
 
   return (
@@ -36,17 +41,24 @@ export function AdminPage({ me }: { me: Me | null }) {
           <h1 className="disp rise m-0 text-[56px] leading-none font-bold">Admin</h1>
           <span className="stamp quiet">Internal</span>
         </div>
-        <p className="m-0 max-w-[640px] text-muted-foreground">How people move from signing up to their first export, and what it costs. Only admins see this page.</p>
-        <p className="m-0"><a href={hrefFor({ page: 'adminEmails' })} className="act">See every email Voltage sends</a></p>
+        <p className="m-0 max-w-[640px] text-muted-foreground">Launch day tools: spend and the kill switch, one person's account, and every admin action. Then how people move from signing up to their first export. Only admins see this page.</p>
+        <nav aria-label="Admin sections" className="flex flex-wrap gap-1.5">
+          {JUMPS.map((j) => ('href' in j && j.href)
+            ? <a key={j.id} href={j.href} className="act">{j.label}</a>
+            : <button key={j.id} type="button" className="act" onClick={() => jump(j.id)}>{j.label}</button>)}
+        </nav>
         {error && (
           <div className="flex flex-wrap items-center gap-3 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive" role="alert">
             {error}<button type="button" className="btn sm" onClick={load}>Try again</button>
           </div>
         )}
         {!error && !data && <p className="m-0 text-muted-foreground" role="status" aria-busy="true">Adding up…</p>}
-        <SpendCard card={card} />
-        <FlagsCard card={card} />
-        <AdminWaitlist card={card} />
+        <div id="admin-spend-s" className="scroll-mt-4"><SpendCard card={card} /></div>
+        <div id="admin-people-s" className="scroll-mt-4"><PeopleSection card={card} onFlags={(owner) => { setFlagsFor((f) => ({ owner, n: (f?.n ?? 0) + 1 })); window.setTimeout(() => jump('admin-flags-s'), 0) }} /></div>
+        <div id="admin-flags-s" className="scroll-mt-4"><FlagsCard card={card} lookFor={flagsFor} /></div>
+        {/* Item 10: the mount point. Other admin tools are one entry each in ./admin/sections.tsx. */}
+        {ADMIN_SECTIONS.filter((x) => x.render).map((x) => <div key={x.id} id={`admin-${x.id}-s`} className="scroll-mt-4">{x.render?.(card)}</div>)}
+        <span id="admin-numbers-s" className="scroll-mt-4" />
         {data && (
           <>
             <section className={`${card} flex flex-col gap-3`} aria-labelledby="funnel-h" data-testid="admin-funnel">
@@ -199,7 +211,7 @@ const SOURCE_WORDS: Record<AdminFlags['flags'][number]['source'], string> = {
 
 /** Launch item 10: turn a feature on or off for one person (their owner id,
  *  e.g. acct:1a2b or google:123), on top of the launch profile. */
-function FlagsCard({ card }: { card: string }) {
+function FlagsCard({ card, lookFor = null }: { card: string; lookFor?: { owner: string; n: number } | null }) {
   const [owner, setOwner] = useState('')
   const [view, setView] = useState<AdminFlags | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
@@ -209,6 +221,11 @@ function FlagsCard({ card }: { card: string }) {
     setError(null)
     try { const v = await run(); if (Array.isArray(v?.flags)) setView(v) } catch (e) { setError(said(e, 'That did not work.')) } finally { setBusy(null) }
   }
+  useEffect(() => {
+    if (!lookFor) return
+    setOwner(lookFor.owner)
+    void act('look', () => getAdminFlags(lookFor.owner))
+  }, [lookFor]) // eslint-disable-line react-hooks/exhaustive-deps
   return (
     <section className={`${card} flex flex-col gap-3`} aria-labelledby="flags-h" data-testid="admin-flags">
       <div className="flex flex-wrap items-baseline gap-2.5"><h2 id="flags-h" className="disp m-0 text-[22px] font-bold">Features for one person</h2><span className="tag text-faint">on top of the launch profile</span></div>
