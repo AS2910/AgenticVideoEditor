@@ -4,6 +4,7 @@ import type { Me } from '../api'
 import { getAdminAnalytics, getAdminFlags, getAdminSpend, setAdminFlag, setPaidPause } from '../api'
 import type { AdminFlags, AdminSpend } from '../api'
 import { track } from '../lib/analytics'
+import { hrefFor } from '../lib/route'
 import { usd } from '../lib/money'
 import { Shell, SideNav } from './Shell'
 import { FillBar } from './bits'
@@ -36,6 +37,7 @@ export function AdminPage({ me }: { me: Me | null }) {
           <span className="stamp quiet">Internal</span>
         </div>
         <p className="m-0 max-w-[640px] text-muted-foreground">How people move from signing up to their first export, and what it costs. Only admins see this page.</p>
+        <p className="m-0"><a href={hrefFor({ page: 'adminEmails' })} className="act">See every email Voltage sends</a></p>
         {error && (
           <div className="flex flex-wrap items-center gap-3 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive" role="alert">
             {error}<button type="button" className="btn sm" onClick={load}>Try again</button>

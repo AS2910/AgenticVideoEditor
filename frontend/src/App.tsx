@@ -53,6 +53,7 @@ import { TemplatesPage } from './pages/Templates'
 import { MembersPage } from './pages/MembersPage'
 import { InvitePage } from './pages/InvitePage'
 import { AdminPage } from './pages/AdminPage'
+import { AdminEmails } from './pages/AdminEmails'
 import { LegalPage } from './pages/LegalPage'
 import { LandingPage } from './pages/LandingPage'
 import { WithdrawConsent } from './components/WithdrawConsent'
@@ -1434,6 +1435,7 @@ function Studio() {
     if (route.page === 'members') return <MembersPage me={me} />
     if (route.page === 'notifications') return <NotificationsPage me={me} />
     if (route.page === 'admin') return <AdminPage me={me} />
+    if (route.page === 'adminEmails') return <AdminEmails me={me} />
     if (route.page === 'invite') return <InvitePage token={route.token} />
     if (route.page === 'templates') return <TemplatesPage me={me} onMade={() => void refreshProjects()} />
     if (route.page === 'export') {

@@ -551,6 +551,11 @@ export const getAdminAnalytics = () => get<AdminAnalytics>('/admin/analytics')
 /** Launch item 3: today's spend across everyone, the cap, and the kill switch. */
 export interface AdminSpend { paused: boolean; reason: 'switch' | 'daily_cap' | null; switch: boolean; today_usd: number; cap_usd: number | null; resumes_at: string | null; by_vendor: Record<string, number> }
 export const getAdminSpend = () => get<AdminSpend>('/admin/spend')
+/** Launch item 9: every email Voltage sends, with sample data (admins only; nothing is sent). */
+export interface EmailKind { kind: string; label: string }
+export interface EmailPreview extends EmailKind { subject: string; html: string; text: string }
+export const getEmailKinds = () => get<{ kinds: EmailKind[] }>('/admin/emails/preview')
+export const getEmailPreview = (kind: string) => get<EmailPreview>(`/admin/emails/preview/${encodeURIComponent(kind)}`)
 export const setPaidPause = (paused: boolean) => put<AdminSpend>('/admin/paid-pause', { paused })
 /** Launch item 10: one person's feature flags, and turning one on or off (null: back to the default). */
 export interface AdminFlags { owner: string; profile: string | null; flags: { flag: string; on: boolean; source: 'owner' | 'everyone' | 'profile' | 'default_owner' | 'off' }[] }
