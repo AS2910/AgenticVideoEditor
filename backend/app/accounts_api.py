@@ -24,7 +24,7 @@ from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 
-from app.store import accounts as store
+from app.store import accounts as store, waitlist
 
 router = APIRouter(tags=["accounts"])
 
@@ -111,7 +111,7 @@ def invite_only() -> bool:
 
 
 def may_join(email: str, code: str | None) -> bool:
-    """With invite-only on: a waiting workspace invite for the address, or a valid code."""
+    """With invite-only on: a waiting workspace invite for the address, a waitlist invite, or a valid code."""
     if not invite_only():
         return True
     codes = {c.strip() for c in (os.environ.get("AVE_INVITE_CODES") or "").split(",") if c.strip()}
@@ -120,7 +120,8 @@ def may_join(email: str, code: str | None) -> bool:
     api = _api()
     with api.database.tx() as c:
         return c.execute("SELECT 1 FROM workspace_invites WHERE lower(email) = ? AND accepted_at IS NULL AND revoked_at IS NULL "
-                         "AND expires_at > ?", (email.lower(), api.now_iso())).fetchone() is not None
+                         "AND expires_at > ?", (email.lower(), api.now_iso())).fetchone() is not None \
+            or waitlist.invited(c, email)          # launch item 8: invited from the waitlist
 
 
 INVITE_ONLY = "Voltage is invite-only for now. Ask for an invite, or enter the invite code you were given."

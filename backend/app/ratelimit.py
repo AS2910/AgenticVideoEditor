@@ -57,6 +57,7 @@ BUCKETS: dict[str, tuple[tuple[str, ...], str, int, float, str]] = {
              20, 600.0, "ip"),
     "comments": (("POST",), rf"^/share/{_ID}/(comments|approve|changes)$|^/videos/{_ID}/comments(/{_ID}/replies)?$", 30, 600.0, "user"),
     "abuse": (("POST",), r"^/abuse-reports$", 5, 3600.0, "ip"),
+    "waitlist": (("POST",), r"^/waitlist$", 5, 3600.0, "ip"),            # launch item 8: Request access
 }
 
 
@@ -97,6 +98,7 @@ WORDS = {
     "auth": "Too many sign-in attempts from here.",
     "comments": "That is a lot of comments in a short time.",
     "abuse": "Thanks. We have your reports; please wait before sending more.",
+    "waitlist": "That is a lot of requests from here.",
 }
 
 
