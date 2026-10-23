@@ -84,3 +84,37 @@ after the restore).
 | Spend climbing fast | Pause paid work from the Admin page, then look at "Spend today" by vendor. |
 | Lots of 429 in the log | Rate limits doing their job; per-bucket limits can be raised with `AVE_RATE_<NAME>=hits/seconds`. |
 | A vendor is down | Jobs fail with the vendor's reason after two retries; users can Retry. Nothing else to do. |
+
+## Failure drills (launch rehearsal, 2026-10-23)
+
+Run against the rehearsal stack (the shipped compose stack, Postgres, mocked
+vendors that wait and bill like the real ones) with `python3 tools/drills/drill.py all`
+(`--port`, `--name` pick the stack; results in `docs/rehearsal/drills/final.json`).
+Each drill makes a new user and video, asks for a line (the paid question), injects
+the fault, then checks four things: no job stuck, no double charge (characters
+billed equal the takes that exist), a clear status (one sentence, no trace), and
+recovery with no manual step (the same go-ahead then voices the line).
+
+| Drill | What happened | Before tonight | Now |
+|---|---|---|---|
+| Kill the API mid-job (SIGKILL to uvicorn while a line is being voiced) | Docker restarted the container in 3 s; the job read "The server restarted while this was running. Try again."; the go-ahead then worked. | **The 60 characters charged before the vendor call were never given back**, so a retry paid twice for one take. | Each charge is "open" until its call returns (`VoiceBudget.held`); the next start refunds charges a dead process left open. Billed = takes made. Pass. |
+| Kill the worker container | Nothing user-facing: jobs run in the API process; the worker only purges and sends digests. Restarted with `up -d`. | Pass. | Pass. |
+| Restart Postgres | Requests during the restart fail, then work again on their own (3 s later all 200). | The app had one connection and never reconnected (every request would fail until the app restarted; found reading the code before the drill); during the restart people saw "Something went wrong". | The next transaction reconnects (`store/db.py`, `store/pg.py`); while Postgres is down people get 503 "Voltage could not reach its database for a moment. Try again in a few seconds." Pass. |
+| ElevenLabs answers 500 on every call | Two retries, then the job fails with "ElevenLabs is unavailable right now (500)."; every charge refunded. | Pass. | Pass. |
+| ElevenLabs hangs 75 s, Claude hangs 70 s on half its calls | Timeouts, retries, then a clear failure; nothing charged; the next go-ahead works. | Claude's timeout reached the person as the SDK's own text with a docs link. | "I did not get an answer in time, so I stopped. Nothing was charged for the step that failed. Say it again and I'll retry." Pass. |
+| Fill the data disk to 95% | Uploads answer 507 with a sentence; renders fail with the same sentence; `/ready` stays 200 (reads and downloads keep working); freeing space reopens both. | Nothing refused new work: uploads and renders would have run until the disk was truly full and then failed halfway with "No space left on device" (the generic 500). | `app/diskroom.py`: past AVE_DISK_FULL_PCT (95) or under 1 GB free, uploads and renders say "Voltage is short of storage space right now, so new uploads and renders are paused. Your videos are safe." Any ENOSPC anywhere answers 507 with it. Pass. |
+
+What the drills taught about operating it:
+
+- **`docker kill` is not a crash.** Docker treats it as a manual stop and the
+  restart policy does not bring the container back. A real crash (the process
+  dying, the kernel's OOM killer) is restarted in seconds. After a deliberate
+  `docker kill`, run `docker compose up -d app`.
+- **The day cap trips under a load test.** The first drill run found every paid
+  step paused: the load test's mock spend had reached the $50 day cap. People saw
+  the pause sentence and nothing was charged, which is the cap working. Keep
+  load tests off the production database.
+- Watch the disk: at 95% Voltage stops taking uploads and renders. `df -h /data`
+  and the log line `disk short: ... refusing new uploads and renders`.
+- One API process only: a second one on the same database refuses to start
+  (`app/lease.py`).

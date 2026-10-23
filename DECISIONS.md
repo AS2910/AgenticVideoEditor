@@ -3,6 +3,10 @@
 Each: what, why, how to undo. Run 2's decisions follow below.
 
 - Setup: Docker was not installed. Installed Colima, the Docker CLI, compose and buildx, k6 and gitleaks with Homebrew (local tools only; `brew uninstall colima docker docker-compose docker-buildx k6 gitleaks` and `colima delete` undo it). The Colima VM has 4 CPUs, 6 GB and a 60 GB disk.
+- 4: Open charges are kept in meta (`charge_open:<id>`, with the process's id) rather than a new table or a column, so no migration: one row per in-flight vendor call, deleted when it returns. Undo: replace `held` with the old charge/refund pairs.
+- 4: Disk guard at 95% used or 1 GB free (AVE_DISK_FULL_PCT): refuses uploads and renders only; voicing, reads and downloads continue; `/ready` stays 200 so the server is not taken out of rotation for it. Undo: drop the two `diskroom.check` calls.
+- 4: While Postgres is unreachable a request answers 503 with Retry-After 5 and a sentence; the next transaction reconnects once (a transaction cut off midway still fails, once).
+- 4: Claude errors in a turn read as plain sentences ("I did not get an answer in time...") instead of the SDK's text; other failures keep the reason in brackets as before.
 - 3: Capacity defaults changed: AVE_JOB_WORKERS 4 to 16, AVE_WORK_WORKERS 2 to 4 (about one per vCPU), AVE_HTTP_THREADS 40 to 100 (anyio's limit for plain routes). Undo: set the three variables back. The renders on Add still run inside the request; making Add return at once with the render as a job is a product change left for you (MORNING.md).
 - 3: The load test raised the sign-in limit (one address for every virtual user) and turned the day cap off, on the load stack only.
 - 2: The rehearsal stand-ins live in the app behind AVE_MOCK_VENDORS=1 (refused in production by `production_problems`), not in a separate fake-vendor server: the real adapters' HTTP is not exercised, but the app's own paths (budget charges, refunds, retries, chaos faults, renders) are. The mock Claude makes one move a turn (a placed line from 0.3 s, up to 2 s, inside the clip). Undo: drop the `mock_vendors` branches in `app/adapters/selection.py` and `main._agent`.

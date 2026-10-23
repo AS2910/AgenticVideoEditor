@@ -629,15 +629,10 @@ class ElevenLabsVoiceAdapter:
             raise VoiceConfigError(f"A sample text needs at least {DESIGN_TEXT_MIN} characters; "
                                    "leave it out and the vendor writes one.")
         estimate = len(text) if text else DESIGN_CHARS
-        self._budget.charge(project_id, estimate)
-        try:
+        with self._budget.held(project_id, estimate):
             status, payload, err = self._design(self._api_key, description, text, self._timeout)
-        except VoiceError:
-            self._budget.refund(project_id, estimate)
-            raise
-        if status != 200:
-            self._budget.refund(project_id, estimate)
-            _raise_for(status, err.replace(self._api_key, "***"))
+            if status != 200:
+                _raise_for(status, err.replace(self._api_key, "***"))
         used = payload.get("text") or text or ""
         actual = len(used) or estimate
         if actual < estimate:
@@ -716,17 +711,12 @@ class ElevenLabsVoiceAdapter:
         if voice_id not in self._clones:
             return None
         cost = math.ceil(audio.duration * STS_CHARS_PER_SECOND)
-        self._budget.charge(source.project_id, cost)
-        try:
+        with self._budget.held(source.project_id, cost):
             status, content, text = self._convert(
                 self._api_key, voice_id, Path(audio.path).read_bytes(), self._timeout,
             )
-        except VoiceError:
-            self._budget.refund(source.project_id, cost)
-            raise
-        if status != 200:
-            self._budget.refund(source.project_id, cost)
-            _raise_for(status, text.replace(self._api_key, "***"))
+            if status != 200:
+                _raise_for(status, text.replace(self._api_key, "***"))
         with tempfile.TemporaryDirectory() as tmp:
             raw, _ = ffmpeg.pcm_to_wav(content, Path(tmp) / "changed.wav", SAMPLE_RATE)
             # The same length as the take it came from, so it drops into the same slot.
@@ -748,15 +738,10 @@ class ElevenLabsVoiceAdapter:
         # squeeze under the ceiling together; a call that fails before anything
         # is made gives the charge back (the chaos pass: a 429 storm used to eat the cap).
         cost = self.cost_of(plan)
-        self._budget.charge(project_id, cost)
-        try:
+        with self._budget.held(project_id, cost):          # refunded on any failure, and after a crash (budget.py)
             status, content, text = self._post(voice_id, body, self._api_key, self._timeout)
-        except VoiceError:
-            self._budget.refund(project_id, cost)
-            raise
-        if status != 200:
-            self._budget.refund(project_id, cost)
-            _raise_for(status, text.replace(self._api_key, "***"))
+            if status != 200:
+                _raise_for(status, text.replace(self._api_key, "***"))
         return decode_response(content)
 
     def _choose(self, project_id: str, voice_id: str, body: dict, plan: EditPlan,

@@ -84,6 +84,7 @@ from app.store import learned as learned_store
 from app.store import members as members_store
 from app.notify import inbox
 from app.notify import digest as digest_mod, email as email_mod
+from app import diskroom
 from starlette.concurrency import run_in_threadpool
 from app.render import captions as captions_mod, deliver as deliver_mod
 from app.jobs import exports as exports_mod
@@ -352,6 +353,7 @@ async def _spool(upload: UploadFile, dest: Path, kind: str = "video") -> str:
     bytes, anything that is not the kind asked for (`video`, `audio`).
     Returns the format the bytes say it is."""
     cap = ingest.MAX_SOURCE_BYTES if kind == "video" else MAX_AUDIO_UPLOAD_BYTES
+    diskroom.check(settings.data_dir)                  # rehearsal item 4: refuse before writing, not halfway
     written, found = 0, ""
     with dest.open("wb") as out:
         while chunk := await upload.read(1 << 20):
@@ -530,6 +532,7 @@ def _ensure_paid_open() -> None:
 
 
 budget.before_charge = _ensure_paid_open
+budget.refund_orphans()          # rehearsal item 4: charges a crashed process left open are given back
 
 
 @app.get("/status")
@@ -6073,12 +6076,13 @@ def _export(record: ProjectRecord, proposals: bool = False, request_id: int | No
                                   "started_at": _now(), "job_id": job_id, "includes": includes}
         _tell_render(project_id, mode)
         try:
+            diskroom.check(settings.data_dir)          # rehearsal item 4: a full disk refuses, with a sentence
             if settings.mock_vendors:                  # the rehearsal: a render takes as long as a real one
                 from app.adapters.mock_claude import wait
                 wait("AVE_MOCK_RENDER_SECONDS", "5-20")
             out = _render_now(record, edits, previewed, proposals)
         except Exception as exc:
-            activity.fail(job_id, "render_failed", f"The render failed: {exc}")
+            activity.fail(job_id, "render_failed", diskroom.SHORT if isinstance(exc, diskroom.DiskFull) else f"The render failed: {exc}")
             raise
         finally:
             _rendering.pop(project_id, None)
@@ -7101,6 +7105,22 @@ def _message_dict(m) -> dict:
     return out
 
 
+def _turn_failure_sentence(exc: Exception, why: str) -> str:
+    """What Voltage says when its turn fails. Claude's own error text (a docs link, SDK wording) is for
+    the log; the person hears what happened and what to do (rehearsal item 4, the vendor drill)."""
+    try:
+        import anthropic
+        if isinstance(exc, (anthropic.APITimeoutError, anthropic.APIConnectionError)):
+            return "I did not get an answer in time, so I stopped. Nothing was charged for the step that failed. Say it again and I'll retry."
+        if isinstance(exc, (anthropic.RateLimitError, anthropic.InternalServerError)):
+            return "I am overloaded right now. Nothing was charged for the step that failed. Try again in a minute."
+        if isinstance(exc, anthropic.APIStatusError):
+            return "That request was refused on my side. It has been reported; please try again."
+    except ImportError:  # pragma: no cover - anthropic is a dependency
+        pass
+    return f"Something went wrong on my side ({why}). Say it again and I'll retry."
+
+
 def _agent_on() -> bool:
     return bool(settings.agent and settings.has_anthropic)
 
@@ -7411,7 +7431,7 @@ def _start_turn(project_id: str, record: ProjectRecord, text: str, owner: str, a
         except Exception as exc:  # noqa: BLE001 — the user hears a sentence; the log has the rest
             logging.getLogger(__name__).exception("turn failed")
             why = str(exc)[:200] or type(exc).__name__
-            sentence = f"Something went wrong on my side ({why}). Say it again and I'll retry."
+            sentence = _turn_failure_sentence(exc, why)
             repo.add_message(project_id, "assistant", sentence)
             repo.update_plan(project_id, plan.plan_id, status="proposed")
             return {"type": "turn", "plan": _plan_dict(repo.get_plan(project_id, plan.plan_id)), "reply": sentence,
@@ -9234,8 +9254,21 @@ from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
 SERVER_FAULT = "Something went wrong on our side. It has been reported; please try again."
 
 
+@app.exception_handler(diskroom.DiskFull)
+async def _disk_full(request: Request, exc: diskroom.DiskFull) -> JSONResponse:
+    return JSONResponse(status_code=507, content={"detail": diskroom.SHORT})
+
+
 @app.exception_handler(Exception)
 async def _no_stack_traces(request: Request, exc: Exception) -> JSONResponse:
+    if type(exc).__module__.startswith("psycopg") and type(exc).__name__ in ("OperationalError", "InterfaceError"):
+        # Rehearsal item 4: Postgres restarting. The next request reconnects (store/db.py).
+        log.error("database unreachable on %s %s: %s", request.method, request.url.path, exc)
+        return JSONResponse(status_code=503, headers={"Retry-After": "5"},
+                            content={"detail": "Voltage could not reach its database for a moment. Try again in a few seconds."})
+    if isinstance(exc, OSError) and getattr(exc, "errno", None) == 28:    # ENOSPC: say so, not "something went wrong"
+        log.error("disk full on %s %s", request.method, request.url.path, exc_info=exc)
+        return JSONResponse(status_code=507, content={"detail": diskroom.SHORT})
     log.error("unhandled error on %s %s", request.method, request.url.path, exc_info=exc)
     return JSONResponse(status_code=500, content={"detail": SERVER_FAULT})
 

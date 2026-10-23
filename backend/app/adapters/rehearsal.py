@@ -48,15 +48,7 @@ class RehearsalVoiceAdapter(MockVoiceAdapter):
         raise VoiceError("Could not reach ElevenLabs (ConnectError).")
 
     def synthesize(self, source: Source, plan: EditPlan, transcript: Transcript | None = None) -> MediaArtifact:
-        cost = self.cost_of(plan)
-        self._budget.charge(source.project_id, cost)
-        try:
+        with self._budget.held(source.project_id, self.cost_of(plan)):   # as the ElevenLabs adapter charges
             self._fault()
             wait("AVE_MOCK_SYNTH_SECONDS", "2-6")
             return super().synthesize(source, plan, transcript)
-        except (VoiceError, VoiceConfigError):
-            self._budget.refund(source.project_id, cost)
-            raise
-        except BaseException:
-            self._budget.refund(source.project_id, cost)
-            raise

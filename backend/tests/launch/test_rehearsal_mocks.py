@@ -50,6 +50,9 @@ def test_mock_claude_proposes_a_placed_line_then_ends_the_turn():
     assert first.usage.input_tokens > 1000
     second = client.beta.messages.create(messages=[{"role": "user", "content": [{"type": "tool_result", "tool_use_id": use["id"], "content": "ok"}]}])
     assert second.stop_reason == "end_turn" and "—" not in second.content[0]["text"]
+    after_crash = client.beta.messages.create(messages=[{"role": "user", "content": [
+        {"type": "tool_result", "tool_use_id": "old", "content": "interrupted", "is_error": True}, {"type": "text", "text": "Go ahead"}]}])
+    assert after_crash.stop_reason == "tool_use"                      # a dead turn's answer plus new words: act on them
     assert client.messages.parse().parsed_output is None          # the planner's reads fall back to plain answers
 
 

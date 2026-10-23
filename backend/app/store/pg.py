@@ -59,14 +59,20 @@ def target(path: Any) -> tuple[str, str | None, bool] | None:
     return test, f"f_{digest}", False
 
 
-def connect(url: str, schema: str | None = None) -> Connection:
+def _open(url: str, schema: str | None):
     import psycopg
-    raw = psycopg.connect(url, autocommit=True, prepare_threshold=None)
+    raw = psycopg.connect(url, autocommit=True, prepare_threshold=None, connect_timeout=10)
     if schema:
         raw.execute(f'CREATE SCHEMA IF NOT EXISTS "{schema}"')
         raw.execute(f'SET search_path TO "{schema}"')
     raw.execute("SELECT set_config('app.bypass_rls', 'on', false)")
-    return Connection(raw, schema)
+    return raw
+
+
+def connect(url: str, schema: str | None = None) -> Connection:
+    conn = Connection(_open(url, schema), schema)
+    conn.url = url
+    return conn
 
 
 # ---------------------------------------------------------------- rows
@@ -263,6 +269,7 @@ class Connection:
     def __init__(self, raw, schema: str | None = None) -> None:
         self.raw = raw
         self.schema = schema
+        self.url: str | None = None
         self._last_rowid: int | None = None
         self._keys: dict[str, tuple[list[str], bool]] = {}
 
@@ -311,6 +318,29 @@ class Connection:
         for params in seq:
             total += max(self.execute(sql, params).rowcount, 0)
         return Cursor([], total, None)
+
+    def ensure(self) -> bool:
+        """Rehearsal item 4 (Postgres restarted under a running app): a closed or
+        broken connection is opened again before the next transaction. True when
+        it had to reconnect. Without a url (tests that wrap a raw connection) it
+        does nothing."""
+        if self.url is None or not (self.raw.closed or getattr(self.raw, "broken", False)):
+            return False
+        try:
+            self.raw.close()
+        except Exception:  # noqa: BLE001 - already gone
+            pass
+        self.raw = _open(self.url, self.schema)
+        self._keys.clear()
+        return True
+
+    def alive(self) -> bool:
+        """Ask the server; a dead socket shows up here rather than mid-transaction."""
+        try:
+            self.raw.execute("SELECT 1")
+            return True
+        except Exception:  # noqa: BLE001 - psycopg.OperationalError and friends
+            return False
 
     def close(self, drop_schema: bool = False) -> None:
         if self.raw.closed:

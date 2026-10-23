@@ -6,6 +6,11 @@ Charged to the usage ledger (Phase 9b), so the budget survives restarts.
 """
 from __future__ import annotations
 
+import json
+import logging
+import uuid
+from collections.abc import Iterator
+from contextlib import contextmanager
 from typing import Callable
 
 from app.timefmt import now_iso
@@ -27,6 +32,16 @@ class BudgetExceeded(NonRetryableError):
             f"This video's voice budget can't cover this edit: it needs {needed} "
             f"characters and {remaining} remain. Raise AVE_VOICE_BUDGET_CHARS to continue."
         )
+
+
+log = logging.getLogger("voltage.budget")
+# Rehearsal item 4 (the crash drill): which process holds an open charge. A
+# charge made before a vendor call stays "open" in meta until the call has
+# returned or been refunded; one a dead process left open is given back at the
+# next start (`refund_orphans`), so a crash mid-call never bills a take that
+# was never made (and a retry does not pay twice).
+PROCESS = uuid.uuid4().hex
+OPEN_PREFIX = "charge_open:"
 
 
 class VoiceBudget:
@@ -86,6 +101,46 @@ class VoiceBudget:
             return
         self.ledger.record(project_id, self.VENDOR, self.WHAT, -amount, self.UNIT,
                            -amount * self.usd_per_1k / 1000)
+
+    @contextmanager
+    def held(self, project_id: str, amount: int) -> Iterator[None]:
+        """Charge `amount` for one vendor call: refunded if anything inside raises,
+        and marked open in meta while the call runs (see PROCESS)."""
+        self.charge(project_id, amount)
+        key = OPEN_PREFIX + uuid.uuid4().hex
+        with self.ledger.db.tx() as c:
+            c.execute("INSERT INTO meta (key, value) VALUES (?, ?)",
+                      (key, json.dumps({"project_id": project_id, "amount": amount, "process": PROCESS, "at": now_iso()})))
+        try:
+            yield
+        except BaseException:
+            self.refund(project_id, amount)
+            raise
+        finally:
+            with self.ledger.db.tx() as c:
+                c.execute("DELETE FROM meta WHERE key = ?", (key,))
+
+    def refund_orphans(self) -> list[dict]:
+        """At startup: give back every charge a previous process left open (it
+        died during the call, so nothing it paid for was kept). Returns them."""
+        with self.ledger.db.tx() as c:
+            rows = c.execute("SELECT key, value FROM meta WHERE key LIKE ?", (OPEN_PREFIX + "%",)).fetchall()
+        given = []
+        for r in rows:
+            try:
+                held = json.loads(r["value"])
+            except (TypeError, ValueError):
+                held = {}
+            if held.get("process") == PROCESS:
+                continue
+            if held.get("project_id") and int(held.get("amount") or 0) > 0:
+                self.refund(held["project_id"], int(held["amount"]))
+                given.append(held)
+                log.warning("refunded %s characters on %s: the process that charged them stopped during the call",
+                            held["amount"], held["project_id"])
+            with self.ledger.db.tx() as c:
+                c.execute("DELETE FROM meta WHERE key = ?", (r["key"],))
+        return given
 
     def reset(self) -> None:
         """Forget all spend. Intended for test isolation."""

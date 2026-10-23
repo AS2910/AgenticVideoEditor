@@ -1,0 +1,214 @@
+{
+  "kill-api": {
+    "steps": {
+      "killed_while_voicing": true,
+      "state_3s_after_kill": "app running Up 3 seconds (health: starting)\npostgres running Up 6 minutes (healthy)\nweb running Up 2 hours (healthy)\nworker running Up 9 seconds",
+      "back_after_s": 3.0,
+      "turn_after_kill": {
+        "status": "unknown",
+        "error": null
+      }
+    },
+    "video": "p1404",
+    "no_job_stuck": {
+      "ok": true,
+      "why": "nothing queued or running"
+    },
+    "no_double_charge": {
+      "ok": true,
+      "why": "billed 0 characters for takes worth 0"
+    },
+    "clear_status": {
+      "ok": true,
+      "why": "failed jobs say: ['The server restarted while this was running. Try again.']"
+    },
+    "recovers": {
+      "ok": true,
+      "why": "go-ahead succeeded, 1 line(s) ready"
+    },
+    "no_double_charge_after_recovery": {
+      "ok": true,
+      "why": "billed 60 characters for takes worth 60"
+    },
+    "passed": true,
+    "seconds": 89.3
+  },
+  "kill-worker": {
+    "steps": {
+      "worker_after_kill": "app running\npostgres running\nweb running"
+    },
+    "video": "p1406",
+    "no_job_stuck": {
+      "ok": true,
+      "why": "nothing queued or running"
+    },
+    "no_double_charge": {
+      "ok": true,
+      "why": "billed 0 characters for takes worth 0"
+    },
+    "clear_status": {
+      "ok": true,
+      "why": "no failed job"
+    },
+    "recovers": {
+      "ok": true,
+      "why": "go-ahead succeeded, 1 line(s) ready"
+    },
+    "no_double_charge_after_recovery": {
+      "ok": true,
+      "why": "billed 60 characters for takes worth 60"
+    },
+    "passed": true,
+    "seconds": 41.0
+  },
+  "restart-pg": {
+    "steps": {
+      "first_answers": [
+        503,
+        503,
+        503
+      ],
+      "answers_3s_later": [
+        200,
+        200,
+        200
+      ],
+      "ready": 200
+    },
+    "video": "p1408",
+    "no_job_stuck": {
+      "ok": true,
+      "why": "nothing queued or running"
+    },
+    "no_double_charge": {
+      "ok": true,
+      "why": "billed 0 characters for takes worth 0"
+    },
+    "clear_status": {
+      "ok": true,
+      "why": "no failed job"
+    },
+    "recovers": {
+      "ok": true,
+      "why": "go-ahead succeeded, 1 line(s) ready"
+    },
+    "no_double_charge_after_recovery": {
+      "ok": true,
+      "why": "billed 60 characters for takes worth 60"
+    },
+    "passed": true,
+    "seconds": 37.4
+  },
+  "vendor-500": {
+    "steps": {
+      "chaos": "elevenlabs=status:500",
+      "go_ahead": {
+        "status": "succeeded",
+        "error": null
+      },
+      "voltage_said": [
+        "I placed \u201cFresh every morning.\u201d over the opening. Hear it, then add it if it sounds right.",
+        "Thinking"
+      ]
+    },
+    "video": "p1410",
+    "no_job_stuck": {
+      "ok": true,
+      "why": "nothing queued or running"
+    },
+    "no_double_charge": {
+      "ok": true,
+      "why": "billed 0 characters for takes worth 0"
+    },
+    "clear_status": {
+      "ok": true,
+      "why": "failed jobs say: ['ElevenLabs is unavailable right now (500).', 'I placed \u201cFresh every morning.\u201d over the opening. Hear it, then add it if it sounds right.', 'Thinking']"
+    },
+    "recovers": {
+      "ok": true,
+      "why": "go-ahead succeeded, 1 line(s) ready"
+    },
+    "no_double_charge_after_recovery": {
+      "ok": true,
+      "why": "billed 60 characters for takes worth 60"
+    },
+    "passed": true,
+    "seconds": 61.6
+  },
+  "vendor-hang": {
+    "steps": {
+      "chaos": "elevenlabs=hang:75;anthropic=hang:70@0.5",
+      "go_ahead": {
+        "status": "succeeded",
+        "error": null
+      },
+      "voltage_said": [
+        "Voice \u201cFresh every morning.\u201d in Test tone's voice, about $0.02?",
+        "I did not get an answer in time, so I stopped. Nothing was charged for the step that failed. Say it again and I'll retry."
+      ]
+    },
+    "video": "p1412",
+    "no_job_stuck": {
+      "ok": true,
+      "why": "nothing queued or running"
+    },
+    "no_double_charge": {
+      "ok": true,
+      "why": "billed 0 characters for takes worth 0"
+    },
+    "clear_status": {
+      "ok": true,
+      "why": "failed jobs say: [\"Voice \u201cFresh every morning.\u201d in Test tone's voice, about $0.02?\", \"I did not get an answer in time, so I stopped. Nothing was charged for the step that failed. Say it again and I'll retry.\"]"
+    },
+    "recovers": {
+      "ok": true,
+      "why": "go-ahead succeeded, 1 line(s) ready"
+    },
+    "no_double_charge_after_recovery": {
+      "ok": true,
+      "why": "billed 60 characters for takes worth 60"
+    },
+    "passed": true,
+    "seconds": 127.0
+  },
+  "disk-95": {
+    "steps": {
+      "disk_bytes": 59850510336,
+      "used_before": 0.082,
+      "used_during": 0.95,
+      "upload_while_full": {
+        "status": 507,
+        "said": "Voltage is short of storage space right now, so new uploads and renders are paused. Your videos are safe. Try again in a little while."
+      },
+      "ready_while_full": 200,
+      "go_ahead_while_full": {
+        "status": "succeeded",
+        "error": null
+      },
+      "after_freeing": 200
+    },
+    "video": "p1414",
+    "no_job_stuck": {
+      "ok": true,
+      "why": "nothing queued or running"
+    },
+    "no_double_charge": {
+      "ok": true,
+      "why": "billed 60 characters for takes worth 60"
+    },
+    "clear_status": {
+      "ok": true,
+      "why": "failed jobs say: ['Voltage is short of storage space right now, so new uploads and renders are paused. Your videos are safe. Try again in a little while.', 'Voltage is short of storage space right now, so new uploads and renders are paused. Your videos are safe. Try again in a little while.']"
+    },
+    "recovers": {
+      "ok": true,
+      "why": "go-ahead succeeded, 2 line(s) ready"
+    },
+    "no_double_charge_after_recovery": {
+      "ok": true,
+      "why": "billed 120 characters for takes worth 120"
+    },
+    "passed": true,
+    "seconds": 42.8
+  }
+}

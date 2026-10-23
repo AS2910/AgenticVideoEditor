@@ -18,6 +18,7 @@ services:
       AVE_WORK_WORKERS: ${AVE_WORK_WORKERS:-}
       AVE_HTTP_THREADS: ${AVE_HTTP_THREADS:-}
       AVE_DAILY_SPEND_CAP_USD: ${AVE_DAILY_SPEND_CAP_USD:-}
+      AVE_MOCK_SYNTH_SECONDS: ${AVE_MOCK_SYNTH_SECONDS:-2-6}
   worker:
     env_file: [deploy/rehearsal/rehearsal.env]
   postgres:

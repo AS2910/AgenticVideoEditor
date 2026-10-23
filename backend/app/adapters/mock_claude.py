@@ -86,7 +86,10 @@ class _Messages:
         wait("AVE_MOCK_CLAUDE_SECONDS", "1-3")
         messages = params.get("messages") or []
         last = messages[-1] if messages else {"content": ""}
-        answered = any(_kind(b) == "tool_result" for b in _blocks(last))
+        # Only tool results: the move was made, so end the turn. The user's own words (also when a turn
+        # a crash cut off is answered as interrupted in the same message): make the move.
+        blocks = _blocks(last)
+        answered = bool(blocks) and all(_kind(b) == "tool_result" for b in blocks)
         if not answered:
             start, end = span_for(messages)
             use = {"type": "tool_use", "id": f"toolu_mock_{random.randrange(10**9)}", "name": "synthesize_take",

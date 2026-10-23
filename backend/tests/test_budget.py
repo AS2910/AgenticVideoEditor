@@ -66,3 +66,34 @@ def test_concurrent_charges_never_overshoot():
     for t in threads:
         t.join()
     assert budget.spent("p1") == 98  # 14 × 7; the 15th would be 105
+
+
+def test_a_held_charge_is_kept_on_success_refunded_on_failure_and_after_a_crash():
+    """Rehearsal item 4: a crash during the vendor call left its charge on the ledger
+    (60 characters for a take that was never made); now the next start gives it back."""
+    from app import budget as budget_mod
+    from app.store.db import Database
+    from app.usage import Ledger
+    b = budget_mod.VoiceBudget(1000, Ledger(Database()))
+    with b.held("p1", 60):
+        pass
+    assert b.spent("p1") == 60
+    try:
+        with b.held("p1", 40):
+            raise RuntimeError("the vendor fell over")
+    except RuntimeError:
+        pass
+    assert b.spent("p1") == 60
+    # A process dies inside the call: its open charge stays behind...
+    gen = b.held("p1", 25)
+    gen.__enter__()
+    assert b.spent("p1") == 85
+    assert b.refund_orphans() == []                      # this process is alive: nothing is given back
+    real = budget_mod.PROCESS
+    budget_mod.PROCESS = "the next process"
+    try:
+        given = b.refund_orphans()                       # ...and the next start refunds it
+    finally:
+        budget_mod.PROCESS = real
+    assert [g["amount"] for g in given] == [25] and b.spent("p1") == 60
+    assert b.refund_orphans() == []                       # once

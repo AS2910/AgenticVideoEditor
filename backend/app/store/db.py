@@ -73,13 +73,33 @@ class Database:
     def tx(self) -> Iterator[sqlite3.Connection]:
         """One transaction, exclusive to the calling thread."""
         with self._lock:
-            self._conn.execute("BEGIN IMMEDIATE")
+            if self.dialect == "postgres":
+                self._begin_pg()
+            else:
+                self._conn.execute("BEGIN IMMEDIATE")
             try:
                 yield self._conn
             except BaseException:
-                self._conn.execute("ROLLBACK")
+                try:
+                    self._conn.execute("ROLLBACK")
+                except Exception:  # noqa: BLE001 - the connection died mid-transaction; the next tx reconnects
+                    if self.dialect != "postgres":
+                        raise
                 raise
             self._conn.execute("COMMIT")
+
+    def _begin_pg(self) -> None:
+        """BEGIN on Postgres, opening the connection again first when the server
+        restarted (rehearsal item 4): the request after a restart succeeds."""
+        self._conn.ensure()
+        try:
+            self._conn.execute("BEGIN IMMEDIATE")
+        except Exception:  # noqa: BLE001 - psycopg.OperationalError: the socket died while idle
+            if self._conn.alive():
+                raise
+            self._conn.raw.close()
+            self._conn.ensure()
+            self._conn.execute("BEGIN IMMEDIATE")
 
     def reset(self) -> None:
         """Empty every table. Intended for test isolation."""
