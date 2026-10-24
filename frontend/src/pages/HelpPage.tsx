@@ -126,6 +126,7 @@ export function HelpPage({ me, articles: given, initialSlug = null, onReplay, on
           <span className="disp text-2xl font-bold">Still stuck?</span>
           <span className="pm">Ask Voltage in any project, or send us feedback. Press <kbd className="tnum text-volt not-italic">?</kbd> in the editor for every shortcut.</span>
         </div>
+        <a href={hrefFor({ page: 'knownIssues' })} className="btn ghost">Known issues</a>
         <button type="button" className="btn ghost" onClick={() => setKeys(true)}>Keyboard shortcuts</button>
         <button type="button" className="btn volt" onClick={openFeedback}>Send feedback</button>
       </section>

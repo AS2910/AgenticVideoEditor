@@ -214,6 +214,8 @@ export const resolveReviewComment = (videoId: string, commentId: number, resolve
 
 /** Help and onboarding (2026-10-19). */
 export const listHelp = async () => (await get<{ articles: HelpArticle[] }>('/help')).articles
+export interface KnownIssues { title: string; updated: string | null; summary: string; sections: { heading: string; body: string }[] }
+export const getKnownIssues = () => get<KnownIssues>('/help/known-issues')
 export const searchHelp = async (q: string) => (await get<{ articles: HelpArticle[] }>(`/help/search?q=${encodeURIComponent(q)}`)).articles
 export const getOnboarding = () => get<Onboarding>('/me/onboarding')
 export const updateOnboarding = (change: Partial<Onboarding>) => put<Onboarding>('/me/onboarding', change)

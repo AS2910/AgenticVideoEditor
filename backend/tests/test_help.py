@@ -36,3 +36,21 @@ def test_the_articles_route_lists_them_and_search_answers():
     assert {"slug", "section", "title", "summary", "body", "order", "tour"} <= set(body[0])
     found = client.get("/help/search", params={"q": "a line won't fit"}).json()["articles"]
     assert found and found[0]["slug"] in ("a-line-wont-fit", "why-a-line-runs-long")
+
+
+def test_known_issues_are_read_from_their_own_file_and_are_not_an_article():
+    page = help_.known_issues()
+    assert page["title"] == "Known issues" and page["updated"]
+    assert page["summary"].startswith("Voltage is in beta.")
+    headings = [s["heading"] for s in page["sections"]]
+    assert "Voices" in headings and all(s["body"] for s in page["sections"])
+    # Search never answers with it: it lives beside the articles, not among them.
+    assert "known-issues" not in {a.slug for a in help_.articles()}
+    client = TestClient(app)
+    r = client.get("/help/known-issues")
+    assert r.status_code == 200 and r.json()["sections"] == page["sections"]
+
+
+def test_known_issues_without_the_file_is_an_empty_page(tmp_path):
+    page = help_.known_issues(tmp_path / "missing.md")
+    assert page == {"title": "Known issues", "updated": None, "summary": "", "sections": []}

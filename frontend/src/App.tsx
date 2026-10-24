@@ -30,6 +30,7 @@ import { LoginPage } from './pages/LoginPage'
 import { ResetPage } from './pages/ResetPage'
 import { ExportPage } from './pages/ExportPage'
 import { HelpPage } from './pages/HelpPage'
+import { KnownIssuesPage } from './pages/KnownIssuesPage'
 import { KeyboardSheet } from './components/KeyboardSheet'
 import { FeedbackHost } from './components/FeedbackDialog'
 import { StatusStrip } from './components/StatusStrip'
@@ -1452,6 +1453,7 @@ function Studio() {
     if (route.page === 'help') {
       return <HelpPage me={me} initialSlug={route.slug ?? null} onReplay={() => void startGuidedRun()} onAsk={() => { const recent = projects[0]; if (recent) go({ page: 'editor', projectId: recent.video_id }); else go({ page: 'projects' }) }} onShowMe={showMe} />
     }
+    if (route.page === 'knownIssues') return <KnownIssuesPage me={me} />
     if (route.page === 'voices') return <VoicesPage me={me} />
     if (route.page === 'usage') return <UsagePage me={me} scope={route.scope ?? null} />
     if (route.page === 'settings') return <SettingsPage me={me} onSignedOut={signedOutNow} />

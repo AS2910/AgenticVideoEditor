@@ -44,6 +44,16 @@ export function Wordmark({ href = hrefFor({ page: 'projects' }), label = 'Voltag
   return href ? <a href={href} aria-label={label} className={cls}>{body}</a> : <span className={cls}>{body}</span>
 }
 
+/** Beta kit: a small, honest Beta stamp beside the wordmark. It links to the known issues;
+ *  the link is the 44 px target, the stamp inside stays small. */
+export function BetaBadge() {
+  return (
+    <a href={hrefFor({ page: 'knownIssues' })} className="-ml-3 inline-flex min-h-11 min-w-11 items-center justify-center rounded-md no-underline focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none" aria-label="Beta: see the known issues" data-testid="beta-badge">
+      <span className="stamp inkd" aria-hidden="true">Beta</span>
+    </a>
+  )
+}
+
 /** The account circle: the person's initial, or V when sign-in is off. Opens Settings. */
 export function AccountDot({ me }: { me: Me | null }) {
   return (
@@ -73,6 +83,7 @@ export function Shell({ active, right, me, children, mainClassName }: ShellProps
       <PausedBanner />
       <header className="flex min-h-[62px] flex-wrap items-center gap-x-[22px] gap-y-2 border-b-[1.5px] border-foreground bg-card px-4 py-2.5 sm:px-6">
         <Wordmark />
+        <BetaBadge />
         <nav className="nav flex flex-wrap gap-1" aria-label="Main">
           {nav.map((n) => (
             <a key={n.page} href={hrefFor({ page: n.page })} aria-current={n.page === active ? 'page' : undefined}>{n.label}</a>

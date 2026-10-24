@@ -36,6 +36,8 @@ export type Route =
   | { page: 'login'; error?: string | null }
   // Launch item 8: the public landing page for anyone (signed-out people see it at the start too).
   | { page: 'welcome' }
+  // Beta kit: what we know is not right yet (the Beta badge links here).
+  | { page: 'knownIssues' }
 
 export function parseRoute(hash: string): Route {
   const h = hash.replace(/^#\/?/, '').trim()
@@ -59,6 +61,7 @@ export function parseRoute(hash: string): Route {
   const invite = /^invite\/([A-Za-z0-9_.-]+)$/.exec(h)
   if (invite) return { page: 'invite', token: invite[1] }
   if (h === 'welcome') return { page: 'welcome' }
+  if (h === 'known-issues') return { page: 'knownIssues' }
   if (h === 'members') return { page: 'members' }
   if (h === 'notifications') return { page: 'notifications' }
   if (h === 'admin') return { page: 'admin' }
@@ -77,6 +80,7 @@ export const hrefFor = (r: Route): string =>
     : r.page === 'help' ? (r.slug ? `#help/${r.slug}` : '#help')
     : r.page === 'projects' ? '#home'
     : r.page === 'adminEmails' ? '#admin/emails'
+    : r.page === 'knownIssues' ? '#known-issues'
     : r.page === 'invite' ? `#invite/${r.token}`
     : r.page === 'reset' ? `#reset/${r.token}`
     : r.page === 'login' ? (r.error ? `#login?error=${encodeURIComponent(r.error)}` : '#login')
