@@ -1,3 +1,16 @@
+# Cost and staging (overnight run 4, 2026-10-24)
+
+Branch `overnight/cost-and-staging`, cut from main `cb29d1d` (run 3 merged). Worktree `../AgenticVideoEditor-cost`.
+Beta 28 Oct 2026, launch 4 Nov 2026. Spec: the user's "Overnight run 4" message (items 1 to 8). Real spend only in item 1 (cap $5, stopped at $4 by the app's day cap); everything else mocked.
+Items were built in parallel on branches `cost/item<N>` (worktrees `../AgenticVideoEditor-c<N>`) and cherry-picked here; each item is gated by `make launch-check SKIP_ENV=1` on this branch before its commits land.
+
+| # | Item | Status | Commit | Notes |
+|---|---|---|---|---|
+| 5 | Production setup kit | done | ba1ffa7, e4f2809, 9e0c687 | `scripts/provision.sh` (Ubuntu 24.04: Docker, ufw 22/80/443, unattended upgrades, fail2ban, swap, log rotation, rclone backup cron from env; `docs/ops/monitoring.md` for Sentry and uptime): shellcheck clean, run twice in an ubuntu:24.04 container, second run "no changes" (ufw, swap and restarts untested outside a VM). `scripts/deploy.sh`, `migrate.sh`, `rollback.sh` (images by git sha; rollback never migrates down). Rollback rehearsed on a local stack: older build, newer build, migrate, roll back in 15 s with data intact; a switch is about 15 s of outage. CHANGELOG.md for 1.0.0-rc1. |
+| 7 | Staging | not run | | No `deploy/staging.env`, so no staging host: nothing deployed. |
+
+---
+
 # Launch rehearsal (overnight run 3, 2026-10-23)
 
 Branch `overnight/launch-rehearsal`, cut from main `47ff162` (overnight/launch-hardening was merged). Worktree `../AgenticVideoEditor-rehearsal`.

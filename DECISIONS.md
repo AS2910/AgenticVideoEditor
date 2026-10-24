@@ -1,3 +1,15 @@
+# Cost and staging decisions (overnight run 4, 2026-10-24)
+
+Each: what, why, how to undo. Run 3's decisions follow below.
+
+- 7: There is no `deploy/staging.env`, so there is no staging host. Item 7 (deploy, journeys, a real 5-line run, a real 60 s render on the VM, off-machine backups) was not run; its $1 of the night's budget was not used, and item 1 had the whole $4.
+- 5: Migrations only add: a rollback never runs `down` and never drops anything; removing a column takes two releases, and a breaking change means restoring the pre-deploy backup. This replaces RUNBOOK's old "migrate down, then roll back". Nothing enforces it in code yet (a test refusing DROP/RENAME in new migrations is a cheap follow-up).
+- 5: Builds come from `git archive <sha>` into `docker build`; compose takes the tag from `VOLTAGE_TAG`; the running build is recorded in `.deploy/<stack>.history` (gitignored); `rollback.sh` with no argument goes to the previous build. `deploy.sh` migrates with the new image before switching. A switch is about 15 s of 502s, not zero downtime.
+- 5: Postgres backups use `pg_dump` from the postgres container (the app image has none); `scripts/backup-offsite.sh` writes restore.sh's layout and uploads with rclone configured only from env (`VOLTAGE_BACKUP_REMOTE`, `RCLONE_CONFIG_*` in `/etc/voltage/backup.env`, root only).
+- 5: provision.sh: swap is half the RAM (2 to 8 GB) and skipped if any exists; the firewall also opens 443/udp for HTTP/3 (say if tcp only); SSH settings are not changed (no lock-out risk; DEPLOY.md keeps the manual step). shellcheck installed with Homebrew.
+
+- Process: the items were built at the same time by separate builders on their own branches and worktrees, then cherry-picked here. The full gate (`make launch-check SKIP_ENV=1`) runs on this branch before each item's commits land, not in each builder's worktree (seven full suites at once on one laptop give false timeouts).
+
 # Launch rehearsal decisions (overnight run 3, 2026-10-23)
 
 Each: what, why, how to undo. Run 2's decisions follow below.
