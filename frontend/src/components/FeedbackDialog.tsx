@@ -4,6 +4,7 @@ import { sendBetaFeedback } from '../api'
 import { parseRoute } from '../lib/route'
 import { lastJobId } from '../lib/lastJob'
 import { said } from '../pages/fmt'
+import { useOnboarding } from '../guides/onboarding'
 
 /** Rehearsal item 11: "Send feedback" from the help menu (the ? sheet and Help).
  *  Anything can open it with `openFeedback()`; `<FeedbackHost />` (mounted once in App) draws it. */
@@ -38,6 +39,7 @@ export function FeedbackDialog({ onClose }: { onClose: () => void }) {
   const [error, setError] = useState<string | null>(null)
   const [thanks, setThanks] = useState<string | null>(null)
   const title = useRef<HTMLHeadingElement>(null)
+  const { markChecklist } = useOnboarding()
   const where = context()
 
   const pick = (f: File | null) => {
@@ -52,6 +54,7 @@ export function FeedbackDialog({ onClose }: { onClose: () => void }) {
       const r = await sendBetaFeedback({ message: message.trim(), route: where.route, video_id: where.video_id, job_id: where.job_id,
         app_version: APP_VERSION, screenshot: shot })
       setThanks(r.said)
+      markChecklist('feedback')        // the beta's welcome checklist (the server ticks it too)
     } catch (e) { setError(said(e, 'That did not send. Try again in a moment.')) } finally { setBusy(false) }
   }
   const attached = [`this page (${where.route})`, where.video_id && `video ${where.video_id}`, where.job_id && `job ${where.job_id}`, 'the app version and your browser'].filter(Boolean).join(', ')

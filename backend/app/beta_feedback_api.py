@@ -121,6 +121,11 @@ async def send_feedback(request: Request, message: str = Form(""), route: str = 
             c.execute("UPDATE beta_feedback SET workspace_id = (SELECT id FROM workspaces WHERE owner = ? "
                       "ORDER BY created_at, id LIMIT 1) WHERE id = ?", (user, fid))
         analytics.safe_in(c, "beta_feedback.sent", user, {"screenshot": bool(sha), "route": _clip(route, 40)})
+    try:                                    # beta kit: the welcome checklist's "Tell us one thing"
+        from app import onboarding
+        onboarding.mark(user, checklist="feedback")
+    except Exception:  # noqa: BLE001 - the message is kept whatever the checklist does
+        api.log.exception("onboarding mark after feedback")
     return {"id": fid, "said": THANKS}
 
 

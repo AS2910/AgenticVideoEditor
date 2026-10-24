@@ -155,3 +155,15 @@ def test_an_address_invited_to_the_beta_joins_at_its_first_sign_in(world):
     main._funnel_started.discard("google:other")
     main._signed_in("google:other")
     assert not beta.in_cohort(main.flags, "google:other")
+
+
+def test_the_welcome_checklist_takes_known_issues_and_feedback_is_ticked_by_sending_it(world, monkeypatch):
+    from app import beta_feedback_api
+    monkeypatch.setattr(beta_feedback_api, "sends", beta_feedback_api.RateLimit(10, 3600.0))
+    sam = world["sam"]
+    main.repo.set_meta("onboarding:google:sam", "{}")
+    put = sam.put("/me/onboarding", json={"checklist": ["known-issues", "nope"]}, headers=H)
+    assert put.status_code == 200 and put.json()["checklist"] == ["known-issues"]
+    assert sam.post("/beta-feedback", data={"message": "The badge is nice."}, headers=H).status_code == 201
+    assert sam.get("/me/onboarding").json()["checklist"] == ["known-issues", "feedback"]
+

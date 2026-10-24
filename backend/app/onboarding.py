@@ -14,7 +14,9 @@ TIPS = (
     "first-upload", "first-silent", "first-question", "first-just-do-it", "first-voice-design",
     "first-project-voice", "first-background", "first-undo-after-export", "first-ceiling", "first-failed-take",
 )
-CHECKLIST = ("goal", "add", "export", "save-voice", "autonomy")
+# The last two are the beta's welcome checklist (shown to `beta.cohort` only): the
+# Known issues page opened, and feedback sent (beta_feedback_api ticks it).
+CHECKLIST = ("goal", "add", "export", "save-voice", "autonomy", "known-issues", "feedback")
 
 
 def _owner(request: Request) -> str:

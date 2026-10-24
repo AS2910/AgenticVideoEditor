@@ -2,7 +2,8 @@ import { describe, it, expect, vi, afterEach } from 'vitest'
 import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { OnboardingProvider } from './onboarding'
-import { Checklist, CHECKLIST } from './Checklist'
+import { Checklist, CHECKLIST, BETA_CHECKLIST } from './Checklist'
+import { resetFlags } from '../flags/useFlags'
 
 const ok = (body: unknown) => ({ ok: true, status: 200, json: async () => body, text: async () => '' }) as Response
 function routeFetch(checklist: string[], hidden = false) {
@@ -16,7 +17,7 @@ function routeFetch(checklist: string[], hidden = false) {
 }
 
 describe('Checklist', () => {
-  afterEach(() => vi.unstubAllGlobals())
+  afterEach(() => { vi.unstubAllGlobals(); resetFlags() })
 
   it('has the five things to do once', () => {
     expect(CHECKLIST.map((i) => i.id)).toEqual(['goal', 'add', 'export', 'save-voice', 'autonomy'])
@@ -57,5 +58,22 @@ describe('Checklist', () => {
   it('reads 0/5 without a provider', () => {
     render(<Checklist onShowMe={() => {}} />)
     expect(screen.getByRole('button', { name: /Get started, 0 of 5/ })).toBeInTheDocument()
+  })
+
+  it('is the welcome checklist in the beta: two more items, opened by link or by the feedback dialog', async () => {
+    const base = { tour: { step: 0, finished: false, skipped: false }, tips: [], checklist: ['goal'], checklist_hidden: false }
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => ok(url.endsWith('/me/flags') ? { flags: ['beta.cohort'] } : base)))
+    const opened = vi.fn()
+    window.addEventListener('voltage:feedback', opened)
+    render(<OnboardingProvider><Checklist onShowMe={() => {}} /></OnboardingProvider>)
+    const pill = await screen.findByRole('button', { name: /Welcome to the beta, 1 of 7/ })
+    expect(BETA_CHECKLIST.map((i) => i.id)).toEqual(['known-issues', 'feedback'])
+    await userEvent.click(pill)
+    const card = screen.getByRole('region', { name: 'Welcome to the beta' })
+    expect(within(card).getAllByRole('listitem')).toHaveLength(7)
+    expect(within(card).getByRole('link', { name: /Open →: Read the known issues/ })).toHaveAttribute('href', '#known-issues')
+    await userEvent.click(within(card).getByRole('button', { name: /Open →: Tell us one thing/ }))
+    expect(opened).toHaveBeenCalled()
+    window.removeEventListener('voltage:feedback', opened)
   })
 })

@@ -5,6 +5,7 @@ import { hrefFor } from '../lib/route'
 import { formatDate } from '../lib/dates'
 import { Markdown } from '../components/Markdown'
 import { openFeedback } from '../components/FeedbackDialog'
+import { useOnboarding } from '../guides/onboarding'
 import { Shell } from './Shell'
 import { said } from './fmt'
 
@@ -13,11 +14,14 @@ import { said } from './fmt'
 export function KnownIssuesPage({ me }: { me: Me | null }) {
   const [page, setPage] = useState<KnownIssues | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const { markChecklist } = useOnboarding()
   useEffect(() => {
     let live = true
     getKnownIssues().then((p) => { if (live) setPage(p) }).catch((e) => { if (live) setError(said(e, 'The known issues could not be read.')) })
     return () => { live = false }
   }, [])
+  // The beta's welcome checklist: read once the page is there.
+  useEffect(() => { if (page) markChecklist('known-issues') }, [page, markChecklist])
 
   return (
     <Shell active="help" me={me} mainClassName="mx-auto flex w-full max-w-[760px] flex-col gap-7 px-4 pt-10 pb-20 sm:px-6 sm:pt-14">
