@@ -119,7 +119,7 @@ def run_one(api: Api, sc: Scenario, db: Path, log: Path, cap: float, keys: dict)
     clip = clips.path(sc.clip)
     setup_since = _now()
     video = api.upload(clip)
-    pid = video["project_id"]
+    pid = video["video_id"]
     api.put(f"/videos/{pid}/settings", {"autonomy": "draft", "turn_usd": cap})
     try:
         api.post(f"/videos/{pid}/reading", {})

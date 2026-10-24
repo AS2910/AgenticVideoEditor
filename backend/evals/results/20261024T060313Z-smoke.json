@@ -1,0 +1,89 @@
+{
+ "label": "smoke",
+ "stamp": "20261024T060313Z",
+ "spent_usd": 0.12696,
+ "runs": [
+  {
+   "scenario": "question",
+   "video_id": "p66",
+   "status": "succeeded",
+   "error": null,
+   "seconds": 30.3,
+   "say": "How do I make a vertical version of this for Instagram Reels?",
+   "statements": [
+    {
+     "text": "Get 20% off today only.",
+     "start": 0.0,
+     "end": 1.82,
+     "speaker": "A"
+    }
+   ],
+   "reply": "The help articles don't describe any way to reframe or crop a video to vertical in Voltage, so I can't point you to a setting for it. Voltage works on what the clip says and how it sounds, not on its shape. What \"Make a variant\" (under Exporting) does is copy this clip and its plan into a new draft in the same project. That's useful for a second version of the read, but it keeps the landscape picture.\n\nThe usual route is to export the vertical cut from your video editor, upload it here, and I'll match the voice line to it. Since the vertical card will probably time the words differently, I'd recheck \"today\" against the new highlight.\n\n0:00 to 0:02 · one line, unchanged · nothing spent this turn",
+   "question": null,
+   "stopped": null,
+   "calls": 1,
+   "steps": [
+    {
+     "text": "Style for this video: Ad read: brisk and confident, one clear offer stated once, urgency on the deadline word.",
+     "cost": null,
+     "tool": "style"
+    },
+    {
+     "text": "Looked in Help: Check with me or Just do it",
+     "cost": null,
+     "tool": "search_help"
+    },
+    {
+     "text": "Thinking",
+     "cost": 0.0935,
+     "tool": "thinking"
+    }
+   ],
+   "takes": [],
+   "requests": [
+    {
+     "input": 4,
+     "cache_read": 0,
+     "cache_write": 10749,
+     "output": 83
+    },
+    {
+     "input": 2,
+     "cache_read": 10749,
+     "cache_write": 722,
+     "output": 572
+    }
+   ],
+   "scores": {
+    "wer": null,
+    "wer_vs_asked": null,
+    "sim_o": null,
+    "utmos": null,
+    "duration_error_s": null,
+    "plan_quality": 1.0,
+    "help_used": false
+   },
+   "plan_quality": {
+    "score": 1.0,
+    "items": 0,
+    "outside": 0,
+    "missed": 0
+   },
+   "cost": {
+    "turn_usd": 0.09347,
+    "turn_by": {
+     "agent": 0.09347
+    },
+    "setup_usd": 0.03349,
+    "scoring_usd": 0.0,
+    "tokens": {
+     "input": 6,
+     "cache_read": 10749,
+     "cache_write": 11471,
+     "output": 655
+    },
+    "requests": 2
+   }
+  }
+ ]
+}
