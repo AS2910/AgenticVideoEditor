@@ -47,8 +47,13 @@ PROFILES = {
 }
 
 
+# Beta kit: `beta.cohort` (app.beta) and any later `beta.*` flag: off for everyone,
+# the default owners included, until a row turns it on for a person.
+BETA_PREFIX = "beta."
+
+
 def is_known(flag: str) -> bool:
-    return flag in KNOWN or flag.startswith(("golive.", "launch."))
+    return flag in KNOWN or flag.startswith(("golive.", "launch.", BETA_PREFIX))
 
 
 class FlagStore:
@@ -58,7 +63,7 @@ class FlagStore:
         self.profile = PROFILES.get(profile or "", frozenset())
 
     def _default(self, flag: str, owner: str) -> bool:
-        if flag.startswith("launch.") or flag in OFF_BY_DEFAULT or not is_known(flag):
+        if flag.startswith(("launch.", BETA_PREFIX)) or flag in OFF_BY_DEFAULT or not is_known(flag):
             return False
         return owner in self.default_owners or flag in self.profile
 

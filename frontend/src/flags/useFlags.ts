@@ -12,6 +12,8 @@ export type Flag =
   | 'voices.cloning'
   | 'voices.cloning_verified'
   | `golive.${string}`
+  // Beta kit: `beta.cohort` is on for the people in the beta (app.beta).
+  | `beta.${string}`
 
 export interface Flags {
   /** True when the flag is on for you. False while the list is loading or failed. */

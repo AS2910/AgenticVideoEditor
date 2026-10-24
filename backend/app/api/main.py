@@ -877,6 +877,8 @@ def _signed_in(owner: str) -> None:
     analytics.track("signed_up", owner)
     analytics.track("first_sign_in", owner)
     _funnel_started.add(owner)
+    from app import beta                    # beta kit: an address invited to the beta joins the cohort
+    beta.claim(owner)
     # G3: a new owner (no work yet, Bin included) starts on the free trial's credits.
     if owner != LOCAL_OWNER and flags.enabled("golive.g3", owner) \
             and not repo.list_projects(owner, include_deleted=True) and not repo.list(owner, include_deleted=True):
@@ -9544,7 +9546,7 @@ async def _csrf_header(request: Request, call_next):
 
 def _mount_optional_routers() -> None:
     import importlib
-    for name in ("app.onboarding", "app.help", "app.tutorial", "app.workspace_api", "app.accounts_api", "app.notify_api", "app.analytics_api", "app.feedback_api", "app.billing_api", "app.safety_api", "app.landing_api", "app.emails_api", "app.admin_api", "app.beta_feedback_api"):
+    for name in ("app.onboarding", "app.help", "app.tutorial", "app.workspace_api", "app.accounts_api", "app.notify_api", "app.analytics_api", "app.feedback_api", "app.billing_api", "app.safety_api", "app.landing_api", "app.emails_api", "app.admin_api", "app.beta_feedback_api", "app.beta_api"):
         try:
             module = importlib.import_module(name)
         except ImportError:

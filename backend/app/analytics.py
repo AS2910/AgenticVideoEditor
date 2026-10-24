@@ -77,6 +77,8 @@ SERVER_NAMES = F7_VERBS | frozenset({
     # G6: trust and safety.
     "consent.liveness_checked", "consent.reviewed", "consent.withdrawn", "clone.public_figure_refused", "abuse.reported",
     "data.export_requested", "data.export_ready", "data.deletion_requested", "export.provenance_stamped",
+    # Beta kit: joining the cohort, and the three questions after a first export.
+    "beta.joined", "beta.survey_shown", "beta.survey_answered",
 })
 # What the browser may post (and nothing else).
 CLIENT_NAMES = frozenset({
