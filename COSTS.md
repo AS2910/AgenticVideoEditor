@@ -13,7 +13,8 @@ How to read this sheet:
 |---|---|---|
 | Transcription (Whisper) | $0.006 a minute of audio | `backend/app/usage.py:26` |
 | Claude, `claude-opus-5` | $5 input, $25 output per million tokens | `backend/app/usage.py:27` |
-| Claude, `claude-haiku-4-5` (project check text pass) | $1 input, $5 output per million tokens | `backend/app/usage.py:29` |
+| Claude, `claude-haiku-4-5` (no longer a default; kept for `AVE_CHECK_MODEL`) | $1 input, $5 output per million tokens | `backend/app/usage.py:29` |
+| Claude, `claude-haiku-5-5` (2026-10-24: project check, learned style, question turns) | $0.10 input, $0.50 output per million tokens (list price, prompts up to 100k tokens) | `backend/app/usage.py:31` |
 | Claude cache read / cache write | 0.10x / 1.25x the input rate | `backend/app/usage.py:34` |
 | Claude fallback for any model not in the table | $5 / $25 per million tokens | `backend/app/usage.py:38` |
 | ElevenLabs speech | $0.30 per 1,000 characters | `backend/app/config.py:53` (env `AVE_ELEVENLABS_USD_PER_1K`) |
@@ -158,3 +159,62 @@ Nothing in code was changed. You set the prices.
 10. INR prices are before GST, with 18% added on the invoice, as the code does.
 11. 1 USD = 84 INR, from `prices.py`.
 12. Breakage and trial credits are not counted in the margin.
+
+## 8. Cost evals and the cost of a turn (2026-10-24)
+
+Measured with real vendors on a database copy, through the app's own ledger, by the cost evals in `backend/evals/` (`python -m evals run`, `python -m evals compare`; raw JSON in `backend/evals/results/`). Six scenarios, one fresh upload and one turn each, under Just do it. The clips are short: the 2.3 s sample ad, a 13 s two-speaker chai stall clip made from it with the system voices, and a 6 s silent clip. Turn cost is the agent plus speech for the turn only; the upload's transcription and first look are setup and shown apart. Costs are "warm": a run's first request that found the shared prefix (tools and system prompt, about 10,300 tokens, the same for every user) cold is counted as having read it, because that depends only on what ran in the five minutes before. The raw ledger figure is in the JSON.
+
+Real spend for the whole night: $3.557 on the copy's ledger (Claude $2.714, ElevenLabs $0.843, under the $3.80 daily cap set on that copy), plus about $0.005 of speech to text (ElevenLabs Scribe: the OpenAI key had expired, so Whisper could not be used) for scoring the takes and about $0.003 of Haiku test calls. Total about $3.57, inside the $4 budget.
+
+### What was changed
+
+| Lever | What it does | What it saved, measured |
+|---|---|---|
+| a. Caching | The agent loop already cached the tools, the system prompt and the thread: 93% of its input tokens were cache reads in the baseline. The planner's own calls (the first look at a clip) now cache their instructions too (about 1,060 tokens). | Under a cent per upload. |
+| b. Small model | A turn that only asks how the app works runs on `claude-haiku-5-5` with the read-only tools, sorted first by the same model (a request put as a question stays with the planner). The project check and learned style moved to `claude-haiku-5-5` too. | Question turn $0.034 to $0.001 (-97%, twice). Project check about 10x cheaper, same output on a live test. |
+| c. Takes | Takes are voiced one at a time, stopping at the first within the fit tolerance. A wider band (`AVE_TAKE_ACCEPT=0.10`) is off: it saved takes but measured worse duration error. | Only when a second take fits; in these runs most lines needed all three. |
+| d. Kept reads | A clip's transcript, first look, understanding and reading are kept by the file's hash (migration 0038). | Re-uploading a clip: setup $0.034 to $0.056 down to $0.00. |
+| e. Opening view | Motion peaks on a named beat are dropped; a later turn whose brief, rules and understanding did not change points back to them. | First turn 0 to 14% fewer opening tokens; later turns 65 to 74% fewer (about 350 tokens a request). |
+
+Not kept: a prompt line asking the agent to voice independent lines in one reply. In its one run the 5-line rewrite cost more ($0.77 against $0.48) and re-voiced lines; it was taken out.
+
+### Cost per turn, per scenario
+
+| Scenario | Baseline | Runs after (same request) | Typical now | Scores, baseline to after |
+|---|---|---|---|---|
+| One-line fix ("Make it 30% off", 2.3 s) | $0.058 | $0.059, $0.119 | $0.059 | WER 0 to 0 · SIM-o 0.63 to 0.52 / 0.62 · UTMOS 4.34 to 4.39 / 4.33 · duration error 0.11 to 0.18 / 0.45 s · plan 1 to 1 |
+| 5-line rewrite (13 s, two speakers) | $0.485 | $0.772 (with the line taken out) | $0.485 | WER 0.03 to 0.24 · SIM-o 0.71 to 0.73 · UTMOS 4.14 to 3.75 · duration error 0.36 to 0.33 s · plan 1 to 1 |
+| New voice-over, one line (6 s, silent) | $0.117 | $0.169, $0.159 (from the ledger: that re-check turn outran the runner's 15 minute wait) | $0.159 | WER 0 to 0 · UTMOS 4.46 to 4.46 · duration error 0 to 0 · plan 1 to 1 |
+| Hinglish line (2.3 s) | $0.140 | $0.116, $0.185 | $0.140 | WER 0.63 to 0.63 · SIM-o 0.82 to 0.79 · UTMOS 3.95 to 3.97 / 2.95 · duration error 0.20 to 0.35 / 0 s · plan 1 to 1 / 0 (laid over instead of replacing, once) |
+| Hindi version, 5 lines (13 s) | $0.453 | not run again (budget) | $0.453 | WER 0.33 · SIM-o 0.84 · UTMOS 3.48 · duration error 0.40 s · plan 1 |
+| Question turn ("How do I make a vertical version?") | $0.034 | $0.001, $0.001 | $0.001 | plan 1 to 1 · help article used and named, both times |
+| Average of the six | $0.215 | | $0.216 | |
+
+The target (40% lower with no score more than 5% worse) was not reached. What the numbers say:
+- Only the question turn moved for certain. The other levers either do not touch a single-turn edit (d and e help re-uploads and later turns) or saved nothing on these lines (c).
+- One turn is not a measurement. The same one-line fix, same words, same voice, same single take, cost $0.051 to $0.151 in agent spend over three runs, and its SIM-o moved 0.63 to 0.52 on a take made the same way. Agent spend is mostly output (thinking), and how long Voltage thinks and how often it re-voices varies run to run. Every flag a 5% threshold raised in these runs is inside that spread, and none comes from a changed lever: the re-check ran the baseline's system prompt and tools, and no kept lever acts on a fresh single-line edit (c only when a second take fits, which it did not). The evals need three or more runs per scenario before a 5% bar means anything; that is about $4.50 a full pass at today's prices ($1.50 a pass with setup).
+
+### What would move the cost (for you to decide, not changed)
+
+| Lever | Effect, from these runs |
+|---|---|
+| The ledger's price for `claude-opus-5-5` | The ledger charges the fallback $5 / $25 and cache reads at 0.1x. The list price is $4 / $20 with reads at 0.05x. At list price the baseline's agent spend is 30% lower, about 20% of every turn (decision 4 in section 6). |
+| Takes per line | Speech is 35% to 40% of a voiced turn here, and most lines took all three takes. Two takes saves about a third of that. |
+| Effort | Agent output (thinking) is about half of agent spend. A lower default effort (`AVE_AGENT_EFFORT`, high today) would cut it; it needs the evals at three runs a scenario first. |
+| Tool definitions | 6,600 of the 10,300 shared tokens are tool descriptions, read on every request (about 9 requests on a 5-line turn). |
+
+### What each scenario costs a user now (at 2.5x)
+
+Typical vendor cost from the table above; USD at $2.62 a credit, INR at Rs 216 a credit before GST (section 4, unchanged: the credit price follows from the margin, not from turn costs).
+
+| Scenario | Credits | USD | INR before GST | INR with GST |
+|---|---|---|---|---|
+| One-line fix (2.3 s) | 0.059 | $0.15 | Rs 13 | Rs 15 |
+| 5-line rewrite (13 s) | 0.485 | $1.27 | Rs 105 | Rs 124 |
+| New voice-over, one line (6 s) | 0.159 | $0.42 | Rs 34 | Rs 41 |
+| Hinglish line (2.3 s) | 0.140 | $0.37 | Rs 30 | Rs 36 |
+| Hindi version, 5 lines (13 s) | 0.453 | $1.19 | Rs 98 | Rs 116 |
+| Question turn | 0.001 | under $0.01 | under Rs 1 | under Rs 1 |
+| Average of the six | 0.216 | $0.57 | Rs 47 | Rs 55 |
+
+These are short clips, and the eval turns are single, fresh turns; the section 2 and 4 figures for 60 s scenarios and the live ledger's $0.47 a real turn still stand. The question turn is the one real change: a how-do-I question no longer costs a planner turn.

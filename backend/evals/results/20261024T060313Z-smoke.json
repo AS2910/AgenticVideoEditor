@@ -61,7 +61,7 @@
     "utmos": null,
     "duration_error_s": null,
     "plan_quality": 1.0,
-    "help_used": false
+    "help_used": true
    },
    "plan_quality": {
     "score": 1.0,
@@ -83,7 +83,8 @@
      "output": 655
     },
     "requests": 2
-   }
+   },
+   "scores_note": "help_used recomputed from the recorded steps (the runner read the wrong field on 2026-10-24)"
   }
  ]
 }

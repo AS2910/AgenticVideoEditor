@@ -22,11 +22,17 @@ PLANNER_USD_PER_TOKEN = 5.00 / 1_000_000
 WRITE, READ = 1.25, 0.10
 
 
-def load(path: str | Path) -> dict[str, dict]:
+def shared_prefix(runs: dict[str, dict]) -> int:
+    """What a warm first request read in this run (0 when every one was cold)."""
+    return max((r["requests"][0]["cache_read"] for r in runs.values() if r.get("requests")), default=0)
+
+
+def load(path: str | Path, static: int | None = None) -> dict[str, dict]:
+    """The run's scenarios with `warm_usd`. `static` is the shared prefix's
+    size when this run never found it warm (taken from the run it is compared with)."""
     data = json.loads(Path(path).read_text())
     runs = {r["scenario"]: r for r in data["runs"] if r.get("status") != "error"}
-    # The shared prefix: what a warm first request read in this run.
-    static = max((r["requests"][0]["cache_read"] for r in runs.values() if r.get("requests")), default=0)
+    static = shared_prefix(runs) or static or 0
     for r in runs.values():
         cold = sum(static for q in r.get("requests") or () if q["cache_read"] == 0 and static and q["cache_write"] >= static)
         r["cost"]["warm_usd"] = round(r["cost"]["turn_usd"] - cold * PLANNER_USD_PER_TOKEN * (WRITE - READ), 5)
@@ -49,6 +55,7 @@ def _fmt(v) -> str:
 
 def table(a_path: str | Path, b_path: str | Path) -> tuple[str, list[str]]:
     a, b = load(a_path), load(b_path)
+    a, b = load(a_path, shared_prefix(b)), load(b_path, shared_prefix(a))
     rows = ["| scenario | turn $ before | turn $ after | change | raw ledger before / after | " + " | ".join(SCORES) + " |",
             "|---|---|---|---|---|" + "---|" * len(SCORES)]
     flags, costs_a, costs_b = [], [], []

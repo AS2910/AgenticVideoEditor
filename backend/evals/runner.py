@@ -161,7 +161,7 @@ def run_one(api: Api, sc: Scenario, db: Path, log: Path, cap: float, keys: dict)
             "utmos": _mean(t.get("utmos") for t in takes),
             "duration_error_s": _mean(t.get("duration_error_s") for t in takes),
             "plan_quality": quality["score"],
-            "help_used": any(s.get("tool") == "search_help" for s in steps) if sc.question else None,
+            "help_used": any((s.get("data") or {}).get("tool") == "search_help" for s in steps) if sc.question else None,
         },
         "plan_quality": quality,
         "cost": {"turn_usd": turn["total"], "turn_by": turn["by"], "setup_usd": setup_usd, "scoring_usd": round(scoring_usd, 5),

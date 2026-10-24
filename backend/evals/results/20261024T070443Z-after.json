@@ -1,0 +1,827 @@
+{
+ "label": "after",
+ "stamp": "20261024T070443Z",
+ "spent_usd": 1.30414,
+ "runs": [
+  {
+   "scenario": "one_line_fix",
+   "video_id": "p73",
+   "status": "succeeded",
+   "error": null,
+   "seconds": 44.7,
+   "say": "Make it 30% off",
+   "statements": [
+    {
+     "text": "Get 20% off today only.",
+     "start": 0.0,
+     "end": 1.82,
+     "speaker": "A"
+    }
+   ],
+   "reply": null,
+   "question": {
+    "text": "The new line says \"Get 30% off today only\" and lands on the word highlight, but it's in a stock voice (Sarah), not the original speaker: the clip has too little of their voice to copy. The card on screen also still reads 20%, and I can't change the picture. Add it like this?",
+    "options": [
+     "Add it in this voice",
+     "Try a closer voice",
+     "Leave it at 20%"
+    ],
+    "guess": "Add it in this voice",
+    "gate": false,
+    "cost_usd": null,
+    "details": [
+     "Put the 30% line in the video in Sarah's voice, even though the card still shows 20%.",
+     "Find a stock voice nearer the original speaker and voice the line again, about +$0.01.",
+     "Keep the original line so it matches the card."
+    ],
+    "left_usd": 0.88,
+    "cap_usd": 1.0
+   },
+   "stopped": null,
+   "calls": 4,
+   "steps": [
+    {
+     "text": "Style for this video: Ad voice: brisk and confident, one clear offer stated once, matched to the word highlight timing.",
+     "cost": null,
+     "tool": "style"
+    },
+    {
+     "text": "Read all 1 line",
+     "cost": null,
+     "tool": "read_transcript"
+    },
+    {
+     "text": "Voiced “Get 30% off today only.” with Sarah · Brisk and confident ad read, same pace and energy as the original, a little weight on \"thirty\".",
+     "cost": 0.0069,
+     "tool": "synthesize_take"
+    },
+    {
+     "text": "Thinking",
+     "cost": 0.1112,
+     "tool": "thinking"
+    }
+   ],
+   "takes": [
+    {
+     "item_id": "i1",
+     "status": "ready",
+     "old_text": "Get 20% off today only.",
+     "new_text": "Get 30% off today only.",
+     "start": 0.0,
+     "end": 1.82,
+     "mix": "replace",
+     "fit_notes": [],
+     "passed": true,
+     "heard": "Get 30% off today only",
+     "wer": 0.0,
+     "wer_vs_asked": 0.0,
+     "sim_o": 0.5228354359546684,
+     "utmos": 4.389200210571289,
+     "duration_error_s": 0.18
+    }
+   ],
+   "requests": [
+    {
+     "input": 4,
+     "cache_read": 0,
+     "cache_write": 10824,
+     "output": 106
+    },
+    {
+     "input": 2,
+     "cache_read": 10824,
+     "cache_write": 372,
+     "output": 490
+    },
+    {
+     "input": 2,
+     "cache_read": 11196,
+     "cache_write": 685,
+     "output": 438
+    }
+   ],
+   "scores": {
+    "wer": 0.0,
+    "wer_vs_asked": 0.0,
+    "sim_o": 0.5228,
+    "utmos": 4.3892,
+    "duration_error_s": 0.18,
+    "plan_quality": 1.0,
+    "help_used": null
+   },
+   "plan_quality": {
+    "score": 1.0,
+    "items": 1,
+    "outside": 0,
+    "missed": 0
+   },
+   "cost": {
+    "turn_usd": 0.11806,
+    "turn_by": {
+     "agent": 0.11116,
+     "speech": 0.0069
+    },
+    "setup_usd": 0.03861,
+    "scoring_usd": 0.0002,
+    "tokens": {
+     "input": 8,
+     "cache_read": 22020,
+     "cache_write": 11881,
+     "output": 1034
+    },
+    "requests": 3
+   }
+  },
+  {
+   "scenario": "five_line_rewrite",
+   "video_id": "p74",
+   "status": "succeeded",
+   "error": null,
+   "seconds": 552.1,
+   "say": "Rewrite all five lines as a Diwali offer: chai and sweets at 20% off. Same speakers, same length, each line replacing the one it rewrites.",
+   "statements": [
+    {
+     "text": "Is the masala chai fresh today?",
+     "start": 0.4,
+     "end": 2.19,
+     "speaker": "A"
+    },
+    {
+     "text": "Fresh every morning, made with ginger.",
+     "start": 2.79,
+     "end": 4.65,
+     "speaker": "B"
+    },
+    {
+     "text": "How much for two cups?",
+     "start": 5.25,
+     "end": 6.508,
+     "speaker": "A"
+    },
+    {
+     "text": "Forty rupees, and the biscuits are free.",
+     "start": 7.108,
+     "end": 9.18,
+     "speaker": "B"
+    },
+    {
+     "text": "Perfect, I will take two.",
+     "start": 9.78,
+     "end": 11.367,
+     "speaker": "A"
+    }
+   ],
+   "reply": "I've rewritten the chai stall chat as a Diwali offer, timed line for line to the original 13 seconds. It now goes: \"Is the chai special for Diwali?\", \"Yes, twenty percent off!\", \"And the sweets too?\", \"Yes, today only!\", \"Happy Diwali!\"\n\nThis is just a draft for you to listen to. It isn't in the video yet. Neither speaker has enough speech in the clip to copy their voice (each needs about 10 seconds), so I used stand-ins: a stock woman's voice for the customer and an Indian man's voice for the stall owner. The stall owner's two lines failed the sound check. They come out higher than the original voice, and line 4 still doesn't sound enough like him.\n\nI also tried \"Diwali deals on chai and sweets?\" for line 1, but it only fits if the picture slows by half a second, so I kept the shorter version. The offer still comes through: line 2 gives the 20%, line 3 covers the sweets, line 4 says today only.\n\n0:00 to 0:11 · five lines · this turn $0.45",
+   "question": null,
+   "stopped": null,
+   "calls": 22,
+   "steps": [
+    {
+     "text": "Style for this video: Ad voice: friendly and brisk, say the 20% off today only offer clearly once, land it on the final word highlight near 0:11.",
+     "cost": null,
+     "tool": "style"
+    },
+    {
+     "text": "Read all 5 lines",
+     "cost": null,
+     "tool": "read_transcript"
+    },
+    {
+     "text": "Voiced “Is the chai special for Diwali?” with Sarah · curious, friendly customer at a festive tea stall",
+     "cost": 0.0279,
+     "tool": "synthesize_take"
+    },
+    {
+     "text": "Checked “Yes, and twenty percent off chai and swe…” before voicing: about 2.3 s for 1.9 s, too long",
+     "cost": null,
+     "tool": "synthesize_take"
+    },
+    {
+     "text": "Checked “[excited] Is that only today?” before voicing: about 1.4 s for 1.3 s, too long",
+     "cost": null,
+     "tool": "synthesize_take"
+    },
+    {
+     "text": "Checked “Today only, so grab some laddoos too.” before voicing: about 2.3 s for 2.1 s, too long",
+     "cost": null,
+     "tool": "synthesize_take"
+    },
+    {
+     "text": "Checked “Happy Diwali! Two chais and sweets, then…” before voicing: about 2.5 s for 1.6 s, too long",
+     "cost": null,
+     "tool": "synthesize_take"
+    },
+    {
+     "text": "Voiced “Twenty percent off chai and sweets!” with Sarah · warm, proud stall owner, bright on the offer",
+     "cost": 0.0315,
+     "tool": "synthesize_take"
+    },
+    {
+     "text": "Voiced “[excited] Just for today?” with Sarah · pleasantly surprised, eager",
+     "cost": 0.0225,
+     "tool": "synthesize_take"
+    },
+    {
+     "text": "Too long for its gap: “Today only. Grab some laddoos!”, 2.8 s for 2.1 s",
+     "cost": 0.036,
+     "tool": "synthesize_take"
+    },
+    {
+     "text": "Voiced “Happy Diwali!” with Sarah · happy, decided, festive warmth",
+     "cost": 0.0156,
+     "tool": "synthesize_take"
+    },
+    {
+     "text": "Looked through 26 voices",
+     "cost": null,
+     "tool": "list_voices"
+    },
+    {
+     "text": "Listened to 2.8–4.7 s",
+     "cost": null,
+     "tool": "hear"
+    },
+    {
+     "text": "Checked “Twenty percent off chai and sweets!” before voicing: about 2.4 s for 1.9 s, too long",
+     "cost": null,
+     "tool": "synthesize_take"
+    },
+    {
+     "text": "Voiced “Today only, friend!” with Jeevan · friendly, brisk, a smile in the voice, weight on today only",
+     "cost": 0.0228,
+     "tool": "synthesize_take"
+    },
+    {
+     "text": "Too long for its gap: “Diwali deals on chai and sweets?”, 2.4 s for 1.8 s",
+     "cost": 0.0384,
+     "tool": "synthesize_take"
+    },
+    {
+     "text": "Voiced “Yes, twenty percent off!” with Brian · warm, proud stall owner, bright on the offer",
+     "cost": 0.0216,
+     "tool": "synthesize_take"
+    },
+    {
+     "text": "Voiced “Today only, friend!” with Brian · friendly, brisk, a smile in the voice, weight on today only",
+     "cost": 0.0171,
+     "tool": "synthesize_take"
+    },
+    {
+     "text": "Voiced “Yes, twenty percent off!” with Jeevan · warm, proud stall owner, bright on the offer, a touch lower and fuller",
+     "cost": 0.0216,
+     "tool": "synthesize_take"
+    },
+    {
+     "text": "Voiced “[excited] And the sweets too?” with Sarah · pleasantly surprised, eager",
+     "cost": 0.0087,
+     "tool": "synthesize_take"
+    },
+    {
+     "text": "Voiced “Yes, today only!” with Jeevan · friendly, brisk, a smile in the voice, weight on today only, a touch lower and fuller",
+     "cost": 0.0144,
+     "tool": "synthesize_take"
+    },
+    {
+     "text": "Thinking",
+     "cost": 0.4942,
+     "tool": "thinking"
+    }
+   ],
+   "takes": [
+    {
+     "item_id": "i1",
+     "status": "ready",
+     "old_text": "Is the masala chai fresh today?",
+     "new_text": "Diwali deals on chai and sweets?",
+     "start": 0.4,
+     "end": 2.19,
+     "mix": "replace",
+     "fit_notes": [
+      "nearest of 3 takes",
+      "speech at 1.16× speed"
+     ],
+     "passed": true,
+     "heard": "Is the chai special for Diwali?",
+     "wer": 1.0,
+     "sim_o": 0.6139917658969523,
+     "utmos": 4.288625240325928,
+     "duration_error_s": 0.18
+    },
+    {
+     "item_id": "i2",
+     "status": "ready",
+     "old_text": "Fresh every morning, made with ginger.",
+     "new_text": "Yes, twenty percent off!",
+     "start": 2.79,
+     "end": 4.65,
+     "mix": "replace",
+     "fit_notes": [
+      "nearest of 3 takes",
+      "speech at 1.12× speed"
+     ],
+     "passed": false,
+     "heard": "Yes, 20% off",
+     "wer": 0.0,
+     "sim_o": 0.6562474106212134,
+     "utmos": 4.045064926147461,
+     "duration_error_s": 0.43
+    },
+    {
+     "item_id": "i3",
+     "status": "ready",
+     "old_text": "How much for two cups?",
+     "new_text": "[excited] And the sweets too?",
+     "start": 5.25,
+     "end": 6.508,
+     "mix": "replace",
+     "fit_notes": [],
+     "passed": true,
+     "heard": "And the sweets too?",
+     "wer": 0.2,
+     "sim_o": 0.6498722732389136,
+     "utmos": 3.383575201034546,
+     "duration_error_s": 0.118
+    },
+    {
+     "item_id": "i4",
+     "status": "ready",
+     "old_text": "Forty rupees, and the biscuits are free.",
+     "new_text": "Yes, today only!",
+     "start": 7.108,
+     "end": 9.18,
+     "mix": "replace",
+     "fit_notes": [
+      "nearest of 3 takes",
+      "opened the pauses by 48 ms",
+      "speech at 0.87× speed"
+     ],
+     "passed": false,
+     "heard": "Yes, today only",
+     "wer": 0.0,
+     "sim_o": 0.9100734305132051,
+     "utmos": 3.3867974281311035,
+     "duration_error_s": 0.602
+    },
+    {
+     "item_id": "i5",
+     "status": "ready",
+     "old_text": "Perfect, I will take two.",
+     "new_text": "Happy Diwali!",
+     "start": 9.78,
+     "end": 11.367,
+     "mix": "replace",
+     "fit_notes": [
+      "nearest of 3 takes",
+      "spoken at 0.76× by the model",
+      "speech at 0.81× speed"
+     ],
+     "passed": true,
+     "heard": "Happy Diwali",
+     "wer": 0.0,
+     "sim_o": 0.8175595454524858,
+     "utmos": 3.6415457725524902,
+     "duration_error_s": 0.317
+    }
+   ],
+   "requests": [
+    {
+     "input": 4,
+     "cache_read": 10351,
+     "cache_write": 637,
+     "output": 69
+    },
+    {
+     "input": 2,
+     "cache_read": 10988,
+     "cache_write": 529,
+     "output": 3216
+    },
+    {
+     "input": 2,
+     "cache_read": 11517,
+     "cache_write": 3775,
+     "output": 2307
+    },
+    {
+     "input": 2,
+     "cache_read": 15292,
+     "cache_write": 3306,
+     "output": 265
+    },
+    {
+     "input": 2,
+     "cache_read": 18598,
+     "cache_write": 1644,
+     "output": 1135
+    },
+    {
+     "input": 2,
+     "cache_read": 20242,
+     "cache_write": 1481,
+     "output": 2100
+    },
+    {
+     "input": 2,
+     "cache_read": 21723,
+     "cache_write": 2755,
+     "output": 2054
+    },
+    {
+     "input": 2,
+     "cache_read": 24478,
+     "cache_write": 2686,
+     "output": 136
+    },
+    {
+     "input": 2,
+     "cache_read": 27164,
+     "cache_write": 394,
+     "output": 972
+    }
+   ],
+   "scores": {
+    "wer": 0.24,
+    "wer_vs_asked": null,
+    "sim_o": 0.7295,
+    "utmos": 3.7491,
+    "duration_error_s": 0.3294,
+    "plan_quality": 1.0,
+    "help_used": null
+   },
+   "plan_quality": {
+    "score": 1.0,
+    "items": 5,
+    "outside": 0,
+    "missed": 0
+   },
+   "cost": {
+    "turn_usd": 0.77227,
+    "turn_by": {
+     "agent": 0.49417,
+     "speech": 0.2781
+    },
+    "setup_usd": 0.04138,
+    "scoring_usd": 0.00095,
+    "tokens": {
+     "input": 20,
+     "cache_read": 160353,
+     "cache_write": 17207,
+     "output": 12254
+    },
+    "requests": 9
+   }
+  },
+  {
+   "scenario": "new_voiceover",
+   "video_id": "p75",
+   "status": "succeeded",
+   "error": null,
+   "seconds": 40.7,
+   "say": "Add a calm woman's voice-over that says “Fresh chai, every morning, right here.”",
+   "statements": [],
+   "reply": "I've added the calm voice-over “Fresh chai, every morning, right here.” in a warm, unhurried woman's voice (Sarah), starting just after the card appears. It's in the video and rendered. My first try was slowed down too much to fill the time and dragged, so I re-voiced it at a natural pace and it now finishes well before the end. One thing to know: the card on screen still says “Get 20% off today only” and the voice-over doesn't mention the offer. If you want, I can add a short second line about it.\n\n0:00.3 to 0:02.8 · one line · $0.06 (two tries)",
+   "question": null,
+   "stopped": null,
+   "calls": 5,
+   "steps": [
+    {
+     "text": "Style for this video: Ad voice: brisk and friendly, one clear line, the 20% off today only offer said once, landing by 0:05.",
+     "cost": null,
+     "tool": "style"
+    },
+    {
+     "text": "Looked through 26 voices",
+     "cost": null,
+     "tool": "list_voices"
+    },
+    {
+     "text": "Found room: the whole clip",
+     "cost": null,
+     "tool": "find_room"
+    },
+    {
+     "text": "Voiced “Fresh chai, every morning, right here.” with Sarah · calm and warm, unhurried, a gentle smile; small easy pauses at the commas",
+     "cost": 0.0456,
+     "tool": "synthesize_take"
+    },
+    {
+     "text": "Voiced “Fresh chai, every morning, right here.” with Sarah · calm and warm, unhurried but natural pace, a gentle smile; small easy pauses at the commas",
+     "cost": 0.0114,
+     "tool": "synthesize_take"
+    },
+    {
+     "text": "Shipped 1 change. The edited video is rendered for these edits; the user can download it from the top bar",
+     "cost": null,
+     "tool": "ship"
+    },
+    {
+     "text": "Thinking",
+     "cost": 0.1123,
+     "tool": "thinking"
+    }
+   ],
+   "takes": [
+    {
+     "item_id": "i1",
+     "status": "approved",
+     "old_text": "",
+     "new_text": "Fresh chai, every morning, right here.",
+     "start": 0.3,
+     "end": 4.0,
+     "mix": "layer",
+     "fit_notes": [],
+     "passed": true,
+     "heard": "Fresh chai every morning, right here.",
+     "wer": 0.0,
+     "wer_vs_asked": 0.0,
+     "sim_o": null,
+     "utmos": 4.456740379333496,
+     "duration_error_s": 0.0
+    }
+   ],
+   "requests": [
+    {
+     "input": 4,
+     "cache_read": 10351,
+     "cache_write": 644,
+     "output": 149
+    },
+    {
+     "input": 2,
+     "cache_read": 10995,
+     "cache_write": 1915,
+     "output": 664
+    },
+    {
+     "input": 2,
+     "cache_read": 12910,
+     "cache_write": 855,
+     "output": 630
+    },
+    {
+     "input": 2,
+     "cache_read": 13765,
+     "cache_write": 779,
+     "output": 132
+    },
+    {
+     "input": 2,
+     "cache_read": 14544,
+     "cache_write": 170,
+     "output": 571
+    }
+   ],
+   "scores": {
+    "wer": 0.0,
+    "wer_vs_asked": 0.0,
+    "sim_o": null,
+    "utmos": 4.4567,
+    "duration_error_s": 0.0,
+    "plan_quality": 1.0,
+    "help_used": null
+   },
+   "plan_quality": {
+    "score": 1.0,
+    "items": 1,
+    "outside": 0,
+    "missed": 0
+   },
+   "cost": {
+    "turn_usd": 0.16926,
+    "turn_by": {
+     "agent": 0.11226,
+     "speech": 0.057
+    },
+    "setup_usd": 0.04594,
+    "scoring_usd": 0.00041,
+    "tokens": {
+     "input": 12,
+     "cache_read": 62565,
+     "cache_write": 4363,
+     "output": 2146
+    },
+    "requests": 5
+   }
+  },
+  {
+   "scenario": "hinglish_line",
+   "video_id": "p76",
+   "status": "succeeded",
+   "error": null,
+   "seconds": 57.6,
+   "say": "Replace the line with “Aaj hi lo, 30% off, sirf aaj!”",
+   "statements": [
+    {
+     "text": "Get 20% off today only.",
+     "start": 0.0,
+     "end": 1.82,
+     "speaker": "A"
+    }
+   ],
+   "reply": "Your new line \"Aaj hi lo, 30% off, sirf aaj!\" is ready to hear. It's a brisk read that fills the card's 1.8 seconds, with the picture eased very slightly (barely noticeable) to make room. I haven't added it to the video yet, for two reasons. First, the clip has only about a second and a half of the original speaker, too little to copy their voice, so this is a stock woman's voice standing in. Second, the card on screen still says \"20% off\", so the voice and the text now disagree.\n\nShould I add it in this voice, or would you like a different voice first?\n\n0:00 to 0:02 · one line · $0.09 spent this turn",
+   "question": null,
+   "stopped": null,
+   "calls": 5,
+   "steps": [
+    {
+     "text": "Style for this video: Ad voice: brisk and confident, one clear offer stated once, matched to the word highlight timing.",
+     "cost": null,
+     "tool": "style"
+    },
+    {
+     "text": "Read all 1 line",
+     "cost": null,
+     "tool": "read_transcript"
+    },
+    {
+     "text": "Found the pauses",
+     "cost": null,
+     "tool": "find_room"
+    },
+    {
+     "text": "Checked “Aaj hi lo, 30% off, sirf aaj!” before voicing: about 2.6 s for 1.8 s, too long",
+     "cost": null,
+     "tool": "synthesize_take"
+    },
+    {
+     "text": "Voiced “Aaj hi lo, 30% off, sirf aaj!” with Sarah · Brisk, confident Hinglish ad read, quick pace, punchy on \"30% off\", a lift on \"sirf aaj\"",
+     "cost": 0.0087,
+     "tool": "synthesize_take"
+    },
+    {
+     "text": "Thinking",
+     "cost": 0.1071,
+     "tool": "thinking"
+    }
+   ],
+   "takes": [
+    {
+     "item_id": "i1",
+     "status": "ready",
+     "old_text": "Get 20% off today only.",
+     "new_text": "Aaj hi lo, 30% off, sirf aaj!",
+     "start": 0.0,
+     "end": 1.82,
+     "mix": "replace",
+     "fit_notes": [
+      "the picture at 0.94×"
+     ],
+     "passed": true,
+     "heard": "आज ही लो 30% off सिर्फ आज",
+     "wer": 0.625,
+     "wer_vs_asked": 0.625,
+     "sim_o": 0.7926318594711416,
+     "utmos": 3.9737236499786377,
+     "duration_error_s": 0.35
+    }
+   ],
+   "requests": [
+    {
+     "input": 4,
+     "cache_read": 10351,
+     "cache_write": 495,
+     "output": 92
+    },
+    {
+     "input": 2,
+     "cache_read": 10846,
+     "cache_write": 359,
+     "output": 740
+    },
+    {
+     "input": 2,
+     "cache_read": 11205,
+     "cache_write": 802,
+     "output": 820
+    },
+    {
+     "input": 2,
+     "cache_read": 12007,
+     "cache_write": 1007,
+     "output": 123
+    },
+    {
+     "input": 2,
+     "cache_read": 13014,
+     "cache_write": 247,
+     "output": 632
+    }
+   ],
+   "scores": {
+    "wer": 0.625,
+    "wer_vs_asked": 0.625,
+    "sim_o": 0.7926,
+    "utmos": 3.9737,
+    "duration_error_s": 0.35,
+    "plan_quality": 1.0,
+    "help_used": null
+   },
+   "plan_quality": {
+    "score": 1.0,
+    "items": 1,
+    "outside": 0,
+    "missed": 0
+   },
+   "cost": {
+    "turn_usd": 0.11583,
+    "turn_by": {
+     "agent": 0.10713,
+     "speech": 0.0087
+    },
+    "setup_usd": 0.0,
+    "scoring_usd": 0.00019,
+    "tokens": {
+     "input": 12,
+     "cache_read": 57423,
+     "cache_write": 2910,
+     "output": 2407
+    },
+    "requests": 5
+   }
+  },
+  {
+   "scenario": "question",
+   "video_id": "p77",
+   "status": "succeeded",
+   "error": null,
+   "seconds": 8.2,
+   "say": "How do I make a vertical version of this for Instagram Reels?",
+   "statements": [
+    {
+     "text": "Get 20% off today only.",
+     "start": 0.0,
+     "end": 1.82,
+     "speaker": "A"
+    }
+   ],
+   "reply": "The Reels 9:16 preset in the batch export article covers this. It's on the project page under **Export videos**, which makes a 9:16 file of each video you pick. This clip would need to be in a project for that route. If you'd rather not use a project, I can't find a single-video vertical option in the help articles, so I wouldn't assume one exists.\n\nSource: Projects / Export many videos at once (batch-export).",
+   "question": null,
+   "stopped": null,
+   "calls": 1,
+   "steps": [
+    {
+     "text": "Style for this video: Ad voice: brisk and confident, one clear offer stated once, matched to the word highlight timing.",
+     "cost": null,
+     "tool": "style"
+    },
+    {
+     "text": "Looked in Help: Brief versions and \"Brief changed\"",
+     "cost": null,
+     "tool": "search_help"
+    },
+    {
+     "text": "Thinking",
+     "cost": 0.001,
+     "tool": "thinking"
+    }
+   ],
+   "takes": [],
+   "requests": [
+    {
+     "input": 4,
+     "cache_read": 0,
+     "cache_write": 4939,
+     "output": 114
+    },
+    {
+     "input": 2,
+     "cache_read": 4939,
+     "cache_write": 973,
+     "output": 306
+    }
+   ],
+   "scores": {
+    "wer": null,
+    "wer_vs_asked": null,
+    "sim_o": null,
+    "utmos": null,
+    "duration_error_s": null,
+    "plan_quality": 1.0,
+    "help_used": true
+   },
+   "plan_quality": {
+    "score": 1.0,
+    "items": 0,
+    "outside": 0,
+    "missed": 0
+   },
+   "cost": {
+    "turn_usd": 0.00104,
+    "turn_by": {
+     "agent": 0.001,
+     "routing": 4e-05
+    },
+    "setup_usd": 0.0,
+    "scoring_usd": 0.0,
+    "tokens": {
+     "input": 6,
+     "cache_read": 4939,
+     "cache_write": 5912,
+     "output": 420
+    },
+    "requests": 2
+   },
+   "scores_note": "help_used recomputed from the recorded steps (the runner read the wrong field on 2026-10-24)"
+  }
+ ]
+}
