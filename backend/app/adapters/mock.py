@@ -59,7 +59,7 @@ class MockTranscriptionAdapter:
         return [w.text for w in self.transcribe(source).words]
 
     def transcribe(self, source: Source) -> Transcript:
-        made = self._known.get(getattr(source.media, "sha256", None))
+        made = self._known.get(getattr(getattr(source, "media", None), "sha256", None))
         if made is not None:
             return Transcript(words=tuple(Word(t, s, e, who) for t, s, e, who in made["words"]),
                               statements=tuple(Statement(t, s, e, who) for t, s, e, who in made["statements"]))

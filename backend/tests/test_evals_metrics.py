@@ -32,7 +32,7 @@ def test_plan_quality_counts_only_the_asked_lines():
 
 def test_compare_flags_a_score_more_than_five_percent_worse(tmp_path):
     def run(cost, utmos, wer):
-        return {"runs": [{"scenario": "s", "status": "succeeded", "cost": {"turn_usd": cost},
+        return {"runs": [{"scenario": "s", "status": "succeeded", "cost": {"turn_usd": cost}, "requests": [],
                           "scores": {"utmos": utmos, "wer": wer, "plan_quality": 1.0}}]}
     a, b = tmp_path / "a.json", tmp_path / "b.json"
     a.write_text(json.dumps(run(0.10, 3.0, 0.10)))
@@ -53,3 +53,15 @@ def test_the_mock_transcriber_knows_the_eval_clips():
     assert len(t.statements) == 5 and {w.speaker for w in t.words} == {"A", "B"}
     # Any other clip still gets the canned words.
     assert MockTranscriptionAdapter(known).transcribe(SimpleNamespace(media=SimpleNamespace(sha256="x"))).words[1].text == "20%"
+
+
+def test_compare_counts_a_cold_shared_prefix_as_read(tmp_path):
+    warm = {"scenario": "w", "status": "succeeded", "cost": {"turn_usd": 0.05}, "scores": {},
+            "requests": [{"input": 4, "cache_read": 10000, "cache_write": 400, "output": 100}]}
+    cold = {"scenario": "c", "status": "succeeded", "cost": {"turn_usd": 0.12}, "scores": {},
+            "requests": [{"input": 4, "cache_read": 0, "cache_write": 10400, "output": 100}]}
+    p = tmp_path / "r.json"
+    p.write_text(json.dumps({"runs": [warm, cold]}))
+    runs = compare.load(p)
+    assert runs["w"]["cost"]["warm_usd"] == 0.05
+    assert runs["c"]["cost"]["warm_usd"] == round(0.12 - 10000 * 5e-6 * 1.15, 5)
