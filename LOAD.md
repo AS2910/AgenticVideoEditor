@@ -1,12 +1,10 @@
 # Load test (launch rehearsal, item 3)
 
-**Safe on one 4 vCPU / 6 GB VM, for 60 s videos: about 10 people editing at once with no
-slowdown (2 to 3 if a render takes as long as it did on the shared laptop's VM).** The 30
-below held for the 2.3 s test clip, whose render is almost free; a real 60 s render takes
-one core for 30 s to 2 min (run 4, "One real 60 s render"), and renders, not requests, are
-the limit. For short clips (10 s and under) the 30 / 50 / 75 below still stand: 30 people
-working at once with no slowdown; 50 at once with no errors but voicing slows (renders
-queue); 75 breaks. Ship with the new defaults
+**Safe on one 4 vCPU / 6 GB VM: 30 people working at once with no slowdown, now for 60 s
+videos too; 50 at once with no errors but voicing slows (renders queue); 75 breaks.** A
+real 60 s render takes about 7 s of one core on the VM since run 4's item 3c (it was about
+23 s; "One real 60 s render"), so renders hold up to about 48 people at a person's pace
+and the 30 / 50 / 75 measured below are the limit again. Ship with the new defaults
 (AVE_JOB_WORKERS=16, AVE_WORK_WORKERS=4, AVE_HTTP_THREADS=100). If most signed-up people
 are idle at any moment (5 to 10% active is common for a tool like this), 30 active is
 roughly 300 to 600 accounts; watch the queue (`/api/health` jobs.queued) rather than
@@ -130,7 +128,7 @@ Sessions finished: 242; failed requests: 0 of 7811; failed checks: 0.
 - web: CPU avg 1%, max 10% (of 400%); memory max 5 MiB
 - worker: CPU avg 0%, max 0% (of 400%); memory max 19 MiB
 
-## One real 60 s render (run 4, item 3b)
+## One real 60 s render (run 4, items 3b and 3c)
 
 The runs above rendered a 2.3 s clip plus a sleep. This measures the real thing, through
 the app's own render path (`_export` -> `_render_now` -> `render` + `compose`, the code
@@ -142,69 +140,70 @@ an Add or a turn's preview runs), with `tools/load/render_bench.py`:
   takes (no vendor cost). Every run renders from scratch (the render cache cleared).
 - Raw numbers: `docs/rehearsal/load/render60-results.json`.
 
-| Where | Run | Wall | CPU (all processes) | of which ffmpeg / children | Cores busy | Peak memory (app + children) |
-|---|---|---|---|---|---|---|
-| Laptop, macOS, 8 cores shared (load 98 to 140) | 1 | 341.1 s | 31.7 s | 16.2 s | 0.09 | 1,132 MB |
-| | 2 | 98.3 s | 32.4 s | 12.6 s | 0.33 | 753 MB |
-| | 3 | 73.7 s | 28.5 s | 9.8 s | 0.39 | 601 MB |
-| The api image in the Colima VM, 4 vCPU / 6 GB (host load 90 to 150) | 1 | 107.8 s | 108.8 s | 22.3 s | 1.01 | 618 MB |
-| | 2 | 162.4 s | 164.6 s | 33.9 s | 1.01 | 630 MB |
-| | 3 | 133.4 s | 135.7 s | 22.9 s | 1.02 | 630 MB |
+**Where the time went (3b).** A render is one core, not every core: in the VM it kept
+exactly 1.0 core busy. Most of it was Python, not ffmpeg (the video is stream-copied):
+a profile put about two thirds in the export loudness pass (`media/loudness.py`), whose
+true-peak check oversampled the whole mix 4x by FFT in `limit` and again to confirm it,
+and `normalize` limited a second time a mix the limiter had just made. The laptop also
+ran demucs stems once per video (about 26 s, cached after; the api image has no demucs,
+see below).
 
-What it says:
+**The fix (3c).** True peak is oversampled only where it can matter: a 0.1 s stretch
+whose samples (and its neighbours') sit more than 6 dB under the level in question
+(twice the worst overshoot between samples, 3 dB) cannot reach it, so it keeps its
+sample peak; and `normalize` no longer limits twice. Same results: tests check the
+loudness within 0.05 LU and the true peak within 0.1 dB of the old pass on speech, a
+clipped sine, an intersample-peak tone, loud bursts and silence
+(`backend/tests/media/test_loudness_fast.py`).
 
-- **A render is one core, not every core.** In the VM it kept exactly 1.0 core busy for
-  the whole render. Most of it is Python, not ffmpeg: the video is stream-copied (every
-  piece a copy), and a profile (laptop) puts about two thirds of the render in the export
-  loudness pass (`media/loudness.py`: `normalize` and `limit`, whose true-peak check
-  4x-oversamples the whole mix by FFT, twice). The laptop also ran demucs stems (installed
-  in its venv, about 26 s of a profiled run); the api image has no demucs.
-- **The time is 30 s to 2 minutes.** Both hosts were shared with seven builders (load 90
-  to 175 on 8 cores), so the wall times are slow and noisy. The laptop's CPU time, about
-  30 s, is what one quiet core would take (and less without demucs); the VM's 108 to
-  165 s is the conservative figure, measured where the app runs. Memory is not a limit:
-  about 630 MB for the whole app process tree while it renders one (the load runs' app
-  peaked near 670 MiB).
-- Render time grows with the video's length (the loudness pass and the audio decode are
-  linear in it): a 30 s video takes about half.
+**Measured, old and new back to back on the same host load** (first measured at load 90
+to 175, which made every number slow and noisy: the api image took 108 / 162 / 133 s then;
+these were taken when the laptop had settled to load 11 to 50):
+
+| Where | Loudness pass | Run 1 | Run 2 | Run 3 | CPU a render | Cores busy | Peak memory |
+|---|---|---|---|---|---|---|---|
+| The api image in the Colima VM, 4 vCPU / 6 GB | old | 22.0 s | 23.0 s | 24.5 s | 22 to 25 s | 1.0 | about 630 MB |
+| | **new (3c)** | **6.0 s** | **6.8 s** | **7.9 s** | 6 to 8 s | 1.0 | about 530 MB |
+| Laptop, macOS (load about 11) | old | 36.3 s* | 20.5 s | 18.9 s | 21 to 34 s | 0.9 to 1.1 | 0.7 to 1.0 GB |
+| | **new (3c)** | 18.6 s* | **5.5 s** | **5.6 s** | 6.5 s | 1.2 | 0.55 to 1.0 GB |
+
+\* the first render of a video on the laptop also separates its stems (demucs, about 13 s
+here); later renders reuse them. Demucs runs only when a line is replaced (it keeps the
+room's own sound under the new voice), once per video, and only where it is installed:
+the api image does not install it, so production renders never pay for it. Memory is the
+whole app process tree while it renders one (the load runs' app peaked near 670 MiB).
 
 ### The safe user count, from the measured render
 
-The render queue is the limit: AVE_WORK_WORKERS=4 renders at once on 4 vCPU, each one
+The render queue is what grows: AVE_WORK_WORKERS=4 renders at once on 4 vCPU, each one
 core, so the VM finishes `4 x 60 / T` renders a minute for a render of T seconds.
 
 An active person makes about one render every 2 minutes (r = 0.5 a minute): every turn
 that voices a line ends with a preview, every Add renders the video, with listening and
-typing between. (The load test's sessions ran four times faster, about 2 renders a
-minute each: a stress pace, not a person.) No slowdown means the queue stays short,
-which wants the renders busy at most 70% of the time:
+typing between. No slowdown means the queue stays short, which wants the renders busy at
+most 70% of the time:
 
-    safe people = 0.7 x (4 x 60 / T) / r
+    people the renders hold = 0.7 x (4 x 60 / T) / r
 
-| Render time T (60 s video) | Renders a minute the VM can do | Safe people at once (r = 0.5) | Where T comes from |
+| Render time T (60 s video, the VM) | Renders a minute | People at r = 0.5 | At the load test's stress pace (r = 2) |
 |---|---|---|---|
-| 30 s | 8.0 | 0.7 x 8.0 / 0.5 = **11** | the laptop's CPU time: one quiet core |
-| 133 s | 1.8 | 0.7 x 1.8 / 0.5 = **2.5** | the VM's median, measured on a busy host |
+| 23 s (old loudness pass) | 10.4 | 0.7 x 10.4 / 0.5 = 14.6 | 3.6 |
+| **7 s (3c)** | 34.3 | 0.7 x 34.3 / 0.5 = **48** | 12 |
 
-So: **plan on about 10 people editing 60 s videos at once on one 4 vCPU VM**, and check
-`render done ... seconds=` in the log on the real VM in the first week; if it says over a
-minute, the safe number is 2 to 5 until the loudness pass is made cheaper. At 30 people
-(15 renders a minute) the queue grows without end even at T = 30 s: every Add would wait
-minutes. What raises it, cheapest first:
-
-1. Make the export loudness pass cheaper (one true-peak pass, polyphase oversampling of
-   short windows rather than a whole-mix FFT, or ffmpeg's `loudnorm` doing it in C):
-   about two thirds of the render.
-2. More vCPUs, with AVE_WORK_WORKERS equal to the vCPU count (a render is one core, so
-   more workers than cores only makes every render slower). 8 vCPU doubles each number.
-3. Skip the render when only the proposals changed and the user is not playing them
-   (a turn's preview, with the proposals in it, is one of the two renders a session makes).
+So renders no longer set the limit below 48 people at a person's pace: **the safe count
+is the measured one, 30 at once with no slowdown, now for 60 s videos too** (50 at once
+with no errors, voicing slower; the load runs' other limits apply). Render time grows
+with the video's length: a 3 minute video takes about 3 times as long, so 3 minute
+videos hold about 16 people. Check `render done ... seconds=` in the log on the real VM
+in the first week. What raises it next: more vCPUs, with AVE_WORK_WORKERS equal to the
+vCPU count (a render is one core, so more workers than cores only makes every render
+slower); 8 vCPU doubles the render numbers.
 
 ## Limits of this test
 
 - The load runs rendered a 2.3 s clip plus a sleep; the 60 s render above is measured one
-  at a time, not under the load test, and on a busy host. The safe count from it is
-  arithmetic, not a load run with 60 s videos (the next run should upload one).
+  at a time, not under the load test. The safe count from it is arithmetic, not a load run
+  with 60 s videos (the next run should upload one).
 - Memory stayed under 820 MiB for the app in every run, so 4 GB of RAM is ample for the app
   plus Postgres; disk and render CPU are what grow.
 - One API process is the design (`app/lease.py`): rate limits and the pause live in its

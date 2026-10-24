@@ -110,40 +110,80 @@ def gain(db: float) -> float:
     return float(10 ** (db / 20))
 
 
+# Run 4, item 3c: true peak is found by 4x oversampling, but only where it can matter. The
+# true peak of band-limited audio exceeds its sample peak by the overshoot between samples,
+# a few dB at most (3 dB for the worst case, a tone at a quarter of the rate at 45 degrees);
+# a stretch whose samples, and its neighbours', sit more than this under the level that
+# matters cannot reach it, so it is never oversampled. 6 dB is twice the worst case.
+OVERSHOOT_DB = 6.0
+_TP_BLOCK = 4800         # 0.1 s at 48 kHz: what is oversampled at a time
+_TP_PAD = 288            # real context either side (block + pads = 5376, a quick FFT length)
+
+
+def _block_maxima(s: np.ndarray, block: int) -> np.ndarray:
+    """The largest of `s` in each `block`, widened to its neighbours (whose samples
+    reach into this block's oversampling)."""
+    n = math.ceil(len(s) / block)
+    m = np.zeros(n * block)
+    m[: len(s)] = s
+    own = m.reshape(n, block).max(axis=1)
+    wide = own.copy()
+    wide[1:] = np.maximum(wide[1:], own[:-1])
+    wide[:-1] = np.maximum(wide[:-1], own[1:])
+    return wide
+
+
+def _oversampled(x: np.ndarray, i: int, block: int) -> np.ndarray:
+    """|x| 4x oversampled over samples [i, i + block), the largest channel, linear. Before the
+    first sample and after the last is silence (the whole-mix pass wrapped the end of a 5 s
+    stretch onto its start instead; the two differ only in the first and last milliseconds
+    of a mix that starts or stops at full level, where this one reads the higher)."""
+    own = min(block, len(x) - i)
+    part = np.zeros((own + 2 * _TP_PAD, x.shape[1]))
+    lo, hi = max(0, i - _TP_PAD), min(len(x), i + own + _TP_PAD)
+    part[lo - (i - _TP_PAD): hi - (i - _TP_PAD)] = x[lo:hi]
+    up = np.abs(np.fft.irfft(np.fft.rfft(part, axis=0), len(part) * 4, axis=0) * 4).max(axis=1)
+    return up[_TP_PAD * 4: (_TP_PAD + own) * 4]
+
+
 def true_peak_db(x: np.ndarray, rate: int = RATE) -> float:
-    """The true peak in dBTP, by 4x oversampling (in chunks, with overlap)."""
+    """The true peak in dBTP, by 4x oversampling of the stretches that can hold it."""
     x = np.asarray(x, dtype=np.float64)
     if x.ndim == 1:
         x = x[:, None]
     if len(x) == 0:
         return -math.inf
-    peak = float(np.abs(x).max())
-    chunk, pad = rate * 5, 256
-    for i in range(0, len(x), chunk):
-        part = x[max(0, i - pad): i + chunk + pad]
-        size = len(part)
-        up = np.fft.irfft(np.fft.rfft(part, axis=0), size * 4, axis=0) * 4
-        peak = max(peak, float(np.abs(up).max()))
-    return 20 * math.log10(peak) if peak > 0 else -math.inf
+    s = np.abs(x).max(axis=1)
+    peak = float(s.max())
+    if peak <= 0:
+        return -math.inf
+    block = _TP_BLOCK
+    # Only a stretch within the overshoot of the loudest sample can hold the true peak.
+    for b in np.flatnonzero(_block_maxima(s, block) >= peak * gain(-OVERSHOOT_DB)):
+        peak = max(peak, float(_oversampled(x, int(b) * block, block).max()))
+    return 20 * math.log10(peak)
 
 
-def _frame_true_peaks(x: np.ndarray, frame: int, rate: int) -> np.ndarray:
-    """The true peak of every `frame` samples, linear."""
+def _frame_true_peaks(x: np.ndarray, frame: int, rate: int, floor: float = 0.0) -> np.ndarray:
+    """The true peak of every `frame` samples, linear. With `floor`, a stretch whose samples
+    sit more than the overshoot under it keeps its sample peaks (its true peaks are under
+    `floor` too, which is all a caller asking that needs to know)."""
     frames = math.ceil(len(x) / frame)
-    out = np.zeros(frames)
-    chunk, pad = (rate * 5 // frame) * frame, 256
-    for i in range(0, len(x), chunk):
-        lo = max(0, i - pad)
-        part = x[lo: i + chunk + pad]
-        up = np.abs(np.fft.irfft(np.fft.rfft(part, axis=0), len(part) * 4, axis=0) * 4).max(axis=1)
-        own = up[(i - lo) * 4: (i - lo + min(chunk, len(x) - i)) * 4]
+    s = np.abs(x).max(axis=1)
+    padded = np.zeros(frames * frame)
+    padded[: len(s)] = s
+    out = padded.reshape(frames, frame).max(axis=1)
+    block = max(frame, (_TP_BLOCK // frame) * frame)
+    for b in np.flatnonzero(_block_maxima(s, block) >= floor * gain(-OVERSHOOT_DB)):
+        i = int(b) * block
+        own = _oversampled(x, i, block)
         n = len(own) // (frame * 4)
         f0 = i // frame
         if n:
             out[f0: f0 + n] = own[: n * frame * 4].reshape(n, frame * 4).max(axis=1)
         rest = own[n * frame * 4:]
         if rest.size and f0 + n < frames:
-            out[f0 + n] = max(out[f0 + n], rest.max())
+            out[f0 + n] = rest.max()
     return out
 
 
@@ -156,7 +196,7 @@ def limit(x: np.ndarray, ceiling_db: float = -1.0, rate: int = RATE,
         x = x[:, None]
     ceiling = gain(ceiling_db)
     frame = max(1, rate // 1000)
-    peaks = _frame_true_peaks(x, frame, rate)
+    peaks = _frame_true_peaks(x, frame, rate, floor=ceiling)
     need = np.minimum(1.0, ceiling / np.maximum(peaks, 1e-12))
     if need.min() >= 1.0:
         return x
@@ -185,6 +225,7 @@ def normalize(x: np.ndarray, target_lufs: float, ceiling_db: float = -1.0, rate:
     Returns the result and the loudness it measures. Silence stays silence."""
     x = np.asarray(x, dtype=np.float64)
     out = x
+    limited = False
     for _ in range(3):
         now = loudness(out, rate)
         if now <= SILENCE:
@@ -194,8 +235,15 @@ def normalize(x: np.ndarray, target_lufs: float, ceiling_db: float = -1.0, rate:
         # Each pass corrects the loudness the limiter took away the pass before.
         boost = target_lufs - now
         out = limit(out * gain(boost), ceiling_db, rate)
-    out = limit(out, ceiling_db, rate)
-    return out, loudness(out, rate)
+        limited = True
+    else:
+        now = None
+    # Run 4, item 3c: what the limiter just made is already under the ceiling (limiting it
+    # again changes nothing), and its loudness was measured at the top of the loop.
+    if not limited:
+        out = limit(out, ceiling_db, rate)
+        now = None
+    return out, now if now is not None else loudness(out, rate)
 
 
 def ramp_envelope(active: np.ndarray, low_db: float, samples: int, rate: int = RATE,

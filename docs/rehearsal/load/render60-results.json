@@ -88,5 +88,185 @@
         "copy"
       ]
     }
-  ]
+  ],
+  "3b_note": "host_macos_8_cores_shared and vm_api_image_4_vcpu: first measured with the old loudness pass, host load 90 to 175",
+  "3c_matched": {
+    "note": "old and new loudness pass back to back; host load 11 to 50",
+    "vm_api_image_4_vcpu_old": [
+      {
+        "run": 1,
+        "wall_s": 22.02,
+        "cpu_s": 22.29,
+        "cpu_ffmpeg_s": 3.34,
+        "cores_busy": 1.01,
+        "peak_tree_rss_mb": 640.0,
+        "load_avg": 0.5,
+        "cached": false,
+        "duration": 60.011,
+        "pieces": [
+          "copy"
+        ]
+      },
+      {
+        "run": 2,
+        "wall_s": 23.04,
+        "cpu_s": 23.25,
+        "cpu_ffmpeg_s": 3.29,
+        "cores_busy": 1.01,
+        "peak_tree_rss_mb": 634.1,
+        "load_avg": 0.642578125,
+        "cached": false,
+        "duration": 60.011,
+        "pieces": [
+          "copy"
+        ]
+      },
+      {
+        "run": 3,
+        "wall_s": 24.5,
+        "cpu_s": 24.75,
+        "cpu_ffmpeg_s": 3.68,
+        "cores_busy": 1.01,
+        "peak_tree_rss_mb": 604.7,
+        "load_avg": 0.76513671875,
+        "cached": false,
+        "duration": 60.011,
+        "pieces": [
+          "copy"
+        ]
+      }
+    ],
+    "vm_api_image_4_vcpu_new": [
+      {
+        "run": 1,
+        "wall_s": 5.99,
+        "cpu_s": 6.09,
+        "cpu_ffmpeg_s": 2.9,
+        "cores_busy": 1.02,
+        "peak_tree_rss_mb": 531.5,
+        "load_avg": 0.65771484375,
+        "cached": false,
+        "duration": 60.011,
+        "pieces": [
+          "copy"
+        ]
+      },
+      {
+        "run": 2,
+        "wall_s": 6.84,
+        "cpu_s": 7.01,
+        "cpu_ffmpeg_s": 3.68,
+        "cores_busy": 1.03,
+        "peak_tree_rss_mb": 533.2,
+        "load_avg": 0.7109375,
+        "cached": false,
+        "duration": 60.011,
+        "pieces": [
+          "copy"
+        ]
+      },
+      {
+        "run": 3,
+        "wall_s": 7.91,
+        "cpu_s": 8.11,
+        "cpu_ffmpeg_s": 3.96,
+        "cores_busy": 1.03,
+        "peak_tree_rss_mb": 523.2,
+        "load_avg": 0.734375,
+        "cached": false,
+        "duration": 60.011,
+        "pieces": [
+          "copy"
+        ]
+      }
+    ],
+    "host_macos_old": [
+      {
+        "run": 1,
+        "wall_s": 36.31,
+        "cpu_s": 33.61,
+        "cpu_ffmpeg_s": 15.72,
+        "cores_busy": 0.93,
+        "peak_tree_rss_mb": 1006.8,
+        "load_avg": 12.81396484375,
+        "cached": false,
+        "duration": 60.000938,
+        "pieces": [
+          "copy"
+        ]
+      },
+      {
+        "run": 2,
+        "wall_s": 20.47,
+        "cpu_s": 22.61,
+        "cpu_ffmpeg_s": 6.36,
+        "cores_busy": 1.1,
+        "peak_tree_rss_mb": 682.2,
+        "load_avg": 12.81005859375,
+        "cached": false,
+        "duration": 60.000938,
+        "pieces": [
+          "copy"
+        ]
+      },
+      {
+        "run": 3,
+        "wall_s": 18.88,
+        "cpu_s": 21.09,
+        "cpu_ffmpeg_s": 5.87,
+        "cores_busy": 1.12,
+        "peak_tree_rss_mb": 702.3,
+        "load_avg": 11.07275390625,
+        "cached": false,
+        "duration": 60.000938,
+        "pieces": [
+          "copy"
+        ]
+      }
+    ],
+    "host_macos_new": [
+      {
+        "run": 1,
+        "wall_s": 18.63,
+        "cpu_s": 15.22,
+        "cpu_ffmpeg_s": 11.52,
+        "cores_busy": 0.82,
+        "peak_tree_rss_mb": 1013.9,
+        "load_avg": 10.9814453125,
+        "cached": false,
+        "duration": 60.000938,
+        "pieces": [
+          "copy"
+        ]
+      },
+      {
+        "run": 2,
+        "wall_s": 5.52,
+        "cpu_s": 6.54,
+        "cpu_ffmpeg_s": 3.62,
+        "cores_busy": 1.19,
+        "peak_tree_rss_mb": 549.7,
+        "load_avg": 11.54345703125,
+        "cached": false,
+        "duration": 60.000938,
+        "pieces": [
+          "copy"
+        ]
+      },
+      {
+        "run": 3,
+        "wall_s": 5.6,
+        "cpu_s": 6.45,
+        "cpu_ffmpeg_s": 3.65,
+        "cores_busy": 1.15,
+        "peak_tree_rss_mb": 634.1,
+        "load_avg": 11.09912109375,
+        "cached": false,
+        "duration": 60.000938,
+        "pieces": [
+          "copy"
+        ]
+      }
+    ]
+  }
 }
