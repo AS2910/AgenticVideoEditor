@@ -6,21 +6,15 @@ Voltage is in beta. These are the gaps we know about today, said plainly. If you
 
 ## Voices
 
-- **Cloning a voice is closed for now.** Making a voice from your own recording or from a speaker in the video waits for a real liveness check. Describe a voice instead. If you need cloning for the beta, write to us and we can turn it on for your account.
+- **Cloning a voice is closed for now.** Making a voice from your own recording or from a speaker in the video will open with a read-aloud consent check, which is still being tried out. Describe a voice instead. If you need cloning for the beta, write to us and we can turn it on for your account.
 
 ## Working in the editor
 
-- **Adding a take can take a few seconds.** Add it renders the preview while you wait. With many people working at once, renders queue and a preview or an export can take minutes.
+- **Renders take a while.** A preview or an export of a 60 s video takes a minute or more, and longer when many people are working at once. You can keep working while it renders.
 - **Reviewers can watch but not comment** unless review is turned on for your account. Beta accounts have it on.
-
-## Signing in
-
-- **Many sign-ins from one network can be slowed.** Sign-in allows 20 tries every 10 minutes from one network address. An office signing up together may be asked to wait a few minutes.
-- **Signed-out pages log a few 401 errors** in the browser console. They are harmless.
 
 ## Money
 
-- **Receipts and invoices are not emailed yet.** Find them on the Billing page.
 - **Prices and plans may change after the beta.**
 
 ## Everything else
