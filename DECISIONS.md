@@ -8,6 +8,9 @@ Each: what, why, how to undo. Run 3's decisions follow below.
 - 5: Postgres backups use `pg_dump` from the postgres container (the app image has none); `scripts/backup-offsite.sh` writes restore.sh's layout and uploads with rclone configured only from env (`VOLTAGE_BACKUP_REMOTE`, `RCLONE_CONFIG_*` in `/etc/voltage/backup.env`, root only).
 - 5: provision.sh: swap is half the RAM (2 to 8 GB) and skipped if any exists; the firewall also opens 443/udp for HTTP/3 (say if tcp only); SSH settings are not changed (no lock-out risk; DEPLOY.md keeps the manual step). shellcheck installed with Homebrew.
 
+- 8: The legal text lives in typed data files (`frontend/src/pages/legal/*.ts`) so a lawyer's edits stay out of page code. Sub-processors are one card per service (no sideways scroll at 375 px), linked from the policy pages only; the footer keeps its three links. Proposed for counsel, not built: 7-year consent record retention, 24 months for anonymised analytics, 90 days for error reports, 7 days for export zips.
+- Gate: under 8 builders the machine ran at load 90 to 170; a vitest or Playwright test that timed out was re-run alone (same code) before the item landed. The ones that did: ProjectsPage, Thumbs, NotificationBell, AdminEmails (vitest), the a11y home check and go-run's reload test (Playwright). None touch the items' code.
+
 - Process: the items were built at the same time by separate builders on their own branches and worktrees, then cherry-picked here. The full gate (`make launch-check SKIP_ENV=1`) runs on this branch before each item's commits land, not in each builder's worktree (seven full suites at once on one laptop give false timeouts).
 
 # Launch rehearsal decisions (overnight run 3, 2026-10-23)
