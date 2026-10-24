@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { getOnboarding, updateOnboarding } from '../api'
+import { signedInHere } from '../lib/session'
 import type { Onboarding } from '../types'
 
 export const EMPTY_ONBOARDING: Onboarding = { tour: { step: 0, finished: false, skipped: false }, tips: [], checklist: [], checklist_hidden: false }
@@ -35,7 +36,9 @@ export function OnboardingProvider({ children, debounceMs = 300 }: { children: R
 
   useEffect(() => {
     let live = true
-    getOnboarding()
+    // Run 4 item 4c: someone signed out has nothing saved; ask only once signed in.
+    signedInHere()
+      .then((here) => (here ? getOnboarding() : EMPTY_ONBOARDING))
       .then((server) => {
         if (!live) return
         // Anything marked before the answer came stays marked.
@@ -56,7 +59,7 @@ export function OnboardingProvider({ children, debounceMs = 300 }: { children: R
     const change = pending.current
     pending.current = {}
     if (Object.keys(change).length === 0) return
-    updateOnboarding(change).catch(() => { /* kept locally; saved with the next change */ pending.current = { ...change, ...pending.current } })
+    void signedInHere().then(async (here) => { if (here) await updateOnboarding(change) }).catch(() => { /* kept locally; saved with the next change */ pending.current = { ...change, ...pending.current } })
   }, [])
   useEffect(() => () => { if (timer.current) { clearTimeout(timer.current); flush() } }, [flush])
 

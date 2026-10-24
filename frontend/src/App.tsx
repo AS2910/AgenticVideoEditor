@@ -78,6 +78,7 @@ import type {
   ActivityJob, PlanQuestion, RenderIncludes, RenderRecord, ProjectRule,
 } from './types'
 import { useMediaToken } from './lib/media'
+import { askWhoIsHere, whoIsHere } from './lib/session'
 import { PausedBanner } from './components/PausedBanner'
 import { piecesFromInserts, renderTimeFrom, sourceTimeFrom } from './timeline/selection'
 
@@ -114,6 +115,8 @@ interface ShippedNote { count: number; held: number; spendUsd: number }
 /** The app (Tutorial map and Help, 2026-10-19): what a person has met so
  *  far, and the tour engine shared by the guided run and every Show me. */
 export default function App() {
+  // Run 4 item 4c: who is here, asked first; the calls made as that person wait for it.
+  useState(askWhoIsHere)
   // Launch item 2: every media address carries a signed token; re-render when it arrives or is renewed.
   useMediaToken()
   return (
@@ -293,7 +296,7 @@ function Studio() {
   }, [])
 
   useEffect(() => {
-    getMe()
+    (whoIsHere() ?? getMe())
       .then(setMe)
       .catch((e) => {
         // Item 10: a suspended account is signed out and told why, on the sign-in page.

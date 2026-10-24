@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { getMyFlags } from '../api'
+import { signedInHere } from '../lib/session'
 
 /** The phase flags (Step 0, FLAGS). Later features gate on these names. */
 export type Flag =
@@ -22,7 +23,8 @@ let cached: Promise<Set<string>> | null = null
 
 function load(): Promise<Set<string>> {
   if (!cached) {
-    cached = getMyFlags().then(
+    // Run 4 item 4c: nobody signed in has no flags to read (the server would say 401).
+    cached = signedInHere().then((here) => (here ? getMyFlags() : [])).then(
       (names) => new Set(names),
       () => {
         // A failed read means everything stays off; the next mount asks again.

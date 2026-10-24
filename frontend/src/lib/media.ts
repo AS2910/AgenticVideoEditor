@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { signedInHere } from './session'
 
 /** Launch item 2: media and exports are served only through signed,
  *  expiring URLs. The server signs a token for the signed-in owner
@@ -26,6 +27,7 @@ export function refreshMediaToken(): Promise<void> {
   if (loading) return loading
   loading = (async () => {
     try {
+      if (!(await signedInHere())) return          // run 4 item 4c: signed out, no token to ask for
       const res = await fetch('/api/me/media-token', { credentials: 'same-origin' })
       if (!res.ok) return
       const body = await res.json() as { token?: unknown; expires_in?: unknown }
