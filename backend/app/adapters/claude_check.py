@@ -15,6 +15,11 @@ from app.agent.project_check import CHECK_MAX_TOKENS, SYSTEM
 from app.orchestrator.meter import Meter
 
 
+def _effort(model: str) -> dict:
+    """Low effort on the models that think by default (Haiku 4.5 takes no effort)."""
+    return {} if model.startswith("claude-haiku-4") else {"output_config": {"effort": "low"}}
+
+
 class _Place(BaseModel):
     video_id: str
     quote: str
@@ -41,7 +46,7 @@ class ClaudeChecker:
         try:
             response = self._client.messages.parse(
                 model=self.model, max_tokens=CHECK_MAX_TOKENS, system=SYSTEM,
-                messages=[{"role": "user", "content": text}], output_format=_Issues,
+                messages=[{"role": "user", "content": text}], **_effort(self.model), output_format=_Issues,
             )
         except (anthropic.RateLimitError, anthropic.InternalServerError, anthropic.APIConnectionError) as exc:
             raise PlannerError(f"Claude is unavailable right now ({type(exc).__name__}).") from None

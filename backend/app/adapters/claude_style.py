@@ -37,6 +37,11 @@ the brief and rules already cover it. Never use em dashes; use commas, \
 colons or full stops."""
 
 
+def _effort(model: str) -> dict:
+    """Low effort on the models that think by default (Haiku 4.5 takes no effort)."""
+    return {} if model.startswith("claude-haiku-4") else {"output_config": {"effort": "low"}}
+
+
 class StyleSuggestion(BaseModel):
     kind: Literal["brief", "rule", "none"]
     text: str = ""
@@ -55,7 +60,7 @@ class ClaudeStyleReader:
         try:
             response = self._client.messages.parse(
                 model=self.model, max_tokens=STYLE_MAX_TOKENS, system=SYSTEM,
-                messages=[{"role": "user", "content": text}], output_format=StyleSuggestion,
+                messages=[{"role": "user", "content": text}], **_effort(self.model), output_format=StyleSuggestion,
             )
         except (anthropic.RateLimitError, anthropic.InternalServerError, anthropic.APIConnectionError) as exc:
             raise PlannerError(f"Claude is unavailable right now ({type(exc).__name__}).") from None

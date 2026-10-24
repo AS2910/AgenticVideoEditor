@@ -139,7 +139,7 @@ def test_the_text_pass_shows_its_price_first_and_is_charged_to_the_project(clien
                           "places": [{"video_id": "p1", "quote": "Diwali Dhamaka sale"}, {"video_id": "p2", "quote": "Diwali Bonanza sale"}]}])
     monkeypatch.setattr(main, "_check_reader", reader)
     est = client.get("/projects/f1/check").json()["estimate"]
-    assert est["available"] and est["label"] == "about $0.01" and est["model"] == "claude-haiku-4-5"
+    assert est["available"] and est["label"] == "about $0.01" and est["model"] == "claude-haiku-5-5"
     page = run(client, "full")
     assert len(reader.calls) == 1 and "Video p2" in reader.calls[0]
     assert [i["kind"] for i in live(page)][-1] == "offer"

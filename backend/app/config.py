@@ -109,8 +109,12 @@ class Settings:
     agent_turn_usd: float = 0.50
     agent_model: str = "claude-opus-5-5"
     agent_effort: str = "high"
-    # A2: the project check's one cheap text pass over the transcripts.
-    check_model: str = "claude-haiku-4-5"
+    # A2: the project check's one cheap text pass over the transcripts (and the
+    # learned style). Cost 1b: the current small model.
+    check_model: str = "claude-haiku-5-5"
+    # Cost 1b: a turn that only asks how the app works runs on this model with
+    # the read-only tools (app/agent/routing.py); empty keeps every turn on agent_model.
+    question_model: str = "claude-haiku-5-5"
     # Phase 15c: keep the original's music and room under an edited line, by
     # separating the voice from the bed (needs the optional `room` extra).
     stems: bool = True
@@ -258,7 +262,8 @@ def load_settings() -> Settings:
         agent_turn_usd=_amount("AVE_AGENT_TURN_USD", 0.50),
         agent_model=os.environ.get("AVE_AGENT_MODEL", "claude-opus-5-5").strip() or "claude-opus-5-5",
         agent_effort=os.environ.get("AVE_AGENT_EFFORT", "high").strip() or "high",
-        check_model=os.environ.get("AVE_CHECK_MODEL", "claude-haiku-4-5").strip() or "claude-haiku-4-5",
+        check_model=os.environ.get("AVE_CHECK_MODEL", "claude-haiku-5-5").strip() or "claude-haiku-5-5",
+        question_model=os.environ.get("AVE_QUESTION_MODEL", "claude-haiku-5-5").strip(),
         clone_min_seconds=_amount("AVE_CLONE_MIN_SECONDS", DEFAULT_CLONE_MIN_SECONDS),
         voice_route=_voice_route(),
         auth_mode=_auth_mode(),

@@ -7304,6 +7304,23 @@ def _agent() -> agent_loop.Agent:
     return _agent_instance
 
 
+def _turn_agent(project_id: str, text: str, history: list[dict], plain_turn: bool) -> agent_loop.Agent:
+    """Cost 1b: the agent for this turn. Words that only ask how the app works
+    go to the small model with the read-only tools; everything else, and any
+    turn that carries on, approves or batches, stays on the planner."""
+    from app.agent import routing
+    main_agent = _agent()
+    model = settings.question_model
+    if not (model and plain_turn and not settings.mock_vendors and routing.looks_like_question(text)
+            and not routing.has_compaction(history)):
+        return main_agent
+    if not routing.is_question(main_agent.client, model, text, meter=_meter(project_id, "routing")):
+        return main_agent
+    from app.agent.tools import BY_NAME
+    tools = [BY_NAME[n] for n in routing.QUESTION_TOOLS]
+    return agent_loop.Agent(main_agent.client, model=model, effort="low", tools=tools, extras=False)
+
+
 def _hear_levels(record: ProjectRecord, start: float, end: float) -> dict:
     from app.continuity import signals
     x = signals.load(record.source.media.path, start, end)
@@ -7587,9 +7604,10 @@ def _start_turn(project_id: str, record: ProjectRecord, text: str, owner: str, a
             repo.add_message(project_id, "assistant", text_, kind="previews", data=data)
 
         try:
-            outcome = _agent().run(_workbench(), turn, history, content, meter=_meter(project_id, "agent"),
-                                   on_step=on_step, on_card=on_card, effort=prefs["effort"],
-                                   persist=lambda role, c: repo.append_turn(project_id, role, c))
+            agent_ = _turn_agent(project_id, text, history, plain_turn=not (approve or carry or batch or asked))
+            outcome = agent_.run(_workbench(), turn, history, content, meter=_meter(project_id, "agent"),
+                                 on_step=on_step, on_card=on_card, effort=prefs["effort"] if agent_ is _agent() else None,
+                                 persist=lambda role, c: repo.append_turn(project_id, role, c))
         except Exception as exc:  # noqa: BLE001 — the user hears a sentence; the log has the rest
             logging.getLogger(__name__).exception("turn failed")
             why = str(exc)[:200] or type(exc).__name__

@@ -186,6 +186,10 @@ class Agent:
     def model(self) -> str:
         return self._model
 
+    @property
+    def client(self) -> anthropic.Anthropic:
+        return self._client
+
     def _create(self, system: list[dict], messages: list[dict], effort: str | None = None) -> Any:
         params: dict = dict(model=self._model, max_tokens=MAX_TOKENS, system=system, messages=with_cache_point(list(messages)),
                             tools=[t.definition() for t in self._tools], output_config={"effort": effort or self._effort})
