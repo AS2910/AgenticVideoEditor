@@ -7,12 +7,14 @@ interface ToasterProps {
   toast: Toast | null
   onAction: (toast: Toast) => void
   onDismiss: () => void
+  /** 'top' while a line's editor is open, so the toast never sits over its Cancel and Voice it. */
+  placement?: 'bottom' | 'top'
 }
 
-/** One toast at a time (2026-10-20), bottom centre, clear of the rows' verbs
+/** One toast at a time (2026-10-20), bottom centre (top centre while a line is being edited), clear of the rows' verbs
  *  and the Get started pill: render ready, a job failed, the turn finished. It leaves on its own
  *  (longer when it has a button) and waits while hovered or focused. */
-export function Toaster({ toast, onAction, onDismiss }: ToasterProps) {
+export function Toaster({ toast, onAction, onDismiss, placement = 'bottom' }: ToasterProps) {
   const held = useRef(false)
   const dismiss = useRef(onDismiss)
   dismiss.current = onDismiss
@@ -27,7 +29,7 @@ export function Toaster({ toast, onAction, onDismiss }: ToasterProps) {
   if (!toast) return null
   return (
     <div
-      className={cn('rise fixed bottom-5 left-1/2 z-40 flex w-max max-w-[min(480px,calc(100vw-2rem))] -translate-x-1/2 items-center gap-3 rounded-xl border-[1.5px] border-ink px-4 py-3 shadow-volt', toast.tone === 'fail' ? 'bg-warn text-ink' : 'bg-ink text-ptext')}
+      className={cn('rise fixed left-1/2', placement === 'top' ? 'top-28' : 'bottom-5', 'z-40 flex w-max max-w-[min(480px,calc(100vw-2rem))] -translate-x-1/2 items-center gap-3 rounded-xl border-[1.5px] border-ink px-4 py-3 shadow-volt', toast.tone === 'fail' ? 'bg-warn text-ink' : 'bg-ink text-ptext')}
       role={toast.tone === 'fail' ? 'alert' : 'status'}
       data-testid="toast"
       onMouseEnter={() => { held.current = true }} onMouseLeave={() => { held.current = false }}

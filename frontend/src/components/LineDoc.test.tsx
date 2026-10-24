@@ -299,6 +299,22 @@ describe('LineDoc: editing starts from where the line stands', () => {
     expect(screen.getByRole('button', { name: 'Voice it' })).toBeEnabled()   // it differs from the line as it stands
   })
 
+  it('voices a line whose words stay the same when its delivery or voice changes', async () => {
+    const h = doc()
+    await userEvent.click(screen.getByText('Sure, sir.'))
+    const voiceIt = screen.getByRole('button', { name: 'Voice it' })
+    expect(voiceIt).toBeDisabled()
+    await userEvent.click(screen.getByRole('button', { name: 'More excited' }))
+    expect(voiceIt).toBeEnabled()
+    await userEvent.click(screen.getByRole('button', { name: 'As spoken' }))
+    expect(voiceIt).toBeDisabled()
+    const voice = screen.getByRole('combobox', { name: 'Voice' })
+    await userEvent.selectOptions(voice, within(voice).getAllByRole('option').find((o) => (o as HTMLOptionElement).value !== (voice as HTMLSelectElement).value)!)
+    expect(voiceIt).toBeEnabled()
+    await userEvent.click(voiceIt)
+    expect(h.onHear).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ text: 'Sure, sir.', mix: 'replace' }))
+  })
+
   it('reopens a kept line with its kept wording, and measures the change from there', async () => {
     doc({ revisions: [{ edit_id: 'e1', start: 7.54, end: 9.02, text: 'Start a live Bhaji Cam session.', mix: 'replace' }] })
     await userEvent.click(within(screen.getByRole('group', { name: 'Added line at 0:07' })).getByRole('button', { name: 'Edit it' }))

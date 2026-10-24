@@ -311,6 +311,8 @@ export function LineDoc({
   // A row being dragged up or down to shift it in time (UX-1c).
   const [drag, setDrag] = useState<{ key: string; label: string; duration: number; at: number; to: number; apply: (to: number) => void } | null>(null)
   const box = useRef<HTMLTextAreaElement>(null)
+  // The voice and delivery the editor opened with: changing either is a change worth voicing, words or not.
+  const openedSound = useRef<{ voiceId: string; delivery: string | null }>({ voiceId: '', delivery: null })
   // A grip drag that moved must not also count as a click on the grip.
   const dragged = useRef(false)
   // The rows as last rendered, for effects that need a row by its order.
@@ -552,6 +554,10 @@ export function LineDoc({
     const known = last?.delivery && DELIVERIES.includes(last.delivery) ? last.delivery : null
     setDelivery(known)
     setOwnWords(focusDelivery && !last?.delivery ? '' : last?.delivery && !known ? last.delivery : null)
+    openedSound.current = {
+      voiceId: last?.candidate?.plan.voice_profile_id ?? speakers.find((sp) => sp.label === s.speaker)?.voice_id ?? '',
+      delivery: last?.delivery || null,
+    }
     setMix(last?.mix === 'concatenate' ? 'concatenate' : 'over')
     setAt('')
   }
@@ -621,9 +627,10 @@ export function LineDoc({
       default: break
     }
   }
+  const soundChanged = () => voiceId !== openedSound.current.voiceId || ((ownWords?.trim() || delivery) ?? null) !== openedSound.current.delivery
   const hear = (s: Statement) => {
     const text = draft.trim()
-    if (!editing || !text || (editing.mode === 'edit' && text === standing(s))) return
+    if (!editing || !text || (editing.mode === 'edit' && text === standing(s) && !soundChanged())) return
     const row = rows[editing.order]
     const key = editing.mode === 'add' ? addKeyOf(s) : keyOf(s)
     const chosen = editing.mode === 'add' && at.trim() ? parseTime(at) : null
@@ -714,7 +721,7 @@ export function LineDoc({
           <Button
             type="button"
             aria-label="Voice it"
-            disabled={disabled || driven || !draft.trim() || badAt || (mode === 'edit' && draft.trim() === base)}
+            disabled={disabled || driven || !draft.trim() || badAt || (mode === 'edit' && draft.trim() === base && !soundChanged())}
             onClick={() => hear(s)}
           >
             Voice it

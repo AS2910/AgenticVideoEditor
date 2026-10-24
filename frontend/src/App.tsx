@@ -2019,7 +2019,7 @@ function Studio() {
         <KeyboardSheet open={keysOpen} onClose={() => setKeysOpen(false)} />
         <ActivityDrawer open={activityOpen} onClose={() => { setActivityOpen(false); setAllJobs(null) }} onRetry={retry}
           jobs={(allJobs ?? []).reduce((all, j) => (all.some((k) => k.job_id === j.job_id) ? all : [...all, j]), activity.jobs).sort((a, b) => (a.created_at < b.created_at ? 1 : -1))} />
-        <Toaster toast={toast} onAction={onToastAction} onDismiss={() => setToast(null)} />
+        <Toaster toast={toast} onAction={onToastAction} onDismiss={() => setToast(null)} placement={editingLine ? 'top' : 'bottom'} />
         {moving && (
           <MoveDialog
             video={project}
