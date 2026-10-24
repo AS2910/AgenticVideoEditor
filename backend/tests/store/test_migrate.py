@@ -127,8 +127,8 @@ def _rows(conn) -> dict:
     return {t: sorted(tuple(r) for r in conn.execute(f"SELECT * FROM {t}")) for t in tables}
 
 
-# Numbers held for steps on other branches (0032 accounts, 0033 search index).
-RESERVED = {32, 33, 38}
+# Numbers held for steps on other branches (0032 accounts, 0033 search index; 0038 to 0041 overnight run 4).
+RESERVED = {32, 33, 38, 39, 40, 41}
 
 
 def test_versions_are_numbered_from_one_without_gaps():

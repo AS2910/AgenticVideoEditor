@@ -36,6 +36,8 @@ def world(monkeypatch):
         c.execute("DELETE FROM meta WHERE key LIKE 'beta_%'")
         c.execute("DELETE FROM feature_flags WHERE flag LIKE 'beta.%' OR (flag IN ('projects.batch', 'projects.review') AND owner <> '*')")
         c.execute("DELETE FROM credit_grants WHERE reference = 'Given by Voltage: beta'")
+        c.execute("DELETE FROM beta_survey")
+        c.execute("DELETE FROM beta_feedback")
     yield {"ada": _client("ada"), "sam": _client("sam")}
 
 
@@ -167,3 +169,38 @@ def test_the_welcome_checklist_takes_known_issues_and_feedback_is_ticked_by_send
     assert sam.post("/beta-feedback", data={"message": "The badge is nice."}, headers=H).status_code == 201
     assert sam.get("/me/onboarding").json()["checklist"] == ["known-issues", "feedback"]
 
+
+def _exported(owner: str) -> None:
+    main.analytics.track("video_exported", owner, {"video_id": "v1", "seconds": 4.0})
+    main.analytics.track("first_export", owner, {"video_id": "v1"})
+
+
+def test_the_three_questions_are_shown_once_after_the_first_export_to_the_cohort(world):
+    sam = world["sam"]
+    with database.tx() as c:
+        c.execute("DELETE FROM analytics_events WHERE owner = 'google:sam'")
+    got = sam.get("/me/beta-survey").json()
+    assert got["due"] is False and [q["id"] for q in got["questions"]] == ["useful", "almost_stopped", "would_pay"]
+    _exported("google:sam")
+    assert sam.get("/me/beta-survey").json()["due"] is False                     # not in the cohort
+    assert sam.post("/me/beta-survey", json={"useful": "very", "would_pay": "yes"}, headers=H).status_code == 404
+    beta.join(database, main.flags, "google:sam")
+    assert sam.get("/me/beta-survey").json()["due"] is True
+    assert sam.post("/me/beta-survey/shown", json={"video_id": "nope"}, headers=H).json() == {"due": False}
+    assert sam.get("/me/beta-survey").json()["due"] is False                     # shown once, answered or not
+    assert sam.post("/me/beta-survey", json={"useful": "maybe", "would_pay": "yes"}, headers=H).status_code == 422
+    out = sam.post("/me/beta-survey", json={"useful": "somewhat", "almost_stopped": "  The upload\n was slow ",
+                                            "would_pay": "maybe"}, headers=H)
+    assert out.status_code == 201 and out.json()["said"] == beta.THANKS
+    row = beta.survey_row(database, "google:sam")
+    assert (row["useful"], row["almost_stopped"], row["would_pay"], row["video_id"]) == ("somewhat", "The upload was slow", "maybe", None)
+    again = sam.post("/me/beta-survey", json={"useful": "very", "would_pay": "yes"}, headers=H)
+    assert again.status_code == 409 and beta.survey_row(database, "google:sam")["useful"] == "somewhat"
+
+
+def test_opening_the_export_page_counts_as_an_export_for_the_questions(world):
+    owner = "google:pat"
+    beta.join(database, main.flags, owner)
+    assert not beta.survey_due(database, main.flags, owner, owner)
+    main.repo.set_meta(f"onboarding:{owner}", '{"checklist": ["export"]}')
+    assert beta.survey_due(database, main.flags, owner, owner)

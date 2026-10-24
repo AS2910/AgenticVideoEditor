@@ -621,6 +621,11 @@ export const decideConsentReview = (id: string, decision: 'approve' | 'reject', 
 export const consentRecordingUrl = (id: string) => `${BASE}/admin/consent-reviews/${id}/recording`
 export const consentSourceUrl = (id: string) => `${BASE}/admin/consent-reviews/${id}/source`
 export const getAdminAudit = async (limit = 50) => (await get<{ entries: AdminAuditEntry[] }>(`/admin/audit?limit=${limit}`)).entries
+/** Beta kit: the three questions after a first export. */
+export interface BetaQuestion { id: 'useful' | 'almost_stopped' | 'would_pay'; text: string; choices?: [string, string][]; optional?: boolean }
+export const getBetaSurvey = () => get<{ due: boolean; questions: BetaQuestion[] }>('/me/beta-survey')
+export const markBetaSurveyShown = (videoId: string | null) => post<{ due: boolean }>('/me/beta-survey/shown', { video_id: videoId })
+export const answerBetaSurvey = (a: { useful: string; almost_stopped: string; would_pay: string; video_id: string | null }) => post<{ said: string }>('/me/beta-survey', a)
 export const getMyFlags = async () => (await get<{ flags: string[] }>('/me/flags')).flags
 /** Everything of yours: every project, take and voice, and the consent records. */
 export async function deleteAccount(): Promise<void> {

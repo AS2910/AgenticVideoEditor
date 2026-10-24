@@ -4,6 +4,7 @@
     join(db, flags, owner) -> {joined, granted}    into the cohort: its flags on, the credits once
     in_cohort(flags, owner) -> bool / cohort(db) -> [{owner, since}]
     claim(owner) -> bool                    at sign-in: an address invited to the beta joins
+    survey_due(db, flags, person, owner) / survey_shown(...) / survey_answer(...)    the three questions
     pending_invite(db, email) / mark_invited(db, email)    a waitlist address invited to the beta
     invited_addresses(db) -> set            every address invited to the beta
     invite_email(api, to, name, existing)   the beta invite (templates `beta_invite`); never raises
@@ -131,4 +132,68 @@ def invite_email(api, to: str, name: str | None = None, existing: bool = False) 
     except Exception:  # noqa: BLE001 - the invite is recorded; the log says the email failed
         api.log.exception("beta invite email")
         return False
+
+
+# ── the three questions after a first export (migration 0042) ─────────────────
+
+QUESTIONS = (
+    {"id": "useful", "text": "How useful was Voltage for this video?",
+     "choices": [["very", "Very useful"], ["somewhat", "Somewhat useful"], ["not", "Not useful"]]},
+    {"id": "almost_stopped", "text": "What almost stopped you?", "optional": True},
+    {"id": "would_pay", "text": "Would you pay for Voltage?", "choices": [["yes", "Yes"], ["maybe", "Maybe"], ["no", "No"]]},
+)
+USEFUL = ("very", "somewhat", "not")
+WOULD_PAY = ("yes", "maybe", "no")
+MAX_WORDS = 2000
+THANKS = "Thank you. That helps us more than you know."
+
+
+class SurveyDone(ValueError):
+    """The questions were answered already."""
+
+
+def exported(db, *owners: str) -> bool:
+    """Whether any of `owners` has exported: the funnel's first export, or the Export page opened
+    (the onboarding checklist's `export`, ticked when the page shows the file)."""
+    import json
+    with db.tx() as c:
+        for owner in owners:
+            if c.execute("SELECT 1 FROM analytics_events WHERE name = 'first_export' AND owner = ? LIMIT 1", (owner,)).fetchone():
+                return True
+            row = c.execute("SELECT value FROM meta WHERE key = ?", (f"onboarding:{owner}",)).fetchone()
+            if row and "export" in (json.loads(row[0] or "{}").get("checklist") or []):
+                return True
+    return False
+
+
+def survey_row(db, person: str) -> dict | None:
+    with db.tx() as c:
+        r = c.execute("SELECT * FROM beta_survey WHERE owner = ?", (person,)).fetchone()
+    return dict(r) if r else None
+
+
+def survey_due(db, flags, person: str, owner: str) -> bool:
+    """Shown once: to someone in the cohort, after their first export, never again once shown."""
+    return in_cohort(flags, owner) and survey_row(db, person) is None and exported(db, owner, person)
+
+
+def survey_shown(db, person: str, workspace_id: str | None, video_id: str | None) -> bool:
+    """Record that the questions were put; True the first time."""
+    with db.tx() as c:
+        return c.execute("INSERT INTO beta_survey (owner, workspace_id, video_id, shown_at) VALUES (?, ?, ?, ?) "
+                         "ON CONFLICT (owner) DO NOTHING", (person, workspace_id, video_id, now_iso())).rowcount == 1
+
+
+def survey_answer(db, person: str, workspace_id: str | None, useful: str, almost_stopped: str | None,
+                  would_pay: str, video_id: str | None = None) -> dict:
+    if useful not in USEFUL or would_pay not in WOULD_PAY:
+        raise ValueError("Pick one answer for the first and the last question.")
+    words = " ".join((almost_stopped or "").split())[:MAX_WORDS] or None
+    survey_shown(db, person, workspace_id, video_id)
+    with db.tx() as c:
+        done = c.execute("UPDATE beta_survey SET useful = ?, almost_stopped = ?, would_pay = ?, answered_at = ? "
+                         "WHERE owner = ? AND answered_at IS NULL", (useful, words, would_pay, now_iso(), person)).rowcount
+    if done != 1:
+        raise SurveyDone("You answered these already. Thank you.")
+    return survey_row(db, person) or {}
 

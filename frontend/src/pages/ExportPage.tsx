@@ -7,6 +7,7 @@ import { cn } from '@/lib/utils'
 import { AccountDot, Bolt, Wordmark } from './Shell'
 import { Tile } from './bits'
 import { clockTenths, said, usd } from './fmt'
+import { exportedNow } from '../components/BetaSurvey'
 
 interface ExportPageProps { projectId: string; me: Me | null; onBack: () => void }
 
@@ -35,7 +36,7 @@ export function ExportPage({ projectId, me, onBack }: ExportPageProps) {
         const [p, r] = await Promise.all([getProject(projectId), getReceipt(projectId)])
         if (!live) return
         setProject(p)
-        if (r.render || exported.current) { setReceipt(r); return }
+        if (r.render || exported.current) { setReceipt(r); if (r.render) exportedNow(); return }
         // Nothing rendered yet: render once, timing it, then read the receipt again.
         exported.current = true
         setRendering(true)
@@ -46,6 +47,7 @@ export function ExportPage({ projectId, me, onBack }: ExportPageProps) {
         if (!live) return
         setRenderSeconds(took)
         setReceipt(again)
+        if (again.render) exportedNow()          // beta kit: the questions after a first export
       } catch (e) {
         if (live) setError(said(e, 'The export could not be read.'))
       } finally {

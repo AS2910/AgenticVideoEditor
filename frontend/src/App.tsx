@@ -33,6 +33,7 @@ import { HelpPage } from './pages/HelpPage'
 import { KnownIssuesPage } from './pages/KnownIssuesPage'
 import { KeyboardSheet } from './components/KeyboardSheet'
 import { FeedbackHost } from './components/FeedbackDialog'
+import { BetaSurveyHost } from './components/BetaSurvey'
 import { StatusStrip } from './components/StatusStrip'
 import { ActivityDrawer } from './components/ActivityDrawer'
 import { Toaster } from './components/Toaster'
@@ -2008,6 +2009,7 @@ function Studio() {
       {page}
       {showChecklist && <Checklist onShowMe={showMe} />}
       {me !== null && !(me.mode !== 'off' && (!me.user || signedOut)) && <FeedbackHost />}
+      {me !== null && !(me.mode !== 'off' && (!me.user || signedOut)) && <BetaSurveyHost />}
     </>
   )
 }
