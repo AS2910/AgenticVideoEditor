@@ -79,8 +79,26 @@ The first release candidate: everything built from the first commit
   with axe, the landing page and waitlist, HTML emails, admin tools with an
   audit trail (RUNBOOK.md), Send feedback.
 
-### Run 4 (2026-10-24)
+### Cost and staging (overnight run 4, 2026-10-24)
 
+- Cost evals (`backend/evals`): six scenarios scored by WER, SIM-o, UTMOS,
+  duration error, plan quality and cost. How-do-I questions answered by a
+  small model (97% cheaper); checks on the small model; takes stop at the
+  first that fits; a clip's transcript and readings kept by its hash, so a
+  re-upload is free; a shorter opening view on later turns.
+- Consent-verified cloning (behind `voices.cloning_verified`, off): the
+  speaker reads a random phrase aloud; words, length and voice similarity
+  decide, and borderline checks go to an admin review queue.
+- Add and Export never render inside a request: both are jobs in the status
+  strip. The export loudness pass is about 4x cheaper with the same result,
+  so a 60 s render takes about 7 s on a 4 vCPU server.
+- Sign-in limited per account and address (an office can sign up together);
+  receipts, tax invoices with a PDF and the account-deleted email are sent;
+  signed-out pages make no calls that need a session.
+- Beta kit: the Beta stamp, Known issues, the beta invite, a beta cohort
+  (batch and review on, 10 credits), a welcome checklist, three questions
+  after a first export and an admin Beta view.
+- Legal drafts v2 for counsel and a sub-processors page.
 - Production setup kit: `scripts/provision.sh` for a fresh Ubuntu 24.04 VM
   (Docker, firewall, security updates, fail2ban, swap, log rotation, the
   nightly off-site backup with rclone), `docs/ops/monitoring.md` (Sentry,
