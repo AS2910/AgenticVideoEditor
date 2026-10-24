@@ -1,0 +1,92 @@
+{
+  "source": "60 s, 1080x1920, 30 fps, h264 12 Mb/s, AAC 192k, speech (a dev clip looped, its words tiled)",
+  "edits": "4 replaced lines + 1 layered voice-over (8 s), mock voice",
+  "host_macos_8_cores_shared": [
+    {
+      "run": 1,
+      "wall_s": 341.09,
+      "cpu_s": 31.73,
+      "cpu_ffmpeg_s": 16.16,
+      "cores_busy": 0.09,
+      "peak_tree_rss_mb": 1132.1,
+      "load_avg": 139.60009765625,
+      "cached": false,
+      "duration": 60.000938,
+      "pieces": [
+        "copy"
+      ]
+    },
+    {
+      "run": 2,
+      "wall_s": 98.3,
+      "cpu_s": 32.43,
+      "cpu_ffmpeg_s": 12.6,
+      "cores_busy": 0.33,
+      "peak_tree_rss_mb": 752.7,
+      "load_avg": 98.46923828125,
+      "cached": false,
+      "duration": 60.000938,
+      "pieces": [
+        "copy"
+      ]
+    },
+    {
+      "run": 3,
+      "wall_s": 73.7,
+      "cpu_s": 28.47,
+      "cpu_ffmpeg_s": 9.77,
+      "cores_busy": 0.39,
+      "peak_tree_rss_mb": 601.3,
+      "load_avg": 117.107421875,
+      "cached": false,
+      "duration": 60.000938,
+      "pieces": [
+        "copy"
+      ]
+    }
+  ],
+  "vm_api_image_4_vcpu": [
+    {
+      "run": 1,
+      "wall_s": 107.78,
+      "cpu_s": 108.81,
+      "cpu_ffmpeg_s": 22.33,
+      "cores_busy": 1.01,
+      "peak_tree_rss_mb": 618.0,
+      "load_avg": 0.89599609375,
+      "cached": false,
+      "duration": 60.011,
+      "pieces": [
+        "copy"
+      ]
+    },
+    {
+      "run": 2,
+      "wall_s": 162.38,
+      "cpu_s": 164.57,
+      "cpu_ffmpeg_s": 33.85,
+      "cores_busy": 1.01,
+      "peak_tree_rss_mb": 629.8,
+      "load_avg": 0.82177734375,
+      "cached": false,
+      "duration": 60.011,
+      "pieces": [
+        "copy"
+      ]
+    },
+    {
+      "run": 3,
+      "wall_s": 133.4,
+      "cpu_s": 135.65,
+      "cpu_ffmpeg_s": 22.88,
+      "cores_busy": 1.02,
+      "peak_tree_rss_mb": 629.8,
+      "load_avg": 1.11328125,
+      "cached": false,
+      "duration": 60.011,
+      "pieces": [
+        "copy"
+      ]
+    }
+  ]
+}
