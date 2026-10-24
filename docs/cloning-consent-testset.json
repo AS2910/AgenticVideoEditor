@@ -1,0 +1,2414 @@
+{
+ "model": "microsoft/wavlm-base-plus-sv",
+ "clips": [
+  {
+   "clip_id": "say-samantha-0",
+   "speaker": "say:samantha",
+   "origin": "say",
+   "role": "source",
+   "detail": "Samantha: Thanks for coming by the shop today. Everything on the front table is fresh this morning, and the bread comes out of the oven at ten.",
+   "seconds": 6.93
+  },
+  {
+   "clip_id": "say-samantha-1",
+   "speaker": "say:samantha",
+   "origin": "say",
+   "role": "consent",
+   "detail": "Samantha: Mirror dragon towel button needle measure corner factory window wonder remember yellow.",
+   "seconds": 4.76
+  },
+  {
+   "clip_id": "say-samantha-1-phone",
+   "speaker": "say:samantha",
+   "origin": "phone",
+   "role": "consent",
+   "detail": "say-samantha-1 through the phone channel",
+   "seconds": 4.76
+  },
+  {
+   "clip_id": "say-samantha-2",
+   "speaker": "say:samantha",
+   "origin": "say",
+   "role": "consent",
+   "detail": "Samantha: Remember letter meadow climb friendly gather silver saddle simple wagon table.",
+   "seconds": 4.26
+  },
+  {
+   "clip_id": "say-samantha-2-phone",
+   "speaker": "say:samantha",
+   "origin": "phone",
+   "role": "consent",
+   "detail": "say-samantha-2 through the phone channel",
+   "seconds": 4.26
+  },
+  {
+   "clip_id": "say-daniel-0",
+   "speaker": "say:daniel",
+   "origin": "say",
+   "role": "source",
+   "detail": "Daniel: Thanks for coming by the shop today. Everything on the front table is fresh this morning, and the bread comes out of the oven at ten.",
+   "seconds": 7.35
+  },
+  {
+   "clip_id": "say-daniel-1",
+   "speaker": "say:daniel",
+   "origin": "say",
+   "role": "consent",
+   "detail": "Daniel: Circle rapid corner kettle tractor remember library island.",
+   "seconds": 3.39
+  },
+  {
+   "clip_id": "say-daniel-1-phone",
+   "speaker": "say:daniel",
+   "origin": "phone",
+   "role": "consent",
+   "detail": "say-daniel-1 through the phone channel",
+   "seconds": 3.39
+  },
+  {
+   "clip_id": "say-daniel-2",
+   "speaker": "say:daniel",
+   "origin": "say",
+   "role": "consent",
+   "detail": "Daniel: Factory simple puzzle castle tractor turtle tidy coffee chair heavy.",
+   "seconds": 4.06
+  },
+  {
+   "clip_id": "say-daniel-2-phone",
+   "speaker": "say:daniel",
+   "origin": "phone",
+   "role": "consent",
+   "detail": "say-daniel-2 through the phone channel",
+   "seconds": 4.06
+  },
+  {
+   "clip_id": "say-karen-0",
+   "speaker": "say:karen",
+   "origin": "say",
+   "role": "source",
+   "detail": "Karen: Thanks for coming by the shop today. Everything on the front table is fresh this morning, and the bread comes out of the oven at ten.",
+   "seconds": 6.83
+  },
+  {
+   "clip_id": "say-karen-1",
+   "speaker": "say:karen",
+   "origin": "say",
+   "role": "consent",
+   "detail": "Karen: Drawer paint listen guitar settle clock open morning bright.",
+   "seconds": 3.3
+  },
+  {
+   "clip_id": "say-karen-1-phone",
+   "speaker": "say:karen",
+   "origin": "phone",
+   "role": "consent",
+   "detail": "say-karen-1 through the phone channel",
+   "seconds": 3.3
+  },
+  {
+   "clip_id": "say-karen-2",
+   "speaker": "say:karen",
+   "origin": "say",
+   "role": "consent",
+   "detail": "Karen: Bridge coffee measure apple lucky dragon table collect meadow.",
+   "seconds": 3.36
+  },
+  {
+   "clip_id": "say-karen-2-phone",
+   "speaker": "say:karen",
+   "origin": "phone",
+   "role": "consent",
+   "detail": "say-karen-2 through the phone channel",
+   "seconds": 3.36
+  },
+  {
+   "clip_id": "say-moira-0",
+   "speaker": "say:moira",
+   "origin": "say",
+   "role": "source",
+   "detail": "Moira: Thanks for coming by the shop today. Everything on the front table is fresh this morning, and the bread comes out of the oven at ten.",
+   "seconds": 7.35
+  },
+  {
+   "clip_id": "say-moira-1",
+   "speaker": "say:moira",
+   "origin": "say",
+   "role": "consent",
+   "detail": "Moira: Coffee wild collect meadow school lucky garden pocket tiger.",
+   "seconds": 3.68
+  },
+  {
+   "clip_id": "say-moira-1-phone",
+   "speaker": "say:moira",
+   "origin": "phone",
+   "role": "consent",
+   "detail": "say-moira-1 through the phone channel",
+   "seconds": 3.68
+  },
+  {
+   "clip_id": "say-moira-2",
+   "speaker": "say:moira",
+   "origin": "say",
+   "role": "consent",
+   "detail": "Moira: Puzzle cloud visit kitchen pretty narrow salad summer helmet.",
+   "seconds": 3.52
+  },
+  {
+   "clip_id": "say-moira-2-phone",
+   "speaker": "say:moira",
+   "origin": "phone",
+   "role": "consent",
+   "detail": "say-moira-2 through the phone channel",
+   "seconds": 3.52
+  },
+  {
+   "clip_id": "say-rishi-0",
+   "speaker": "say:rishi",
+   "origin": "say",
+   "role": "source",
+   "detail": "Rishi: Thanks for coming by the shop today. Everything on the front table is fresh this morning, and the bread comes out of the oven at ten.",
+   "seconds": 8.02
+  },
+  {
+   "clip_id": "say-rishi-1",
+   "speaker": "say:rishi",
+   "origin": "say",
+   "role": "consent",
+   "detail": "Rishi: Jacket collect shiver purple dinner mirror wonder carry potato.",
+   "seconds": 3.45
+  },
+  {
+   "clip_id": "say-rishi-1-phone",
+   "speaker": "say:rishi",
+   "origin": "phone",
+   "role": "consent",
+   "detail": "say-rishi-1 through the phone channel",
+   "seconds": 3.45
+  },
+  {
+   "clip_id": "say-rishi-2",
+   "speaker": "say:rishi",
+   "origin": "say",
+   "role": "consent",
+   "detail": "Rishi: Umbrella promise pretty purple island early saddle golden quiet station stumble.",
+   "seconds": 4.8
+  },
+  {
+   "clip_id": "say-rishi-2-phone",
+   "speaker": "say:rishi",
+   "origin": "phone",
+   "role": "consent",
+   "detail": "say-rishi-2 through the phone channel",
+   "seconds": 4.8
+  },
+  {
+   "clip_id": "say-tara-0",
+   "speaker": "say:tara",
+   "origin": "say",
+   "role": "source",
+   "detail": "Tara: Thanks for coming by the shop today. Everything on the front table is fresh this morning, and the bread comes out of the oven at ten.",
+   "seconds": 7.11
+  },
+  {
+   "clip_id": "say-tara-1",
+   "speaker": "say:tara",
+   "origin": "say",
+   "role": "consent",
+   "detail": "Tara: Summer finger packet rabbit wonder carpet doctor mountain open busy.",
+   "seconds": 3.7
+  },
+  {
+   "clip_id": "say-tara-1-phone",
+   "speaker": "say:tara",
+   "origin": "phone",
+   "role": "consent",
+   "detail": "say-tara-1 through the phone channel",
+   "seconds": 3.7
+  },
+  {
+   "clip_id": "say-tara-2",
+   "speaker": "say:tara",
+   "origin": "say",
+   "role": "consent",
+   "detail": "Tara: Apple whistle ordinary farmer potato modern towel narrow.",
+   "seconds": 3.14
+  },
+  {
+   "clip_id": "say-tara-2-phone",
+   "speaker": "say:tara",
+   "origin": "phone",
+   "role": "consent",
+   "detail": "say-tara-2 through the phone channel",
+   "seconds": 3.14
+  },
+  {
+   "clip_id": "say-aman-0",
+   "speaker": "say:aman",
+   "origin": "say",
+   "role": "source",
+   "detail": "Aman: Thanks for coming by the shop today. Everything on the front table is fresh this morning, and the bread comes out of the oven at ten.",
+   "seconds": 7.53
+  },
+  {
+   "clip_id": "say-aman-1",
+   "speaker": "say:aman",
+   "origin": "say",
+   "role": "consent",
+   "detail": "Aman: Bright salad button finger pillow hungry kettle castle.",
+   "seconds": 2.81
+  },
+  {
+   "clip_id": "say-aman-1-phone",
+   "speaker": "say:aman",
+   "origin": "phone",
+   "role": "consent",
+   "detail": "say-aman-1 through the phone channel",
+   "seconds": 2.81
+  },
+  {
+   "clip_id": "say-aman-2",
+   "speaker": "say:aman",
+   "origin": "say",
+   "role": "consent",
+   "detail": "Aman: Cloud cherry rapid paint heavy modern happy collect careful yellow measure rabbit.",
+   "seconds": 4.01
+  },
+  {
+   "clip_id": "say-aman-2-phone",
+   "speaker": "say:aman",
+   "origin": "phone",
+   "role": "consent",
+   "detail": "say-aman-2 through the phone channel",
+   "seconds": 4.01
+  },
+  {
+   "clip_id": "say-lekha-0",
+   "speaker": "say:lekha",
+   "origin": "say",
+   "role": "source",
+   "detail": "Lekha: Thanks for coming by the shop today. Everything on the front table is fresh this morning, and the bread comes out of the oven at ten.",
+   "seconds": 8.0
+  },
+  {
+   "clip_id": "say-lekha-1",
+   "speaker": "say:lekha",
+   "origin": "say",
+   "role": "consent",
+   "detail": "Lekha: Bright river valley glass narrow happy warm ladder spoon carry.",
+   "seconds": 3.56
+  },
+  {
+   "clip_id": "say-lekha-1-phone",
+   "speaker": "say:lekha",
+   "origin": "phone",
+   "role": "consent",
+   "detail": "say-lekha-1 through the phone channel",
+   "seconds": 3.56
+  },
+  {
+   "clip_id": "say-lekha-2",
+   "speaker": "say:lekha",
+   "origin": "say",
+   "role": "consent",
+   "detail": "Lekha: Purple table mirror borrow frozen puzzle factory basket.",
+   "seconds": 3.4
+  },
+  {
+   "clip_id": "say-lekha-2-phone",
+   "speaker": "say:lekha",
+   "origin": "phone",
+   "role": "consent",
+   "detail": "say-lekha-2 through the phone channel",
+   "seconds": 3.4
+  },
+  {
+   "clip_id": "say-flo-us-0",
+   "speaker": "say:flo-us",
+   "origin": "say",
+   "role": "source",
+   "detail": "Flo (English (US)): Thanks for coming by the shop today. Everything on the front table is fresh this morning, and the bread comes out of the oven at ten.",
+   "seconds": 8.35
+  },
+  {
+   "clip_id": "say-flo-us-1",
+   "speaker": "say:flo-us",
+   "origin": "say",
+   "role": "consent",
+   "detail": "Flo (English (US)): Garlic feather castle umbrella pocket school paper winter bottle.",
+   "seconds": 4.32
+  },
+  {
+   "clip_id": "say-flo-us-1-phone",
+   "speaker": "say:flo-us",
+   "origin": "phone",
+   "role": "consent",
+   "detail": "say-flo-us-1 through the phone channel",
+   "seconds": 4.32
+  },
+  {
+   "clip_id": "say-flo-us-2",
+   "speaker": "say:flo-us",
+   "origin": "say",
+   "role": "consent",
+   "detail": "Flo (English (US)): Pumpkin careful table towel planet valley pocket candle simple.",
+   "seconds": 4.6
+  },
+  {
+   "clip_id": "say-flo-us-2-phone",
+   "speaker": "say:flo-us",
+   "origin": "phone",
+   "role": "consent",
+   "detail": "say-flo-us-2 through the phone channel",
+   "seconds": 4.6
+  },
+  {
+   "clip_id": "say-eddy-us-0",
+   "speaker": "say:eddy-us",
+   "origin": "say",
+   "role": "source",
+   "detail": "Eddy (English (US)): Thanks for coming by the shop today. Everything on the front table is fresh this morning, and the bread comes out of the oven at ten.",
+   "seconds": 8.35
+  },
+  {
+   "clip_id": "say-eddy-us-1",
+   "speaker": "say:eddy-us",
+   "origin": "say",
+   "role": "consent",
+   "detail": "Eddy (English (US)): Stumble clock kettle station tidy chair borrow dragon guitar orange.",
+   "seconds": 4.77
+  },
+  {
+   "clip_id": "say-eddy-us-1-phone",
+   "speaker": "say:eddy-us",
+   "origin": "phone",
+   "role": "consent",
+   "detail": "say-eddy-us-1 through the phone channel",
+   "seconds": 4.77
+  },
+  {
+   "clip_id": "say-eddy-us-2",
+   "speaker": "say:eddy-us",
+   "origin": "say",
+   "role": "consent",
+   "detail": "Eddy (English (US)): Pencil factory cherry tractor borrow lemon turtle visit.",
+   "seconds": 4.12
+  },
+  {
+   "clip_id": "say-eddy-us-2-phone",
+   "speaker": "say:eddy-us",
+   "origin": "phone",
+   "role": "consent",
+   "detail": "say-eddy-us-2 through the phone channel",
+   "seconds": 4.12
+  },
+  {
+   "clip_id": "say-reed-uk-0",
+   "speaker": "say:reed-uk",
+   "origin": "say",
+   "role": "source",
+   "detail": "Reed (English (UK)): Thanks for coming by the shop today. Everything on the front table is fresh this morning, and the bread comes out of the oven at ten.",
+   "seconds": 8.21
+  },
+  {
+   "clip_id": "say-reed-uk-1",
+   "speaker": "say:reed-uk",
+   "origin": "say",
+   "role": "consent",
+   "detail": "Reed (English (UK)): Bright feather farmer cloud packet summer wonder turtle saddle morning.",
+   "seconds": 4.46
+  },
+  {
+   "clip_id": "say-reed-uk-1-phone",
+   "speaker": "say:reed-uk",
+   "origin": "phone",
+   "role": "consent",
+   "detail": "say-reed-uk-1 through the phone channel",
+   "seconds": 4.46
+  },
+  {
+   "clip_id": "say-reed-uk-2",
+   "speaker": "say:reed-uk",
+   "origin": "say",
+   "role": "consent",
+   "detail": "Reed (English (UK)): Salad packet paint sunny doctor chair promise shiver lemon.",
+   "seconds": 4.14
+  },
+  {
+   "clip_id": "say-reed-uk-2-phone",
+   "speaker": "say:reed-uk",
+   "origin": "phone",
+   "role": "consent",
+   "detail": "say-reed-uk-2 through the phone channel",
+   "seconds": 4.14
+  },
+  {
+   "clip_id": "say-shelley-uk-0",
+   "speaker": "say:shelley-uk",
+   "origin": "say",
+   "role": "source",
+   "detail": "Shelley (English (UK)): Thanks for coming by the shop today. Everything on the front table is fresh this morning, and the bread comes out of the oven at ten.",
+   "seconds": 8.21
+  },
+  {
+   "clip_id": "say-shelley-uk-1",
+   "speaker": "say:shelley-uk",
+   "origin": "say",
+   "role": "consent",
+   "detail": "Shelley (English (UK)): Meadow promise rocket village winter river orange mountain.",
+   "seconds": 3.76
+  },
+  {
+   "clip_id": "say-shelley-uk-1-phone",
+   "speaker": "say:shelley-uk",
+   "origin": "phone",
+   "role": "consent",
+   "detail": "say-shelley-uk-1 through the phone channel",
+   "seconds": 3.76
+  },
+  {
+   "clip_id": "say-shelley-uk-2",
+   "speaker": "say:shelley-uk",
+   "origin": "say",
+   "role": "consent",
+   "detail": "Shelley (English (UK)): Collect yellow spoon tidy table coffee pillow glass teacher finger school helmet.",
+   "seconds": 5.26
+  },
+  {
+   "clip_id": "say-shelley-uk-2-phone",
+   "speaker": "say:shelley-uk",
+   "origin": "phone",
+   "role": "consent",
+   "detail": "say-shelley-uk-2 through the phone channel",
+   "seconds": 5.26
+  },
+  {
+   "clip_id": "media-4248f56c4e",
+   "speaker": "el:ALJq",
+   "origin": "media",
+   "role": "take",
+   "detail": "p59/4248f56c4e3c4b981c947802f99a519952dda9ff1146064cb3790cd00e50f3a8.wav",
+   "seconds": 6.4
+  },
+  {
+   "clip_id": "media-3d5bae1a13",
+   "speaker": "el:ALJq",
+   "origin": "media",
+   "role": "take",
+   "detail": "p59/3d5bae1a1384386c5854e09ecba0517c410ea9d1e617d95dacae242445e653b8.wav",
+   "seconds": 6.4
+  },
+  {
+   "clip_id": "media-091d92439b",
+   "speaker": "el:ALJq",
+   "origin": "media",
+   "role": "take",
+   "detail": "p59/091d92439bbb87ee4ff36b757387e4f40f169bb4a473c532b1b6e32b0333e277.wav",
+   "seconds": 6.0
+  },
+  {
+   "clip_id": "media-609a2fdf6c",
+   "speaker": "el:ALJq",
+   "origin": "media",
+   "role": "take",
+   "detail": "p60/609a2fdf6c244cafab5c1d0ba28f4b3a69b2990168f21f150da74e6eab58f55d.wav",
+   "seconds": 5.32
+  },
+  {
+   "clip_id": "media-cf410874c6",
+   "speaker": "el:ALJq",
+   "origin": "media",
+   "role": "take",
+   "detail": "p60/cf410874c66cb66ddb993d49b56a348de7c720c3a26f339ce798fe3c9b8aa425.wav",
+   "seconds": 2.09
+  },
+  {
+   "clip_id": "media-8b1216e915",
+   "speaker": "el:IKne",
+   "origin": "media",
+   "role": "take",
+   "detail": "p61/8b1216e9153c2db41303e846b1d88d4a11312c07cf44a8c256b6fc149a47f114.wav",
+   "seconds": 3.7
+  },
+  {
+   "clip_id": "media-9344ed79ab",
+   "speaker": "el:IKne",
+   "origin": "media",
+   "role": "take",
+   "detail": "p61/9344ed79abe6204e65a9adbd6ef60fc2084bf0e013091b42c37d29e2ba4787b8.wav",
+   "seconds": 2.9
+  },
+  {
+   "clip_id": "media-e2e4e9d27d",
+   "speaker": "el:IKne",
+   "origin": "media",
+   "role": "take",
+   "detail": "p62/e2e4e9d27d6181d1792c9cf52abc0adde59c4cc5389aadbb1ebda09d45edd9f1.wav",
+   "seconds": 2.7
+  },
+  {
+   "clip_id": "media-fb15bdc847",
+   "speaker": "el:IKne",
+   "origin": "media",
+   "role": "take",
+   "detail": "p62/fb15bdc84784ca0be6f8d52c208ba895092fd330a84961f67665464f430b2490.wav",
+   "seconds": 2.6
+  },
+  {
+   "clip_id": "media-f04c2a3ae2",
+   "speaker": "el:onwK",
+   "origin": "media",
+   "role": "take",
+   "detail": "p61/f04c2a3ae20b88594827f239019ba2c2163357600e58e564fed4010b11909f8f.wav",
+   "seconds": 2.8
+  },
+  {
+   "clip_id": "media-5e98a9137d",
+   "speaker": "el:onwK",
+   "origin": "media",
+   "role": "take",
+   "detail": "p61/5e98a9137d02ac91f5feafc4dd945a9be45f7c2cc1f98d0014cf5986de49ce6e.wav",
+   "seconds": 3.1
+  },
+  {
+   "clip_id": "media-4676863cdd",
+   "speaker": "el:onwK",
+   "origin": "media",
+   "role": "take",
+   "detail": "p62/4676863cdda2d68e242b94e37ab7ba4d810fb5a95c6b0660c1007bb142a5bb46.wav",
+   "seconds": 2.3
+  },
+  {
+   "clip_id": "media-3d23d3cb83",
+   "speaker": "el:onwK",
+   "origin": "media",
+   "role": "take",
+   "detail": "p62/3d23d3cb8311e2ffe4148ba25bb010f01371e57da8a6ba934420fa50335f1c5e.wav",
+   "seconds": 2.2
+  },
+  {
+   "clip_id": "media-98b17c9255",
+   "speaker": "el:mCQM",
+   "origin": "media",
+   "role": "take",
+   "detail": "p63/98b17c925559deb9d6fd6a4c1dea2d126c5f63f277d0e1f019069e45e202cec3.wav",
+   "seconds": 2.6
+  },
+  {
+   "clip_id": "media-d841bf967a",
+   "speaker": "el:mCQM",
+   "origin": "media",
+   "role": "take",
+   "detail": "p63/d841bf967ad7ef49b024bb6f316a76890ad65d6419dfc122aa5d5f406d832d8e.wav",
+   "seconds": 3.3
+  },
+  {
+   "clip_id": "media-bd5ad24991",
+   "speaker": "el:mCQM",
+   "origin": "media",
+   "role": "take",
+   "detail": "p63/bd5ad249916676d9aec94a1b20ee29161e930804a6a25f6675359fa9fcd39316.wav",
+   "seconds": 3.35
+  },
+  {
+   "clip_id": "media-610df99d33-0",
+   "speaker": "rec:deewar",
+   "origin": "media",
+   "role": "source",
+   "detail": "user-local/610df99d33c121ba26918e51aeff8db3ae10ce284b237eece69b29524e733b16.wav 0.0-5.0 s",
+   "seconds": 5.0
+  },
+  {
+   "clip_id": "media-610df99d33-5",
+   "speaker": "rec:deewar",
+   "origin": "media",
+   "role": "consent",
+   "detail": "user-local/610df99d33c121ba26918e51aeff8db3ae10ce284b237eece69b29524e733b16.wav 5.0-10.0 s",
+   "seconds": 5.0
+  },
+  {
+   "clip_id": "media-610df99d33-10",
+   "speaker": "rec:deewar",
+   "origin": "media",
+   "role": "consent",
+   "detail": "user-local/610df99d33c121ba26918e51aeff8db3ae10ce284b237eece69b29524e733b16.wav 10.0-15.3 s",
+   "seconds": 5.3
+  },
+  {
+   "clip_id": "media-aa0e7a1666-0",
+   "speaker": "human:p60",
+   "origin": "media",
+   "role": "consent",
+   "detail": "p60/aa0e7a1666b5df80dc41b6f10609c5f757af07c7eea15191b01d92c9dd6ed8a3.mp4 0.0-4.0 s",
+   "seconds": 4.0
+  },
+  {
+   "clip_id": "media-aa0e7a1666-4",
+   "speaker": "human:p60",
+   "origin": "media",
+   "role": "consent",
+   "detail": "p60/aa0e7a1666b5df80dc41b6f10609c5f757af07c7eea15191b01d92c9dd6ed8a3.mp4 4.0-8.0 s",
+   "seconds": 4.0
+  },
+  {
+   "clip_id": "public-sample-ad",
+   "speaker": "public:sample-ad",
+   "origin": "public",
+   "role": "source",
+   "detail": "frontend/public/sample-ad.mp4",
+   "seconds": 2.24
+  }
+ ],
+ "summary": {
+  "same": {
+   "n": 125,
+   "min": 0.5468,
+   "p05": 0.7067,
+   "median": 0.9525,
+   "p95": 0.9856,
+   "max": 0.9932
+  },
+  "different": {
+   "n": 3112,
+   "min": 0.1875,
+   "p05": 0.3563,
+   "median": 0.6233,
+   "p95": 0.8728,
+   "max": 0.9723
+  },
+  "by_kind": {
+   "different": {
+    "n": 3112,
+    "min": 0.1875,
+    "p05": 0.3563,
+    "median": 0.6233,
+    "p95": 0.8728,
+    "max": 0.9723
+   },
+   "same, clean": {
+    "n": 37,
+    "min": 0.8887,
+    "p05": 0.9248,
+    "median": 0.9684,
+    "p95": 0.9867,
+    "max": 0.9888
+   },
+   "same, phone vs clean": {
+    "n": 60,
+    "min": 0.8345,
+    "p05": 0.9001,
+    "median": 0.9537,
+    "p95": 0.9817,
+    "max": 0.9932
+   },
+   "same, voice vendor or recorded sample": {
+    "n": 28,
+    "min": 0.5468,
+    "p05": 0.5513,
+    "median": 0.8031,
+    "p95": 0.9287,
+    "max": 0.9355
+   }
+  },
+  "at": [
+   {
+    "threshold": 0.6,
+    "false_accept": 0.554,
+    "false_reject": 0.04,
+    "false_reject_consent_like": 0.0
+   },
+   {
+    "threshold": 0.62,
+    "false_accept": 0.5084,
+    "false_reject": 0.048,
+    "false_reject_consent_like": 0.0
+   },
+   {
+    "threshold": 0.64,
+    "false_accept": 0.4598,
+    "false_reject": 0.048,
+    "false_reject_consent_like": 0.0
+   },
+   {
+    "threshold": 0.66,
+    "false_accept": 0.4181,
+    "false_reject": 0.048,
+    "false_reject_consent_like": 0.0
+   },
+   {
+    "threshold": 0.68,
+    "false_accept": 0.375,
+    "false_reject": 0.048,
+    "false_reject_consent_like": 0.0
+   },
+   {
+    "threshold": 0.7,
+    "false_accept": 0.3345,
+    "false_reject": 0.048,
+    "false_reject_consent_like": 0.0
+   },
+   {
+    "threshold": 0.72,
+    "false_accept": 0.2985,
+    "false_reject": 0.056,
+    "false_reject_consent_like": 0.0
+   },
+   {
+    "threshold": 0.74,
+    "false_accept": 0.2596,
+    "false_reject": 0.064,
+    "false_reject_consent_like": 0.0
+   },
+   {
+    "threshold": 0.76,
+    "false_accept": 0.2265,
+    "false_reject": 0.08,
+    "false_reject_consent_like": 0.0
+   },
+   {
+    "threshold": 0.78,
+    "false_accept": 0.1906,
+    "false_reject": 0.096,
+    "false_reject_consent_like": 0.0
+   },
+   {
+    "threshold": 0.8,
+    "false_accept": 0.1555,
+    "false_reject": 0.112,
+    "false_reject_consent_like": 0.0
+   },
+   {
+    "threshold": 0.82,
+    "false_accept": 0.1215,
+    "false_reject": 0.12,
+    "false_reject_consent_like": 0.0
+   },
+   {
+    "threshold": 0.84,
+    "false_accept": 0.0906,
+    "false_reject": 0.136,
+    "false_reject_consent_like": 0.0103
+   },
+   {
+    "threshold": 0.86,
+    "false_accept": 0.0656,
+    "false_reject": 0.144,
+    "false_reject_consent_like": 0.0103
+   },
+   {
+    "threshold": 0.88,
+    "false_accept": 0.0447,
+    "false_reject": 0.168,
+    "false_reject_consent_like": 0.0103
+   },
+   {
+    "threshold": 0.9,
+    "false_accept": 0.0302,
+    "false_reject": 0.208,
+    "false_reject_consent_like": 0.0412
+   },
+   {
+    "threshold": 0.92,
+    "false_accept": 0.0161,
+    "false_reject": 0.256,
+    "false_reject_consent_like": 0.0722
+   },
+   {
+    "threshold": 0.94,
+    "false_accept": 0.0058,
+    "false_reject": 0.376,
+    "false_reject_consent_like": 0.1959
+   },
+   {
+    "threshold": 0.96,
+    "false_accept": 0.0013,
+    "false_reject": 0.648,
+    "false_reject_consent_like": 0.5464
+   }
+  ],
+  "bands": {
+   "pass_at": 0.92,
+   "review_from": 0.84,
+   "same, consent-like (clean, phone vs clean)": {
+    "n": 97,
+    "pass": 90,
+    "review": 6,
+    "fail": 1
+   },
+   "same, voice vendor or recorded sample": {
+    "n": 28,
+    "pass": 3,
+    "review": 9,
+    "fail": 16
+   },
+   "different": {
+    "n": 3112,
+    "pass": 50,
+    "review": 232,
+    "fail": 2830
+   }
+  },
+  "hardest_different": [
+   {
+    "a": "say-rishi-2-phone",
+    "b": "say-aman-2-phone",
+    "same": false,
+    "kind": "different",
+    "sim": 0.9723
+   },
+   {
+    "a": "say-eddy-us-0",
+    "b": "say-reed-uk-0",
+    "same": false,
+    "kind": "different",
+    "sim": 0.966
+   },
+   {
+    "a": "say-moira-0",
+    "b": "say-tara-2-phone",
+    "same": false,
+    "kind": "different",
+    "sim": 0.9638
+   },
+   {
+    "a": "say-rishi-2-phone",
+    "b": "say-aman-2",
+    "same": false,
+    "kind": "different",
+    "sim": 0.9628
+   },
+   {
+    "a": "say-rishi-0",
+    "b": "say-aman-0",
+    "same": false,
+    "kind": "different",
+    "sim": 0.9564
+   },
+   {
+    "a": "say-rishi-2-phone",
+    "b": "say-aman-0",
+    "same": false,
+    "kind": "different",
+    "sim": 0.9564
+   },
+   {
+    "a": "say-rishi-0",
+    "b": "say-aman-1",
+    "same": false,
+    "kind": "different",
+    "sim": 0.9546
+   },
+   {
+    "a": "say-aman-1",
+    "b": "media-3d5bae1a13",
+    "same": false,
+    "kind": "different",
+    "sim": 0.9534
+   },
+   {
+    "a": "say-aman-2",
+    "b": "media-3d5bae1a13",
+    "same": false,
+    "kind": "different",
+    "sim": 0.9532
+   },
+   {
+    "a": "say-moira-1",
+    "b": "say-tara-2-phone",
+    "same": false,
+    "kind": "different",
+    "sim": 0.9514
+   }
+  ],
+  "hardest_same": [
+   {
+    "a": "media-3d5bae1a13",
+    "b": "media-cf410874c6",
+    "same": true,
+    "kind": "same, voice vendor or recorded sample",
+    "sim": 0.5468
+   },
+   {
+    "a": "media-091d92439b",
+    "b": "media-cf410874c6",
+    "same": true,
+    "kind": "same, voice vendor or recorded sample",
+    "sim": 0.5493
+   },
+   {
+    "a": "media-3d5bae1a13",
+    "b": "media-609a2fdf6c",
+    "same": true,
+    "kind": "same, voice vendor or recorded sample",
+    "sim": 0.5551
+   },
+   {
+    "a": "media-610df99d33-0",
+    "b": "media-610df99d33-5",
+    "same": true,
+    "kind": "same, voice vendor or recorded sample",
+    "sim": 0.5711
+   },
+   {
+    "a": "media-4248f56c4e",
+    "b": "media-3d5bae1a13",
+    "same": true,
+    "kind": "same, voice vendor or recorded sample",
+    "sim": 0.5955
+   },
+   {
+    "a": "media-610df99d33-0",
+    "b": "media-610df99d33-10",
+    "same": true,
+    "kind": "same, voice vendor or recorded sample",
+    "sim": 0.6139
+   },
+   {
+    "a": "media-9344ed79ab",
+    "b": "media-e2e4e9d27d",
+    "same": true,
+    "kind": "same, voice vendor or recorded sample",
+    "sim": 0.7032
+   },
+   {
+    "a": "media-9344ed79ab",
+    "b": "media-fb15bdc847",
+    "same": true,
+    "kind": "same, voice vendor or recorded sample",
+    "sim": 0.7205
+   },
+   {
+    "a": "media-3d5bae1a13",
+    "b": "media-091d92439b",
+    "same": true,
+    "kind": "same, voice vendor or recorded sample",
+    "sim": 0.7511
+   },
+   {
+    "a": "media-8b1216e915",
+    "b": "media-fb15bdc847",
+    "same": true,
+    "kind": "same, voice vendor or recorded sample",
+    "sim": 0.7585
+   }
+  ],
+  "model": "microsoft/wavlm-base-plus-sv"
+ },
+ "by_speakers": [
+  {
+   "a": "say:moira",
+   "b": "say:moira",
+   "same": true,
+   "n": 8,
+   "median": 0.9751,
+   "max": 0.9932
+  },
+  {
+   "a": "say:lekha",
+   "b": "say:lekha",
+   "same": true,
+   "n": 8,
+   "median": 0.9704,
+   "max": 0.9886
+  },
+  {
+   "a": "say:samantha",
+   "b": "say:samantha",
+   "same": true,
+   "n": 8,
+   "median": 0.9676,
+   "max": 0.9862
+  },
+  {
+   "a": "say:shelley-uk",
+   "b": "say:shelley-uk",
+   "same": true,
+   "n": 8,
+   "median": 0.966,
+   "max": 0.9855
+  },
+  {
+   "a": "say:karen",
+   "b": "say:karen",
+   "same": true,
+   "n": 8,
+   "median": 0.9617,
+   "max": 0.9801
+  },
+  {
+   "a": "say:aman",
+   "b": "say:aman",
+   "same": true,
+   "n": 8,
+   "median": 0.9584,
+   "max": 0.9744
+  },
+  {
+   "a": "say:tara",
+   "b": "say:tara",
+   "same": true,
+   "n": 8,
+   "median": 0.9551,
+   "max": 0.9858
+  },
+  {
+   "a": "say:rishi",
+   "b": "say:rishi",
+   "same": true,
+   "n": 8,
+   "median": 0.9531,
+   "max": 0.9735
+  },
+  {
+   "a": "say:flo-us",
+   "b": "say:flo-us",
+   "same": true,
+   "n": 8,
+   "median": 0.9494,
+   "max": 0.9664
+  },
+  {
+   "a": "say:eddy-us",
+   "b": "say:eddy-us",
+   "same": true,
+   "n": 8,
+   "median": 0.9493,
+   "max": 0.9732
+  },
+  {
+   "a": "human:p60",
+   "b": "human:p60",
+   "same": true,
+   "n": 1,
+   "median": 0.9482,
+   "max": 0.9482
+  },
+  {
+   "a": "say:daniel",
+   "b": "say:daniel",
+   "same": true,
+   "n": 8,
+   "median": 0.9456,
+   "max": 0.977
+  },
+  {
+   "a": "say:aman",
+   "b": "say:rishi",
+   "same": false,
+   "n": 25,
+   "median": 0.9356,
+   "max": 0.9723
+  },
+  {
+   "a": "say:reed-uk",
+   "b": "say:reed-uk",
+   "same": true,
+   "n": 8,
+   "median": 0.9341,
+   "max": 0.9651
+  },
+  {
+   "a": "el:mCQM",
+   "b": "el:mCQM",
+   "same": true,
+   "n": 3,
+   "median": 0.9241,
+   "max": 0.9312
+  },
+  {
+   "a": "say:moira",
+   "b": "say:tara",
+   "same": false,
+   "n": 25,
+   "median": 0.9217,
+   "max": 0.9638
+  },
+  {
+   "a": "el:mCQM",
+   "b": "say:aman",
+   "same": false,
+   "n": 15,
+   "median": 0.9093,
+   "max": 0.9389
+  },
+  {
+   "a": "human:p60",
+   "b": "say:flo-us",
+   "same": false,
+   "n": 10,
+   "median": 0.8923,
+   "max": 0.9445
+  },
+  {
+   "a": "el:onwK",
+   "b": "el:onwK",
+   "same": true,
+   "n": 6,
+   "median": 0.8921,
+   "max": 0.9355
+  },
+  {
+   "a": "say:shelley-uk",
+   "b": "say:tara",
+   "same": false,
+   "n": 25,
+   "median": 0.8891,
+   "max": 0.9292
+  },
+  {
+   "a": "say:moira",
+   "b": "say:shelley-uk",
+   "same": false,
+   "n": 25,
+   "median": 0.8798,
+   "max": 0.9057
+  },
+  {
+   "a": "say:karen",
+   "b": "say:shelley-uk",
+   "same": false,
+   "n": 25,
+   "median": 0.8558,
+   "max": 0.9063
+  },
+  {
+   "a": "el:mCQM",
+   "b": "say:rishi",
+   "same": false,
+   "n": 15,
+   "median": 0.8539,
+   "max": 0.9359
+  },
+  {
+   "a": "say:karen",
+   "b": "say:tara",
+   "same": false,
+   "n": 25,
+   "median": 0.8475,
+   "max": 0.9061
+  },
+  {
+   "a": "say:flo-us",
+   "b": "say:shelley-uk",
+   "same": false,
+   "n": 25,
+   "median": 0.8419,
+   "max": 0.941
+  },
+  {
+   "a": "say:karen",
+   "b": "say:samantha",
+   "same": false,
+   "n": 25,
+   "median": 0.8334,
+   "max": 0.883
+  },
+  {
+   "a": "say:eddy-us",
+   "b": "say:reed-uk",
+   "same": false,
+   "n": 25,
+   "median": 0.82,
+   "max": 0.966
+  },
+  {
+   "a": "el:mCQM",
+   "b": "say:reed-uk",
+   "same": false,
+   "n": 15,
+   "median": 0.819,
+   "max": 0.8672
+  },
+  {
+   "a": "say:samantha",
+   "b": "say:tara",
+   "same": false,
+   "n": 25,
+   "median": 0.8143,
+   "max": 0.8533
+  },
+  {
+   "a": "say:aman",
+   "b": "say:reed-uk",
+   "same": false,
+   "n": 25,
+   "median": 0.8098,
+   "max": 0.8769
+  },
+  {
+   "a": "say:reed-uk",
+   "b": "say:rishi",
+   "same": false,
+   "n": 25,
+   "median": 0.8052,
+   "max": 0.8616
+  },
+  {
+   "a": "el:onwK",
+   "b": "say:daniel",
+   "same": false,
+   "n": 20,
+   "median": 0.804,
+   "max": 0.9018
+  },
+  {
+   "a": "rec:deewar",
+   "b": "say:aman",
+   "same": false,
+   "n": 15,
+   "median": 0.8036,
+   "max": 0.8366
+  },
+  {
+   "a": "el:mCQM",
+   "b": "say:daniel",
+   "same": false,
+   "n": 15,
+   "median": 0.7999,
+   "max": 0.8503
+  },
+  {
+   "a": "human:p60",
+   "b": "say:samantha",
+   "same": false,
+   "n": 10,
+   "median": 0.7977,
+   "max": 0.844
+  },
+  {
+   "a": "say:moira",
+   "b": "say:samantha",
+   "same": false,
+   "n": 25,
+   "median": 0.7921,
+   "max": 0.8659
+  },
+  {
+   "a": "say:karen",
+   "b": "say:lekha",
+   "same": false,
+   "n": 25,
+   "median": 0.7911,
+   "max": 0.836
+  },
+  {
+   "a": "say:flo-us",
+   "b": "say:samantha",
+   "same": false,
+   "n": 25,
+   "median": 0.7908,
+   "max": 0.8544
+  },
+  {
+   "a": "say:samantha",
+   "b": "say:shelley-uk",
+   "same": false,
+   "n": 25,
+   "median": 0.7888,
+   "max": 0.8474
+  },
+  {
+   "a": "el:IKne",
+   "b": "el:IKne",
+   "same": true,
+   "n": 6,
+   "median": 0.7881,
+   "max": 0.8615
+  },
+  {
+   "a": "rec:deewar",
+   "b": "say:rishi",
+   "same": false,
+   "n": 15,
+   "median": 0.7872,
+   "max": 0.8344
+  },
+  {
+   "a": "el:ALJq",
+   "b": "say:flo-us",
+   "same": false,
+   "n": 25,
+   "median": 0.7793,
+   "max": 0.8914
+  },
+  {
+   "a": "el:ALJq",
+   "b": "say:moira",
+   "same": false,
+   "n": 25,
+   "median": 0.7765,
+   "max": 0.8935
+  },
+  {
+   "a": "el:IKne",
+   "b": "el:onwK",
+   "same": false,
+   "n": 16,
+   "median": 0.7695,
+   "max": 0.8546
+  },
+  {
+   "a": "say:daniel",
+   "b": "say:reed-uk",
+   "same": false,
+   "n": 25,
+   "median": 0.7679,
+   "max": 0.8487
+  },
+  {
+   "a": "el:ALJq",
+   "b": "say:shelley-uk",
+   "same": false,
+   "n": 25,
+   "median": 0.7672,
+   "max": 0.924
+  },
+  {
+   "a": "say:karen",
+   "b": "say:moira",
+   "same": false,
+   "n": 25,
+   "median": 0.7614,
+   "max": 0.841
+  },
+  {
+   "a": "el:ALJq",
+   "b": "el:ALJq",
+   "same": true,
+   "n": 10,
+   "median": 0.756,
+   "max": 0.8703
+  },
+  {
+   "a": "el:IKne",
+   "b": "say:daniel",
+   "same": false,
+   "n": 20,
+   "median": 0.7455,
+   "max": 0.8666
+  },
+  {
+   "a": "say:flo-us",
+   "b": "say:moira",
+   "same": false,
+   "n": 25,
+   "median": 0.7367,
+   "max": 0.8205
+  },
+  {
+   "a": "say:lekha",
+   "b": "say:tara",
+   "same": false,
+   "n": 25,
+   "median": 0.7353,
+   "max": 0.818
+  },
+  {
+   "a": "el:IKne",
+   "b": "say:eddy-us",
+   "same": false,
+   "n": 20,
+   "median": 0.7288,
+   "max": 0.8381
+  },
+  {
+   "a": "say:aman",
+   "b": "say:daniel",
+   "same": false,
+   "n": 25,
+   "median": 0.728,
+   "max": 0.7895
+  },
+  {
+   "a": "human:p60",
+   "b": "say:shelley-uk",
+   "same": false,
+   "n": 10,
+   "median": 0.7236,
+   "max": 0.7888
+  },
+  {
+   "a": "el:ALJq",
+   "b": "human:p60",
+   "same": false,
+   "n": 10,
+   "median": 0.7229,
+   "max": 0.8637
+  },
+  {
+   "a": "rec:deewar",
+   "b": "say:shelley-uk",
+   "same": false,
+   "n": 15,
+   "median": 0.7224,
+   "max": 0.8495
+  },
+  {
+   "a": "say:lekha",
+   "b": "say:shelley-uk",
+   "same": false,
+   "n": 25,
+   "median": 0.7219,
+   "max": 0.7745
+  },
+  {
+   "a": "say:lekha",
+   "b": "say:samantha",
+   "same": false,
+   "n": 25,
+   "median": 0.72,
+   "max": 0.8099
+  },
+  {
+   "a": "say:flo-us",
+   "b": "say:tara",
+   "same": false,
+   "n": 25,
+   "median": 0.7128,
+   "max": 0.8337
+  },
+  {
+   "a": "el:ALJq",
+   "b": "say:samantha",
+   "same": false,
+   "n": 25,
+   "median": 0.7123,
+   "max": 0.7819
+  },
+  {
+   "a": "el:mCQM",
+   "b": "el:onwK",
+   "same": false,
+   "n": 12,
+   "median": 0.7108,
+   "max": 0.7931
+  },
+  {
+   "a": "el:IKne",
+   "b": "say:reed-uk",
+   "same": false,
+   "n": 20,
+   "median": 0.7046,
+   "max": 0.8249
+  },
+  {
+   "a": "el:ALJq",
+   "b": "say:tara",
+   "same": false,
+   "n": 25,
+   "median": 0.7025,
+   "max": 0.9141
+  },
+  {
+   "a": "rec:deewar",
+   "b": "say:moira",
+   "same": false,
+   "n": 15,
+   "median": 0.6998,
+   "max": 0.8663
+  },
+  {
+   "a": "say:aman",
+   "b": "say:moira",
+   "same": false,
+   "n": 25,
+   "median": 0.6962,
+   "max": 0.812
+  },
+  {
+   "a": "say:aman",
+   "b": "say:shelley-uk",
+   "same": false,
+   "n": 25,
+   "median": 0.6931,
+   "max": 0.7602
+  },
+  {
+   "a": "say:flo-us",
+   "b": "say:karen",
+   "same": false,
+   "n": 25,
+   "median": 0.6927,
+   "max": 0.8278
+  },
+  {
+   "a": "say:daniel",
+   "b": "say:rishi",
+   "same": false,
+   "n": 25,
+   "median": 0.6867,
+   "max": 0.7789
+  },
+  {
+   "a": "el:ALJq",
+   "b": "rec:deewar",
+   "same": false,
+   "n": 15,
+   "median": 0.6856,
+   "max": 0.8439
+  },
+  {
+   "a": "public:sample-ad",
+   "b": "rec:deewar",
+   "same": false,
+   "n": 3,
+   "median": 0.6852,
+   "max": 0.8917
+  },
+  {
+   "a": "say:aman",
+   "b": "say:tara",
+   "same": false,
+   "n": 25,
+   "median": 0.6847,
+   "max": 0.7776
+  },
+  {
+   "a": "human:p60",
+   "b": "say:karen",
+   "same": false,
+   "n": 10,
+   "median": 0.6834,
+   "max": 0.7404
+  },
+  {
+   "a": "say:reed-uk",
+   "b": "say:shelley-uk",
+   "same": false,
+   "n": 25,
+   "median": 0.6795,
+   "max": 0.7416
+  },
+  {
+   "a": "say:eddy-us",
+   "b": "say:flo-us",
+   "same": false,
+   "n": 25,
+   "median": 0.673,
+   "max": 0.7468
+  },
+  {
+   "a": "rec:deewar",
+   "b": "say:samantha",
+   "same": false,
+   "n": 15,
+   "median": 0.672,
+   "max": 0.72
+  },
+  {
+   "a": "rec:deewar",
+   "b": "say:tara",
+   "same": false,
+   "n": 15,
+   "median": 0.6689,
+   "max": 0.8675
+  },
+  {
+   "a": "el:mCQM",
+   "b": "say:eddy-us",
+   "same": false,
+   "n": 15,
+   "median": 0.6685,
+   "max": 0.7694
+  },
+  {
+   "a": "el:mCQM",
+   "b": "rec:deewar",
+   "same": false,
+   "n": 9,
+   "median": 0.6668,
+   "max": 0.8578
+  },
+  {
+   "a": "el:mCQM",
+   "b": "public:sample-ad",
+   "same": false,
+   "n": 3,
+   "median": 0.6651,
+   "max": 0.7027
+  },
+  {
+   "a": "el:ALJq",
+   "b": "say:eddy-us",
+   "same": false,
+   "n": 25,
+   "median": 0.6632,
+   "max": 0.7532
+  },
+  {
+   "a": "el:IKne",
+   "b": "el:mCQM",
+   "same": false,
+   "n": 12,
+   "median": 0.6578,
+   "max": 0.7395
+  },
+  {
+   "a": "rec:deewar",
+   "b": "say:flo-us",
+   "same": false,
+   "n": 15,
+   "median": 0.6572,
+   "max": 0.8583
+  },
+  {
+   "a": "el:onwK",
+   "b": "say:reed-uk",
+   "same": false,
+   "n": 20,
+   "median": 0.6532,
+   "max": 0.7442
+  },
+  {
+   "a": "rec:deewar",
+   "b": "say:reed-uk",
+   "same": false,
+   "n": 15,
+   "median": 0.6517,
+   "max": 0.8428
+  },
+  {
+   "a": "say:daniel",
+   "b": "say:eddy-us",
+   "same": false,
+   "n": 25,
+   "median": 0.6513,
+   "max": 0.8191
+  },
+  {
+   "a": "say:daniel",
+   "b": "say:shelley-uk",
+   "same": false,
+   "n": 25,
+   "median": 0.6443,
+   "max": 0.708
+  },
+  {
+   "a": "human:p60",
+   "b": "say:moira",
+   "same": false,
+   "n": 10,
+   "median": 0.6441,
+   "max": 0.7005
+  },
+  {
+   "a": "say:rishi",
+   "b": "say:shelley-uk",
+   "same": false,
+   "n": 25,
+   "median": 0.643,
+   "max": 0.7146
+  },
+  {
+   "a": "rec:deewar",
+   "b": "say:karen",
+   "same": false,
+   "n": 15,
+   "median": 0.6338,
+   "max": 0.8092
+  },
+  {
+   "a": "rec:deewar",
+   "b": "say:lekha",
+   "same": false,
+   "n": 15,
+   "median": 0.6323,
+   "max": 0.73
+  },
+  {
+   "a": "say:rishi",
+   "b": "say:tara",
+   "same": false,
+   "n": 25,
+   "median": 0.6316,
+   "max": 0.715
+  },
+  {
+   "a": "el:mCQM",
+   "b": "say:moira",
+   "same": false,
+   "n": 15,
+   "median": 0.6299,
+   "max": 0.7307
+  },
+  {
+   "a": "say:moira",
+   "b": "say:rishi",
+   "same": false,
+   "n": 25,
+   "median": 0.6286,
+   "max": 0.7219
+  },
+  {
+   "a": "el:ALJq",
+   "b": "public:sample-ad",
+   "same": false,
+   "n": 5,
+   "median": 0.6274,
+   "max": 0.884
+  },
+  {
+   "a": "say:lekha",
+   "b": "say:moira",
+   "same": false,
+   "n": 25,
+   "median": 0.6272,
+   "max": 0.6704
+  },
+  {
+   "a": "el:onwK",
+   "b": "say:eddy-us",
+   "same": false,
+   "n": 20,
+   "median": 0.6269,
+   "max": 0.7138
+  },
+  {
+   "a": "human:p60",
+   "b": "say:tara",
+   "same": false,
+   "n": 10,
+   "median": 0.6263,
+   "max": 0.6707
+  },
+  {
+   "a": "el:ALJq",
+   "b": "say:karen",
+   "same": false,
+   "n": 25,
+   "median": 0.6258,
+   "max": 0.845
+  },
+  {
+   "a": "el:ALJq",
+   "b": "el:IKne",
+   "same": false,
+   "n": 20,
+   "median": 0.6229,
+   "max": 0.726
+  },
+  {
+   "a": "rec:deewar",
+   "b": "rec:deewar",
+   "same": true,
+   "n": 3,
+   "median": 0.6139,
+   "max": 0.7748
+  },
+  {
+   "a": "el:mCQM",
+   "b": "say:shelley-uk",
+   "same": false,
+   "n": 15,
+   "median": 0.6088,
+   "max": 0.7033
+  },
+  {
+   "a": "say:daniel",
+   "b": "say:karen",
+   "same": false,
+   "n": 25,
+   "median": 0.6065,
+   "max": 0.6731
+  },
+  {
+   "a": "say:eddy-us",
+   "b": "say:shelley-uk",
+   "same": false,
+   "n": 25,
+   "median": 0.6058,
+   "max": 0.7327
+  },
+  {
+   "a": "el:mCQM",
+   "b": "say:tara",
+   "same": false,
+   "n": 15,
+   "median": 0.6024,
+   "max": 0.6825
+  },
+  {
+   "a": "say:aman",
+   "b": "say:lekha",
+   "same": false,
+   "n": 25,
+   "median": 0.595,
+   "max": 0.6872
+  },
+  {
+   "a": "say:aman",
+   "b": "say:karen",
+   "same": false,
+   "n": 25,
+   "median": 0.5946,
+   "max": 0.6516
+  },
+  {
+   "a": "say:aman",
+   "b": "say:eddy-us",
+   "same": false,
+   "n": 25,
+   "median": 0.5944,
+   "max": 0.7156
+  },
+  {
+   "a": "say:moira",
+   "b": "say:reed-uk",
+   "same": false,
+   "n": 25,
+   "median": 0.5921,
+   "max": 0.6749
+  },
+  {
+   "a": "rec:deewar",
+   "b": "say:eddy-us",
+   "same": false,
+   "n": 15,
+   "median": 0.5841,
+   "max": 0.7939
+  },
+  {
+   "a": "say:daniel",
+   "b": "say:moira",
+   "same": false,
+   "n": 25,
+   "median": 0.5805,
+   "max": 0.6689
+  },
+  {
+   "a": "el:onwK",
+   "b": "say:aman",
+   "same": false,
+   "n": 20,
+   "median": 0.5798,
+   "max": 0.7111
+  },
+  {
+   "a": "say:flo-us",
+   "b": "say:lekha",
+   "same": false,
+   "n": 25,
+   "median": 0.5742,
+   "max": 0.7282
+  },
+  {
+   "a": "human:p60",
+   "b": "say:eddy-us",
+   "same": false,
+   "n": 10,
+   "median": 0.573,
+   "max": 0.6083
+  },
+  {
+   "a": "el:mCQM",
+   "b": "say:karen",
+   "same": false,
+   "n": 15,
+   "median": 0.5691,
+   "max": 0.5936
+  },
+  {
+   "a": "say:daniel",
+   "b": "say:tara",
+   "same": false,
+   "n": 25,
+   "median": 0.5685,
+   "max": 0.625
+  },
+  {
+   "a": "say:eddy-us",
+   "b": "say:rishi",
+   "same": false,
+   "n": 25,
+   "median": 0.5683,
+   "max": 0.6952
+  },
+  {
+   "a": "say:reed-uk",
+   "b": "say:tara",
+   "same": false,
+   "n": 25,
+   "median": 0.5594,
+   "max": 0.638
+  },
+  {
+   "a": "human:p60",
+   "b": "public:sample-ad",
+   "same": false,
+   "n": 2,
+   "median": 0.5561,
+   "max": 0.5663
+  },
+  {
+   "a": "el:ALJq",
+   "b": "say:reed-uk",
+   "same": false,
+   "n": 25,
+   "median": 0.5553,
+   "max": 0.8231
+  },
+  {
+   "a": "el:IKne",
+   "b": "human:p60",
+   "same": false,
+   "n": 8,
+   "median": 0.555,
+   "max": 0.6215
+  },
+  {
+   "a": "el:IKne",
+   "b": "say:aman",
+   "same": false,
+   "n": 20,
+   "median": 0.5534,
+   "max": 0.6825
+  },
+  {
+   "a": "el:ALJq",
+   "b": "say:aman",
+   "same": false,
+   "n": 25,
+   "median": 0.5505,
+   "max": 0.9534
+  },
+  {
+   "a": "el:ALJq",
+   "b": "el:onwK",
+   "same": false,
+   "n": 20,
+   "median": 0.5474,
+   "max": 0.6465
+  },
+  {
+   "a": "say:flo-us",
+   "b": "say:reed-uk",
+   "same": false,
+   "n": 25,
+   "median": 0.5471,
+   "max": 0.6565
+  },
+  {
+   "a": "el:IKne",
+   "b": "say:flo-us",
+   "same": false,
+   "n": 20,
+   "median": 0.5462,
+   "max": 0.6745
+  },
+  {
+   "a": "el:ALJq",
+   "b": "say:daniel",
+   "same": false,
+   "n": 25,
+   "median": 0.5456,
+   "max": 0.6963
+  },
+  {
+   "a": "el:onwK",
+   "b": "say:rishi",
+   "same": false,
+   "n": 20,
+   "median": 0.5452,
+   "max": 0.7033
+  },
+  {
+   "a": "say:eddy-us",
+   "b": "say:moira",
+   "same": false,
+   "n": 25,
+   "median": 0.5444,
+   "max": 0.6378
+  },
+  {
+   "a": "rec:deewar",
+   "b": "say:daniel",
+   "same": false,
+   "n": 15,
+   "median": 0.538,
+   "max": 0.7426
+  },
+  {
+   "a": "el:mCQM",
+   "b": "say:lekha",
+   "same": false,
+   "n": 15,
+   "median": 0.5347,
+   "max": 0.6239
+  },
+  {
+   "a": "el:ALJq",
+   "b": "el:mCQM",
+   "same": false,
+   "n": 15,
+   "median": 0.5334,
+   "max": 0.8914
+  },
+  {
+   "a": "say:karen",
+   "b": "say:rishi",
+   "same": false,
+   "n": 25,
+   "median": 0.5333,
+   "max": 0.6059
+  },
+  {
+   "a": "el:IKne",
+   "b": "say:shelley-uk",
+   "same": false,
+   "n": 20,
+   "median": 0.5331,
+   "max": 0.6447
+  },
+  {
+   "a": "el:IKne",
+   "b": "say:moira",
+   "same": false,
+   "n": 20,
+   "median": 0.5328,
+   "max": 0.6928
+  },
+  {
+   "a": "el:ALJq",
+   "b": "say:rishi",
+   "same": false,
+   "n": 25,
+   "median": 0.5309,
+   "max": 0.9063
+  },
+  {
+   "a": "say:lekha",
+   "b": "say:rishi",
+   "same": false,
+   "n": 25,
+   "median": 0.5295,
+   "max": 0.6257
+  },
+  {
+   "a": "say:daniel",
+   "b": "say:flo-us",
+   "same": false,
+   "n": 25,
+   "median": 0.5282,
+   "max": 0.5601
+  },
+  {
+   "a": "el:onwK",
+   "b": "say:flo-us",
+   "same": false,
+   "n": 20,
+   "median": 0.5252,
+   "max": 0.6211
+  },
+  {
+   "a": "human:p60",
+   "b": "say:lekha",
+   "same": false,
+   "n": 10,
+   "median": 0.5242,
+   "max": 0.6201
+  },
+  {
+   "a": "el:IKne",
+   "b": "rec:deewar",
+   "same": false,
+   "n": 12,
+   "median": 0.524,
+   "max": 0.7632
+  },
+  {
+   "a": "say:karen",
+   "b": "say:reed-uk",
+   "same": false,
+   "n": 25,
+   "median": 0.5128,
+   "max": 0.6024
+  },
+  {
+   "a": "human:p60",
+   "b": "rec:deewar",
+   "same": false,
+   "n": 6,
+   "median": 0.5127,
+   "max": 0.8091
+  },
+  {
+   "a": "el:IKne",
+   "b": "say:rishi",
+   "same": false,
+   "n": 20,
+   "median": 0.4997,
+   "max": 0.6627
+  },
+  {
+   "a": "el:onwK",
+   "b": "say:shelley-uk",
+   "same": false,
+   "n": 20,
+   "median": 0.4934,
+   "max": 0.6564
+  },
+  {
+   "a": "say:aman",
+   "b": "say:flo-us",
+   "same": false,
+   "n": 25,
+   "median": 0.4836,
+   "max": 0.5843
+  },
+  {
+   "a": "el:IKne",
+   "b": "say:tara",
+   "same": false,
+   "n": 20,
+   "median": 0.471,
+   "max": 0.6127
+  },
+  {
+   "a": "el:onwK",
+   "b": "say:moira",
+   "same": false,
+   "n": 20,
+   "median": 0.4695,
+   "max": 0.6063
+  },
+  {
+   "a": "say:lekha",
+   "b": "say:reed-uk",
+   "same": false,
+   "n": 25,
+   "median": 0.4646,
+   "max": 0.5152
+  },
+  {
+   "a": "say:aman",
+   "b": "say:samantha",
+   "same": false,
+   "n": 25,
+   "median": 0.4601,
+   "max": 0.5744
+  },
+  {
+   "a": "el:IKne",
+   "b": "say:karen",
+   "same": false,
+   "n": 20,
+   "median": 0.4598,
+   "max": 0.5176
+  },
+  {
+   "a": "el:onwK",
+   "b": "human:p60",
+   "same": false,
+   "n": 8,
+   "median": 0.4577,
+   "max": 0.5568
+  },
+  {
+   "a": "el:ALJq",
+   "b": "say:lekha",
+   "same": false,
+   "n": 25,
+   "median": 0.4534,
+   "max": 0.7482
+  },
+  {
+   "a": "say:eddy-us",
+   "b": "say:samantha",
+   "same": false,
+   "n": 25,
+   "median": 0.4521,
+   "max": 0.5397
+  },
+  {
+   "a": "say:daniel",
+   "b": "say:lekha",
+   "same": false,
+   "n": 25,
+   "median": 0.4515,
+   "max": 0.5235
+  },
+  {
+   "a": "say:eddy-us",
+   "b": "say:tara",
+   "same": false,
+   "n": 25,
+   "median": 0.4513,
+   "max": 0.5857
+  },
+  {
+   "a": "el:onwK",
+   "b": "rec:deewar",
+   "same": false,
+   "n": 12,
+   "median": 0.4464,
+   "max": 0.728
+  },
+  {
+   "a": "el:mCQM",
+   "b": "say:flo-us",
+   "same": false,
+   "n": 15,
+   "median": 0.4458,
+   "max": 0.5661
+  },
+  {
+   "a": "el:onwK",
+   "b": "say:karen",
+   "same": false,
+   "n": 20,
+   "median": 0.4298,
+   "max": 0.5648
+  },
+  {
+   "a": "el:mCQM",
+   "b": "say:samantha",
+   "same": false,
+   "n": 15,
+   "median": 0.4283,
+   "max": 0.5508
+  },
+  {
+   "a": "el:IKne",
+   "b": "say:samantha",
+   "same": false,
+   "n": 20,
+   "median": 0.4158,
+   "max": 0.5091
+  },
+  {
+   "a": "say:daniel",
+   "b": "say:samantha",
+   "same": false,
+   "n": 25,
+   "median": 0.4017,
+   "max": 0.5343
+  },
+  {
+   "a": "say:rishi",
+   "b": "say:samantha",
+   "same": false,
+   "n": 25,
+   "median": 0.3999,
+   "max": 0.498
+  },
+  {
+   "a": "el:IKne",
+   "b": "public:sample-ad",
+   "same": false,
+   "n": 4,
+   "median": 0.399,
+   "max": 0.482
+  },
+  {
+   "a": "say:reed-uk",
+   "b": "say:samantha",
+   "same": false,
+   "n": 25,
+   "median": 0.3916,
+   "max": 0.5074
+  },
+  {
+   "a": "say:eddy-us",
+   "b": "say:karen",
+   "same": false,
+   "n": 25,
+   "median": 0.3845,
+   "max": 0.4866
+  },
+  {
+   "a": "say:flo-us",
+   "b": "say:rishi",
+   "same": false,
+   "n": 25,
+   "median": 0.384,
+   "max": 0.522
+  },
+  {
+   "a": "human:p60",
+   "b": "say:daniel",
+   "same": false,
+   "n": 10,
+   "median": 0.3834,
+   "max": 0.4779
+  },
+  {
+   "a": "human:p60",
+   "b": "say:reed-uk",
+   "same": false,
+   "n": 10,
+   "median": 0.3822,
+   "max": 0.4978
+  },
+  {
+   "a": "el:onwK",
+   "b": "say:tara",
+   "same": false,
+   "n": 20,
+   "median": 0.3767,
+   "max": 0.5542
+  },
+  {
+   "a": "el:onwK",
+   "b": "public:sample-ad",
+   "same": false,
+   "n": 4,
+   "median": 0.3631,
+   "max": 0.4752
+  },
+  {
+   "a": "el:onwK",
+   "b": "say:lekha",
+   "same": false,
+   "n": 20,
+   "median": 0.3621,
+   "max": 0.4761
+  },
+  {
+   "a": "el:onwK",
+   "b": "say:samantha",
+   "same": false,
+   "n": 20,
+   "median": 0.3412,
+   "max": 0.5118
+  },
+  {
+   "a": "el:mCQM",
+   "b": "human:p60",
+   "same": false,
+   "n": 6,
+   "median": 0.3362,
+   "max": 0.414
+  },
+  {
+   "a": "say:eddy-us",
+   "b": "say:lekha",
+   "same": false,
+   "n": 25,
+   "median": 0.3309,
+   "max": 0.4267
+  },
+  {
+   "a": "human:p60",
+   "b": "say:aman",
+   "same": false,
+   "n": 10,
+   "median": 0.317,
+   "max": 0.3691
+  },
+  {
+   "a": "el:IKne",
+   "b": "say:lekha",
+   "same": false,
+   "n": 20,
+   "median": 0.2983,
+   "max": 0.3791
+  },
+  {
+   "a": "human:p60",
+   "b": "say:rishi",
+   "same": false,
+   "n": 10,
+   "median": 0.2268,
+   "max": 0.3123
+  }
+ ]
+}
