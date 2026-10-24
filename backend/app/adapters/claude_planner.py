@@ -299,7 +299,9 @@ class ClaudePlanner:
         try:
             response = self._client.messages.parse(
                 model=self._model, max_tokens=MAX_TOKENS, output_config={"effort": effort},
-                system=system, messages=[{"role": "user", "content": content}],
+                # Cost 1a: the instructions are the same for every clip, so they are cached.
+                system=[{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}],
+                messages=[{"role": "user", "content": content}],
                 output_format=output_format,
             )
         except (anthropic.RateLimitError, anthropic.InternalServerError, anthropic.APIConnectionError) as exc:
@@ -310,7 +312,9 @@ class ClaudePlanner:
                 "Check ANTHROPIC_API_KEY and ANTHROPIC_WORKSPACE_ID."
             ) from None
         if meter is not None and response.usage is not None:
-            meter(self._model, response.usage.input_tokens, response.usage.output_tokens)
+            meter(self._model, response.usage.input_tokens, response.usage.output_tokens,
+                  getattr(response.usage, "cache_read_input_tokens", 0) or 0,
+                  getattr(response.usage, "cache_creation_input_tokens", 0) or 0)
         return response
 
     def look(self, frames: Sequence[Frame], duration: float, meter: Meter | None = None, brief: str = "") -> Sight:
