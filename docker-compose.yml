@@ -13,7 +13,8 @@ x-backend: &backend
   build:
     context: .
     dockerfile: backend/Dockerfile
-  image: voltage-backend:latest
+  # scripts/deploy.sh sets VOLTAGE_TAG to the git sha it built (RUNBOOK.md, section 5).
+  image: voltage-backend:${VOLTAGE_TAG:-latest}
   env_file: .env
   volumes:
     - avedata:/data
@@ -59,7 +60,7 @@ services:
     build:
       context: .
       dockerfile: frontend/Dockerfile
-    image: voltage-web:latest
+    image: voltage-web:${VOLTAGE_TAG:-latest}
     depends_on:
       app:
         condition: service_healthy

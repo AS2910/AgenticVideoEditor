@@ -72,7 +72,8 @@ after the restore).
 
 - Status: `python -m app.store.migrate status --db <path or postgres URL>`.
 - Every start applies pending steps in order, each in its own transaction.
-- Roll back one step: `python -m app.store.migrate down --db <path>` (take a backup first). Some steps refuse to go down while they hold data, by design.
+- `scripts/migrate.sh` applies pending steps explicitly (backup first); `scripts/deploy.sh` runs it before switching builds.
+- Migrations only add, so a rollback (`scripts/rollback.sh`) keeps the schema and never runs `down` (RUNBOOK.md, section 5). `python -m app.store.migrate down --db <path>` is for undoing a step that was itself wrong, by hand, after a backup. Some steps refuse to go down while they hold data, by design.
 
 ## When something goes wrong
 
@@ -118,3 +119,58 @@ What the drills taught about operating it:
   and the log line `disk short: ... refusing new uploads and renders`.
 - One API process only: a second one on the same database refuses to start
   (`app/lease.py`).
+
+## Deploy, migrate and roll back (rehearsed 2026-10-24)
+
+`scripts/deploy.sh [REF]`, `scripts/migrate.sh` and `scripts/rollback.sh [SHA]`
+(RUNBOOK.md, section 5). Images are tagged by git sha; rollback starts the
+previous tag and keeps the schema, because migrations only add.
+
+Rehearsed on the local stack (`RH_NAME=voltage-rb RH_PORT=8085`: the shipped
+compose stack, Postgres 16, mocked vendors, the public profile), from an
+empty database:
+
+| Step | Command | Time | Result |
+|---|---|---|---|
+| 1. Older build | `scripts/deploy.sh cb29d1d` | 232 s (209 s of it the first, uncached image build) | 0001 to 0037 applied by migrate.sh before the switch; ready |
+| 2. Data | a password account (signed up, verified, signed in) and an uploaded video | | accounts 1, videos 2 (with the sample), 2 media files, 196,096 bytes |
+| 3. Newer build | `scripts/deploy.sh HEAD` (4359221, this branch) | 43 s (build 20 s, cached) | backup taken (`ave.pgdump`, `data.tar.gz`, `SHA256SUMS`); nothing pending; app, worker, web on `:43592217746a`; ready |
+| 4. Migrate | `scripts/migrate.sh` | 4 s | backup taken; nothing pending, nothing changed; 37 steps listed as applied |
+| 5. Roll back | `scripts/rollback.sh` | 15 s | back to `cb29d1d74686`, no build, schema kept; `/api/ready` 200 (database, migrations, storage, ffmpeg) |
+| 6. Data check | sign in as the account, `GET /videos/p2`, `GET /videos` | | 200 and 200; counts and the media checksum identical to step 2 |
+
+Then the case the rule is for, code older than the schema:
+
+| Step | Command | Time | Result |
+|---|---|---|---|
+| 7. A build without 0037 | `scripts/deploy.sh 0c9cd0b^` (5042c0a, which knows 0001 to 0036) on the schema at 0037 | 60 s (build 46 s) | ready; it ignores 0037 (`beta_feedback`); sign-in and both reads 200; data identical |
+| 8. Forward again | `scripts/rollback.sh 43592217746a` | 21 s | ready; data identical |
+
+The history file after it (`.deploy/voltage-rb.history`):
+
+```
+cb29d1d74686 2026-10-24T05:59:04Z deploy
+43592217746a 2026-10-24T06:00:36Z deploy
+cb29d1d74686 2026-10-24T06:01:26Z rollback-from-43592217746a
+5042c0ae0af1 2026-10-24T06:02:38Z deploy
+43592217746a 2026-10-24T06:03:23Z rollback-from-5042c0ae0af1
+```
+
+What it showed:
+
+- **A switch is a short outage, not zero downtime.** Polling `/api/health`
+  every 0.25 s through step 8: 15 s without an answer (502 from nginx while
+  the app restarted, then nothing while `web` was recreated after the app
+  passed its health check). One API process per database (`app/lease.py`)
+  rules out running old and new side by side; deploy at a quiet hour, and
+  pause paid work first if a turn must not be cut off (a cut-off job reads
+  "The server restarted while this was running. Try again." and its charge is
+  refunded).
+- Rollback takes seconds because nothing is built: keep the last few images
+  on the VM (`docker image prune` with no `-a` keeps tagged images).
+- Each deploy and migrate takes a backup first; on a VM they go to
+  `<checkout>/backups` (or `/var/backups/voltage` from cron) and only the
+  nightly cron copies off the machine.
+- The nightly off-site copy (`scripts/backup-offsite.sh`) was run against
+  this stack with a local rclone remote (no object store): dump, media and
+  checksums copied, `shasum -c` OK, `pg_restore --list` reads 52 tables of data.

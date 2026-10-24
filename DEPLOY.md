@@ -166,36 +166,21 @@ docker compose exec app sqlite3 /data/ave.db ".backup /data/ave-$(date +%F).db"
 
 ## 6. Updates and rollback
 
-Take a backup first (`scripts/backup.sh`). Then:
-
 ```sh
 cd /opt/voltage
 git fetch && git log --oneline HEAD..origin/main      # what is coming
 git pull --ff-only
-docker compose up -d --build
-docker compose ps && curl -fsS https://<your domain>/api/health
+scripts/deploy.sh                                     # build by sha, back up, migrate, switch, wait for /api/ready
 ```
 
-Migrations run when the API starts (each `Database` open applies what is
-pending), so there is no separate migrate step. `python -m app.store.migrate
-status --db /data/ave.db` shows where the schema stands.
+`scripts/migrate.sh` applies pending migrations on its own (deploy.sh runs it
+before switching); `python -m app.store.migrate status --db /data/ave.db`
+inside the app container shows where the schema stands.
 
-Roll back the code: check out the previous commit and rebuild.
-
-```sh
-git checkout <previous-commit>
-docker compose up -d --build
-```
-
-If that release added a migration, roll the schema back one step first, while
-the new code is still running (the new code knows how to undo its own step):
-
-```sh
-docker compose exec app python -m app.store.migrate down --db /data/ave.db
-```
-
-`down 2` undoes two steps. If a migration cannot be undone cleanly, restore the
-pre-update backup with `scripts/restore.sh` (OPS.md) instead.
+Roll back to the build before: `scripts/rollback.sh`. It reuses the images
+already built and does not touch the schema, because migrations only add.
+The rule, and what to do when a release cannot follow it, is in RUNBOOK.md,
+section 5.
 
 ## 7. Pre-launch checklist
 

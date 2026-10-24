@@ -7,14 +7,15 @@
 # database (ave.pgdump from the postgres container when the app uses
 # Postgres, else ave.db by SQLite's .backup), the media (data.tar.gz) and
 # SHA256SUMS, the same layout scripts/restore.sh reads. Then `rclone copy` to
-# VOLTAGE_BACKUP_REMOTE/<folder>.
+# VOLTAGE_BACKUP_REMOTE/<folder>. deploy.sh and migrate.sh run it first too
+# (a local copy only, when they cannot read backup.env).
 #
 # Settings come from the environment, or from /etc/voltage/backup.env
 # (VOLTAGE_BACKUP_ENV) which provision.sh writes:
-#   VOLTAGE_BACKUP_REMOTE  rclone destination, remote:bucket/path (required)
+#   VOLTAGE_BACKUP_REMOTE  rclone destination, remote:bucket/path (blank: a local copy only)
 #   RCLONE_CONFIG_*        the remote's settings (rclone reads them itself)
 #   VOLTAGE_DIR            the checkout with docker-compose.yml (default: this repo)
-#   VOLTAGE_BACKUP_DIR     local copies (default /var/backups/voltage)
+#   VOLTAGE_BACKUP_DIR     local copies (default /var/backups/voltage as root, else <checkout>/backups)
 #   KEEP_DAYS              local copies older than this go (default 7)
 #   REMOTE_KEEP_DAYS       remote copies older than this go (default: kept forever)
 #   COMPOSE                the compose command (default "docker compose")
@@ -31,8 +32,8 @@ fi
 
 here="$(cd "$(dirname "$0")/.." && pwd)"
 dir="${VOLTAGE_DIR:-$here}"
-remote="${VOLTAGE_BACKUP_REMOTE:?set VOLTAGE_BACKUP_REMOTE (remote:bucket/path)}"
-root="${VOLTAGE_BACKUP_DIR:-/var/backups/voltage}"
+remote="${VOLTAGE_BACKUP_REMOTE:-}"
+if [[ "$(id -u)" -eq 0 ]]; then root="${VOLTAGE_BACKUP_DIR:-/var/backups/voltage}"; else root="${VOLTAGE_BACKUP_DIR:-$dir/backups}"; fi
 keep="${KEEP_DAYS:-7}"
 read -r -a dc <<< "${COMPOSE:-docker compose}"
 read -r -a rclone <<< "${RCLONE:-rclone}"
@@ -59,10 +60,14 @@ fi
 "${dc[@]}" exec -T app tar -C /data -czf - --exclude='./ave.db*' --exclude='./backups' . > "$dest/data.tar.gz"
 ( cd "$dest" && "${sha[@]}" ./* > SHA256SUMS )
 
+find "$root" -maxdepth 1 -type d -name 'voltage-*' -mtime +"$keep" -exec rm -rf {} +
+if [[ -z "$remote" ]]; then
+  echo "backup: local copy only (no VOLTAGE_BACKUP_REMOTE)"
+  exit 0
+fi
+
 "${rclone[@]}" copy "$dest" "$remote/voltage-$stamp"
 echo "backup: copied to $remote/voltage-$stamp"
-
-find "$root" -maxdepth 1 -type d -name 'voltage-*' -mtime +"$keep" -exec rm -rf {} +
 if [[ -n "${REMOTE_KEEP_DAYS:-}" ]]; then
   "${rclone[@]}" delete --min-age "${REMOTE_KEEP_DAYS}d" "$remote"
   "${rclone[@]}" rmdirs --leave-root "$remote"

@@ -42,3 +42,7 @@ backend/var/
 # The bench (Phase 19): runs and real clips stay local; the baseline and rungs table are committed
 backend/bench/results/
 backend/bench/clips/
+
+# scripts/deploy.sh: which build is running (per stack), and local backups
+.deploy/
+backups/

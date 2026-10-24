@@ -125,43 +125,58 @@ the admin page under **Abuse reports**. Someone must watch these from day one.
 
 ## 5. A bad deploy and rollback
 
-Before every update (DEPLOY.md, section 6), take a backup and keep the
-running images under a second tag, so going back needs no rebuild:
+Three commands, run from the checkout on the VM (`/opt/voltage`):
 
-```sh
-cd /opt/voltage
-docker compose exec -T app /srv/scripts/backup.sh /data /data/backups
-docker tag voltage-backend:latest voltage-backend:prev
-docker tag voltage-web:latest voltage-web:prev
-git rev-parse HEAD > .last-good-commit
-git pull --ff-only && docker compose up -d --build
-docker compose ps && curl -fsS https://<your domain>/api/ready
-```
+| Command | What it does |
+|---|---|
+| `scripts/deploy.sh [REF]` | Builds REF (default `HEAD`; fetch and `git pull --ff-only` first) as `voltage-backend:<sha>` and `voltage-web:<sha>`, backs up, migrates with the new image while the old one still serves, switches app, worker and web to the new images, waits for `/api/ready`, and records the sha in `.deploy/voltage.history`. |
+| `scripts/migrate.sh` | Backs up, then applies pending migrations with the running build's image and prints every step's status. With nothing pending it changes nothing. (The API also applies pending steps when it starts.) |
+| `scripts/rollback.sh [SHA]` | Starts the build deployed before the running one (or SHA) from images already on the machine: no build, no migrations, about a minute. |
 
-How a bad deploy shows: `/api/ready` answers 503 (`migrations` or `database`
-false; the reason is in `docker compose logs app`), errors climbing on the
-admin page (Feedback > Errors reported), or people writing in.
+Each prints its timings. `docker compose ps` and `.deploy/voltage.history`
+say what is running.
 
-Roll back:
+### The rule: migrations only add (expand only)
+
+A rollback never runs `migrate down` and never drops anything. The schema
+stays as the newer build left it, and the older build runs on it. That works
+because every migration only adds:
+
+- new tables, new indexes, new columns that are nullable or have a default;
+- never a dropped or renamed table or column, a narrowed type, or a new
+  `NOT NULL` without a default, in the same release as the code that stops
+  using the old shape.
+
+Removing something takes two releases: first a release whose code no longer
+reads or writes it (the old shape stays in the schema), then, once nobody will
+roll back past that release, a migration that removes it. A release that
+needs a breaking change is not one `rollback.sh` can undo: restore the
+pre-deploy backup instead (section 6).
+
+The older build ignores what it does not know: it applies only the steps it
+has, and `/ready` checks only that those are applied. `python -m
+app.store.migrate down` is still there for a step that was itself wrong, by
+hand, after a backup; some steps refuse to go down while they hold data, by
+design (0020, 0036).
+
+### How a bad deploy shows
+
+`deploy.sh` stops with "not ready" (`/api/ready` answers 503: `migrations` or
+`database` false; the reason is in `docker compose logs app`), errors climbing
+on the admin page (Feedback > Errors reported) or in Sentry, or people writing in.
+
+### Roll back
 
 1. **Pause paid work** first if anything is charging wrongly (section 2).
-2. **If the release added migrations**, undo them while the new code is still running (it knows its own steps):
-   ```sh
-   docker compose exec app python -m app.store.migrate status --db /data/ave.db     # which steps are new
-   docker compose exec app python -m app.store.migrate down --db /data/ave.db       # one step; "down 2" for two
-   ```
-   Some steps refuse to go down while they hold data, by design: 0020 (consent kept by a purge) and 0036 (the admin audit and suspensions: evidence, and dropping suspensions would let suspended people back in). If a step refuses, do not force it: restore the pre-update backup instead (section 6).
-3. **Go back to the old images** (no rebuild):
-   ```sh
-   docker tag voltage-backend:prev voltage-backend:latest
-   docker tag voltage-web:prev voltage-web:latest
-   git checkout "$(cat .last-good-commit)"
-   docker compose up -d --no-build app worker web
-   curl -fsS https://<your domain>/api/ready
-   ```
-   Without the `prev` tags: `git checkout <previous commit>` and `docker compose up -d --build` (DEPLOY.md).
-4. `/ready` only notices steps that are missing, not extra ones: old code on a schema it does not know looks ready. That is why step 2 comes first.
-5. When it is fixed: `git checkout main && git pull --ff-only`, and deploy again as above.
+2. `scripts/rollback.sh`. It names the build it goes back to and ends with "ready in N s".
+3. `curl -fsS https://<your domain>/api/ready` from outside.
+4. Find and fix the cause on a branch; when it is fixed, `git pull --ff-only` and `scripts/deploy.sh` again.
+
+`rollback.sh` twice in a row goes back to the newer build; to go further back,
+name a sha: `scripts/rollback.sh <sha>` (it must have been built on this
+machine; `scripts/deploy.sh <sha>` builds one that was not).
+
+Rehearsed on the local stack on 2026-10-24: OPS.md, "Deploy, migrate and roll back".
 
 ## 6. Restore from a backup
 
