@@ -609,7 +609,7 @@ export const setBetaFeedbackStatus = (id: number, status: BetaStatus) => put<Bet
 export const betaScreenshotUrl = (id: number) => `${BASE}/admin/beta-feedback/${id}/screenshot`
 /** Run 4 item 2: consent checks waiting for a person (admins). */
 export interface ConsentReview {
-  id: string; owner: string; video_id: string; speaker: string | null; sentence: string; status: 'waiting' | 'passed' | 'review' | 'failed' | 'withdrawn' | 'expired'
+  id: string; owner: string; video_id: string; speaker: string | null; sentence: string; status: ConsentStatus | 'withdrawn' | 'expired'
   reason: string; heard: string | null; wer: number | null; similarity: number | null; seconds: number | null; rule: string
   asr_model: string; speaker_model: string; pass_at: number | null; review_from: number | null; created_at: string; checked_at: string | null
   reviewed_by: string | null; review_reason: string; reviewed_at: string | null; has_recording: boolean
@@ -708,9 +708,13 @@ export const topUp = (credits: number) => post<BillingView>('/billing/topup', { 
 export const invoiceUrl = (id: number) => `/api/billing/invoices/${id}`
 export const verifyRazorpay = (paid: { order_id: string; payment_id: string; signature: string }) => post<BillingView>('/billing/razorpay/verify', paid)
 
-/** G6: trust and safety (fake providers, test mode). */
-export const startLiveness = (videoId: string, speaker?: string | null) => post<{ attempt_id: string; sentence: string; test_mode: boolean }>(`/videos/${videoId}/liveness`, { speaker: speaker ?? null })
-export async function sendLiveness(videoId: string, attemptId: string, audio: Blob, name = 'liveness.webm'): Promise<{ attempt_id: string; status: 'passed' | 'failed'; reason: string; test_mode: boolean }> {
+/** G6: trust and safety (fake providers, test mode). Run 4 item 2: with `voices.cloning_verified`
+ *  the read-aloud step is the real gate, `verified`; a check can also be with a reviewer. */
+export type ConsentStatus = 'waiting' | 'passed' | 'review' | 'failed'
+export interface ConsentAttempt { attempt_id: string; sentence: string; status: ConsentStatus; reason: string; tip: string; test_mode: boolean; verified: boolean; min_seconds?: number }
+export const startLiveness = (videoId: string, speaker?: string | null, fresh = false) =>
+  post<ConsentAttempt>(`/videos/${videoId}/liveness`, { speaker: speaker ?? null, ...(fresh ? { fresh: true } : {}) })
+export async function sendLiveness(videoId: string, attemptId: string, audio: Blob, name = 'liveness.webm'): Promise<Omit<ConsentAttempt, 'sentence'>> {
   const body = new FormData()
   body.append('file', audio, name)
   const res = await fetch(`${BASE}/videos/${videoId}/liveness/${attemptId}`, { method: 'POST', headers: FROM_VOLTAGE, body })

@@ -5,7 +5,13 @@ order: 907
 ---
 Voltage clones a voice only with the speaker's consent, never a public figure's, and marks every export.
 
-**Read a sentence aloud.** Before a speaker's voice is cloned, they read a short sentence with a code in it, recorded in the browser or uploaded. It shows they are there and agree. The recording is kept with the consent record. In this build the check runs in test mode: the recording is kept but the words are not checked yet.
+**Read a phrase aloud.** Before a speaker's voice is cloned, they read a phrase shown on screen, recorded in the browser or uploaded. The phrase is 8 to 12 plain words, made fresh for each try, and it works once, within ten minutes. Voltage checks three things: the recording is at least 4 seconds long, the words heard match the phrase, and the voice matches the speaker in the video. Then you see one of three results:
+
+- **Passed.** Confirm consent and carry on.
+- **Sent for review.** The voice was close but not a clear match, or could not be checked. A person at Voltage listens and decides, and you get a notification. You can also read a new phrase instead.
+- **Did not pass.** It says why and what to try: read every word in order, at an easy pace, in a quiet room, close to the microphone. The person whose voice is in the video reads it themselves. Then read a new phrase.
+
+The recording, the phrase, what was heard and the scores are kept with the consent record. Withdrawing consent means the phrase is read again next time. Where this check is not switched on yet, the step says Test mode: the recording is kept, but the words and the voice are not checked, and speakers' voices are not cloned.
 
 **No public figures.** Voltage will not clone a voice named after a known public figure, such as a politician or a film star. The line uses a voice from the catalogue instead and says why.
 

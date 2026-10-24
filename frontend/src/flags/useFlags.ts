@@ -10,6 +10,7 @@ export type Flag =
   | 'projects.reuse'
   | 'projects.check'
   | 'voices.cloning'
+  | 'voices.cloning_verified'
   | `golive.${string}`
 
 export interface Flags {

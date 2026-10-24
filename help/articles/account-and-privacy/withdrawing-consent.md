@@ -5,7 +5,7 @@ order: 904
 ---
 Withdraw consent now from the editor, and the speaker's voice clone is deleted at the voice service at once.
 
-**Withdraw consent now.** Under the transcript, a row says consent is on record. Withdraw consent now asks once, then deletes the clone at the voice service and stops new lines in that voice. Lines already added stay in the video. To use the voice again, consent is asked again, with the sentence read aloud.
+**Withdraw consent now.** Under the transcript, a row says consent is on record. Withdraw consent now asks once, then deletes the clone at the voice service and stops new lines in that voice. Lines already added stay in the video. To use the voice again, consent is asked again, with a new phrase read aloud.
 
 **Deleting instead.** Deleting the video, or the kept voice, also stops every use of the clone at once; it goes to the Bin and the clone is deleted at the voice service when the Bin empties after 30 days.
 

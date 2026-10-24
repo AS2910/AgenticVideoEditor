@@ -57,6 +57,66 @@ describe('G6: consent with liveness', () => {
   })
 })
 
+describe('Run 4 item 2: consent-verified cloning (the real read-aloud check)', () => {
+  afterEach(() => vi.unstubAllGlobals())
+  const PHRASE = 'Purple kettle river tiger window salad pencil morning.'
+  const start = (over: Record<string, unknown> = {}) => ({ attempt_id: 'cv_1', sentence: PHRASE, status: 'waiting', reason: '', tip: '', test_mode: false, verified: true, min_seconds: 4, ...over })
+  const file = new File(['RIFF'], 'me.wav', { type: 'audio/wav' })
+
+  it('shows the phrase, and once the check passes, Yes cites it', async () => {
+    serve((url) => (url.endsWith('/videos/p1/liveness') ? start()
+      : { attempt_id: 'cv_1', status: 'passed', reason: 'The words and the voice match the speaker in the video.', tip: '', test_mode: false, verified: true }))
+    const onConfirm = vi.fn()
+    render(<ConsentSheet who="Jeevan" livenessVideoId="p1" onConfirm={onConfirm} onCancel={() => {}} />)
+    expect(await screen.findByTestId('liveness-sentence')).toHaveTextContent(PHRASE)
+    expect(screen.queryByText('Test mode')).toBeNull()
+    expect(screen.getByText(/compare the voice with the speaker in the video/)).toBeInTheDocument()
+    await userEvent.upload(screen.getByLabelText('Upload a recording'), file)
+    expect(await screen.findByTestId('liveness-note')).toHaveTextContent('Passed. The words and the voice match the speaker in the video.')
+    expect(screen.queryByLabelText('Upload a recording')).toBeNull()        // the phrase is spent
+    const yes = screen.getByRole('button', { name: 'Yes, I have it' })
+    await waitFor(() => expect(yes).toBeEnabled())
+    await userEvent.click(yes)
+    expect(onConfirm).toHaveBeenCalledWith('cv_1')
+  })
+
+  it('did not pass: says why and what to try, and the last thing is a new phrase', async () => {
+    let n = 0
+    const calls = serve((url) => {
+      if (url.endsWith('/videos/p1/liveness')) return start({ attempt_id: `cv_${++n}` })
+      return { attempt_id: 'cv_1', status: 'failed', reason: 'The words heard did not match the phrase.', tip: 'Read every word on screen, in order, in a quiet room, close to the microphone.', test_mode: false, verified: true }
+    })
+    render(<ConsentSheet who="Jeevan" livenessVideoId="p1" onConfirm={() => {}} onCancel={() => {}} />)
+    await screen.findByText(`“${PHRASE}”`)
+    await userEvent.upload(screen.getByLabelText('Upload a recording'), file)
+    expect(await screen.findByTestId('liveness-note')).toHaveTextContent('Did not pass. The words heard did not match the phrase.')
+    expect(screen.getByTestId('liveness-tip')).toHaveTextContent('Read every word on screen')
+    expect(screen.getByText('Did not pass', { selector: '.stamp' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Yes, I have it' })).toBeDisabled()
+    const step = screen.getByTestId('liveness')
+    const buttons = within(step).getAllByRole('button')
+    expect(buttons[buttons.length - 1]).toHaveTextContent('Read a new phrase')
+    await userEvent.click(buttons[buttons.length - 1])
+    await waitFor(() => expect(calls.filter((c) => c === 'POST /api/videos/p1/liveness')).toHaveLength(2))
+    expect(await screen.findByLabelText('Upload a recording')).toBeInTheDocument()
+  })
+
+  it('sent for review: says a person will listen, keeps Yes off, and offers a new phrase', async () => {
+    const bodies: string[] = []
+    serve((url, init) => {
+      if (url.endsWith('/videos/p1/liveness')) { bodies.push(String(init?.body ?? '')); return start({ status: bodies.length === 1 ? 'review' : 'waiting', attempt_id: `cv_${bodies.length}`, reason: 'The voice is close but not a clear match, so a person will listen to the recording.' }) }
+      return {}
+    })
+    render(<ConsentSheet who="Jeevan" livenessVideoId="p1" onConfirm={() => {}} onCancel={() => {}} />)
+    expect(await screen.findByTestId('liveness-note')).toHaveTextContent('Sent for review. The voice is close')
+    expect(screen.getByTestId('liveness-note')).toHaveTextContent('You will get a notification when it is decided, then confirm here.')
+    expect(screen.getByRole('button', { name: 'Yes, I have it' })).toBeDisabled()
+    await userEvent.click(screen.getByRole('button', { name: 'Read a new phrase instead' }))
+    await waitFor(() => expect(bodies[1]).toContain('"fresh":true'))
+    expect(await screen.findByLabelText('Upload a recording')).toBeInTheDocument()
+  })
+})
+
 describe('G6: withdraw consent, abuse reports, legal pages, your data', () => {
   afterEach(() => vi.unstubAllGlobals())
 
@@ -126,7 +186,7 @@ describe('9e: tips for the G6 consent and withdraw flows', () => {
     render(<ConsentSheet who="Jeevan" livenessVideoId="p1" onConfirm={() => {}} onCancel={() => {}} />)
     const dialog = await screen.findByRole('dialog')
     const tip = within(dialog).getByRole('status', { name: 'Tip: Read aloud' })
-    expect(tip).toHaveTextContent('reads this sentence once, live')
+    expect(tip).toHaveTextContent('reads this once, live')
     expect(tip.className).not.toMatch(/\bfixed\b/)
     expect(within(tip).getByRole('link', { name: /The speaker's own voice and consent/ })).toHaveAttribute('href', '#help/the-speakers-own-voice-and-consent')
     expect(within(dialog).getByRole('button', { name: 'Got it' })).toBeEnabled()     // inside the focus trap
