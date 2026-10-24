@@ -336,6 +336,31 @@ def test_a_take_that_misses_gets_more_takes_and_the_nearest_wins(store):
 
 
 @needs_ffmpeg
+def test_takes_stop_at_the_first_close_enough_for_the_ladder(store):
+    # Cost 1c: against a 0.9 s slot, 1.3 s misses, 0.95 s (5.6% long) is close enough at a 10% accept.
+    post = Takes([1.3, 0.95, 0.9])
+    budget = VoiceBudget(ceiling=1000)
+    voice = adapter(store, post=post, budget=budget)
+    voice._takes, voice._accept = 3, 0.10
+    artifact = voice.synthesize(SOURCE, PLAN, TRANSCRIPT)
+    assert len(post.calls) == 2
+    assert budget.spent("p1") == 2 * billed_characters("30% off", "eleven_multilingual_v2")
+    assert artifact.duration == pytest.approx(0.9, abs=0.02) and "nearest of 2 takes" in voice.last_notes
+    # With no band set, the search stops at the first take within the tolerance.
+    within = Takes([1.3, 0.92, 0.9])
+    voice = adapter(store, post=within)
+    voice._takes = 3
+    voice.synthesize(SOURCE, PLAN, TRANSCRIPT)
+    assert len(within.calls) == 2
+    # A first take inside the accept band is the only one paid for.
+    one = Takes([0.97])
+    voice = adapter(store, post=one)
+    voice._takes, voice._accept = 3, 0.10
+    voice.synthesize(SOURCE, PLAN, TRANSCRIPT)
+    assert len(one.calls) == 1
+
+
+@needs_ffmpeg
 def test_when_every_take_is_too_long_the_model_is_asked_to_speak_faster(store):
     # 1.25 s against 0.9 s is 1.39×: past atempo's 1.25, inside 1.25 × 1.15 (p61: no faster than 1.15).
     post = Takes([1.25, 1.25, 1.25, 1.0])

@@ -45,6 +45,11 @@ DEFAULT_USER_BUDGET_USD = 10.0
 # all and keep the nearest; and how far off the slot counts as a miss.
 DEFAULT_TAKES_PER_LINE = 3
 DEFAULT_FIT_TOLERANCE = 0.05
+# Cost 1c: takes are voiced one at a time and the first within the fit
+# tolerance ends the search. AVE_TAKE_ACCEPT widens that to a band the fit
+# ladder closes (0.10 saved takes but measured worse duration error in the
+# evals, so it is off: 0 keeps the tolerance).
+DEFAULT_TAKE_ACCEPT = 0.0
 DEFAULT_MAX_FLEX = 1.12         # Phase 16: the roadmap's undetectable band
 DEFAULT_MAX_LIVING = 1.6        # how far a pause may stretch for an added line
 DEFAULT_INTERPOLATOR = "minterpolate"
@@ -92,6 +97,7 @@ class Settings:
     elevenlabs_usd_per_1k: float = DEFAULT_ELEVENLABS_USD_PER_1K
     takes_per_line: int = DEFAULT_TAKES_PER_LINE
     fit_tolerance: float = DEFAULT_FIT_TOLERANCE
+    take_accept: float = DEFAULT_TAKE_ACCEPT
     # Phase 16: how far the picture may slow or speed so a take fits (1.0 = never);
     # how far a pause may stretch to make room for an added line; and how the
     # frames in between are made ("minterpolate", "none", or "rife").
@@ -253,6 +259,7 @@ def load_settings() -> Settings:
         elevenlabs_usd_per_1k=_amount("AVE_ELEVENLABS_USD_PER_1K", DEFAULT_ELEVENLABS_USD_PER_1K),
         takes_per_line=max(1, _whole_number("AVE_TAKES_PER_LINE", DEFAULT_TAKES_PER_LINE)),
         fit_tolerance=_amount("AVE_FIT_TOLERANCE", DEFAULT_FIT_TOLERANCE),
+        take_accept=_amount("AVE_TAKE_ACCEPT", DEFAULT_TAKE_ACCEPT),
         max_flex=max(1.0, _amount("AVE_MAX_FLEX", DEFAULT_MAX_FLEX)),
         max_living=max(1.0, _amount("AVE_MAX_LIVING", DEFAULT_MAX_LIVING)),
         interpolator=(os.environ.get("AVE_INTERPOLATOR") or DEFAULT_INTERPOLATOR).strip().lower(),
