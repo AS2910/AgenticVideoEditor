@@ -7627,17 +7627,26 @@ def _start_turn(project_id: str, record: ProjectRecord, text: str, owner: str, a
             repo.set_settings(project_id, last_turn={**(repo.settings(project_id).get("last_turn") or {}),
                                                      "brief_version": view.get("brief_version")})
             _set_turn(project_id, brief_version=view.get("brief_version"))
+        from app.agent.context import fixed_lines
+        from app.agent.routing import has_compaction
+        sight_now = _sight_text(project_id) if not lines else ""
+        understood_now = understanding_mod.context_lines(repo.settings(project_id).get("understanding"))
+        history = repo.turns(project_id)
+        # Cost 1e: the brief, rules and understanding go once; a later turn that
+        # finds them unchanged (and the thread not compacted) points back to them.
+        blocks = fixed_lines(view, sight_now, understood_now)
+        fixed = content_cache.key_of(blocks)
+        fixed_known = bool(history and blocks) and repo.settings(project_id).get("opening_fixed") == fixed and not has_compaction(history)
         head = opening(repo.get_plan(project_id, plan.plan_id), duration=record.source.duration,
                        filename=record.source.filename, speakers=names, lines=len(lines), autonomy=autonomy,
                        spent_usd=ledger.spent_usd(project_id), ceiling_usd=ledger.ceiling_usd,
-                       turn_usd=cap_usd, sight=_sight_text(project_id) if not lines else "",
+                       turn_usd=cap_usd, sight=sight_now,
                        edits=[e for e in repo.list_edits(project_id) if not e.reverted], project=view,
-                       understanding=understanding_mod.context_lines(repo.settings(project_id).get("understanding")))
+                       understanding=understood_now, fixed_known=fixed_known)
         allowed = (f" (They allowed ${carry['needed_usd']:.2f} more for this turn: its cap is now ${cap_usd:.2f}, "
                    "so the step that went over it may run now. Carry on with it.)") if carry else ""
         content = [{"type": "text", "text": head}, {"type": "text", "text": f"The user says: {text}"
                    + (" (They are answering yes to what you asked.)" if approve else "") + allowed + picked}]
-        history = repo.turns(project_id)
 
         def on_step(step: str, cost: float, tool: str = "", data: dict | None = None) -> None:
             # The trace shows which tool a step was and when in the turn it landed;
@@ -7654,6 +7663,7 @@ def _start_turn(project_id: str, record: ProjectRecord, text: str, owner: str, a
 
         try:
             agent_ = _turn_agent(project_id, text, history, plain_turn=not (approve or carry or batch or asked))
+            repo.set_settings(project_id, opening_fixed=fixed)     # the run's first step puts this opening in the thread
             outcome = agent_.run(_workbench(), turn, history, content, meter=_meter(project_id, "agent"),
                                  on_step=on_step, on_card=on_card, effort=prefs["effort"] if agent_ is _agent() else None,
                                  persist=lambda role, c: repo.append_turn(project_id, role, c))

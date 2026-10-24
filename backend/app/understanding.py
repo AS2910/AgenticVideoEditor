@@ -35,6 +35,7 @@ def _now() -> str:
 
 
 DESCRIPTIONS = {"setting", "subjects", "summary", "audio_notes"}
+SAME_MOMENT_S = 0.35
 
 
 def _strip_names(text: str, sources: str, strict: bool = True) -> str:
@@ -122,8 +123,11 @@ def context_lines(record: dict | None) -> list[str]:
         out.append(f"Setting: {read.get('setting') or '?'}. Subjects: {read.get('subjects') or '?'}.")
     if read.get("on_screen_text"):
         out.append("On screen: " + "; ".join(f"“{t}”" for t in read["on_screen_text"]))
+    # Cost 1e: a motion peak at the moment a named beat already marks says nothing more.
+    named = [b["at"] for b in v.get("beats", []) if b.get("kind") == "visual" or b.get("source") == "user"]
     beats = [f"{b['at']:.1f} s {b['label']}" + (" (user)" if b.get("source") == "user" else "" if b.get("confidence", 0) >= 0.6 else " (unsure)")
-             for b in v.get("beats", []) if b.get("kind") != "cut"]
+             for b in v.get("beats", []) if b.get("kind") != "cut"
+             and not (b.get("kind") == "motion" and any(abs(b["at"] - t) <= SAME_MOMENT_S for t in named))]
     cuts = [f"{b['at']:.1f}" for b in v.get("beats", []) if b.get("kind") == "cut"]
     if beats:
         out.append("Beats: " + "; ".join(beats) + ".")

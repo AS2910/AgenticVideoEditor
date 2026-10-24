@@ -243,19 +243,37 @@ def rules_lines(rules: Sequence[dict]) -> list[str]:
     return out
 
 
-def opening(plan: Plan | None, *, duration: float, filename: str, speakers: Sequence[str],
-            lines: int, autonomy: str, spent_usd: float, ceiling_usd: float, turn_usd: float,
-            sight: str = "", edits: Sequence[Any] = (), project: dict | None = None,
-            understanding: Sequence[str] = ()) -> str:
-    """The video as it stands, at the top of a turn; the project's Brief
-    block first when it is in one."""
-    who = (f"{len(speakers)} speakers ({', '.join(speakers)})" if len(speakers) > 1
-           else f"one speaker ({speakers[0]})" if speakers else "no speech")
+# Cost 1e: on a later turn, the blocks that did not change are not sent again.
+UNCHANGED = ("The brief, the project's rules and your read of the video are as at the top of "
+             "the last turn; nothing there changed.")
+
+
+def fixed_lines(project: dict | None, sight: str = "", understanding: Sequence[str] = ()) -> list[str]:
+    """The part of the opening that stays put from turn to turn: the Brief
+    block, the first look, the understanding."""
     out = brief_block(project)
-    out.append(f"The clip: {filename}, {duration:.1f} s, {who}, {lines} {'line' if lines == 1 else 'lines'}.")
     if sight:
         out.append(f"What you noted when you first looked: {sight}")
     out.extend(understanding)
+    return out
+
+
+def opening(plan: Plan | None, *, duration: float, filename: str, speakers: Sequence[str],
+            lines: int, autonomy: str, spent_usd: float, ceiling_usd: float, turn_usd: float,
+            sight: str = "", edits: Sequence[Any] = (), project: dict | None = None,
+            understanding: Sequence[str] = (), fixed_known: bool = False) -> str:
+    """The video as it stands, at the top of a turn; the project's Brief
+    block first when it is in one. `fixed_known`: the thread already carries
+    those blocks as they are now (the last turn's top), so one line stands for them."""
+    who = (f"{len(speakers)} speakers ({', '.join(speakers)})" if len(speakers) > 1
+           else f"one speaker ({speakers[0]})" if speakers else "no speech")
+    fixed = fixed_lines(project, sight, understanding)
+    out = [] if fixed_known else fixed[:len(brief_block(project))]
+    out.append(f"The clip: {filename}, {duration:.1f} s, {who}, {lines} {'line' if lines == 1 else 'lines'}.")
+    if fixed_known:
+        out.append(UNCHANGED)
+    else:
+        out.extend(fixed[len(brief_block(project)):])
     out.append(f"Autonomy: {'Check with me' if autonomy == 'ask' else 'Just do it'}. "
                f"Spent on this video so far ${spent_usd:.2f} of a ${ceiling_usd:.2f} ceiling; "
                f"this turn may spend up to ${turn_usd:.2f}.")
