@@ -37,24 +37,29 @@ class RateLimit:
 
 # ── Launch item 2: per-user limits on the costly and abusable routes ─────────
 # Each bucket: (methods, path pattern, hits, window seconds). Keyed by the
-# signed-in person, or by the caller's address where there is no account
-# yet (sign-in) or the caller is a link holder (a review comment). Any bucket
-# can be changed with AVE_RATE_<NAME>="hits/seconds" (e.g. AVE_RATE_TURNS=60/600).
+# signed-in person, or by the caller's address where the caller is a link
+# holder (a review comment). Sign-in is keyed by the account being tried
+# (its address, or its emailed token) plus the caller's address, so an office
+# behind one address can all sign up at once while one account is still hard
+# to guess; a looser ceiling per address stops one address spraying many
+# accounts (run 4 item 4a). Any bucket can be changed with
+# AVE_RATE_<NAME>="hits/seconds" (e.g. AVE_RATE_TURNS=60/600).
 
 import os
 import re
 
 _ID = r"[^/]+"
+_AUTH = r"^/auth/(login|callback|email|email/callback|password.*|signup|verify.*|reset.*|change-email.*)$"
 BUCKETS: dict[str, tuple[tuple[str, ...], str, int, float, str]] = {
-    # name: (methods, pattern, hits, window, key: "user" | "ip")
+    # name: (methods, pattern, hits, window, key: "user" | "ip" | "account")
     "turns": (("POST",), rf"^/(videos|projects)/{_ID}/turns(/allow-more)?$|^/projects/{_ID}/batches(/{_ID}/go)?$|^/projects/{_ID}/brief-update$",
               30, 600.0, "user"),
     "synth": (("POST",), rf"^/voices/(design|mine(/from-speaker|/from-preview)?)$|^/videos/{_ID}/plans/{_ID}/items/{_ID}/ease$"
                          rf"|^/videos/{_ID}/(variants|languages|sync)$|^/videos/{_ID}/liveness/{_ID}$", 20, 600.0, "user"),
     "uploads": (("POST",), rf"^/videos$|^/projects/{_ID}/files$|^/projects/{_ID}/rules/{_ID}/audio$", 30, 3600.0, "user"),
     "imports": (("POST",), r"^/imports$", 10, 3600.0, "user"),
-    "auth": (("GET", "POST"), r"^/auth/(login|callback|email|email/callback|password.*|signup|verify.*|reset.*|change-email.*)$",
-             20, 600.0, "ip"),
+    "auth": (("GET", "POST"), _AUTH, 20, 600.0, "account"),
+    "auth_ip": (("GET", "POST"), _AUTH, 100, 600.0, "ip"),
     "comments": (("POST",), rf"^/share/{_ID}/(comments|approve|changes)$|^/videos/{_ID}/comments(/{_ID}/replies)?$", 30, 600.0, "user"),
     "abuse": (("POST",), r"^/abuse-reports$", 5, 3600.0, "ip"),
     "waitlist": (("POST",), r"^/waitlist$", 5, 3600.0, "ip"),            # launch item 8: Request access
@@ -72,15 +77,24 @@ class Limits:
                 hits, window = int(override.split("/")[0]), float(override.split("/")[1])
             self.rules.append((name, frozenset(methods), re.compile(pattern), key, RateLimit(hits, window, clock)))
 
-    def check(self, method: str, path: str, user: str | None, ip: str) -> str | None:
-        """The bucket's name when this request is over its limit (not counted), else None."""
+    def check(self, method: str, path: str, user: str | None, ip: str, account: str | None = None) -> str | None:
+        """The bucket's name when this request is over its limit (not counted), else None.
+        `account` is the account a sign-in request names; without one only the address ceiling applies."""
         path = path[4:] if path.startswith("/api/") else path
         for name, methods, pattern, key, limit in self.rules:
             if method in methods and pattern.match(path):
-                who = (user or ip) if key == "user" else ip
+                if key == "account" and not account:
+                    continue
+                who = (user or ip) if key == "user" else f"{account.strip().lower()}|{ip}" if key == "account" else ip
                 if not limit.allow(f"{name}:{who}"):
                     return name
         return None
+
+    def keys_by_account(self, method: str, path: str) -> bool:
+        """Whether this request needs `account` (so the caller reads the body only then)."""
+        path = path[4:] if path.startswith("/api/") else path
+        return any(key == "account" and method in methods and pattern.match(path)
+                   for _name, methods, pattern, key, _limit in self.rules)
 
     def window(self, name: str) -> float:
         return next(r[4].window for r in self.rules if r[0] == name)
@@ -96,6 +110,7 @@ WORDS = {
     "uploads": "That is a lot of uploads in a short time.",
     "imports": "That is a lot of imports in a short time.",
     "auth": "Too many sign-in attempts from here.",
+    "auth_ip": "Too many sign-in attempts from here.",
     "comments": "That is a lot of comments in a short time.",
     "abuse": "Thanks. We have your reports; please wait before sending more.",
     "waitlist": "That is a lot of requests from here.",

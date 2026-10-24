@@ -187,6 +187,9 @@ concatenation in the test, so the scan runs clean in CI.
 - **No script-src in the CSP** (nginx): the theme uses an inline script before
   first paint. Moving it to a hashed script would allow `script-src 'self'
   'sha256-...'`.
+- **Sign-in limit** (run 4 item 4a): 20 tries per 10 minutes for one account
+  from one address, and 100 per 10 minutes from one address in all. One account
+  guessed slowly from many addresses is not limited across them.
 - **Rate limits and the day cap live in one process**; a second server needs
   Redis (known from item 2).
 - **The SSRF guard relies on httpcore 1.x internals** (`_pool._network_backend`);

@@ -9284,10 +9284,28 @@ def _client_ip(request: Request) -> str:
     return request.client.host if request.client else "unknown"
 
 
+async def _sign_in_account(request: Request, me: "Acting | None") -> str | None:
+    """Run 4 item 4a: the account a sign-in request is about, for its rate limit: the
+    address in the body, else the emailed token, else the signed-in person (changing
+    their address asks for their password)."""
+    body: dict = {}
+    if request.method == "POST" and "json" in request.headers.get("content-type", ""):
+        try:
+            got = json.loads(await request.body() or b"{}")     # Starlette replays the body to the route
+            body = got if isinstance(got, dict) else {}
+        except ValueError:
+            body = {}
+    for value in (body.get("email"), body.get("token"), request.query_params.get("token")):
+        if isinstance(value, str) and value.strip():
+            return value[:320]
+    return me.user if me is not None and settings.auth_mode != "off" else None
+
+
 @app.middleware("http")
 async def _rate_limited(request: Request, call_next):
     me = acting.get()
-    over = rate_limits.check(request.method, request.url.path, me.user if me else None, _client_ip(request))
+    account = await _sign_in_account(request, me) if rate_limits.keys_by_account(request.method, request.url.path) else None
+    over = rate_limits.check(request.method, request.url.path, me.user if me else None, _client_ip(request), account)
     if over:
         window = rate_limits.window(over)
         analytics.track("rate_limited", me.user if me else None, {"bucket": over})

@@ -47,8 +47,9 @@ def test_turns_uploads_and_sign_in_are_rate_limited_per_person(monkeypatch):
     clock[0] += 601
     assert limits.check("POST", "/videos/p1/turns", "google:a", "1.2.3.4") is None        # the window passed
     for _ in range(20):
-        limits.check("POST", "/auth/email", None, "9.9.9.9")
-    assert limits.check("POST", "/auth/email", "google:x", "9.9.9.9") == "auth"           # sign-in is by address
+        limits.check("POST", "/auth/email", None, "9.9.9.9", "ann@example.com")
+    assert limits.check("POST", "/auth/email", None, "9.9.9.9", "ann@example.com") == "auth"   # sign-in: account and address
+    assert limits.check("POST", "/auth/email", None, "9.9.9.9", "bob@example.com") is None
 
 
 def test_a_limited_request_answers_429_with_a_sentence(monkeypatch):
@@ -68,7 +69,7 @@ def test_every_bucket_names_a_real_route():
     from tests.launch.test_isolation import _all_routes
     paths = [re.sub(r"{\w+(:\w+)?}", "x", r.path) for r in _all_routes()]
     for name, (_methods, pattern, *_rest) in BUCKETS.items():
-        if name == "auth":
+        if name in ("auth", "auth_ip"):
             continue                                   # covers sign-in routes added in item 5 too
         assert any(re.match(pattern, p) for p in paths), name
 
