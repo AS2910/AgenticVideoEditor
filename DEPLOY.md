@@ -41,9 +41,14 @@ memory. `docker compose up --scale app=2` fails on purpose.
 - Ubuntu 24.04 LTS, 4 vCPU, 8 GB RAM, 100 GB+ disk (media is the bulk; size the
   disk for the uploads you expect, each source up to 2 GB, plus renders).
 - A DNS `A` record (and `AAAA` if IPv6) for your domain pointing at the VM.
-- Install Docker Engine and the Compose plugin (docs.docker.com/engine/install/ubuntu),
-  then add your deploy user to the `docker` group.
-- Unattended security updates: `sudo apt install unattended-upgrades`.
+- `sudo DEPLOY_USER=<you> scripts/provision.sh` sets the rest up: Docker Engine
+  and the Compose plugin, your user in the `docker` group, the firewall below,
+  unattended security upgrades, fail2ban on SSH, swap, log rotation and (with
+  `VOLTAGE_BACKUP_REMOTE` and the rclone variables) the nightly off-site backup.
+  Running it again changes nothing. Then set up error reports and uptime alerts:
+  `docs/ops/monitoring.md`.
+- By hand instead: Docker Engine and the Compose plugin (docs.docker.com/engine/install/ubuntu),
+  your deploy user in the `docker` group, `sudo apt install unattended-upgrades`, and the firewall:
 
 ### Firewall
 
