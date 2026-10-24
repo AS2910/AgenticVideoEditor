@@ -26,7 +26,7 @@ from fastapi import Depends, FastAPI, HTTPException, File, Form, Request, Respon
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, StreamingResponse
 from pydantic import BaseModel
 
-from typing import Literal, Sequence
+from typing import Any, Callable, Literal, Sequence
 
 from app.domain.models import (
     Source, Selection, ContinuityReport, EditCandidate, ApprovedEdit, MediaArtifact,
@@ -57,7 +57,7 @@ from app.adapters.selection import (
 from app.errors import NonRetryableError
 from app import chaos as chaos_module
 from app.budget import VoiceBudget, BudgetExceeded
-from app.orchestrator.planner import Line, Frame, Sight
+from app.orchestrator.planner import Line, Frame, Reading, Role, Sight
 from app.media.ffmpeg import SpanMismatch
 from app.media.reference import extract_reference_audio, speech_seconds
 from app.orchestrator.clones import CloneService, VoiceChoice
@@ -83,6 +83,7 @@ from app.store import home as home_store
 from app.store import templates as templates_store
 from app.store import learned as learned_store
 from app.store import members as members_store
+from app.store import content_cache, codec as store_codec
 from app.notify import inbox
 from app.notify import digest as digest_mod, email as email_mod
 from app import diskroom
@@ -1001,16 +1002,42 @@ def _frames_dict(record: ProjectRecord) -> list[dict]:
         return []
 
 
+def _kept_read(record: ProjectRecord, kind: str, parts: tuple, read: Callable[[], Any],
+               encode: Callable[[Any], Any] = lambda x: x, decode: Callable[[Any], Any] = lambda x: x,
+               again: bool = False) -> Any:
+    """Cost 1d: a paid read of this clip's bytes (a look, an understanding, a
+    reading), made once per owner and inputs and reused when the same file
+    comes again. `parts` is what else the read depends on (the brief, the lines);
+    `again` (the user asked for a fresh read) reads anew and keeps that."""
+    key = content_cache.key_of(planner_label, *parts)
+    sha = record.source.media.sha256
+    hit = None if again else content_cache.get(database, record.owner, sha, kind, key)
+    if hit is not None:
+        return decode(hit)
+    out = read()
+    if out is not None:
+        content_cache.put(database, record.owner, sha, kind, key, encode(out), record.source.project_id)
+    return out
+
+
+def _sight_of(d: dict) -> Sight:
+    known = {k: v for k, v in d.items() if k in Sight.__dataclass_fields__}
+    return Sight(**{**known, "beats": tuple(d.get("beats", ())), "details": tuple(d.get("details", ()))})
+
+
 def _sight(project_id: str, record: ProjectRecord) -> Sight:
     """What Voltage saw in the clip: looked at once, kept with the project."""
     saved = repo.settings(project_id).get("sight")
     if saved:
-        known = {k: v for k, v in saved.items() if k in Sight.__dataclass_fields__}
-        return Sight(**{**known, "beats": tuple(saved.get("beats", ())), "details": tuple(saved.get("details", ()))})
+        return _sight_of(saved)
     if planner is None:
         raise HTTPException(status_code=503, detail=NEEDS_CLAUDE)
-    frames = [Frame(at=f.at, path=str(f.path)) for f in _frames(record)]
-    sight = planner.look(frames, record.source.duration, meter=_meter(project_id, "looking"), brief=_brief_text(project_id))
+    brief = _brief_text(project_id)
+
+    def look() -> Sight:
+        frames = [Frame(at=f.at, path=str(f.path)) for f in _frames(record)]
+        return planner.look(frames, record.source.duration, meter=_meter(project_id, "looking"), brief=brief)
+    sight = _kept_read(record, "sight", (brief,), look, encode=asdict, decode=_sight_of)
     repo.set_settings(project_id, sight=asdict(sight))
     return sight
 
@@ -1289,8 +1316,11 @@ def _ingest_staged(staged: Path, filename: str, consent: bool, folder: Project |
     source = Source(
         project_id=project_id, filename=filename, duration=probed.duration, media=media,
     )
+    # Cost 1d: the same file from the same owner is transcribed once.
+    heard_key = content_cache.key_of(transcriber_label)
+    kept = content_cache.get(database, owner, media.sha256, "transcript", heard_key)
     try:
-        transcript = transcriber.transcribe(source)
+        transcript = store_codec.transcript(kept) if kept is not None else transcriber.transcribe(source)
     except TranscriptionError as exc:
         # The upload is already stored under `project_id`, so a vendor failure
         # leaves that media orphaned. Acceptable while storage is disposable;
@@ -1303,11 +1333,13 @@ def _ingest_staged(staged: Path, filename: str, consent: bool, folder: Project |
     granted = Consent(granted_at=_now()) if consent else None
     repo.create(source, transcript, granted, owner=owner, folder_id=folder.project_id if folder else None)
     repo.set_settings(project_id, **_starting_settings(owner, folder))
-    if transcriber_label.startswith("openai"):
+    if kept is None:
+        content_cache.put(database, owner, media.sha256, "transcript", heard_key, asdict(transcript), project_id)
+    if transcriber_label.startswith("openai") and kept is None:
         minutes = source.duration / 60
         ledger.record(project_id, "openai", "transcription", minutes, "minutes",
                       minutes * WHISPER_USD_PER_MINUTE)
-    if any(w.speaker for w in transcript.words):
+    if any(w.speaker for w in transcript.words) and kept is None:
         _record_diarization(project_id, source.duration)
     analytics.track("video_uploaded", owner, {"video_id": project_id, "seconds": round(source.duration, 1),
                                               "project_id": folder.project_id if folder else None})
@@ -2469,7 +2501,7 @@ def _adaptive_frames(project_id: str, record: ProjectRecord, times: list[float])
     return frames
 
 
-def _understand(project_id: str, record: ProjectRecord, lines: list[Line]) -> dict | None:
+def _understand(project_id: str, record: ProjectRecord, lines: list[Line], again: bool = False) -> dict | None:
     """The first read as one look at the whole piece: the understanding, the
     opening, the roles, the style line and the chips, in one call. None when
     this planner cannot (the plain reads follow)."""
@@ -2478,8 +2510,12 @@ def _understand(project_id: str, record: ProjectRecord, lines: list[Line]) -> di
     try:
         _ensure_spend(project_id)
         signals = _signals(project_id, record)
-        frames = _adaptive_frames(project_id, record, signals.get("frame_times") or [])
-        vision = planner.understand(frames, signals, lines, meter=_meter(project_id, "looking"), brief=_brief_text(project_id))
+        brief = _brief_text(project_id)
+
+        def understand() -> dict | None:
+            frames = _adaptive_frames(project_id, record, signals.get("frame_times") or [])
+            return planner.understand(frames, signals, lines, meter=_meter(project_id, "looking"), brief=brief)
+        vision = _kept_read(record, "understanding", (brief, [asdict(ln) for ln in lines]), understand, again=again)
     except SpendCeilingReached as exc:
         raise HTTPException(status_code=402, detail=str(exc)) from exc
     except NonRetryableError as exc:
@@ -2566,6 +2602,11 @@ def set_style(project_id: str, req: StyleRequest, owner: str = Depends(current_o
     return understanding_mod.view(updated)
 
 
+def _reading_of(d: dict) -> Reading:
+    return Reading(opening=d.get("opening", ""), roles=tuple(Role(**r) for r in d.get("roles") or ()),
+                   suggestions=tuple(d.get("suggestions") or ()))
+
+
 class ReadRequest(BaseModel):
     # Read the clip again even though a reading is saved.
     again: bool = False
@@ -2582,7 +2623,7 @@ def read_project(project_id: str, req: ReadRequest, owner: str = Depends(current
     if saved and not req.again:
         return saved
     lines = _lines(record)
-    understood = _understand(project_id, record, lines)
+    understood = _understand(project_id, record, lines, again=req.again)
     if understood is not None:
         return understood
     if not lines:
@@ -2604,7 +2645,10 @@ def read_project(project_id: str, req: ReadRequest, owner: str = Depends(current
         _ensure_spend(project_id)
         if planner is None:
             raise HTTPException(status_code=503, detail=NEEDS_CLAUDE)
-        reading = planner.read(lines, meter=_meter(project_id, "reading"), brief=_brief_text(project_id))
+        brief = _brief_text(project_id)
+        reading = _kept_read(record, "reading", (brief, [asdict(ln) for ln in lines]),
+                             lambda: planner.read(lines, meter=_meter(project_id, "reading"), brief=brief),
+                             encode=asdict, decode=_reading_of, again=req.again)
     except SpendCeilingReached as exc:
         raise HTTPException(status_code=402, detail=str(exc)) from exc
     except NonRetryableError as exc:
@@ -2654,6 +2698,10 @@ def _delete_project(project_id: str) -> None:
         except Exception as exc:  # noqa: BLE001
             logging.getLogger("ave").warning("project %s deleted, but voice %s (%s) is still at ElevenLabs: %s",
                                              project_id, made.get("name"), made["voice_id"], exc)
+    # Cost 1d: what was read from its bytes goes with it.
+    gone = repo.get(project_id)
+    if gone is not None:
+        content_cache.forget(database, gone.owner, gone.source.media.sha256)
     repo.delete(project_id)
     shutil.rmtree(artifacts.root / project_id, ignore_errors=True)
 
@@ -2694,6 +2742,7 @@ def delete_account(owner: str = Depends(current_owner)) -> Response:
         accounts_store.delete(database, owner[len("acct:"):])
     with database.tx() as c:          # D4: their pins
         c.execute("DELETE FROM pins WHERE owner = ?", (owner,))
+        c.execute("DELETE FROM content_cache WHERE owner = ?", (owner,))   # cost 1d: reads kept by content
         templates_store.purge_owner_in(c, owner)   # D1: their templates
     repo.delete(_user_store(owner))   # the designs' spend, kept under the owner's own id
     shutil.rmtree(artifacts.root / _user_store(owner), ignore_errors=True)

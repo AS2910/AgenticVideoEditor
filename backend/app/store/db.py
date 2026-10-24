@@ -31,7 +31,7 @@ EXTRA_TABLES = ("project_briefs", "project_rules", "project_events", "purged_ite
                 "analytics_events", "feedback", "error_reports",
                 "billing_accounts", "credit_grants", "invoices",
                 "liveness_attempts", "abuse_reports", "data_requests", "provenance_marks",
-                "member_shares", "accounts", "auth_tokens")
+                "member_shares", "accounts", "auth_tokens", "content_cache")
 
 
 def location(default: str | Path) -> str | Path:
