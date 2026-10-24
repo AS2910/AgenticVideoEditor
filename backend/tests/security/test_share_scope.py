@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 import app.api.main as main
 from app.media import ffmpeg
 from app.store import shares
+from tests.factories import export_now  # noqa: E402
 
 
 def test_a_share_token_is_long_and_random():
@@ -29,7 +30,7 @@ def test_one_link_reaches_only_its_own_files(sample_video):
     upload_into(client, sample_video, "f1", name="a.mp4")
     upload_into(client, sample_video, "f2", name="b.mp4")
     for vid in ("p1", "p2"):
-        assert client.post(f"/videos/{vid}/export", json={"purpose": "export"}).status_code == 200
+        assert export_now(client, f"/videos/{vid}/export", json={"purpose": "export"}).status_code == 200
     link_a = client.post("/projects/f1/shares", json={"scope": "project"}).json()
     link_b = client.post("/projects/f2/shares", json={"scope": "project"}).json()
     token_a, token_b = (link["url"].split("/#s/")[1] for link in (link_a, link_b))

@@ -16,6 +16,7 @@ from app.store import shares, stages
 from app.timefmt import iso
 from tests.api.test_endpoints import voiced
 from tests.api.test_folders import upload_into
+from tests.factories import export_now  # noqa: E402
 
 pytestmark = pytest.mark.skipif(not ffmpeg.available(), reason="ffmpeg/ffprobe not installed")
 
@@ -41,10 +42,10 @@ def rendered_twice(client, monkeypatch):
     """p1 in project f1 with v1 (as shot) and a later final version (line 1 now says 30% off)."""
     client.post("/projects", json={"name": "Diwali"})
     upload_into(client, sample_video_path[0], "f1")
-    assert client.post("/videos/p1/export", json={"purpose": "export"}).status_code == 200
+    assert export_now(client, "/videos/p1/export", json={"purpose": "export"}).status_code == 200
     plan_id = voiced(client, monkeypatch)["plan"]["plan_id"]
     assert client.post(f"/videos/p1/plans/{plan_id}/approve", json={"items": ["i1"]}).status_code == 200
-    assert client.post("/videos/p1/export", json={"purpose": "export"}).status_code == 200
+    assert export_now(client, "/videos/p1/export", json={"purpose": "export"}).status_code == 200
 
 
 sample_video_path: list = []
@@ -236,8 +237,8 @@ def test_a_reviewer_with_an_email_hears_about_a_new_version_once(client, two_ver
     assert email_mod.outbox(database, kind="version_ready") == []                 # the version it was sent on
     plan_id = voiced(client, monkeypatch, text="Get 40% off today only.")["plan"]["plan_id"]
     client.post(f"/videos/p1/plans/{plan_id}/approve", json={"items": ["i1"]})
-    client.post("/videos/p1/export", json={"purpose": "export"})
-    client.post("/videos/p1/export", json={"purpose": "export"})                  # the same version again
+    export_now(client, "/videos/p1/export", json={"purpose": "export"})
+    export_now(client, "/videos/p1/export", json={"purpose": "export"})                  # the same version again
     [told] = email_mod.outbox(database, kind="version_ready")
     newest = client.get(f"/share/{token_of(link)}").json()["review"]["videos"][0]["current_version"]
     assert told["to_addr"] == "priya@client.example" and told["subject"] == f"v{newest} of ad.mp4 is ready to review"

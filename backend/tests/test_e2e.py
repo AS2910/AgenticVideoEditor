@@ -10,6 +10,7 @@ import app.api.main as main
 from app.api.main import app, repo, jobs
 from tests.api.test_endpoints import _agent_on, take
 from tests.factories import media_get
+from tests.factories import export_now  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
@@ -71,7 +72,7 @@ def test_full_journey_ingest_turn_approve_export(sample_video, monkeypatch):
     assert approved["edit_id"] == "e1"
 
     # 4. Export shows the edited span; the line is the whole clip, so it is the whole output
-    segments = client.post(f"/videos/{project_id}/export").json()["segments"]
+    segments = export_now(client, f"/videos/{project_id}/export").json()["segments"]
     edited = [s for s in segments if s["kind"] == "edited"]
     assert len(edited) == 1
     assert edited[0]["start"] == 0.0 and edited[0]["end"] == 2.3

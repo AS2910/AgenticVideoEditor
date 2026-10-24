@@ -303,8 +303,32 @@ export async function pollJob(
 /** Renders the video: the added lines only, or (20e) with the proposals mixed in for "With proposals" playback. */
 /** A render of the video as it is now (Final), or with the proposals mixed in. `requestId` comes back
  *  on the answer so the caller can keep only its latest request (bug 1, 2026-10-19). */
-export const exportProject = (id: string, withProposals = false, requestId?: number, purpose: 'preview' | 'export' = 'preview') =>
-  post<ExportManifest>(`/videos/${id}/export`, { ...(withProposals ? { with_proposals: true } : {}), ...(requestId !== undefined ? { request_id: requestId } : {}), ...(purpose === 'export' ? { purpose } : {}) })
+export async function exportProject(id: string, withProposals = false, requestId?: number, purpose: 'preview' | 'export' = 'preview',
+  onJob?: (job: ActivityJob) => void): Promise<ExportManifest> {
+  const body = { ...(withProposals ? { with_proposals: true } : {}), ...(requestId !== undefined ? { request_id: requestId } : {}), ...(purpose === 'export' ? { purpose } : {}) }
+  // Run 4, item 3d: the request never renders. A render not made yet comes back as its job;
+  // once the job is done, the same request answers with the render (the edits may have moved
+  // on meanwhile: then it is their render's job, followed the same way).
+  for (let round = 0; round < 10; round++) {
+    const out = await post<ExportManifest | { render_job: ActivityJob; request_id: number | null }>(`/videos/${id}/export`, body)
+    if (!('render_job' in out) || !out.render_job) return out as ExportManifest
+    onJob?.(out.render_job)
+    await jobSettled(id, out.render_job.job_id)
+  }
+  throw new ApiError(503, 'The render kept changing. Try again.')
+}
+
+const JOB_POLL_MS = 1000
+
+/** Waits for a job of the video to finish; a failed or cancelled one throws its reason. */
+async function jobSettled(id: string, jobId: string): Promise<ActivityJob> {
+  for (;;) {
+    const job = (await getJobs(id)).jobs.find((j) => j.job_id === jobId)
+    if (job && job.status === 'done') return job
+    if (job && (job.status === 'failed' || job.status === 'cancelled')) throw new ApiError(500, job.error_text ?? 'The render failed.')
+    await new Promise((r) => setTimeout(r, JOB_POLL_MS))
+  }
+}
 
 /** 2026-10-20: a line's role in the mix and its fine-tune, nothing voiced again. The only
  *  speech in its span answers 409 with a question (RoleQuestion) unless `confirm`. */

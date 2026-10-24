@@ -14,6 +14,7 @@ from app.api.main import app, database, flags, jobs, repo
 from app.media import ffmpeg
 from tests.api.test_endpoints import generate
 from tests.api.test_folders import upload_into
+from tests.factories import export_now  # noqa: E402
 
 pytestmark = pytest.mark.skipif(not ffmpeg.available(), reason="ffmpeg/ffprobe not installed")
 
@@ -46,9 +47,9 @@ def test_the_funnel_fills_from_sign_in_to_first_export(client, sample_video):
     candidate = generate(project_id="p1")
     assert client.post("/videos/p1/edits", json={"candidate_id": candidate["candidate_id"]}).status_code == 200
     generate(project_id="p1", text="Another go")                       # voiced, not added
-    out = client.post("/videos/p1/export", json={"purpose": "export"})
+    out = export_now(client, "/videos/p1/export", json={"purpose": "export"})
     assert out.status_code == 200, out.text
-    client.post("/videos/p1/export", json={"purpose": "export"})         # a second export: first_export stays one
+    export_now(client, "/videos/p1/export", json={"purpose": "export"})         # a second export: first_export stays one
     seen = names()
     for step in ("signed_up", "first_sign_in", "video_uploaded", "take_voiced", "take_added", "first_export",
                  "edit.shipped", "video_exported"):

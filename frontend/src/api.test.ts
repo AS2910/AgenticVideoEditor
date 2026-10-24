@@ -126,6 +126,36 @@ describe('api client', () => {
     expect(f.mock.calls[0][0]).toBe('/api/videos/p1/export')
   })
 
+  it('exportProject follows a render job and asks again for the render (run 4, item 3d)', async () => {
+    vi.useFakeTimers()
+    const job = { job_id: 'J4', status: 'running', error_text: null }
+    let posts = 0
+    let polls = 0
+    const reply = (body: unknown) => ({ ok: true, status: 200, json: async () => body, text: async () => JSON.stringify(body) } as Response)
+    const f = vi.fn(async (url: string) => {
+      if (url.endsWith('/export')) { posts += 1; return reply(posts === 1 ? { render_job: job, request_id: 3 } : { segments: [], render: { sha256: 'r' }, version: 1, request_id: 3 }) }
+      polls += 1
+      return reply({ jobs: [{ ...job, status: polls < 2 ? 'running' : 'done' }], turn: null })
+    })
+    vi.stubGlobal('fetch', f)
+    const seen: string[] = []
+    const done = exportProject('p1', false, 3, 'preview', (j) => seen.push(j.job_id))
+    await vi.runAllTimersAsync()
+    const manifest = await done
+    vi.useRealTimers()
+    expect(manifest.version).toBe(1)
+    expect(seen).toEqual(['J4'])
+    expect(f.mock.calls.map(([u]) => u)).toEqual(['/api/videos/p1/export', '/api/videos/p1/jobs', '/api/videos/p1/jobs', '/api/videos/p1/export'])
+  })
+
+  it('exportProject throws the failed job\'s reason', async () => {
+    const reply = (body: unknown) => ({ ok: true, status: 200, json: async () => body, text: async () => JSON.stringify(body) } as Response)
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => (url.endsWith('/export')
+      ? reply({ render_job: { job_id: 'J5', status: 'queued' }, request_id: null })
+      : reply({ jobs: [{ job_id: 'J5', status: 'failed', error_text: 'The render failed: no room' }], turn: null }))))
+    await expect(exportProject('p1')).rejects.toMatchObject({ message: 'The render failed: no room' })
+  })
+
   it('throws ApiError with status and the detail on non-2xx', async () => {
     vi.stubGlobal('fetch', mockFetch(422, { detail: 'continuity check failed' }))
     await expect(exportProject('p1')).rejects.toMatchObject({ status: 422, message: 'continuity check failed' })

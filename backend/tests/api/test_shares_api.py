@@ -10,6 +10,7 @@ from app.api.main import app, flags, jobs, repo
 from app.media import ffmpeg
 from app.store import shares
 from tests.api.test_folders import upload_into
+from tests.factories import export_now  # noqa: E402
 
 pytestmark = pytest.mark.skipif(not ffmpeg.available(), reason="ffmpeg/ffprobe not installed")
 
@@ -32,7 +33,7 @@ def test_a_project_link_lists_every_rendered_video_and_serves_it(client, sample_
     client.post("/projects", json={"name": "Spring"})
     upload_into(client, sample_video, "f1", name="ad1.mp4")
     upload_into(client, sample_video, "f1", name="ad2.mp4")
-    assert client.post("/videos/p1/export", json={"purpose": "export"}).status_code == 200    # p2 never rendered
+    assert export_now(client, "/videos/p1/export", json={"purpose": "export"}).status_code == 200    # p2 never rendered
     made = client.post("/projects/f1/shares", json={"scope": "project"})
     assert made.status_code == 201, made.text
     link = made.json()

@@ -94,10 +94,10 @@ export default function () {
 
   if (items.length) {
     r = http.post(`${BASE}/videos/${v}/plans/${plan.plan_id}/approve`, JSON.stringify({ items }), { headers: H, timeout: '300s', ...tag('POST /plans/{id}/approve (renders)') })
-    check(r, { 'added': (x) => x.status === 200 })
+    check(r, { 'added': (x) => x.status === 200 })   // run 4, item 3a: answers at once with the render's job
     sleep(2 + Math.random() * 3)
     r = http.post(`${BASE}/videos/${v}/export`, JSON.stringify({ purpose: 'export' }), { headers: H, timeout: '300s', ...tag('POST /videos/{id}/export') })
-    check(r, { 'exported': (x) => x.status === 200 })
+    check(r, { 'exported': (x) => x.status === 200 || x.status === 202 })   // run 4, item 3d: 202 is its render job
   }
   http.get(`${BASE}/billing`, tag('GET /billing'))
   sleep(5 + Math.random() * 5)

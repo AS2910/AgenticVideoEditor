@@ -12,6 +12,7 @@ from app.api.main import app, jobs, repo
 from app.store.db import Database
 from app.timefmt import CLIP_TIME, is_time_key, to_iso
 from tests.api.test_endpoints import generate, upload
+from tests.factories import export_now  # noqa: E402
 
 CANON = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$")
 
@@ -51,7 +52,7 @@ def test_every_answer_sends_moments_as_iso_strings_or_null(client, sample_video)
     assert upload(client, sample_video).status_code == 200
     take = generate(text="Welcome", start=0.4, end=1.3, mix="layer")
     client.post("/videos/p1/edits", json={"candidate_id": take["candidate_id"]})
-    client.post("/videos/p1/export")
+    export_now(client, "/videos/p1/export")
     folder = client.post("/projects", json={"name": "Diwali"}).json()
     client.patch("/videos/p1", json={"project_id": folder["project_id"]})
     # One of the owner's voices, then shared into the project.

@@ -9,6 +9,7 @@ from app.media import ffmpeg
 from app.orchestrator.clones import CloneService
 from app.orchestrator.pipeline import STOCK_VOICE_WARNING
 from tests.api.test_endpoints import WORDS, generate, upload
+from tests.factories import export_now  # noqa: E402
 
 pytestmark = pytest.mark.skipif(
     not ffmpeg.available(), reason="ffmpeg/ffprobe not installed (`brew install ffmpeg`)",
@@ -129,12 +130,12 @@ def test_an_export_with_an_edit_separates_the_voice_from_the_bed(client, sample_
     monkeypatch.setattr(main, "compose", lambda *a, **k: seen.update(stems=k.get("stems", "missing")) or real(*a, **k))
 
     assert upload(client, sample_video).status_code == 200
-    assert client.post("/videos/p1/export").status_code == 200
+    assert export_now(client, "/videos/p1/export").status_code == 200
     assert asked == [] and seen["stems"] is None          # nothing edited: no separation, no cost
 
     candidate = generate()
     assert client.post("/videos/p1/edits", json={"candidate_id": candidate["candidate_id"]}).status_code == 200
-    assert client.post("/videos/p1/export").status_code == 200
+    assert export_now(client, "/videos/p1/export").status_code == 200
     assert len(asked) == 1 and asked[0].name == "stems"   # kept under the project, once per source
     assert seen["stems"] is None                          # the (faked) separation failed: today's render
 

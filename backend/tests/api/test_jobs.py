@@ -4,6 +4,7 @@ import time
 
 from tests.api.test_endpoints import _agent_on, client, project, reset_state, send, take, voiced  # noqa: F401
 from tests.agent.conftest import reply, text as said, use
+from tests.factories import export_now  # noqa: E402
 
 
 def active(client):
@@ -43,7 +44,7 @@ def test_the_latest_render_says_its_version_what_it_carries_and_whether_it_is_st
     assert latest["latest"]["version"] == 1 and latest["latest"]["includes"]["item_ids"] == ["i1"]
     assert latest["in_progress"] is None and latest["stale"] is False
     # The same edit set again is the same version; nothing new is rendered.
-    again = client.post("/videos/p1/export", json={"with_proposals": True}).json()
+    again = export_now(client, "/videos/p1/export", json={"with_proposals": True}).json()
     assert again["version"] == 1 and again["cached"] is True and again["includes"]["item_ids"] == ["i1"]
     # Nothing is kept yet: the final edit set is empty and was never rendered, and nothing says it is stale.
     final = client.get("/videos/p1/renders/latest?mode=final").json()
@@ -190,7 +191,7 @@ def test_a_clone_and_a_mix_change_are_jobs_too(client, project):
 
 
 def test_the_export_page_render_is_an_export_job(client, project):
-    out = client.post("/videos/p1/export", json={"purpose": "export"}).json()
+    out = export_now(client, "/videos/p1/export", json={"purpose": "export"}).json()
     assert out["version"] == 1 and out["render_id"] == "r1"
     job = next(j for j in client.get("/videos/p1/jobs").json()["jobs"] if j["kind"] == "export")
     assert job["status"] == "done" and job["step_label"] == "v1 ready" and job["detail"]["render_id"] == "r1"

@@ -7,6 +7,7 @@ from app.adapters.mock import MockVoiceAdapter
 from app.api.main import app, repo, jobs
 from app.media import ffmpeg, ingest
 from tests.factories import media_get
+from tests.factories import export_now  # noqa: E402
 
 pytestmark = pytest.mark.skipif(
     not ffmpeg.available(), reason="ffmpeg/ffprobe not installed (`brew install ffmpeg`)",
@@ -483,7 +484,7 @@ def test_approve_commits_the_previewed_candidate_and_export_shows_it(client, pro
     assert approve.json()["edit_id"] == "e1"
     assert approve.json()["candidate_id"] == "c1"
 
-    segments = client.post("/videos/p1/export").json()["segments"]
+    segments = export_now(client, "/videos/p1/export").json()["segments"]
     assert [s["kind"] for s in segments] == ["original", "edited", "original"]
 
     # The exported span carries the very artifact the user heard.
@@ -496,7 +497,7 @@ def test_export_originals_point_at_the_uploaded_source(client, project):
     candidate = generate()
     client.post("/videos/p1/edits", json={"candidate_id": candidate["candidate_id"]})
 
-    segments = client.post("/videos/p1/export").json()["segments"]
+    segments = export_now(client, "/videos/p1/export").json()["segments"]
     originals = [s for s in segments if s["kind"] == "original"]
     assert all(s["artifact"]["sha256"] == project["media"]["sha256"] for s in originals)
 
@@ -508,7 +509,7 @@ def test_approving_one_of_several_candidates_picks_the_right_media(client, proje
 
     client.post("/videos/p1/edits", json={"candidate_id": second["candidate_id"]})
 
-    segments = client.post("/videos/p1/export").json()["segments"]
+    segments = export_now(client, "/videos/p1/export").json()["segments"]
     edited = next(s for s in segments if s["kind"] == "edited")
     assert edited["artifact"]["sha256"] == second["frames"]["sha256"]
 
@@ -548,7 +549,7 @@ def test_approve_unknown_candidate_is_404(client, project):
 
 
 def test_export_unknown_project_is_404(client):
-    assert client.post("/videos/nope/export").status_code == 404
+    assert export_now(client, "/videos/nope/export").status_code == 404
 
 
 # ── voice budget (Phase 4a) ──────────────────────────────────────────────────
@@ -738,7 +739,7 @@ def test_someone_elses_project_is_not_found(client, project, monkeypatch):
     main.app.dependency_overrides[main.current_owner] = lambda: "someone-else"
     try:
         assert client.get("/videos/p1").status_code == 404
-        assert client.post("/videos/p1/export").status_code == 404
+        assert export_now(client, "/videos/p1/export").status_code == 404
         assert client.delete("/videos/p1").status_code == 404
         assert client.get("/videos").json()["videos"] == []
     finally:
@@ -802,7 +803,7 @@ def test_export_renders_a_real_mp4_you_can_download(client, project):
     candidate = generate()
     client.post("/videos/p1/edits", json={"candidate_id": candidate["candidate_id"]})
 
-    body = client.post("/videos/p1/export").json()
+    body = export_now(client, "/videos/p1/export").json()
     rendered = body["render"]
     assert rendered["kind"] == "video" and rendered["container"] == "mp4"
     assert rendered["duration"] == pytest.approx(project["duration"], abs=0.05)
@@ -813,7 +814,7 @@ def test_export_renders_a_real_mp4_you_can_download(client, project):
 
 
 def test_export_with_no_edits_still_renders_a_clean_copy(client, project):
-    rendered = client.post("/videos/p1/export").json()["render"]
+    rendered = export_now(client, "/videos/p1/export").json()["render"]
     assert rendered["duration"] == pytest.approx(project["duration"], abs=0.05)
 
 
@@ -823,7 +824,7 @@ def test_re_approving_a_span_exports_one_edit_not_two(client, project):
     second = generate(text="40% off")
     client.post("/videos/p1/edits", json={"candidate_id": second["candidate_id"]})
 
-    segments = client.post("/videos/p1/export").json()["segments"]
+    segments = export_now(client, "/videos/p1/export").json()["segments"]
     edited = [s for s in segments if s["kind"] == "edited"]
     assert len(edited) == 1
     assert edited[0]["ref"] == second["frames"]["sha256"]
@@ -896,7 +897,7 @@ def test_a_reverted_edit_is_marked_skipped_by_the_render_and_not_counted(client,
     assert resp.status_code == 200 and resp.json() == {"edit_id": "e1", "reverted": True}
     reopened = client.get("/videos/p1").json()
     assert [(e["edit_id"], e["reverted"]) for e in reopened["edits"]] == [("e1", True)]
-    segments = client.post("/videos/p1/export").json()["segments"]
+    segments = export_now(client, "/videos/p1/export").json()["segments"]
     assert [s["kind"] for s in segments] == ["original"]
     assert client.get("/videos").json()["videos"][0]["edits"] == 0
 
@@ -1164,20 +1165,20 @@ def test_removing_a_line_is_a_proposal_that_ships_to_room_tone_and_can_be_undone
     assert (item["status"], item["mix"], item["old_text"], item["new_text"]) == ("ready", "remove", "20% off", "")
     assert client.get("/videos/p1").json()["edits"] == []
     # With proposals, the preview render carries it; the final does not.
-    preview = client.post("/videos/p1/export", json={"with_proposals": True}).json()
+    preview = export_now(client, "/videos/p1/export", json={"with_proposals": True}).json()
     assert preview["proposals"] == ["i1"] and [s["kind"] for s in preview["segments"]] == ["original", "edited", "original"]
-    assert [s["kind"] for s in client.post("/videos/p1/export").json()["segments"]] == ["original"]
+    assert [s["kind"] for s in export_now(client, "/videos/p1/export").json()["segments"]] == ["original"]
     # Add it: approving the item makes the edit.
     plan_id = body["plan"]["plan_id"]
     shipped = add(client, plan_id, {"items": ["i1"]})
     assert [a["edit_id"] for a in shipped["approved"]] == ["e1"]
     edits = client.get("/videos/p1").json()["edits"]
     assert edits[0]["mix"] == "remove" and edits[0]["new_text"] == ""
-    export = client.post("/videos/p1/export").json()
+    export = export_now(client, "/videos/p1/export").json()
     edited = [s for s in export["segments"] if s["kind"] == "edited"]
     assert len(edited) == 1 and edited[0]["start"] == pytest.approx(0.4) and edited[0]["end"] == pytest.approx(1.3)
     assert client.post("/videos/p1/edits/e1/revert").status_code == 200
-    assert [s["kind"] for s in client.post("/videos/p1/export").json()["segments"]] == ["original"]
+    assert [s["kind"] for s in export_now(client, "/videos/p1/export").json()["segments"]] == ["original"]
 
 
 def test_removing_nothing_is_refused(client, project):
@@ -1247,7 +1248,7 @@ def test_a_kept_line_moves_in_one_step(client, project):
     edits = client.get("/videos/p1").json()["edits"]
     assert [(e["edit_id"], e["reverted"]) for e in edits] == [("e1", True), ("e2", False)]
     assert edits[1]["selection"]["start"] == pytest.approx(1.3)
-    segments = client.post("/videos/p1/export").json()["segments"]
+    segments = export_now(client, "/videos/p1/export").json()["segments"]
     edited = [s for s in segments if s["kind"] == "edited"]
     assert len(edited) == 1 and edited[0]["start"] == pytest.approx(1.3)
 
@@ -1312,7 +1313,7 @@ def test_the_render_lands_on_the_loudness_target_with_no_clipping(client, projec
     client.post("/videos/p1/edits", json={"candidate_id": take["candidate_id"]})
     for loudness, target in (("social", -14.0), ("general", -16.0)):
         client.put("/videos/p1/settings", json={"mix": {"loudness": loudness}})
-        out = client.post("/videos/p1/export").json()
+        out = export_now(client, "/videos/p1/export").json()
         assert out["mix"]["loudness_lufs"] == pytest.approx(target, abs=0.5) and out["mix"]["true_peak_db"] <= -1.0
         path = main.artifacts.find("p1", out["render"]["sha256"])
         err = subprocess.run([main.ffmpeg.FFMPEG, "-hide_banner", "-nostats", "-i", str(path), "-af", "ebur128=peak=true", "-f", "null", "-"],
@@ -1663,7 +1664,7 @@ def test_each_person_sees_only_their_own_projects(client, sample_video, monkeypa
     login(client)
     assert client.get("/videos").json()["videos"] == []
     assert client.get("/videos/p1").status_code == 404
-    assert client.post("/videos/p1/export", headers=HEADERS).status_code == 404
+    assert export_now(client, "/videos/p1/export", headers=HEADERS).status_code == 404
 
 
 def test_a_person_has_a_ceiling_across_their_projects(client, sample_video, monkeypatch):
@@ -1723,7 +1724,7 @@ def test_export_describes_the_output_as_pieces_and_nothing_is_held(client, proje
     and no frame is frozen."""
     candidate = generate(text="Hurry!", mix="concatenate", start=0.4, end=1.3)
     assert client.post("/videos/p1/edits", json={"candidate_id": candidate["candidate_id"]}).status_code == 200
-    export = client.post("/videos/p1/export").json()
+    export = export_now(client, "/videos/p1/export").json()
     pieces = export["pieces"]
     assert [p["kind"] for p in pieces] == ["copy", "living", "copy"]
     assert pieces[0]["out_start"] == 0.0 and pieces[-1]["out_end"] == pytest.approx(export["render"]["duration"], abs=0.1)
@@ -1735,12 +1736,12 @@ def test_export_describes_the_output_as_pieces_and_nothing_is_held(client, proje
     assert insert["held"] == 0.0
     # The cuts were looked for once and kept with the project.
     assert client.get("/videos/p1").json()  # still fine
-    export_again = client.post("/videos/p1/export").json()
+    export_again = export_now(client, "/videos/p1/export").json()
     assert export_again["pieces"] == pieces
 
 
 def test_a_plan_without_edits_exports_copies_only(client, project):
-    export = client.post("/videos/p1/export").json()
+    export = export_now(client, "/videos/p1/export").json()
     assert [p["kind"] for p in export["pieces"]] == ["copy"]
     assert export["inserts"] == []
 
@@ -2226,7 +2227,7 @@ def test_the_receipt_sums_up_the_project_for_the_export_page(client, project, mo
     assert media_get(client, f"/videos/p1/artifacts/{render['sha256']}").status_code == 200
     # A removal is a draft until it ships, and never a take; a preview render is not the render.
     removed = client.post("/videos/p1/lines/remove", json={"start": 1.3, "end": 1.8}).json()
-    client.post("/videos/p1/export", json={"with_proposals": True})
+    export_now(client, "/videos/p1/export", json={"with_proposals": True})
     again = client.get("/videos/p1/receipt").json()
     assert (again["takes"], again["drafts"], again["render"]["sha256"]) == (1, 1, render["sha256"])
     client.post("/videos/p1/edits/e1/revert")

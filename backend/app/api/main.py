@@ -6016,13 +6016,59 @@ class ExportRequest(BaseModel):
 
 @app.post("/videos/{project_id}/export")
 @app.post("/projects/{project_id}/export", deprecated=True)
-def export_project(project_id: str, req: ExportRequest | None = None, owner: str = Depends(current_owner)) -> dict:
-    out = _export(_owned(project_id, owner), proposals=bool(req and req.with_proposals), request_id=req.request_id if req else None,
-                  purpose=req.purpose if req else "preview")
-    if req and req.purpose == "export" and not req.with_proposals:
-        out = _provenance_export(repo.get(project_id), out)        # G6: the mark and the manifest
+def export_project(project_id: str, response: Response, req: ExportRequest | None = None,
+                   owner: str = Depends(current_owner)) -> dict:
+    """The render of the edits as they are now (or with the proposals). Run 4, item 3d: this
+    request never renders. When that render is made, it is the answer, as it always was; when
+    it is not, the answer is 202 with the render's job (`render_job`), and asking again once
+    the job is done answers with the render."""
+    record = _owned(project_id, owner)
+    proposals, purpose = bool(req and req.with_proposals), req.purpose if req else "preview"
+    request_id = req.request_id if req else None
+    out = _made_render(record, proposals)
+    if out is None:
+        response.status_code = 202
+        return {"render_job": _render_job(project_id, proposals, purpose).to_dict(), "request_id": request_id}
+    if purpose == "export" and not proposals:
+        out = _provenance_export(repo.get(project_id), out)        # G6: the mark (made by the job, read here)
         _exported(owner, project_id, float(out.get("render", {}).get("duration") or 0.0))
-    return {**out, "request_id": req.request_id if req else None}
+    return {**out, "request_id": request_id}
+
+
+def _made_render(record: ProjectRecord, proposals: bool) -> dict | None:
+    """The render of the edits as they are now when it is already made, as `_export` answers
+    with it (no lock, nothing rendered); None when it is not made yet."""
+    project_id = record.source.project_id
+    mode = "proposals" if proposals else "final"
+    edits, previewed = _render_edits(project_id, proposals)
+    h = edit_set_hash(record, edits, mode)
+    done = (repo.settings(project_id).get("renders") or {}).get(h)
+    if done is None or artifacts.find(project_id, done["render"]["sha256"]) is None:
+        return None
+    if not proposals:
+        repo.set_settings(project_id, render={**done["record"], "at": done["at"]}, mix_report=done["manifest"].get("mix"))
+    return {**done["manifest"], "edit_hash": h, "mode": mode, "cached": True, "render_id": done.get("render_id"),
+            "version": done.get("version") or _version_for(project_id, h), "includes": done.get("includes") or _includes(edits, previewed)}
+
+
+def _render_job(project_id: str, proposals: bool, purpose: str = "preview"):
+    """The job rendering the edits as they are now: the one already on its way for them, or a
+    new one on the work pool. An export's job makes its marked copy too (G6), off the request."""
+    mode = "proposals" if proposals else "final"
+    kind = "export" if purpose == "export" else "render_preview"
+    edits, _ = _render_edits(project_id, proposals)
+    h = edit_set_hash(repo.get(project_id), edits, mode)
+    for job in activity.list(project_id, active=True, limit=200):
+        if job.kind == kind and job.detail.get("edit_hash") == h:
+            return job
+    job = activity.create(project_id, kind, detail={"mode": mode, "edit_hash": h})
+
+    def work() -> None:
+        out = _export(repo.get(project_id), proposals=proposals, purpose=purpose, job_id=job.job_id)
+        if purpose == "export" and not proposals:
+            _provenance_export(repo.get(project_id), out)
+    _in_background(project_id, job.job_id, work)
+    return job
 
 
 def _exported(owner: str, video_id: str, seconds: float, preset: str | None = None) -> None:

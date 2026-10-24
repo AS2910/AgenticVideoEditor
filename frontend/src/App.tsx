@@ -1115,7 +1115,7 @@ function Studio() {
     const seq = beginRender('proposals')
     let manifest: ExportManifest | null = null
     try {
-      manifest = await exportProject(projectId, true, seq)
+      manifest = await exportProject(projectId, true, seq, 'preview', activity.take)
       if (!isLatest('proposals', seq)) return
       const url = artifactUrl(projectId, manifest.render.sha256)
       setPreview({ url, duration: manifest.render.duration, key, mix: manifest.mix ?? null,
@@ -1157,7 +1157,7 @@ function Studio() {
     const seq = beginRender('final')
     let manifest: ExportManifest | null = null
     try {
-      manifest = await exportProject(id, false, seq)
+      manifest = await exportProject(id, false, seq, 'preview', activity.take)
       // An older render that finishes after a newer one was asked for is dropped: it no longer matches the edits.
       if (!isLatest('final', seq)) return null
       setSegments(manifest.segments)

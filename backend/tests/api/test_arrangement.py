@@ -5,6 +5,7 @@ become the arrangement."""
 import pytest
 
 from tests.api.test_endpoints import client, generate, project, reset_state, speechless  # noqa: F401
+from tests.factories import export_now  # noqa: E402
 
 
 @pytest.fixture
@@ -30,8 +31,7 @@ def test_reordering_plays_the_lines_one_after_another(client, three):
     assert body["can_undo"] is True
     assert client.get("/videos/p1").json()["messages"][-1]["text"].startswith("Moved line 3 to 0:00")
     # Rendered: each line's old place gets the room's sound, its words play at the new place.
-    manifest = client.post("/videos/p1/export").json()
-    assert manifest["cached"] is False
+    manifest = export_now(client, "/videos/p1/export").json()       # made by its job (run 4, item 3d), then read
     assert {round(s["start"], 1) for s in manifest["segments"] if s["kind"] == "edited"} == {0.0, 0.4, 1.3}
 
 
@@ -45,7 +45,7 @@ def test_one_action_is_one_undo(client, three):
     assert starts(back) == [("L0", 0.0), ("L1", 0.4), ("L2", 1.3)] and back["can_undo"] is False
     assert client.post("/videos/p1/arrangement/undo").status_code == 409
     # Back where it was shot: the render is the source again.
-    assert [s["kind"] for s in client.post("/videos/p1/export").json()["segments"]] == ["original"]
+    assert [s["kind"] for s in export_now(client, "/videos/p1/export").json()["segments"]] == ["original"]
 
 
 def test_a_pinned_line_holds_and_the_others_are_pushed_after_it(client, three):
@@ -64,11 +64,11 @@ def test_two_pins_at_once_are_refused_with_a_reason(client, three):
 def test_a_run_past_the_end_is_held_unless_trimmed(client, three):
     body = client.put("/videos/p1/arrangement", json={"pins": {"L1": 1.8}}).json()
     assert body["overrun"] > 0 and body["ease_ok"] is True
-    held = client.post("/videos/p1/export").json()
+    held = export_now(client, "/videos/p1/export").json()
     assert held["inserts"], "the last frame holds while the line finishes"
 
     client.put("/videos/p1/arrangement", json={"pins": {"L1": 1.8}, "end": "trim"})
-    trimmed = client.post("/videos/p1/export").json()
+    trimmed = export_now(client, "/videos/p1/export").json()
     assert not trimmed["inserts"]
 
 

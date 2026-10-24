@@ -51,10 +51,11 @@ trusting that ratio.
    nothing for sign-in (login p95 60 s, 15 timeouts). Then AVE_HTTP_THREADS, default 100:
    0 failures. **Fixed for good in run 4 (item 3a):** Add (and a batch's Add all that
    passed) answers at once with a render job; the render runs on the work pool with every
-   other render, so no request holds a thread for one. Still rendering inside a request:
-   `POST /videos/{id}/export` (the editor's own re-render after an undo, a move or a role
-   change, the with-proposals preview, and the Export page's export). Moving those is the
-   next step of the same change (the editor would start `/renders` and wait for the job).
+   other render, so no request holds a thread for one. Item 3d did the same for
+   `POST /videos/{id}/export` (the editor's re-render after an undo, a move or a role
+   change, the with-proposals preview, and the Export page's export): a render not made
+   yet answers 202 with its job, and the same request once the job is done answers with
+   the render. No request renders now.
 4. **What is left at 50: the render queue.** Renders and previews run 4 at a time
    (AVE_WORK_WORKERS=4, about one per vCPU since a real render is ffmpeg on every core).
    At 50 users the go-ahead (voice + preview) p50 stays 28 s but p95 grows to 6 minutes.

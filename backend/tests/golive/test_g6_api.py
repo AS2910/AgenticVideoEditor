@@ -22,6 +22,7 @@ from app.notify.email import outbox
 from app.safety import figures
 from tests.api.test_folders import upload_into
 from tests.factories import media_get
+from tests.factories import export_now  # noqa: E402
 
 pytestmark = pytest.mark.skipif(not ffmpeg.available(), reason="ffmpeg/ffprobe not installed")
 
@@ -128,7 +129,7 @@ def test_your_data_export_is_a_job_with_a_zip_and_deletion_is_recorded(client, v
 
 
 def test_the_export_carries_the_mark_and_a_manifest(client, video):
-    out = client.post("/videos/p1/export", json={"purpose": "export"}).json()
+    out = export_now(client, "/videos/p1/export", json={"purpose": "export"}).json()
     marked = out["render"]["sha256"]
     assert out["provenance"]["mark"] and out["provenance"]["source_sha256"] != marked
     path = main.artifacts.find("p1", marked)
@@ -136,7 +137,7 @@ def test_the_export_carries_the_mark_and_a_manifest(client, video):
     manifest = media_get(client, f"/videos/p1/artifacts/{marked}/c2pa").json()
     assert manifest["manifest"]["asset"]["sha256"] == marked and manifest["signature"]["test_mode"]
     assert client.get(f"/exports/provenance/{out['provenance']['mark']}").json()["video_id"] == "p1"
-    again = client.post("/videos/p1/export", json={"purpose": "export"}).json()
+    again = export_now(client, "/videos/p1/export", json={"purpose": "export"}).json()
     assert again["render"]["sha256"] == marked                            # once per render
 
 
@@ -145,5 +146,5 @@ def test_flag_off(client, video):
     assert client.post("/videos/p1/liveness", json={}).status_code == 404
     assert client.post("/me/data-export").status_code == 404
     assert client.post("/videos/p1/consent").status_code == 200          # consent as before
-    out = client.post("/videos/p1/export", json={"purpose": "export"}).json()
+    out = export_now(client, "/videos/p1/export", json={"purpose": "export"}).json()
     assert "provenance" not in out
