@@ -10,7 +10,7 @@ Voltage is in beta. These are the gaps we know about today, said plainly. If you
 
 ## Working in the editor
 
-- **Renders take a while.** A preview or an export of a 60 s video takes a minute or more, and longer when many people are working at once. You can keep working while it renders.
+- **Renders take a while.** A preview or an export of a 60 s video takes several seconds, and longer when many people are working at once. You can keep working while it renders.
 - **Reviewers can watch but not comment** unless review is turned on for your account. Beta accounts have it on.
 
 ## Money
