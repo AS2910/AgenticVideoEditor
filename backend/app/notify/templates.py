@@ -16,7 +16,9 @@ does not is replaced by the app's home.
 The text version carries the same words and each link on its own line.
 
 Item 8 (the waitlist) sends its access invite with
-`templates.email("access_invite", to, public_url=..., link=..., name=...)`.
+`templates.email("access_invite", to, public_url=..., link=..., name=...)`;
+the beta kit its beta invite with `templates.email("beta_invite", to, ...,
+link=..., name=..., credits=..., existing=...)`.
 """
 from __future__ import annotations
 
@@ -356,6 +358,26 @@ def _access_invite(d: dict) -> _Mail:
                  greeting=f"Hi {d['name']}," if d.get("name") else "Hi,")
 
 
+def _beta_invite(d: dict) -> _Mail:
+    """Beta kit: a place in the beta, for a waitlist address (make an account) or a person who has one."""
+    credits = d.get("credits")
+    paras = ["You have a place in the Voltage beta. Upload a video and tell Voltage what to change: "
+             "it rewrites the lines, voices them and fits them to the picture."]
+    if credits:
+        paras.append(f"Your account comes with {credits:g} beta credits, and batch work across videos and client review links are turned on.")
+    after = ["Voltage is still being built. The Known issues page in the app lists what is not right yet, and "
+             "Send feedback in Help comes straight to us. After your first export we will ask you three short questions."]
+    existing = bool(d.get("existing"))
+    if not existing:
+        after.append("Make your account with this address so the beta finds you. If you did not ask for this, you can ignore this email.")
+    return _Mail("You are in the Voltage beta", "Welcome to the beta", paras,
+                 button=("Open Voltage" if existing else "Make my account", d["link"]), after=after,
+                 reason=("You got this because an admin added your Voltage account to the beta." if existing
+                         else "You got this because this address joined the Voltage waitlist."),
+                 stop="This is the one email the beta invite sends, so there is nothing to turn off.",
+                 greeting=f"Hi {d['name']}," if d.get("name") else "Hi,")
+
+
 def _abuse_report(d: dict) -> _Mail:
     return _Mail(d["title"], d["title"], [],
                  rows=[("Where", d.get("location") or "(none)"), ("Details", d.get("details") or "(none)"),
@@ -371,7 +393,7 @@ _BUILD: dict[str, Callable[[dict], _Mail]] = {
     "workspace_invite": _workspace_invite, "review_invite": _review_invite, "version_ready": _version_ready,
     "digest": _digest, "receipt": _receipt, "invoice": _invoice, "spend_alert": _spend_alert,
     "job_failed": _job_failed, "account_deleted": _account_deleted, "access_invite": _access_invite,
-    "abuse_report": _abuse_report,
+    "beta_invite": _beta_invite, "abuse_report": _abuse_report,
 }
 KINDS = tuple(_BUILD)
 LABELS = {
@@ -380,7 +402,8 @@ LABELS = {
     "sign_in": "Sign-in link", "workspace_invite": "Workspace invite", "review_invite": "Review link",
     "version_ready": "Review: new version", "digest": "Review comment digest", "receipt": "Receipt (top-up)",
     "invoice": "Invoice (GST)", "spend_alert": "Spend alert", "job_failed": "Job failed",
-    "account_deleted": "Account deleted", "access_invite": "Access invite (waitlist)", "abuse_report": "Abuse report (internal)",
+    "account_deleted": "Account deleted", "access_invite": "Access invite (waitlist)",
+    "beta_invite": "Beta invite", "abuse_report": "Abuse report (internal)",
 }
 
 
@@ -452,6 +475,7 @@ SAMPLES: dict[str, dict] = {
     "job_failed": {"what": "The export", "name": "promo.mp4", "reason": "ffmpeg stopped: the disk is full.", "link": "#v/p12"},
     "account_deleted": {"removed": _REMOVED, "kept": _KEPT},
     "access_invite": {"name": "Ann", "link": "#login", "expires": "2026-11-18"},
+    "beta_invite": {"name": "Ann", "link": "#login", "credits": 10},
     "abuse_report": {"title": "Abuse report #7: Impersonation.", "location": "https://voltage.example/#s/abc",
                      "details": "Uses my voice without asking.", "contact": "me@example.com"},
 }

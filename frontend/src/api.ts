@@ -739,6 +739,6 @@ export interface PublicPricing {
 }
 export const getPricing = () => get<PublicPricing>('/pricing')
 export const joinWaitlist = (r: { email: string; name?: string; use_case?: string }) => post<{ ok: boolean; message: string }>('/waitlist', r)
-export interface WaitlistRow { id: number; email: string; name: string | null; use_case: string | null; created_at: string; invited_at: string | null; invited_by: string | null; status: 'waiting' | 'invited' }
+export interface WaitlistRow { id: number; email: string; name: string | null; use_case: string | null; created_at: string; invited_at: string | null; invited_by: string | null; status: 'waiting' | 'invited'; beta?: boolean }
 export const getAdminWaitlist = () => get<{ rows: WaitlistRow[]; invite_only: boolean }>('/admin/waitlist')
-export const sendWaitlistInvite = (id: number) => post<{ row: WaitlistRow }>(`/admin/waitlist/${id}/invite`)
+export const sendWaitlistInvite = (id: number, beta = false) => post<{ row: WaitlistRow }>(`/admin/waitlist/${id}/invite`, beta ? { beta: true } : undefined)

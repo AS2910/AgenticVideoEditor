@@ -139,4 +139,19 @@ describe('Launch item 8: the admin waitlist', () => {
     expect(calls).toContain('POST /api/admin/waitlist/2/invite')
     expect(screen.getByRole('button', { name: 'Send the invite again to cy@example.com' })).toBeInTheDocument()
   })
+
+  it('Invite to beta posts {beta: true} and the row then says Beta', async () => {
+    const row = { id: 3, email: 'eve@example.com', name: null, use_case: null, created_at: '2026-10-22T10:00:00+00:00', invited_at: null, invited_by: null, status: 'waiting' }
+    const bodies: (string | undefined)[] = []
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.endsWith('/admin/waitlist')) return ok({ rows: [row], invite_only: true })
+      if (url.endsWith('/admin/waitlist/3/invite')) { bodies.push(init?.body as string | undefined); return ok({ row: { ...row, status: 'invited', invited_at: '2026-10-24T08:00:00+00:00', invited_by: 'acct:admin', beta: true } }) }
+      return ok({})
+    }))
+    render(<AdminWaitlist card="" />)
+    await userEvent.click(await screen.findByRole('button', { name: 'Invite to beta: eve@example.com' }))
+    await waitFor(() => expect(screen.getByTestId('waitlist-row')).toHaveTextContent('Beta'))
+    expect(bodies).toEqual([JSON.stringify({ beta: true })])
+    expect(screen.getByRole('button', { name: 'Send the beta invite again to eve@example.com' })).toBeInTheDocument()
+  })
 })

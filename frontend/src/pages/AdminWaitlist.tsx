@@ -6,11 +6,12 @@ import { said } from './fmt'
 
 /** Launch item 8: everyone who asked for access on the landing page, newest first,
  *  waiting or invited. Send invite emails the address and lets it sign up while
- *  Voltage is invite-only; the row then says who invited and when. */
+ *  Voltage is invite-only; the row then says who invited and when. Invite to beta (beta kit)
+ *  does the same with the beta invite, and the address joins the beta cohort when it first signs in. */
 export function AdminWaitlist({ card }: { card: string }) {
   const [rows, setRows] = useState<WaitlistRow[] | null>(null)
   const [inviteOnly, setInviteOnly] = useState<boolean | null>(null)
-  const [busy, setBusy] = useState<number | null>(null)
+  const [busy, setBusy] = useState<{ id: number; beta: boolean } | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [unread, setUnread] = useState(false)
   const load = useCallback(() => {
@@ -20,11 +21,11 @@ export function AdminWaitlist({ card }: { card: string }) {
   }, [])
   useEffect(() => { load() }, [load])
 
-  const invite = async (row: WaitlistRow) => {
-    setBusy(row.id)
+  const invite = async (row: WaitlistRow, beta = false) => {
+    setBusy({ id: row.id, beta })
     setError(null)
     try {
-      const { row: next } = await sendWaitlistInvite(row.id)
+      const { row: next } = await sendWaitlistInvite(row.id, beta)
       setRows((all) => (all ?? []).map((r) => (r.id === next.id ? next : r)))
     } catch (e) { setError(said(e, 'The invite did not go.')) } finally { setBusy(null) }
   }
@@ -53,9 +54,14 @@ export function AdminWaitlist({ card }: { card: string }) {
                 </span>
               </span>
               <span className={r.status === 'invited' ? 'stamp in' : 'stamp need'}>{r.status === 'invited' ? 'Invited' : 'Waiting'}</span>
+              {r.beta && <span className="stamp inkd">Beta</span>}
               <button type="button" className={r.status === 'invited' ? 'btn sm' : 'btn volt sm'} disabled={busy !== null} onClick={() => void invite(r)}
                 aria-label={`${r.status === 'invited' ? 'Send the invite again to' : 'Send invite to'} ${r.email}`}>
-                {busy === r.id ? 'Sending…' : r.status === 'invited' ? 'Send again' : 'Send invite'}
+                {busy?.id === r.id && !busy.beta ? 'Sending…' : r.status === 'invited' ? 'Send again' : 'Send invite'}
+              </button>
+              <button type="button" className="btn sm" disabled={busy !== null} onClick={() => void invite(r, true)}
+                aria-label={`${r.beta ? 'Send the beta invite again to' : 'Invite to beta:'} ${r.email}`}>
+                {busy?.id === r.id && busy.beta ? 'Sending…' : r.beta ? 'Beta invite again' : 'Invite to beta'}
               </button>
             </li>
           ))}

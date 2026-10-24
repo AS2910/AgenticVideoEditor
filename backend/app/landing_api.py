@@ -9,7 +9,9 @@ Admins only (AVE_ADMIN_OWNERS):
     GET  /admin/waitlist               every request, newest first, waiting or invited
     POST /admin/waitlist/{id}/invite   emails the invite and marks the address invited:
                                        with `launch.invite_only` on it may then sign up
-                                       (`accounts_api.may_join`)
+                                       (`accounts_api.may_join`). With {beta: true} (beta kit)
+                                       the email is the beta invite, and the address joins the
+                                       beta cohort at its first sign-in (`app.beta`)
 """
 from __future__ import annotations
 
@@ -84,17 +86,30 @@ def _admin(request: Request) -> str:
 def admin_waitlist(request: Request) -> dict:
     _admin(request)
     api = _api()
-    return {"rows": waitlist.rows(api.database), "invite_only": api.flags.enabled("launch.invite_only")}
+    from app import beta
+    asked = beta.invited_addresses(api.database)
+    return {"rows": [{**r, "beta": r["email"] in asked} for r in waitlist.rows(api.database)],
+            "invite_only": api.flags.enabled("launch.invite_only")}
+
+
+class Invite(BaseModel):
+    beta: bool = False
 
 
 @router.post("/admin/waitlist/{row_id}/invite")
-def admin_invite(row_id: int, request: Request) -> dict:
+def admin_invite(row_id: int, request: Request, req: Invite | None = None) -> dict:
     who = _admin(request)
     api = _api()
     row = waitlist.get(api.database, row_id)
     if row is None:
         raise HTTPException(status_code=404, detail="Not found")
     row = waitlist.invite(api.database, row_id, who)
+    if req is not None and req.beta:
+        from app import admin as admin_mod, beta
+        beta.mark_invited(api.database, row["email"])
+        beta.invite_email(api, row["email"], row.get("name"))
+        admin_mod.audit(api.database, who, "beta_invite", row["email"], "", {"waitlist_id": row_id})
+        return {"row": {**row, "beta": True}}
     try:
         from app.notify import templates
         # Item 9's access invite (HTML and text); the outbox kind stays waitlist_invite.
