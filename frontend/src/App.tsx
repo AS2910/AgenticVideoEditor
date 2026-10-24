@@ -279,6 +279,10 @@ function Studio() {
   const [picked, setPicked] = useState<{ question: PlanQuestion; option: string } | null>(null)
   const [playerPlaying, setPlayerPlaying] = useState(false)
   const swapWaiting = useRef<RenderRecord | null>(null)
+  // Run 4, item 3: an Add's render is a job. Its request (the final's seq) stays pending until the job ends,
+  // and the player moves to it then; a job that ended before its Add answered is remembered for that answer.
+  const addRenders = useRef(new Map<string, number>())
+  const endedRenders = useRef(new Map<string, ActivityJob>())
   const [justReady, setJustReady] = useState(false)
   // The turn this editor started last ('pending' until the server names it), so a finished turn's steps never stand under newer words.
   const [turnIdNow, setTurnIdNow] = useState<string | null>(null)
@@ -623,12 +627,14 @@ function Studio() {
       const passed = item.candidate?.continuity.passed ?? true
       const seq = beginRender('final')
       let result: PlanApproval | null = null
+      let waiting = false
       try {
         result = await approvePlan(projectId, plan.plan_id, { items: [item.item_id], ...(passed ? {} : { override: true }), ...(confirmStage ? { confirm_stage: true } : {}) })
         takeInApproval(result, seq)
+        waiting = awaitAddRender(result, seq)
         if (result.approved.length > 0) leftApproved()
       } finally {
-        endRender('final', seq, result?.export ?? null)
+        if (!waiting) endRender('final', seq, result?.export ?? null)
       }
       setPreview(null)
     } catch (e) {
@@ -975,6 +981,7 @@ function Studio() {
     if (!confirmStage && heldByStage(() => void approveAll(items, true))) return
     const seq = beginRender('final')
     let manifest: ExportManifest | null = null
+    let waiting = false
     try {
       const result = await approvePlan(projectId, plan.plan_id, {
         items: items.map((i) => i.item_id), override: items.some((i) => !(i.candidate?.continuity.passed ?? true)),
@@ -982,6 +989,7 @@ function Studio() {
       })
       manifest = result.export ?? null
       takeInApproval(result, seq)
+      waiting = awaitAddRender(result, seq)
       if (result.approved.length > 0) leftApproved()
       setPreview(null)
       if (result.skipped.length > 0) {
@@ -991,9 +999,30 @@ function Studio() {
       if (stageHeld(e, () => void approveAll(items, true))) return
       setError(e instanceof ApiError ? e.message : 'Could not add those lines.')
     } finally {
-      endRender('final', seq, manifest)
+      if (!waiting) endRender('final', seq, manifest)
       void refreshUsage(projectId)
     }
+  }
+
+  /** Run 4, item 3: the Add's render came back as a job: it goes into the strip and the rows at once, and
+   *  the request stays pending until the job ends. True when it is waited for. */
+  const awaitAddRender = (result: PlanApproval, seq: number): boolean => {
+    const job = result.render_job
+    if (!job) return false
+    addRenders.current.set(job.job_id, seq)
+    activity.take(job)
+    const ended = endedRenders.current.get(job.job_id)
+    if (ended) settleAddRender(ended)
+    return true
+  }
+  /** The Add's render ended: done, the player moves to it (as the Add's own render always did); failed, the toast says why. */
+  const settleAddRender = (job: ActivityJob) => {
+    const seq = addRenders.current.get(job.job_id)
+    if (seq === undefined) { endedRenders.current.set(job.job_id, job); return }
+    addRenders.current.delete(job.job_id)
+    endedRenders.current.delete(job.job_id)
+    if (job.status === 'done' && isLatest('final', seq)) void offerRender(job, true)
+    endRender('final', seq)
   }
 
   const findSpeakers = async () => {
@@ -1186,7 +1215,7 @@ function Studio() {
   /** A render finished on the server: swapped in at the playhead when the picture is paused; while it plays,
    *  a toast asks first ("v5 ready. Switch now?"), so nothing changes under a word. A render of another mode
    *  is kept for when that mode is played, unless a turn made it (then it is what the turn asks you to hear). */
-  const offerRender = async (job: ActivityJob) => {
+  const offerRender = async (job: ActivityJob, switchTo = false) => {
     const mode = job.detail?.mode
     if (!projectId || !mode) return
     const state = await getLatestRender(projectId, mode).catch(() => null)
@@ -1194,7 +1223,7 @@ function Studio() {
     if (!rec?.manifest) return
     const have = mode === 'final' ? rendered?.version : preview?.version
     if (have != null && rec.version <= have) return
-    if (view !== mode && !job.turn_id) { adopt(rec, false); return }
+    if (view !== mode && !job.turn_id && !switchTo) { adopt(rec, false); return }
     if (playerPlaying) {
       swapWaiting.current = rec
       pushToast({ id: `swap-${rec.render_id}`, tone: 'ok', text: `v${rec.version} ready. Switch now?`, action: { label: 'Switch now', key: 'swap' } })
@@ -1212,6 +1241,7 @@ function Studio() {
       pushToast({ id: job.job_id, tone: 'fail', text: `${what}: ${job.error_text ?? 'no reason was given'}`, action: { label: 'Activity', key: 'activity' } })
     }
     if (isVoice(job) && job.status === 'done' && before.status !== 'done') pushToast({ id: job.job_id, tone: 'ok', text: '1 line ready' })
+    if (isRender(job) && job.detail?.added && !isActive(job)) { settleAddRender(job); return }
     if (isRender(job) && job.status === 'done' && before.status !== 'done') void offerRender(job)
   }
 

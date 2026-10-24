@@ -669,6 +669,8 @@ export interface ActivityJob {
     text?: string; voice_name?: string; chars?: number
     version?: number; mode?: 'final' | 'proposals'; render_id?: string; includes?: RenderIncludes
     manual?: boolean
+    /** Run 4, item 3: the render an Add started. */
+    added?: boolean
     // G1: an import from a link (bytes so far, the size when known, the video it made).
     bytes?: number
     total_bytes?: number | null

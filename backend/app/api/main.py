@@ -4363,7 +4363,7 @@ def add_all_batch(project_id: str, batch_id: str, req: AddAllRequest | None = No
         plan, ids = _passing_items(child["video_id"])
         if plan is None or not ids:
             continue
-        result = _ship(child["video_id"], video, plan.plan_id, ids)
+        result = _ship(child["video_id"], video, plan.plan_id, ids, background=True)
         edit_ids = [a["edit_id"] for a in result["approved"]]
         if edit_ids:
             added[child["video_id"]] = {"edit_ids": [*((child.get("added") or {}).get("edit_ids") or []), *edit_ids],
@@ -6556,7 +6556,7 @@ def approve_plan(
     record = _owned(project_id, owner)
     _plan_or_404(project_id, plan_id)
     _stage_gate([project_id], owner, req.confirm_stage)
-    return _ship(project_id, record, plan_id, req.items, req.override)
+    return _ship(project_id, record, plan_id, req.items, req.override, background=True)
 
 
 NUMBER_WORDS = {2: "two", 3: "three", 4: "four", 5: "five", 6: "six", 7: "seven", 8: "eight", 9: "nine", 10: "ten"}
@@ -6583,8 +6583,11 @@ def _resolve_question(project_id: str, plan_id: str, why: str, by: str = "editor
 
 
 def _ship(project_id: str, record: ProjectRecord, plan_id: str, item_ids: list[str] | None,
-          override: bool = False) -> dict:
-    """Approve the ready items (or the ones named) and render."""
+          override: bool = False, background: bool = False) -> dict:
+    """Approve the ready items (or the ones named) and render. With
+    `background` (run 4, item 3: the user's Add) the render is a job and the
+    answer comes back at once with it: no request ever holds a thread for a
+    render. The agent's ship, already off the request thread, renders in line."""
     plan = repo.get_plan(project_id, plan_id)
     approved, skipped = [], []
     for item in plan.items:
@@ -6611,12 +6614,22 @@ def _ship(project_id: str, record: ProjectRecord, plan_id: str, item_ids: list[s
                         f"Approved {len(approved)} {'change' if len(approved) == 1 else 'changes'}")
         ready = [i for i in plan.items if i.status == "ready"]
         _resolve_question(project_id, plan_id, f"you added {_count_lines(len(approved), len(approved) == len(ready) and len(ready) > 1)}")
-    export = _export(record) if approved else None
-    if export:
+    def rendered(job_id: str | None = None) -> dict:
+        out = _export(repo.get(project_id) or record, job_id=job_id)
         repo.append_log(project_id, plan_id, "Rendered the edited video",
                         f"${ledger.spent_usd(project_id):.2f} in total")
+        return out
+
+    export = job = None
+    if approved and background:
+        job = activity.create(project_id, "render_preview", line_ids=[a["edit_id"] for a in approved],
+                              detail={"mode": "final", "added": True})
+        _in_background(project_id, job.job_id, lambda: rendered(job.job_id))
+    elif approved:
+        export = rendered()
     return {
         "approved": approved, "skipped": skipped, "export": export,
+        "render_job": job.to_dict() if job else None,
         "plan": _plan_dict(repo.get_plan(project_id, plan_id)),
     }
 

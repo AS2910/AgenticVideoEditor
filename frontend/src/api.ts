@@ -398,11 +398,13 @@ export interface PlanApproval {
   approved: { item_id: string; edit_id: string; overridden: boolean }[]
   skipped: { item_id: string; reason: string }[]
   export: ExportManifest | null
+  /** Run 4, item 3: the render the Add started, as a job (the answer never waits for it); null when nothing was added. */
+  render_job?: ActivityJob | null
   plan: Plan
 }
 
-/** Approves the ready items named (every one, by default) and renders: Ship,
- *  and Keep on one line. */
+/** Approves the ready items named (every one, by default) and starts their
+ *  render as a job: Ship, and Keep on one line. */
 export const approvePlan = (id: string, planId: string, req: { items?: string[]; override?: boolean; confirm_stage?: boolean } = {}) =>
   post<PlanApproval>(`/videos/${id}/plans/${planId}/approve`, req)
 

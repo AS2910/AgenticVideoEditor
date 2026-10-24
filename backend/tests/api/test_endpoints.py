@@ -18,6 +18,40 @@ def reset_state():
     repo.reset()
     jobs.reset()
     yield
+    settle_renders()
+
+
+def settle_renders(timeout=60.0):
+    """Run 4, item 3: an Add renders in the background; the next test never
+    starts under a render still writing to the last one's video."""
+    from app.api.main import activity
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        with activity.db.tx() as c:
+            busy = c.execute("SELECT COUNT(*) AS n FROM jobs WHERE kind IN ('render_preview', 'export') "
+                             "AND status IN ('queued', 'running')").fetchone()["n"]
+        if not busy:
+            return
+        time.sleep(0.05)
+
+
+def add(client, plan_id, body=None, project_id="p1"):
+    """Add (the plan's approve), its render waited for: the answer, with the
+    finished render's manifest as `export` (None when nothing was added)."""
+    resp = client.post(f"/videos/{project_id}/plans/{plan_id}/approve", json=body or {})
+    assert resp.status_code == 200, resp.text
+    out = resp.json()
+    job = out.get("render_job")
+    if job:
+        deadline = time.time() + 120
+        while time.time() < deadline:
+            found = next((j for j in client.get(f"/videos/{project_id}/jobs").json()["jobs"] if j["job_id"] == job["job_id"]), None)
+            if found and found["status"] in ("done", "failed", "cancelled"):
+                break
+            time.sleep(0.05)
+        assert found["status"] == "done", found
+        out["export"] = client.get(f"/videos/{project_id}/renders/latest?mode=final").json()["latest"]["manifest"]
+    return out
 
 
 @pytest.fixture()
@@ -978,14 +1012,12 @@ def test_a_turn_voices_the_line_then_approve_all_exports(client, project, monkey
     assert item["candidate"]["candidate_id"] == "c1" and item["candidate"]["continuity"]["passed"] is True
     assert any(e["text"].startswith("Voiced “Get 30% off") for e in done["plan"]["log"])
 
-    resp = client.post(f"/videos/p1/plans/{plan_id}/approve", json={})
-    body = resp.json()
-    assert resp.status_code == 200
+    body = add(client, plan_id)
     assert body["approved"] == [{"item_id": "i1", "edit_id": "e1", "overridden": False, "speaker": None, "voice_profile_id": "mock"}]
     assert body["skipped"] == []
     assert [s["kind"] for s in body["export"]["segments"]] == ["edited"]
     assert body["plan"]["items"][0]["status"] == "approved" and body["plan"]["items"][0]["edit_id"] == "e1"
-    assert body["plan"]["log"][-1]["text"] == "Rendered the edited video"
+    assert client.get(f"/videos/p1/plans/{plan_id}").json()["log"][-1]["text"] == "Rendered the edited video"
     assert [e["edit_id"] for e in client.get("/videos/p1").json()["edits"]] == ["e1"]
 
 
@@ -996,11 +1028,11 @@ def test_a_failing_take_is_skipped_by_approve_all_unless_overridden(client, proj
     plan_id = done["plan"]["plan_id"]
     assert done["plan"]["items"][0]["candidate"]["continuity"]["passed"] is False
 
-    body = client.post(f"/videos/p1/plans/{plan_id}/approve", json={}).json()
+    body = add(client, plan_id, {})
     assert body["approved"] == [] and body["skipped"] == [{"item_id": "i1", "reason": "continuity check failed"}]
-    assert body["export"] is None
+    assert body["export"] is None and body["render_job"] is None
 
-    body = client.post(f"/videos/p1/plans/{plan_id}/approve", json={"override": True}).json()
+    body = add(client, plan_id, {"override": True})
     assert body["approved"] == [{"item_id": "i1", "edit_id": "e1", "overridden": True, "speaker": "A", "voice_profile_id": "unknown"}]
 
 
@@ -1137,7 +1169,7 @@ def test_removing_a_line_is_a_proposal_that_ships_to_room_tone_and_can_be_undone
     assert [s["kind"] for s in client.post("/videos/p1/export").json()["segments"]] == ["original"]
     # Add it: approving the item makes the edit.
     plan_id = body["plan"]["plan_id"]
-    shipped = client.post(f"/videos/p1/plans/{plan_id}/approve", json={"items": ["i1"]}).json()
+    shipped = add(client, plan_id, {"items": ["i1"]})
     assert [a["edit_id"] for a in shipped["approved"]] == ["e1"]
     edits = client.get("/videos/p1").json()["edits"]
     assert edits[0]["mix"] == "remove" and edits[0]["new_text"] == ""
@@ -1222,7 +1254,7 @@ def test_a_kept_line_moves_in_one_step(client, project):
 
 def test_a_removal_cannot_be_moved(client, project):
     rm = client.post("/videos/p1/lines/remove", json={"start": 0.5, "end": 1.0}).json()
-    shipped = client.post(f"/videos/p1/plans/{rm['plan']['plan_id']}/approve", json={"items": [rm["item_id"]]}).json()
+    shipped = add(client, rm['plan']['plan_id'], {"items": [rm["item_id"]]})
     assert client.post(f"/videos/p1/edits/{shipped['approved'][0]['edit_id']}/move", json={"start": 1.0}).status_code == 422
 
 
@@ -1239,7 +1271,7 @@ def test_a_line_takes_a_role_before_and_after_it_is_added(client, project, monke
     assert (up["plan"]["role"], up["plan"]["offset_db"]) == ("voice", -3.0) and up["candidate_id"] != item["candidate"]["candidate_id"]
     assert client.get(f"/videos/p1/plans/{plan_id}").json()["items"][0]["candidate"]["candidate_id"] == up["candidate_id"]
     # Added, then a Bed in the video (the speaker talks under it, so no question): the old edit reverted, the same take approved.
-    shipped = client.post(f"/videos/p1/plans/{plan_id}/approve", json={"items": ["i1"]}).json()
+    shipped = add(client, plan_id, {"items": ["i1"]})
     edit_id = shipped["approved"][0]["edit_id"]
     down = client.post(f"/videos/p1/edits/{edit_id}/role", json={"role": "bed"}).json()
     assert down["reverted"] == edit_id and down["candidate"]["plan"]["role"] == "bed"
@@ -1297,11 +1329,11 @@ def test_a_line_taken_out_says_so_on_its_row_until_it_is_added_again(client, pro
     import app.api.main as main
     rm = client.post("/videos/p1/lines/remove", json={"start": 0.5, "end": 1.0}).json()
     plan_id = rm["plan"]["plan_id"]
-    shipped = client.post(f"/videos/p1/plans/{plan_id}/approve", json={"items": ["i1"]}).json()
+    shipped = add(client, plan_id, {"items": ["i1"]})
     client.post(f"/videos/p1/edits/{shipped['approved'][0]['edit_id']}/revert")
     item = client.get(f"/videos/p1/plans/{plan_id}").json()["items"][0]
     assert item["status"] == "ready" and item["note"] == main.TAKEN_OUT
-    client.post(f"/videos/p1/plans/{plan_id}/approve", json={"items": ["i1"]})
+    add(client, plan_id, {"items": ["i1"]})
     assert client.get(f"/videos/p1/plans/{plan_id}").json()["items"][0]["note"] is None
 
 
@@ -1340,7 +1372,7 @@ def test_a_proposal_can_be_discarded_but_a_shipped_line_cannot(client, project):
     assert plan["items"][0]["status"] == "dismissed" and plan["items"][0]["enabled"] is False
     assert plan["log"][-1]["text"] == "You discarded the line at 0:00"
     rm2 = client.post("/videos/p1/lines/remove", json={"start": 0.5, "end": 1.0}).json()
-    client.post(f"/videos/p1/plans/{plan_id}/approve", json={"items": [rm2["item_id"]]})
+    add(client, plan_id, {"items": [rm2["item_id"]]})
     assert client.post(f"/videos/p1/plans/{plan_id}/items/{rm2['item_id']}/dismiss").status_code == 409
 
 
@@ -1441,7 +1473,7 @@ def test_the_project_list_shows_each_projects_frame_state_and_last_change(client
     listed = client.get("/videos").json()["videos"][0]
     assert listed["state"] == "draft" and listed["last_change"].startswith("Voiced “Get 30% off")
 
-    client.post(f"/videos/p1/plans/{done['plan']['plan_id']}/approve", json={})
+    add(client, done['plan']['plan_id'])
     listed = client.get("/videos").json()["videos"][0]
     assert listed["state"] == "shipped" and listed["edits"] == 1 and listed["last_change"] == "Rendered the edited video"
 
@@ -1455,7 +1487,7 @@ def test_shipping_some_lines_holds_the_rest_and_undo_returns_a_line_to_a_draft(c
     plan_id = done["plan"]["plan_id"]
     assert [i["status"] for i in done["plan"]["items"]] == ["ready", "ready"]
 
-    shipped = client.post(f"/videos/p1/plans/{plan_id}/approve", json={"items": ["i1"]}).json()
+    shipped = add(client, plan_id, {"items": ["i1"]})
 
     assert [a["item_id"] for a in shipped["approved"]] == ["i1"]
     assert [i["status"] for i in shipped["plan"]["items"]] == ["approved", "ready"]   # the second is held
@@ -1475,7 +1507,7 @@ def test_a_variant_is_the_same_clip_with_the_plan_as_a_draft(client, project, mo
     client.put("/videos/p1/speakers/A", json={"name": "Presenter", "voice_id": "nPczCjzI2devNBz1zQrb"})
     client.put("/videos/p1/settings", json={"effort": "xhigh"})
     done = voiced(client, monkeypatch)
-    client.post(f"/videos/p1/plans/{done['plan']['plan_id']}/approve", json={})
+    add(client, done['plan']['plan_id'], {})
 
     variant = client.post("/videos/p1/variants").json()
 
@@ -1983,7 +2015,7 @@ def test_an_edit_says_who_it_is_for_and_whose_voice_says_it(client, project, mon
     client.post("/videos/p1/speakers/detect")
     done = voiced(client, monkeypatch, voice_id="")        # line 1 is A's; the mock cannot clone, so the default speaks
     plan_id = done["plan"]["plan_id"]
-    shipped = client.post(f"/videos/p1/plans/{plan_id}/approve", json={}).json()
+    shipped = add(client, plan_id, {})
     assert [(a["speaker"], a["voice_profile_id"]) for a in shipped["approved"]] == [("A", "mock")]
     [edit] = client.get("/videos/p1").json()["edits"]
     assert (edit["speaker"], edit["voice_profile_id"]) == ("A", "mock")
@@ -2185,7 +2217,7 @@ def test_the_receipt_sums_up_the_project_for_the_export_page(client, project, mo
     before = client.get("/videos/p1/receipt").json()
     assert (before["turns"], before["takes"], before["drafts"], before["render"]) == (1, 1, 1, None)
     assert before["spent_usd"] == pytest.approx(client.get("/videos/p1/usage").json()["spent_usd"])
-    client.post(f"/videos/p1/plans/{done['plan']['plan_id']}/approve", json={})
+    add(client, done['plan']['plan_id'], {})
     receipt = client.get("/videos/p1/receipt").json()
     assert (receipt["turns"], receipt["takes"], receipt["drafts"]) == (1, 1, 0)
     assert receipt["changes"] == [{"edit_id": "e1", "start": 0.0, "text": "Get 30% off today only.", "kind": "changed", "note": "in Test tone's voice"}]
@@ -2198,7 +2230,7 @@ def test_the_receipt_sums_up_the_project_for_the_export_page(client, project, mo
     again = client.get("/videos/p1/receipt").json()
     assert (again["takes"], again["drafts"], again["render"]["sha256"]) == (1, 1, render["sha256"])
     client.post("/videos/p1/edits/e1/revert")
-    client.post(f"/videos/p1/plans/{removed['plan']['plan_id']}/approve", json={})
+    add(client, removed['plan']['plan_id'], {})
     assert client.get("/videos/p1/receipt").json()["changes"] == [
         {"edit_id": "e2", "start": 1.3, "text": "", "kind": "removed", "note": "room tone in its place"}]
     assert client.get("/videos/p9/receipt").status_code == 404

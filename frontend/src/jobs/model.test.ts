@@ -67,6 +67,14 @@ describe('row chip: exactly one state per line', () => {
     expect(rowChip({ editId: 'e2', jobs: [], video: { candidate_ids: [], edit_ids: [], item_ids: [] } }).label).toBe('Ready to hear')
     expect(rowChip({ editId: 'e2', jobs: [], video: null, videoUnknown: true }).label).toBe('In the video')
   })
+  it('a line just added is Rendering while its Add job renders, even before any render is known (run 4, item 3)', () => {
+    const inc = { candidate_ids: [], edit_ids: ['e2'], item_ids: [] }
+    const add = job({ kind: 'render_preview', turn_id: null, status: 'running', step_label: 'Rendering preview v2', line_ids: ['e2'], detail: { mode: 'final', added: true, version: 2, includes: inc } })
+    expect(rowChip({ editId: 'e2', jobs: [add], video: null, videoUnknown: true, rendering: inc }).state).toBe('rendering')
+    expect(rowChip({ editId: 'e2', jobs: [add], video: { candidate_ids: [], edit_ids: [], item_ids: [] }, rendering: inc }).label).toBe('Rendering')
+    expect(rowChip({ editId: 'e2', jobs: [{ ...add, status: 'done' }], video: inc }).label).toBe('In the video')
+    expect(stripState({ jobs: [add], turn: null, playing: null, stale: false }).text).toBe('Rendering preview v2 · about 10 s')
+  })
   it('a line nobody touched is Original', () => {
     expect(rowChip({ jobs: [] }).label).toBe('Original')
   })

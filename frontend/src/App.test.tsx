@@ -694,6 +694,55 @@ describe('App the agent (Phase 13, 20c)', () => {
     await waitFor(() => expect(screen.getAllByText('Ready to hear')).toHaveLength(2))
   })
 
+  it('Add answers with its render as a job: the row says Rendering, then In the video when the job is done (run 4, item 3)', async () => {
+    const calls = agent(PLAN, (text) => (text === 'go' ? PLAN_DONE : PLAN))
+    const base = fetch as unknown as (url: string, init?: RequestInit) => Promise<Response>
+    const includes = { candidate_ids: [BRIAN_TAKE.candidate_id], edit_ids: ['e1'], item_ids: [] }
+    const job = { job_id: 'J9', video_id: 'p1', turn_id: null, kind: 'render_preview', status: 'running', step_label: 'Rendering preview v1',
+      progress: 0.1, line_ids: ['e1'], created_at: '2026-10-24T10:00:00Z', started_at: '2026-10-24T10:00:00Z', finished_at: null,
+      eta_s: null, error_code: null, error_text: null, cost_usd: null, detail: { mode: 'final', added: true, version: 1, includes } }
+    let added = false
+    let rendered = false
+    const record = { render_id: 'r1', version: 1, edit_set_hash: 'h1', created_at: '2026-10-24T10:00:05Z', mode: 'final', render: RENDER,
+      manifest: { segments: SEGMENTS, render: RENDER, version: 1, edit_hash: 'h1', includes }, includes }
+    const f = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.endsWith('/approve')) {
+        calls.push({ url, body: JSON.parse(String(init?.body)) })
+        added = true
+        return ok({ approved: [{ item_id: 'i1', edit_id: 'e1', overridden: false }], skipped: [], export: null, render_job: job, plan: PLAN_APPROVED })
+      }
+      if (url.includes('/jobs?active=1') || url.endsWith('/jobs')) {
+        if (!added) return ok({ jobs: [], turn: null })
+        return ok({ jobs: [rendered ? { ...job, status: 'done', step_label: 'v1 ready', progress: 1, finished_at: '2026-10-24T10:00:05Z' } : job], turn: null })
+      }
+      if (url.includes('/renders/latest')) {
+        const final = url.includes('mode=final')
+        return ok({ mode: final ? 'final' : 'proposals', current_hash: 'h1', latest: final && rendered ? record : null, in_progress: null, stale: false })
+      }
+      if (url.endsWith('/export')) throw new Error('Add never renders through /export')
+      return base(url, init)
+    })
+    vi.stubGlobal('fetch', f)
+    const user = userEvent.setup()
+    render(<App />)
+    await reachGoal(user)
+    await user.type(screen.getByRole('textbox', TEXTBOX), 'make it 30% off{Enter}')
+    await screen.findByText('I read 1 line. One change does it.')
+    await user.type(screen.getByRole('textbox', TEXTBOX), 'go{Enter}')
+    await waitFor(() => expect(screen.getByText('Ready to hear')).toBeInTheDocument())
+
+    await user.click(within(screen.getByRole('group', { name: 'Proposal at 0:00' })).getByRole('button', { name: 'Add it' }))
+    await waitFor(() => expect(calls.find((c) => c.url.endsWith('/approve'))?.body).toEqual({ items: ['i1'] }))
+    // The answer came back without the render: the line is added and its row says the render is on its way.
+    const chip = () => screen.getAllByTestId('row-chip').map((c) => c.getAttribute('data-status'))
+    await waitFor(() => expect(chip()).toContain('rendering'))
+    expect(screen.getByTestId('status-strip')).toHaveTextContent('Rendering preview v1')
+
+    rendered = true
+    await waitFor(() => expect(screen.getByText('✓ In the video')).toBeInTheDocument(), { timeout: 5000 })
+    expect(f.mock.calls.some(([u]) => String(u).endsWith('/export'))).toBe(false)
+  })
+
   it('shows what a line needs you for, in the card and on the line; the answer is the next turn', async () => {
     const needs = { ...PLAN, status: 'done', items: [{ ...PLAN_ITEM, status: 'needs-you', question: {
       type: 'question', question: "The new line runs 1.1 s long and there's no pause after it to run into.", text: 'x', mix: 'replace',

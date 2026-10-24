@@ -105,9 +105,10 @@ export function rowChip({ item, editId, candidateId, removed, jobs, video, video
   }
   if (editId) {
     const ids = [editId, candidateId]
-    const inVideo = carries(video, ids) || (!video && videoUnknown)
-    if (inVideo) return chip(removed ? 'removed' : 'in-video')
+    if (carries(video, ids)) return chip(removed ? 'removed' : 'in-video')
+    // Run 4, item 3: a line just added renders as a job; while it does, the row says so, even before any render is known.
     if (carries(rendering, ids)) return chip('rendering')
+    if (!video && videoUnknown) return chip(removed ? 'removed' : 'in-video')
     return chip('ready')
   }
   return chip('original')
