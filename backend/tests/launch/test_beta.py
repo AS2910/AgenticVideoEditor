@@ -1,6 +1,7 @@
 """Beta kit: the beta invite from the waitlist (and its preview); the cohort:
 its flags on, $10 of credits once per person, joined by an admin or at the
-first sign-in of an address invited to the beta."""
+first sign-in of an address invited to the beta; the welcome checklist; the
+three questions, once, after a first export; the admin's Beta view."""
 from __future__ import annotations
 
 from dataclasses import replace
@@ -204,3 +205,29 @@ def test_opening_the_export_page_counts_as_an_export_for_the_questions(world):
     assert not beta.survey_due(database, main.flags, owner, owner)
     main.repo.set_meta(f"onboarding:{owner}", '{"checklist": ["export"]}')
     assert beta.survey_due(database, main.flags, owner, owner)
+
+
+def test_the_admin_beta_view_has_each_person_with_activity_spend_feedback_and_errors(world, monkeypatch):
+    from app import beta_feedback_api
+    monkeypatch.setattr(beta_feedback_api, "sends", beta_feedback_api.RateLimit(10, 3600.0))
+    ada, sam = world["ada"], world["sam"]
+    assert sam.get("/admin/beta").status_code == 404
+    main.email_mod.remember_address(database, "google:sam", "sam@example.com")
+    with database.tx() as c:
+        c.execute("DELETE FROM analytics_events WHERE owner = 'google:sam'")
+        c.execute("DELETE FROM error_reports WHERE owner = 'google:sam'")
+        c.execute("INSERT INTO error_reports (owner, source, message, at) VALUES ('google:sam', 'client', 'Boom', ?)",
+                  (main.now_iso(),))
+    assert ada.post("/admin/beta/join", json={"who": "google:sam", "email": False}, headers=H).json()["emailed"] is False
+    _exported("google:sam")
+    assert sam.post("/beta-feedback", data={"message": "Lovely, but slow."}, headers=H).status_code == 201
+    sam.post("/me/beta-survey", json={"useful": "very", "would_pay": "no"}, headers=H)
+    view = ada.get("/admin/beta").json()
+    person = next(p for p in view["people"] if p["owner"] == "google:sam")
+    assert person["emails"] == ["sam@example.com"] and person["exports"] == 1 and person["credits_given"] == 10.0
+    assert person["spend_usd"] == 0.0 and person["last_active"]
+    assert person["feedback"] == {"messages": 1, "latest": "Lovely, but slow."}
+    assert person["errors"] == {"count": 1, "latest": "Boom"}
+    assert person["survey"]["useful"] == "very" and person["survey"]["would_pay"] == "no"
+    assert view["survey"]["answered"] == 1 and view["survey"]["useful"]["very"] == 1 and view["survey"]["would_pay"]["no"] == 1
+    assert view["credits_each"] == 10.0

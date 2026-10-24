@@ -626,6 +626,15 @@ export interface BetaQuestion { id: 'useful' | 'almost_stopped' | 'would_pay'; t
 export const getBetaSurvey = () => get<{ due: boolean; questions: BetaQuestion[] }>('/me/beta-survey')
 export const markBetaSurveyShown = (videoId: string | null) => post<{ due: boolean }>('/me/beta-survey/shown', { video_id: videoId })
 export const answerBetaSurvey = (a: { useful: string; almost_stopped: string; would_pay: string; video_id: string | null }) => post<{ said: string }>('/me/beta-survey', a)
+export interface BetaPerson {
+  owner: string; emails: string[]; since: string; last_active: string | null; exports: number; spend_usd: number; credits_given: number
+  feedback: { messages: number; latest: string | null }
+  survey: { useful: string | null; almost_stopped: string | null; would_pay: string | null; shown_at: string; answered_at: string | null } | null
+  errors: { count: number; latest: string | null }
+}
+export interface BetaView { people: BetaPerson[]; survey: { shown: number; answered: number; useful: Record<string, number>; would_pay: Record<string, number> }; credits_each: number }
+export const getAdminBeta = () => get<BetaView>('/admin/beta')
+export const joinBeta = (who: string, email = true) => post<{ owner: string; joined: boolean; granted: boolean; credits: number; emailed: boolean }>('/admin/beta/join', { who, email })
 export const getMyFlags = async () => (await get<{ flags: string[] }>('/me/flags')).flags
 /** Everything of yours: every project, take and voice, and the consent records. */
 export async function deleteAccount(): Promise<void> {

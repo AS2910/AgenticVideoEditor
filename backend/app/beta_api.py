@@ -7,6 +7,8 @@ The signed-in person (any role; asked once, after their first export):
     POST /me/beta-survey            {useful, almost_stopped?, would_pay, video_id?}: 201, once (409 after)
 
 Admins only (AVE_ADMIN_OWNERS; everyone else gets 404):
+    GET  /admin/beta          the Beta view: each person in the cohort (last active, exports,
+                              spend, credits, feedback and answers, errors) and the answers' counts
     POST /admin/beta/join     {who, email?}: `who` is an owner id or an address; into the
                               cohort (app.beta.join: its flags on, $10 of credits once),
                               audited; with email (the default) the beta invite goes to
@@ -43,6 +45,12 @@ def _who(text: str) -> str:
                                 else "More than one person has that address. Use their owner id.")
         return owners[0]
     return _known(text)
+
+
+@router.get("/admin/beta")
+def beta_view(who: str = Depends(_admin_writer)) -> dict:
+    api = _api()
+    return beta.overview(api.database, api.ledger)
 
 
 class Join(BaseModel):

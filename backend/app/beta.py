@@ -5,6 +5,7 @@
     in_cohort(flags, owner) -> bool / cohort(db) -> [{owner, since}]
     claim(owner) -> bool                    at sign-in: an address invited to the beta joins
     survey_due(db, flags, person, owner) / survey_shown(...) / survey_answer(...)    the three questions
+    overview(db, ledger) -> dict            the admin's Beta view: each person, and the answers
     pending_invite(db, email) / mark_invited(db, email)    a waitlist address invited to the beta
     invited_addresses(db) -> set            every address invited to the beta
     invite_email(api, to, name, existing)   the beta invite (templates `beta_invite`); never raises
@@ -197,3 +198,44 @@ def survey_answer(db, person: str, workspace_id: str | None, useful: str, almost
         raise SurveyDone("You answered these already. Thank you.")
     return survey_row(db, person) or {}
 
+
+# ── the admin's Beta view ─────────────────────────────────────────────────────
+
+def _one(c, sql: str, args: tuple):
+    return c.execute(sql, args).fetchone()
+
+
+def overview(db, ledger) -> dict:
+    """Each person in the cohort: when they joined, last active (their latest event,
+    message or error report), exports, spend (the ledger, all time), credits given,
+    feedback (messages and the three answers) and error reports. Newest joiner first."""
+    from app import admin
+    people = []
+    for row in cohort(db):
+        o = row["owner"]
+        with db.tx() as c:
+            ev = _one(c, "SELECT MAX(at) AS last, SUM(CASE WHEN name = 'video_exported' THEN 1 ELSE 0 END) AS exports "
+                         "FROM analytics_events WHERE owner = ?", (o,))
+            fb = _one(c, "SELECT COUNT(*) AS n, MAX(created_at) AS last FROM beta_feedback WHERE owner = ?", (o,))
+            latest = _one(c, "SELECT message FROM beta_feedback WHERE owner = ? ORDER BY id DESC LIMIT 1", (o,))
+            er = _one(c, "SELECT COUNT(*) AS n, MAX(at) AS last FROM error_reports WHERE owner = ?", (o,))
+            last_error = _one(c, "SELECT message FROM error_reports WHERE owner = ? ORDER BY id DESC LIMIT 1", (o,))
+            sv = _one(c, "SELECT useful, almost_stopped, would_pay, shown_at, answered_at FROM beta_survey WHERE owner = ?", (o,))
+            given = _one(c, "SELECT 1 FROM meta WHERE key = ?", (f"beta_credits:{o}",))
+        last = max((t for t in (ev["last"], fb["last"], er["last"]) if t), default=None)
+        people.append({
+            "owner": o, "emails": admin.emails_of(db, o), "since": row["since"], "last_active": last,
+            "exports": int(ev["exports"] or 0), "spend_usd": round(ledger.spent_usd_by_owner(o), 4),
+            "credits_given": BETA_CREDITS if given else 0.0,
+            "feedback": {"messages": int(fb["n"]), "latest": latest["message"][:200] if latest else None},
+            "survey": dict(sv) if sv else None,
+            "errors": {"count": int(er["n"]), "latest": last_error["message"][:200] if last_error else None},
+        })
+    answered = [p["survey"] for p in people if p["survey"] and p["survey"]["answered_at"]]
+    return {
+        "people": people,
+        "survey": {"shown": sum(1 for p in people if p["survey"]), "answered": len(answered),
+                   "useful": {k: sum(1 for a in answered if a["useful"] == k) for k in USEFUL},
+                   "would_pay": {k: sum(1 for a in answered if a["would_pay"] == k) for k in WOULD_PAY}},
+        "credits_each": BETA_CREDITS,
+    }
