@@ -75,7 +75,7 @@ SERVER_NAMES = F7_VERBS | frozenset({
     # G3: billing (fake providers): a plan bought, a top-up, paid work paused for credits.
     "billing.plan_changed", "billing.topped_up", "billing.credits_out", "billing.refunded",
     # G6: trust and safety.
-    "consent.liveness_checked", "consent.withdrawn", "clone.public_figure_refused", "abuse.reported",
+    "consent.liveness_checked", "consent.reviewed", "consent.withdrawn", "clone.public_figure_refused", "abuse.reported",
     "data.export_requested", "data.export_ready", "data.deletion_requested", "export.provenance_stamped",
 })
 # What the browser may post (and nothing else).

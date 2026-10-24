@@ -2,6 +2,7 @@ import type { ReactNode } from 'react'
 import { AuditSection } from './AuditSection'
 import { AdminWaitlist } from '../AdminWaitlist'
 import { BetaFeedbackSection } from './BetaFeedbackSection'
+import { ConsentReviewsSection } from './ConsentReviewsSection'
 import { card } from './ui'
 
 /** The admin page's mount point (rehearsal item 10). Each later admin tool is one
@@ -17,6 +18,7 @@ export const ADMIN_SECTIONS: AdminSection[] = [
   { id: 'waitlist', label: 'Waitlist', render: (c) => <AdminWaitlist card={c} /> },
   { id: 'emails', label: 'Emails', href: '#admin/emails' },
   { id: 'beta', label: 'Beta feedback', render: (c) => <BetaFeedbackSection card={c} /> },
+  { id: 'consent', label: 'Consent reviews', render: (c) => <ConsentReviewsSection card={c} /> },
   { id: 'audit', label: 'Audit trail', render: (c) => <AuditSection card={c} /> },
 ]
 

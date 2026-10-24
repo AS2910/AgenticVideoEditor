@@ -16,16 +16,24 @@ were here. Every change is written to the audit trail (`app.admin.audit`).
     POST /admin/users/{owner}/unsuspend           {reason?}: everything back
     POST /admin/shares/{share_id}/revoke          {reason}: take a share link down (abuse)
     GET  /admin/audit?limit=&owner=               the audit trail, newest first
+    GET  /admin/consent-reviews?status=           run 4 item 2: consent checks waiting for a person
+                                                  (status review, or decided: passed | failed), with
+                                                  the phrase, what was heard and the scores
+    GET  /admin/consent-reviews/{id}/recording    the consent recording
+    GET  /admin/consent-reviews/{id}/source       the speaker's speech in the video it was compared with
+    POST /admin/consent-reviews/{id}              {decision: approve | reject, reason}: passed or did not
+                                                  pass, audited, and the owner is told
 """
 from __future__ import annotations
 
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from app import admin, analytics, billing
-from app.timefmt import iso
+from app.timefmt import iso, now_iso
 
 router = APIRouter(tags=["admin"])
 
@@ -251,3 +259,98 @@ def revoke_share(share_id: str, req: ReasonRequest, who: str = Depends(_admin)) 
 @router.get("/admin/audit")
 def get_audit(limit: int = 50, owner: str | None = None, who: str = Depends(_admin)) -> dict:
     return {"entries": admin.recent_audit(_api().database, limit, target=owner)}
+
+
+# ── consent reviews (run 4 item 2) ──────────────────────────────────────────
+
+REVIEW_FIELDS = ("id", "owner", "video_id", "speaker", "sentence", "status", "reason", "heard", "wer", "similarity", "seconds",
+                 "rule", "asr_model", "speaker_model", "pass_at", "review_from", "created_at", "checked_at",
+                 "reviewed_by", "review_reason", "reviewed_at")
+APPROVED = "A person listened to the recording and approved it."
+REJECTED = "A person listened to the recording and could not confirm it is the speaker in the video."
+
+
+def _review_row(r) -> dict:
+    return {**{k: r[k] for k in REVIEW_FIELDS}, "has_recording": bool(r["audio_sha"])}
+
+
+def _attempt(attempt_id: str):
+    with _api().database.tx() as c:
+        row = c.execute("SELECT * FROM liveness_attempts WHERE id = ? AND method = 'verified'", (attempt_id,)).fetchone()
+    if row is None:
+        raise HTTPException(status_code=404, detail="No consent check with that id.")
+    return row
+
+
+@router.get("/admin/consent-reviews")
+def consent_reviews(status: str = "review", limit: int = 50, who: str = Depends(_admin)) -> dict:
+    """The queue (status `review`, oldest first, so the longest wait is on top), or the decided ones, newest first."""
+    limit = max(1, min(int(limit), 200))
+    with _api().database.tx() as c:
+        if status == "review":
+            rows = c.execute("SELECT * FROM liveness_attempts WHERE method = 'verified' AND status = 'review' "
+                             "ORDER BY created_at LIMIT ?", (limit,)).fetchall()
+        else:
+            rows = c.execute("SELECT * FROM liveness_attempts WHERE method = 'verified' AND reviewed_at IS NOT NULL "
+                             "ORDER BY reviewed_at DESC LIMIT ?", (limit,)).fetchall()
+        waiting = c.execute("SELECT COUNT(*) FROM liveness_attempts WHERE method = 'verified' AND status = 'review'").fetchone()[0]
+    return {"items": [_review_row(r) for r in rows], "waiting": int(waiting)}
+
+
+def _audio(path, name: str) -> FileResponse:
+    kind = {"wav": "audio/wav", "webm": "audio/webm", "ogg": "audio/ogg", "mp3": "audio/mpeg", "m4a": "audio/mp4",
+            "mp4": "audio/mp4"}.get(path.suffix.lstrip("."), "application/octet-stream")
+    return FileResponse(path, media_type=kind, headers={"Cache-Control": "private, no-store",
+                                                        "Content-Disposition": f"inline; filename={name}{path.suffix}"})
+
+
+@router.get("/admin/consent-reviews/{attempt_id}/recording")
+def consent_recording(attempt_id: str, who: str = Depends(_admin)) -> FileResponse:
+    row = _attempt(attempt_id)
+    path = _api().artifacts.find(f"liveness-{row['owner']}", row["audio_sha"]) if row["audio_sha"] else None
+    if path is None:
+        raise HTTPException(status_code=404, detail="That recording is not kept.")
+    return _audio(path, f"consent-{attempt_id}")
+
+
+@router.get("/admin/consent-reviews/{attempt_id}/source")
+def consent_source(attempt_id: str, who: str = Depends(_admin)) -> FileResponse:
+    api = _api()
+    row = _attempt(attempt_id)
+    record = api.repo.get(row["video_id"])
+    path = api.consent_reference(row["video_id"], record, row["speaker"]) if record is not None else None
+    if path is None:
+        raise HTTPException(status_code=404, detail="There is too little of the speaker in that video to play.")
+    return _audio(path, f"speaker-{attempt_id}")
+
+
+class ConsentDecision(BaseModel):
+    decision: str
+    reason: str = Field(default="", max_length=500)
+
+
+@router.post("/admin/consent-reviews/{attempt_id}")
+def decide_consent(attempt_id: str, req: ConsentDecision, who: str = Depends(_admin)) -> dict:
+    api = _api()
+    if req.decision not in ("approve", "reject"):
+        raise HTTPException(status_code=422, detail="Approve or reject.")
+    reason = _need_reason(req.reason)
+    row = _attempt(attempt_id)
+    if row["status"] != "review":
+        raise HTTPException(status_code=409, detail="That check is not waiting for review any more.")
+    approve = req.decision == "approve"
+    from app.safety import consent as consent_mod
+    with api.database.tx() as c:
+        c.execute("UPDATE liveness_attempts SET status = ?, reason = ?, tip = ?, reviewed_by = ?, review_reason = ?, reviewed_at = ? "
+                  "WHERE id = ? AND status = 'review'",
+                  ("passed" if approve else "failed", APPROVED if approve else REJECTED, "" if approve else consent_mod.TIP_VOICE,
+                   who, reason, now_iso(), attempt_id))
+        admin.audit_in(c, who, "consent_approve" if approve else "consent_reject", row["owner"], reason,
+                       {"attempt_id": attempt_id, "video_id": row["video_id"], "similarity": row["similarity"], "wer": row["wer"],
+                        "rule": row["rule"]})
+        api.inbox.add_in(c, row["owner"], "consent_decided",
+                         "Your consent recording was approved." if approve else "Your consent recording was not approved.",
+                         body=APPROVED if approve else REJECTED, link=f"#v/{row['video_id']}", video_id=row["video_id"])
+        analytics.track_in(c, "consent.reviewed", who, {"approved": approve})
+        row = c.execute("SELECT * FROM liveness_attempts WHERE id = ?", (attempt_id,)).fetchone()
+    return _review_row(row)

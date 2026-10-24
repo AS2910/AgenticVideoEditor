@@ -607,6 +607,17 @@ export interface BetaFeedbackItem { id: number; owner: string; message: string; 
 export const listBetaFeedback = (status?: BetaStatus) => get<{ items: BetaFeedbackItem[]; counts: Record<BetaStatus, number> }>(`/admin/beta-feedback${status ? `?status=${status}` : ''}`)
 export const setBetaFeedbackStatus = (id: number, status: BetaStatus) => put<BetaFeedbackItem>(`/admin/beta-feedback/${id}`, { status })
 export const betaScreenshotUrl = (id: number) => `${BASE}/admin/beta-feedback/${id}/screenshot`
+/** Run 4 item 2: consent checks waiting for a person (admins). */
+export interface ConsentReview {
+  id: string; owner: string; video_id: string; speaker: string | null; sentence: string; status: 'waiting' | 'passed' | 'review' | 'failed' | 'withdrawn' | 'expired'
+  reason: string; heard: string | null; wer: number | null; similarity: number | null; seconds: number | null; rule: string
+  asr_model: string; speaker_model: string; pass_at: number | null; review_from: number | null; created_at: string; checked_at: string | null
+  reviewed_by: string | null; review_reason: string; reviewed_at: string | null; has_recording: boolean
+}
+export const listConsentReviews = (status: 'review' | 'decided' = 'review') => get<{ items: ConsentReview[]; waiting: number }>(`/admin/consent-reviews?status=${status}`)
+export const decideConsentReview = (id: string, decision: 'approve' | 'reject', reason: string) => post<ConsentReview>(`/admin/consent-reviews/${id}`, { decision, reason })
+export const consentRecordingUrl = (id: string) => `${BASE}/admin/consent-reviews/${id}/recording`
+export const consentSourceUrl = (id: string) => `${BASE}/admin/consent-reviews/${id}/source`
 export const getAdminAudit = async (limit = 50) => (await get<{ entries: AdminAuditEntry[] }>(`/admin/audit?limit=${limit}`)).entries
 export const getMyFlags = async () => (await get<{ flags: string[] }>('/me/flags')).flags
 /** Everything of yours: every project, take and voice, and the consent records. */
