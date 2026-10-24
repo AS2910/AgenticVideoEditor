@@ -28,7 +28,17 @@ def select_transcriber(settings: Settings, chaos: Chaos | None = None):
         from app.adapters import openai_whisper
         post = chaos.openai_post(openai_whisper._post) if chaos else openai_whisper._post
         return WhisperTranscriptionAdapter(settings.openai_api_key, post=post), f"openai:{WHISPER_MODEL}"
-    return MockTranscriptionAdapter(), "mock"
+    return MockTranscriptionAdapter(_known_transcripts()), "mock"
+
+
+def _known_transcripts() -> dict | None:
+    """AVE_KNOWN_TRANSCRIPTS: a JSON file of clips whose words are known (the
+    cost evals), read by the mock transcriber. Unset in every real deployment."""
+    import json
+    import os
+    from pathlib import Path
+    path = (os.environ.get("AVE_KNOWN_TRANSCRIPTS") or "").strip()
+    return json.loads(Path(path).read_text()) if path else None
 
 
 def select_voice(settings: Settings, store: ArtifactStore, budget: VoiceBudget, chaos: Chaos | None = None):

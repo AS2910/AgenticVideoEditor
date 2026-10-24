@@ -43,6 +43,13 @@ def _span(plan: EditPlan) -> float:
 
 
 class MockTranscriptionAdapter:
+    """The canned words, or the words a clip is known to say: `known` maps a
+    media sha256 to its words and statements (the cost evals' clips, made with
+    known words: backend/evals/clips/transcripts.json)."""
+
+    def __init__(self, known: dict | None = None) -> None:
+        self._known = known or {}
+
     def diarize(self, source: Source) -> list[tuple[str, float, float]]:
         """One speaker throughout — enough to exercise speaker features offline."""
         return [("A", 0.0, source.duration)]
@@ -52,6 +59,10 @@ class MockTranscriptionAdapter:
         return [w.text for w in self.transcribe(source).words]
 
     def transcribe(self, source: Source) -> Transcript:
+        made = self._known.get(getattr(source.media, "sha256", None))
+        if made is not None:
+            return Transcript(words=tuple(Word(t, s, e, who) for t, s, e, who in made["words"]),
+                              statements=tuple(Statement(t, s, e, who) for t, s, e, who in made["statements"]))
         return Transcript(
             words=_CANNED_WORDS, statements=(Statement("Get 20% off today only.", 0.0, 2.3),),
         )
