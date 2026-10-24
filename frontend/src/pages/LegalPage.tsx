@@ -7,12 +7,13 @@ import type { Block, LegalText, Vendor } from './legal/types'
 import { TERMS } from './legal/terms'
 import { PRIVACY } from './legal/privacy'
 import { ACCEPTABLE_USE } from './legal/acceptableUse'
+import { SUBPROCESSORS } from './legal/subprocessors'
 
-/** G6: Terms, Privacy and Acceptable Use. Drafts for a lawyer to review (SETUP_NEEDED.md), clearly
+/** G6: Terms, Privacy, Acceptable Use and the Sub-processors list. Drafts for a lawyer to review (SETUP_NEEDED.md), clearly
  *  marked as such; the text lives in `legal/`. Public: no account needed to read them. */
-export type LegalDoc = 'terms' | 'privacy' | 'acceptable-use'
+export type LegalDoc = 'terms' | 'privacy' | 'acceptable-use' | 'subprocessors'
 
-const DOCS: Record<LegalDoc, LegalText> = { terms: TERMS, privacy: PRIVACY, 'acceptable-use': ACCEPTABLE_USE }
+const DOCS: Record<LegalDoc, LegalText> = { terms: TERMS, privacy: PRIVACY, 'acceptable-use': ACCEPTABLE_USE, subprocessors: SUBPROCESSORS }
 
 function Blocks({ blocks }: { blocks: Block[] }) {
   return blocks.map((b, i) => {
@@ -71,7 +72,7 @@ export function LegalPage({ doc }: { doc: LegalDoc }) {
         </div>
         <nav aria-label="On this page" className="flex flex-col gap-2 rounded-lg border border-line2 bg-card px-4 py-3">
           <h2 className="tag m-0">On this page</h2>
-          <ol className="m-0 flex flex-col gap-1 pl-5 text-sm">
+          <ol className="m-0 flex list-decimal flex-col gap-1 pl-5 text-sm">
             {d.sections.map((s, i) => (
               <li key={s.h}><button type="button" className="text-left underline underline-offset-2" onClick={() => jump(`${doc}-${i}`)}>{s.h}</button></li>
             ))}
@@ -84,7 +85,7 @@ export function LegalPage({ doc }: { doc: LegalDoc }) {
           </section>
         ))}
         <nav aria-label="Policies" className="flex flex-wrap gap-4 border-t border-line pt-4 text-sm">
-          <a href="#terms">Terms of service</a><a href="#privacy">Privacy policy</a><a href="#acceptable-use">Acceptable use policy</a>
+          <a href="#terms">Terms of service</a><a href="#privacy">Privacy policy</a><a href="#acceptable-use">Acceptable use policy</a><a href="#subprocessors">Sub-processors</a>
         </nav>
         {doc === 'acceptable-use' && <AbuseReport />}
       </main>

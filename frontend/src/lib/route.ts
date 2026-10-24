@@ -29,7 +29,7 @@ export type Route =
   | { page: 'admin' }
   // Launch item 9: the email preview (admins only).
   | { page: 'adminEmails' }
-  | { page: 'legal'; doc: 'terms' | 'privacy' | 'acceptable-use' }
+  | { page: 'legal'; doc: 'terms' | 'privacy' | 'acceptable-use' | 'subprocessors' }
   | { page: 'invite'; token: string }
   // Launch item 5: a password reset link, and the sign-in page (with an error a link landed on).
   | { page: 'reset'; token: string }
@@ -63,7 +63,7 @@ export function parseRoute(hash: string): Route {
   if (h === 'notifications') return { page: 'notifications' }
   if (h === 'admin') return { page: 'admin' }
   if (h === 'admin/emails') return { page: 'adminEmails' }
-  if (h === 'terms' || h === 'privacy' || h === 'acceptable-use') return { page: 'legal', doc: h }
+  if (h === 'terms' || h === 'privacy' || h === 'acceptable-use' || h === 'subprocessors') return { page: 'legal', doc: h }
   const help = /^help(?:\/([A-Za-z0-9_-]+))?$/.exec(h)
   if (help) return { page: 'help', slug: help[1] ?? null }
   if (h === 'voices' || h === 'settings' || h === 'billing' || h === 'bin' || h === 'templates') return { page: h }

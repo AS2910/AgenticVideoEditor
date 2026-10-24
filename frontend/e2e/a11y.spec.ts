@@ -165,6 +165,7 @@ const SCREENS: Screen[] = [
   { name: 'terms', who: 'out', hash: '/#terms', ready: heading('Terms of service'), targets: true },
   { name: 'privacy', who: 'out', hash: '/#privacy', ready: heading('Privacy policy'), targets: true },
   { name: 'acceptable-use', who: 'out', hash: '/#acceptable-use', ready: visible('abuse-form'), targets: true },
+  { name: 'subprocessors', who: 'out', hash: '/#subprocessors', ready: visible('vendor-list'), targets: true },
   { name: 'share', who: 'out', hash: '/?share=1#s/sh1.sig', ready: visible('share-file'), targets: true },
   { name: 'review', who: 'out', hash: '/?share=2#s/rv1.sig', ready: async (p) => { await expect(p.getByRole('heading', { level: 1 })).toBeVisible() }, targets: true },
   // The owner.
