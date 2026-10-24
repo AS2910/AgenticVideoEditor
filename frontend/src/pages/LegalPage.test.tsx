@@ -5,7 +5,7 @@ import { LegalPage, type LegalDoc } from './LegalPage'
 import { parseRoute, hrefFor } from '../lib/route'
 
 const DOCS: [LegalDoc, string][] = [
-  ['terms', 'Terms of service'], ['privacy', 'Privacy policy'], ['subprocessors', 'Sub-processors'],
+  ['terms', 'Terms of service'], ['privacy', 'Privacy policy'], ['subprocessors', 'Sub-processors'], ['acceptable-use', 'Acceptable use policy'],
 ]
 
 describe('the policy drafts (G6, v2)', () => {
