@@ -272,12 +272,17 @@ def _test_banner(d: dict) -> str | None:
 
 
 def _receipt(d: dict) -> _Mail:
-    return _Mail(f"Your Voltage receipt {d['number']}", "Thanks, your top-up is in",
-                 [f"We added {d['credits']} credits to your account. Here is your receipt."],
+    if d.get("plan"):          # run 4 item 4b: a plan bought, not a top-up
+        heading, first = "Thanks, your plan is on", f"You are on the {d['plan']} plan. Here is your receipt."
+        why = "You got this because you paid for a Voltage plan."
+    else:
+        heading, first = "Thanks, your top-up is in", f"We added {d['credits']} credits to your account. Here is your receipt."
+        why = "You got this because you paid for a Voltage top-up."
+    return _Mail(f"Your Voltage receipt {d['number']}", heading, [first],
                  rows=[("Receipt", d["number"]), ("Paid on", d["issued"]), *_money_rows(d)],
                  button=("See your billing", d.get("link") or "#billing"),
-                 after=["Your tax invoice is on the Billing page."],
-                 reason="You got this because you paid for a Voltage top-up.", banner=_test_banner(d))
+                 after=["Your tax invoice comes in its own email, with a PDF, and is on the Billing page."],
+                 reason=why, banner=_test_banner(d))
 
 
 def _invoice(d: dict) -> _Mail:
@@ -286,9 +291,11 @@ def _invoice(d: dict) -> _Mail:
             ("From", s.get("name") or "Voltage (seller details not set)"), ("Seller GSTIN", s.get("gstin") or "not set yet"),
             ("Seller state", s.get("state_name") or s.get("state") or ""),
             ("To", d["buyer"]), ("Buyer GSTIN", d.get("buyer_gstin") or "No GSTIN"), ("Place of supply", d["place"]),
-            ("SAC", d.get("sac") or "998314"), *_money_rows(d)]
+            ("SAC", d.get("sac") or "998314")]
+    money = _money_rows(d)
+    rows += [money[0], ("Taxable value", money[0][1]), *money[1:]]
     return _Mail(f"Your Voltage invoice {d['number']}", "Your tax invoice",
-                 [f"Here is the tax invoice for {d['description']}. A printable copy is on the Billing page."],
+                 [f"Here is the tax invoice for {d['description']}. The PDF is attached, and a printable copy is on the Billing page."],
                  rows=rows, button=("See the invoice", d.get("link") or "#billing"),
                  reason="You got this because you paid for Voltage.", banner=_test_banner(d))
 
@@ -386,10 +393,11 @@ def render(kind: str, *, public_url: str | None = None, **data) -> Rendered:
 
 
 def email(kind: str, to: str, *, public_url: str | None = None, owner: str | None = None,
-          workspace_id: str | None = None, sent_as: str | None = None, **data) -> Email:
+          workspace_id: str | None = None, sent_as: str | None = None, attachments: tuple = (), **data) -> Email:
     """The Email for `kind`, with both bodies; `sent_as` keeps an older outbox kind (the digest)."""
     r = render(kind, public_url=public_url, **data)
-    return Email(to=to, subject=r.subject, body=r.text, html=r.html, kind=sent_as or kind, owner=owner, workspace_id=workspace_id)
+    return Email(to=to, subject=r.subject, body=r.text, html=r.html, kind=sent_as or kind, owner=owner, workspace_id=workspace_id,
+                 attachments=tuple(attachments))
 
 
 # ── what an account deletion removes and keeps (from DELETE /account) ──────

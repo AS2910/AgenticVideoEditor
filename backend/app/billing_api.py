@@ -11,6 +11,10 @@ keeps its plain "no billing in this build" view.
     POST /billing/razorpay/verify  {order_id, payment_id, signature}: checkout.js's signed payment
     GET  /billing/invoices/{id}    the invoice as a printable HTML page
 
+Run 4 item 4b: every paid purchase (the fake provider at once, Razorpay's
+signed payment, a Stripe or Razorpay webhook) emails a receipt and the tax
+invoice, the invoice with its PDF attached (`paid_emails`).
+
 Item 7, public (no session, no CSRF header; the signature is the check):
     POST /billing/webhooks/stripe     Stripe-Signature over the raw body; 400 when bad
     POST /billing/webhooks/razorpay   X-Razorpay-Signature over the raw body; 400 when bad
@@ -81,6 +85,38 @@ def view(owner: str) -> dict:
     }
 
 
+def paid_emails(owner: str, inv: dict) -> None:
+    """The receipt and the tax invoice (with its PDF) for a paid invoice. Never raises:
+    the payment is done either way, and the log says what failed."""
+    api = _api()
+    try:
+        from app.billing import pdf
+        from app.notify import email as email_mod, templates
+        to = email_mod.person_address(api.database, owner)
+        if not to:
+            api.log.warning("invoice %s: no address for its owner, so no receipt or invoice email", inv["number"])
+            return
+        data = templates.invoice_data(inv, seller(), gst.STATES)
+        got = billing.bought(api.database, inv["id"])
+        plan = billing.PLANS.get(got.get("plan") or "")
+        extra = {"plan": plan.name} if plan else {"credits": f"{float(got.get('credits') or 0):g}"}
+        url = api.settings.public_url
+        api.email_sender.send(templates.email("receipt", to, public_url=url, owner=owner, **data, **extra))
+        attached = email_mod.Attachment(f"{inv['number']}.pdf", "application/pdf", pdf.invoice_pdf(inv, seller()))
+        api.email_sender.send(templates.email("invoice", to, public_url=url, owner=owner, attachments=(attached,), **data))
+    except Exception:  # noqa: BLE001
+        api.log.exception("receipt and invoice emails for %s", inv.get("number"))
+
+
+def _paid_by_webhook(got: dict) -> dict:
+    """A webhook that granted a purchase: its emails (the route's answer stays the same)."""
+    if got.get("handled") and got.get("invoice"):
+        inv = billing.invoice_by_number(_api().database, got["invoice"])
+        if inv is not None:
+            paid_emails(inv["owner"], inv)
+    return got
+
+
 @router.get("/billing")
 def get_billing(owner: str = Depends(_owner)) -> dict:
     return view(owner)
@@ -116,6 +152,7 @@ def change_plan(req: PlanRequest, owner: str = Depends(_owner)) -> dict:
     if made.get("pending"):
         return {**view(owner), "checkout": made["checkout"]}
     analytics.track("billing.plan_changed", owner, {"plan": req.plan, "currency": made["currency"]})
+    paid_emails(owner, made)
     return {**view(owner), "invoice": made}
 
 
@@ -132,6 +169,7 @@ def top_up(req: TopupRequest, owner: str = Depends(_owner)) -> dict:
     if made.get("pending"):
         return {**view(owner), "checkout": made["checkout"]}
     analytics.track("billing.topped_up", owner, {"credits": req.credits, "currency": made["currency"]})
+    paid_emails(owner, made)
     return {**view(owner), "invoice": made}
 
 
@@ -162,6 +200,8 @@ def razorpay_verify(req: RazorpayPaid, owner: str = Depends(_owner)) -> dict:
         raise HTTPException(status_code=400, detail="That payment could not be verified. Nothing was granted.")
     made = billing.fulfil(api.database, "razorpay", req.order_id, req.payment_id, api.settings.seller_state,
                           test_mode=provider.test_mode)
+    if made is not None:
+        paid_emails(owner, made)
     return {**view(owner), "invoice": made}
 
 
@@ -176,7 +216,8 @@ async def stripe_webhook(request: Request) -> dict:
         event = provider.verify_webhook(payload, request.headers.get("stripe-signature"))
     except WebhookRejected:
         raise HTTPException(status_code=400, detail="Bad signature.") from None
-    return await asyncio.to_thread(webhooks.handle_stripe, api.database, provider, event, api.settings.seller_state)
+    got = await asyncio.to_thread(webhooks.handle_stripe, api.database, provider, event, api.settings.seller_state)
+    return await asyncio.to_thread(_paid_by_webhook, got)
 
 
 @router.post("/billing/webhooks/razorpay")
@@ -190,8 +231,9 @@ async def razorpay_webhook(request: Request) -> dict:
         event = provider.verify_webhook(payload, request.headers.get("x-razorpay-signature"))
     except WebhookRejected:
         raise HTTPException(status_code=400, detail="Bad signature.") from None
-    return await asyncio.to_thread(webhooks.handle_razorpay, api.database, provider, event,
-                                   request.headers.get("x-razorpay-event-id"), api.settings.seller_state)
+    got = await asyncio.to_thread(webhooks.handle_razorpay, api.database, provider, event,
+                                  request.headers.get("x-razorpay-event-id"), api.settings.seller_state)
+    return await asyncio.to_thread(_paid_by_webhook, got)
 
 
 class RefundRequest(BaseModel):

@@ -13,6 +13,7 @@ the account is read in that month. Unused plan credits lapse when their month en
     set_details(db, owner, country=, legal_name=, gstin=, state_code=)
     buy_plan(db, owner, plan_id, provider) / buy_topup(db, owner, credits, provider) -> invoice
     invoices(db, owner) / invoice(db, owner, invoice_id) / invoice_html(invoice)
+    bought(db, invoice_id) / invoice_by_number(db, number)
 
     fulfil(db, provider, reference, payment_ref, ...) -> invoice | None     a confirmed real payment, once
     refund(db, owner, invoice_id) -> dict            in full, credits taken back
@@ -430,6 +431,19 @@ def admin_grant(db, owner: str, credits_: float, reason: str) -> dict:
             _grant_in(c, owner, "refund", float(credits_), None, f"Credit reversal: {reason}"[:200])
         gid = int(c.execute("SELECT MAX(id) FROM credit_grants WHERE owner = ?", (owner,)).fetchone()[0])
     return {"grant_id": gid, "credits": float(credits_)}
+
+
+def bought(db, invoice_id: int) -> dict:
+    """What an invoice's purchase granted: {"credits", "plan"} (the plan id, or None for a top-up)."""
+    with db.tx() as c:
+        row = c.execute("SELECT value FROM meta WHERE key = ?", (_bought_key(invoice_id),)).fetchone()
+    return json.loads(row[0]) if row else {"credits": 0.0, "plan": None}
+
+
+def invoice_by_number(db, number: str) -> dict | None:
+    with db.tx() as c:
+        r = c.execute("SELECT * FROM invoices WHERE number = ?", (number,)).fetchone()
+    return _invoice(r) if r else None
 
 
 def refunded(db, invoice_id: int) -> bool:

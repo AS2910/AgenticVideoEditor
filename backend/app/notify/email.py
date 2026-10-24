@@ -9,15 +9,18 @@ out. Item 7: `ResendEmail` sends through Resend's API, chosen when
 (provider `resend`) as the record of what went out. Any other name, or
 resend without a key, falls back to the outbox with a warning.
 
-    Email(to, subject, body, kind, owner=None, workspace_id=None, html=None)
+    Email(to, subject, body, kind, owner=None, workspace_id=None, html=None, attachments=())
     (item 9: `body` is the plain text, `html` the HTML; both are sent and kept.
-    The bodies come from `app/notify/templates.py`.)
+    The bodies come from `app/notify/templates.py`. Run 4 item 4b: `attachments`
+    are Attachment(filename, content_type, data), e.g. the invoice PDF.)
     sender_for(name, db, api_key=None, from_addr=None) -> EmailSender
     outbox(db, kind=None, to=None) -> [dict]  newest last
     remember_address(db, owner, email) / address_for(db, owner, fallback=None)
 """
 from __future__ import annotations
 
+import base64
+import json
 import logging
 import os
 import re
@@ -38,6 +41,13 @@ EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 
 @dataclass(frozen=True)
+class Attachment:
+    filename: str
+    content_type: str
+    data: bytes
+
+
+@dataclass(frozen=True)
 class Email:
     to: str
     subject: str
@@ -46,6 +56,7 @@ class Email:
     owner: str | None = None
     workspace_id: str | None = None
     html: str | None = None        # item 9: the HTML part (multipart with `body`)
+    attachments: tuple[Attachment, ...] = ()
 
 
 class EmailSender(Protocol):
@@ -57,6 +68,7 @@ class EmailSender(Protocol):
 # Item 9: the HTML part is kept beside the outbox row (no column for it yet:
 # meta `notify_outbox_html:<id>`), and `outbox()` gives it back as `html`.
 HTML_KEY = "notify_outbox_html:"
+FILES_KEY = "notify_outbox_files:"        # run 4 item 4b: the attachments, base64 in JSON
 
 
 def _record_in(c, email: Email, provider: str) -> None:
@@ -65,6 +77,10 @@ def _record_in(c, email: Email, provider: str) -> None:
                     (email.workspace_id, email.owner, email.to, email.kind, email.subject, email.body, provider, now_iso()))
     if email.html:
         c.execute("INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)", (f"{HTML_KEY}{cur.lastrowid}", email.html))
+    if email.attachments:
+        files = [{"filename": a.filename, "content_type": a.content_type, "data": base64.b64encode(a.data).decode()}
+                 for a in email.attachments]
+        c.execute("INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)", (f"{FILES_KEY}{cur.lastrowid}", json.dumps(files)))
 
 
 # G7: what each email kind is called in analytics.
@@ -111,6 +127,9 @@ class ResendEmail(OutboxEmail):
         body = {"from": self.from_addr, "to": [email.to], "subject": email.subject, "text": email.body}
         if email.html:
             body["html"] = email.html
+        if email.attachments:
+            body["attachments"] = [{"filename": a.filename, "content": base64.b64encode(a.data).decode(),
+                                    "content_type": a.content_type} for a in email.attachments]
         headers = {"Authorization": f"Bearer {self.api_key}", "Idempotency-Key": key}
         for attempt in range(self.RETRIES + 1):
             try:
@@ -169,6 +188,9 @@ def outbox(db: Database, kind: str | None = None, to: str | None = None) -> list
         for r in rows:
             found = c.execute("SELECT value FROM meta WHERE key = ?", (f"{HTML_KEY}{r['id']}",)).fetchone()
             r["html"] = found[0] if found else None
+            files = c.execute("SELECT value FROM meta WHERE key = ?", (f"{FILES_KEY}{r['id']}",)).fetchone()
+            r["attachments"] = [Attachment(f["filename"], f["content_type"], base64.b64decode(f["data"]))
+                                for f in json.loads(files[0])] if files else []
     return rows
 
 

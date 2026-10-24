@@ -2627,6 +2627,7 @@ def delete_account(owner: str = Depends(current_owner)) -> Response:
     me = acting.get()
     if me is not None and me.user != me.owner:
         owner = me.user
+    address = email_mod.person_address(database, owner)     # run 4 item 4b: read before the account goes
     from app.store import members as members_store
     for ws in members_store.workspaces_for(database, owner):
         if not ws.get("own"):
@@ -2657,7 +2658,20 @@ def delete_account(owner: str = Depends(current_owner)) -> Response:
             c.execute("INSERT INTO data_requests (owner, kind, status, created_at, done_at) VALUES (?, 'deletion', 'done', ?, ?)",
                       (owner, _now(), _now()))
             analytics.track_in(c, "data.deletion_requested", owner, {})
+    _account_deleted_email(owner, address)
     return Response(status_code=204)
+
+
+def _account_deleted_email(owner: str, address: str | None) -> None:
+    """Run 4 item 4b: the last email, what went and what is kept. Never fails the deletion."""
+    if not address:
+        return
+    try:
+        removed, kept = email_templates.deletion_lists(settings.consent_retention_years)
+        email_sender.send(email_templates.email("account_deleted", address, public_url=settings.public_url, owner=owner,
+                                                removed=removed, kept=kept))
+    except Exception:  # noqa: BLE001
+        log.exception("account deleted email")
 
 
 # ── Folders: a project is a folder of videos ─────────────────────────────────
