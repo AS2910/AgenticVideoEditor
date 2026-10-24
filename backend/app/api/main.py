@@ -65,7 +65,7 @@ from app.orchestrator.pipeline import run_edit
 from app.store.db import Database, location as database_location
 from app.flags import FlagStore
 from app import analytics, dataexport, errors_report
-from app.safety import figures as figures_mod, liveness as liveness_mod, provenance as provenance_mod
+from app.safety import consent as consent_mod, figures as figures_mod, liveness as liveness_mod, provenance as provenance_mod
 from app.purge import PurgeScheduler
 from app.usage import (
     Ledger, SpendCeilingReached, WHISPER_USD_PER_MINUTE, claude_usd, current_actor, current_turn, money, month_name, month_start,
@@ -171,6 +171,50 @@ continuity, continuity_label = select_continuity(voice.identity, artifacts)
 # Phase 15a: each speaker's own voice, made once and reused (never under dry-run).
 clones = CloneService(repo, artifacts, voice, enabled=settings.clone and not settings.dry_run,
                       min_seconds=settings.clone_min_seconds)
+
+
+# Run 4 item 2: the real consent gate (`voices.cloning_verified`): Whisper
+# hears the phrase, WavLM compares the voice with the clone's source audio.
+def _consent_heard(path: Path, video_id: str) -> str | None:
+    """What Whisper heard in a consent recording, or None without a real
+    transcriber (the mock would hear its canned words in every recording)."""
+    if not transcriber_label.startswith("openai") or not hasattr(transcriber, "hear"):
+        return None
+    seconds = _recording_seconds(path)
+    media = MediaArtifact(kind="audio", sha256="0" * 64, path=str(path), duration=seconds, container=path.suffix.lstrip(".") or "webm")
+    words = transcriber.hear(Source(project_id="consent", filename=path.name, duration=seconds, media=media))
+    ledger.record(video_id, "openai", "consent_check", seconds / 60, "minutes", seconds / 60 * WHISPER_USD_PER_MINUTE)
+    return " ".join(words)
+
+
+def _consent_similarity(reference: Path, recording: Path) -> float | None:
+    from app.continuity import similarity
+    return similarity.speaker_similarity(reference, recording) if similarity.available() else None
+
+
+def _speaker_model() -> str:
+    from app.continuity import similarity
+    return similarity.SPEAKER_MODEL
+
+
+consent_verifier = consent_mod.ConsentVerifier(
+    transcribe=_consent_heard, similarity=_consent_similarity, seconds_of=_recording_seconds,
+    asr_model=transcriber_label, speaker_model=_speaker_model(),
+)
+CONSENT_REFERENCE_SECONDS = 3.0     # less of the speaker than this, and the voice is not compared (a person listens)
+
+
+def consent_reference(video_id: str, record: "ProjectRecord", speaker: str | None) -> Path | None:
+    """The clone's source audio a consent recording is compared with: the
+    named speaker's speech in the video (by label or name), else that of the
+    speaker with the most speech. None when there is too little to compare."""
+    label = next((s.label for s in repo.speakers(video_id) if speaker and speaker in (s.label, s.name)), None)
+    if label is None:
+        labels = sorted({w.speaker for w in record.transcript.words if w.speaker})
+        label = max(labels, key=lambda lb: speech_seconds(record.transcript, lb)) if labels else None
+    reference = extract_reference_audio(record.source, record.transcript, artifacts, speaker=label,
+                                        min_seconds=CONSENT_REFERENCE_SECONDS)
+    return Path(reference.path) if reference is not None else None
 planner, planner_label = select_planner(settings, chaos)
 jobs = JobStore()
 # AVE_JOB_WORKERS (default 16, rehearsal item 3, LOAD.md): at four, 50 people's turns queued for two
@@ -5394,9 +5438,11 @@ def grant_consent(project_id: str, req: ConsentRequest | None = None, owner: str
     """
     _owned(project_id, owner)
     if flags.enabled("golive.g6", owner):
-        from app.safety_api import passed_attempt
-        if not passed_attempt(project_id, req.liveness_id if req else None):
-            raise HTTPException(status_code=422, detail="Read the sentence aloud first, so we know the speaker is here and agrees.")
+        from app.safety_api import passed_attempt, verified_on
+        verified = verified_on(owner)
+        if not passed_attempt(project_id, req.liveness_id if req else None, verified=verified):
+            raise HTTPException(status_code=422, detail=("The speaker reads the phrase aloud first, and the check passes."
+                                                         if verified else "Read the sentence aloud first, so we know the speaker is here and agrees."))
     recorded = repo.grant_consent(project_id, Consent(granted_at=_now()))
     return {"video_id": project_id, "consent_granted_at": recorded.granted_at if recorded else None}
 
@@ -5454,12 +5500,29 @@ def _voice_for(project_id: str, record: ProjectRecord, selection: Selection, req
         if figure and not any(s["label"] == speaker and s["voice_id"] for s in _speakers(project_id)):
             analytics.track("clone.public_figure_refused", record.owner, {"video_id": project_id})
             return VoiceChoice(requested, (f"Stock voice: {figures_mod.REFUSAL}",))
-    if not flags.enabled("voices.cloning", record.owner):
+    if not cloning_open(record.owner) or not _consent_verified_for(project_id, record.owner):
         picked = next((s["voice_id"] for s in _speakers(project_id) if s["label"] == speaker and s["voice_id"]), None)
         if picked:
             return VoiceChoice(picked)
+        if cloning_open(record.owner):
+            return VoiceChoice(requested, ("Stock voice: the speaker's consent check has not passed yet.",))
         return VoiceChoice(requested, ("Stock voice: voice cloning is not open yet.",))
     return clones.resolve(project_id, record.source, record.transcript, speaker, requested)
+
+
+def cloning_open(owner: str) -> bool:
+    """A speaker's voice may be cloned for this owner: `voices.cloning` (an
+    admin opened it), or `voices.cloning_verified` (run 4 item 2: each video's
+    speaker passes the consent check first)."""
+    return flags.enabled("voices.cloning", owner) or flags.enabled("voices.cloning_verified", owner)
+
+
+def _consent_verified_for(video_id: str, owner: str) -> bool:
+    """With only `voices.cloning_verified` on, a video's speaker is cloned once its consent check passed."""
+    if flags.enabled("voices.cloning", owner):
+        return True
+    from app.safety_api import verified_consent
+    return verified_consent(video_id)
 
 
 def _refuse_public_figure(owner: str, name: str | None) -> None:
@@ -7291,7 +7354,7 @@ def _workbench() -> Workbench:
         add_from_library=getattr(voice, "add_from_library", None),
         delete_voice=getattr(voice, "delete_voice", None),
         slots=getattr(voice, "slots", lambda: None), put_audio=put_audio,
-        speakers=repo.speakers, voice_for=_voice_for, cloning_open=lambda o: flags.enabled("voices.cloning", o), remove_words=_remove_words, shift_words=_shift_by_pin, move_take=_moved,
+        speakers=repo.speakers, voice_for=_voice_for, cloning_open=cloning_open, remove_words=_remove_words, shift_words=_shift_by_pin, move_take=_moved,
         project=_project_view, suggest=_suggest_brief, help_search=lambda query: search_help_articles(query, limit=3),
         spend=lambda pid: _spend_summary(repo.get(pid).owner if repo.get(pid) else LOCAL_OWNER, video_id=pid),
         measured=lambda: getattr(voice, "last_measure", None), held_take=_held_take, jobs=line_jobs,
@@ -9114,7 +9177,9 @@ def withdraw_consent_now(video_id: str, owner: str) -> dict:
     failed = clones.purge(video_id, keep=kept)
     deleted = len([v for v in before.values() if v and v not in kept and v not in failed])
     had = repo.withdraw_consent(video_id)
+    from app.safety_api import withdraw_checks
     with database.tx() as c:
+        withdraw_checks(c, video_id)          # run 4 item 2: the next consent reads a new phrase
         activity_log.record(c, "consent.withdrawn", user_actor(owner), video_id=video_id, target=video_id,
                             payload={"deleted": deleted, "failed": len(failed), "had": bool(had)})
     if failed:

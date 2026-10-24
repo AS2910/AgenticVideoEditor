@@ -1,9 +1,15 @@
 """G6: trust and safety (routes). Everything needs `golive.g6` for the owner;
 the public abuse form needs it on for the deployment (the default owners).
 
-    POST /videos/{id}/liveness                  {speaker?}: a fresh sentence to read aloud
+    POST /videos/{id}/liveness                  {speaker?, fresh?}: a fresh sentence to read aloud. With
+                                                `voices.cloning_verified` (run 4 item 2): a random phrase
+                                                of 8 to 12 words, single use, for ten minutes; a check of
+                                                this video already passed or with a reviewer comes back
+                                                instead (unless `fresh`, for one with a reviewer)
     POST /videos/{id}/liveness/{attempt}        the recording (multipart `file`): checked by the
-                                                LivenessProvider (fake, test mode), stored either way
+                                                LivenessProvider (fake, test mode), or with the flag by
+                                                the real gate (app.safety.consent): passed | review | failed,
+                                                with the reason and what to try; stored either way
     POST /videos/{id}/consent/withdraw          consent withdrawn now: the speaker's clones are
                                                 deleted at the voice service at once
     POST /abuse-reports                         public, no account, rate limited: stored, and the
@@ -18,6 +24,7 @@ from __future__ import annotations
 import json
 import secrets
 import tempfile
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from starlette.concurrency import run_in_threadpool
@@ -28,8 +35,8 @@ from pydantic import BaseModel, Field
 from app import analytics
 from app.filenames import safe_filename
 from app.ratelimit import RateLimit
-from app.safety import liveness as liveness_mod
-from app.timefmt import now_iso
+from app.safety import consent as consent_mod, liveness as liveness_mod
+from app.timefmt import iso, now_iso
 
 router = APIRouter(tags=["safety"])
 abuse_limit = RateLimit(5, 3600.0)
@@ -62,60 +69,128 @@ def deployment_on() -> bool:
 
 class LivenessStart(BaseModel):
     speaker: str | None = None
+    fresh: bool = False             # run 4 item 2: a new phrase even while one is with a reviewer
+
+
+def verified_on(owner: str) -> bool:
+    """Run 4 item 2: the real consent gate, for an owner with `voices.cloning_verified`."""
+    return _api().flags.enabled("voices.cloning_verified", owner)
+
+
+def _attempt_view(row, test_mode: bool = False) -> dict:
+    return {"attempt_id": row["id"], "sentence": row["sentence"], "status": row["status"], "reason": row["reason"] or "",
+            "tip": row["tip"] or "", "test_mode": test_mode, "verified": row["method"] == "verified",
+            "min_seconds": consent_mod.MIN_SECONDS}
 
 
 @router.post("/videos/{video_id}/liveness", status_code=201)
 def start_liveness(video_id: str, req: LivenessStart | None = None, owner: str = Depends(_owner)) -> dict:
     api = _api()
     api._owned(video_id, owner)
-    attempt = "lv_" + secrets.token_hex(8)
-    sentence = liveness_mod.prompt()
+    speaker = req.speaker if req else None
+    if not verified_on(owner):
+        attempt = "lv_" + secrets.token_hex(8)
+        sentence = liveness_mod.prompt()
+        with api.database.tx() as c:
+            c.execute("INSERT INTO liveness_attempts (id, owner, video_id, speaker, sentence, status, provider, created_at) "
+                      "VALUES (?, ?, ?, ?, ?, 'waiting', ?, ?)",
+                      (attempt, owner, video_id, speaker, sentence, api.liveness.name, now_iso()))
+        return {"attempt_id": attempt, "sentence": sentence, "status": "waiting", "reason": "", "tip": "",
+                "test_mode": api.liveness.test_mode, "verified": False, "min_seconds": liveness_mod.MIN_SECONDS}
     with api.database.tx() as c:
-        c.execute("INSERT INTO liveness_attempts (id, owner, video_id, speaker, sentence, status, provider, created_at) "
-                  "VALUES (?, ?, ?, ?, ?, 'waiting', ?, ?)",
-                  (attempt, owner, video_id, (req.speaker if req else None), sentence, api.liveness.name, now_iso()))
-    return {"attempt_id": attempt, "sentence": sentence, "test_mode": api.liveness.test_mode}
+        # A check already passed, or with a reviewer, for this video: show it, rather than a new phrase.
+        held = c.execute("SELECT * FROM liveness_attempts WHERE video_id = ? AND owner = ? AND method = 'verified' "
+                         "AND status IN ('passed', 'review') ORDER BY created_at DESC LIMIT 1", (video_id, owner)).fetchone()
+        if held is not None and not (req and req.fresh and held["status"] == "review"):
+            return _attempt_view(held)
+        attempt = "cv_" + secrets.token_hex(8)
+        expires = iso(datetime.now(timezone.utc) + timedelta(minutes=consent_mod.ATTEMPT_MINUTES))
+        c.execute("INSERT INTO liveness_attempts (id, owner, video_id, speaker, sentence, status, provider, method, "
+                  "pass_at, review_from, expires_at, created_at) VALUES (?, ?, ?, ?, ?, 'waiting', ?, 'verified', ?, ?, ?, ?)",
+                  (attempt, owner, video_id, speaker, consent_mod.phrase(), api.consent_verifier.name,
+                   api.consent_verifier.pass_at, api.consent_verifier.review_from, expires, now_iso()))
+        row = c.execute("SELECT * FROM liveness_attempts WHERE id = ?", (attempt,)).fetchone()
+    return _attempt_view(row)
 
 
 @router.post("/videos/{video_id}/liveness/{attempt_id}")
 async def check_liveness(video_id: str, attempt_id: str, file: UploadFile = File(...), owner: str = Depends(_owner)) -> dict:
     api = _api()
-    api._owned(video_id, owner)
+    record = api._owned(video_id, owner)
     with api.database.tx() as c:
         row = c.execute("SELECT * FROM liveness_attempts WHERE id = ? AND video_id = ? AND owner = ?",
                         (attempt_id, video_id, owner)).fetchone()
     if row is None:
         raise HTTPException(status_code=404, detail="That attempt is not here. Start again.")
     if row["status"] != "waiting":
-        raise HTTPException(status_code=409, detail="That sentence was used already. Start again for a new one.")
+        raise HTTPException(status_code=409, detail="That phrase was used already. Start again for a new one.")
+    verified = row["method"] == "verified"
+    if verified and row["expires_at"] and row["expires_at"] < now_iso():
+        with api.database.tx() as c:
+            c.execute("UPDATE liveness_attempts SET status = 'expired', checked_at = ? WHERE id = ?", (now_iso(), attempt_id))
+        raise HTTPException(status_code=410, detail="That phrase has expired. Start again for a new one.")
     with tempfile.TemporaryDirectory() as tmp:
         staged = Path(tmp) / safe_filename(file.filename, "liveness.webm")
         await api._spool(file, staged, "audio")
         if staged.stat().st_size > MAX_RECORDING_BYTES:
-            raise HTTPException(status_code=422, detail="That recording is too long. Just the sentence is enough.")
+            raise HTTPException(status_code=422, detail="That recording is too long. Just the phrase is enough.")
 
         def check() -> tuple:           # the provider's call and the store block: off the event loop (rehearsal item 3)
-            result = api.liveness.verify(staged, row["sentence"])
+            if verified:
+                reference = api.consent_reference(video_id, record, row["speaker"])
+                result = api.consent_verifier.verify(staged, row["sentence"], reference, video_id)
+            else:
+                result = api.liveness.verify(staged, row["sentence"])
             sha = None
             if staged.stat().st_size:
                 container = staged.suffix.lstrip(".") or "webm"
                 sha = api.artifacts.put_file(f"liveness-{owner}", staged, kind="audio", container=container, duration=0.0).sha256
             return result, sha
         result, sha = await run_in_threadpool(check)
-    status = "passed" if result.passed else "failed"
+    if not verified:
+        status = "passed" if result.passed else "failed"
+        with api.database.tx() as c:
+            c.execute("UPDATE liveness_attempts SET status = ?, reason = ?, audio_sha = ?, checked_at = ? WHERE id = ?",
+                      (status, result.reason, sha, now_iso(), attempt_id))
+            analytics.track_in(c, "consent.liveness_checked", owner, {"video_id": video_id, "passed": result.passed})
+        return {"attempt_id": attempt_id, "status": status, "reason": result.reason, "tip": "", "test_mode": result.test_mode,
+                "verified": False}
     with api.database.tx() as c:
-        c.execute("UPDATE liveness_attempts SET status = ?, reason = ?, audio_sha = ?, checked_at = ? WHERE id = ?",
-                  (status, result.reason, sha, now_iso(), attempt_id))
-        analytics.track_in(c, "consent.liveness_checked", owner, {"video_id": video_id, "passed": result.passed})
-    return {"attempt_id": attempt_id, "status": status, "reason": result.reason, "test_mode": result.test_mode}
+        c.execute("UPDATE liveness_attempts SET status = ?, reason = ?, tip = ?, audio_sha = ?, heard = ?, wer = ?, similarity = ?, "
+                  "seconds = ?, rule = ?, asr_model = ?, speaker_model = ?, checked_at = ? WHERE id = ?",
+                  (result.status, result.reason, result.tip, sha, result.heard, result.wer, result.similarity, result.seconds,
+                   result.rule, api.consent_verifier.asr_model, api.consent_verifier.speaker_model, now_iso(), attempt_id))
+        analytics.track_in(c, "consent.liveness_checked", owner, {"video_id": video_id, "passed": result.passed,
+                                                                  "status": result.status, "rule": result.rule})
+        if result.status == "review":
+            from app.admin import admin_owner_ids
+            for admin in admin_owner_ids(api.database, api.settings.admin_owners):
+                api.inbox.add_in(c, admin, "consent_review", "A consent recording is waiting for review.",
+                                 body=f"Video {video_id}: {result.reason}", link="#admin")
+    return {"attempt_id": attempt_id, "status": result.status, "reason": result.reason, "tip": result.tip,
+            "test_mode": False, "verified": True}
 
 
-def passed_attempt(video_id: str, attempt_id: str | None) -> bool:
+def passed_attempt(video_id: str, attempt_id: str | None, verified: bool = False) -> bool:
+    """Whether the consent may cite this attempt: it passed (or a reviewer approved it); with
+    `verified`, only an attempt of the real gate counts."""
     if not attempt_id:
         return False
     with _api().database.tx() as c:
-        return c.execute("SELECT 1 FROM liveness_attempts WHERE id = ? AND video_id = ? AND status = 'passed'",
-                         (attempt_id, video_id)).fetchone() is not None
+        return c.execute("SELECT 1 FROM liveness_attempts WHERE id = ? AND video_id = ? AND status = 'passed'"
+                         + (" AND method = 'verified'" if verified else ""), (attempt_id, video_id)).fetchone() is not None
+
+
+def verified_consent(video_id: str) -> bool:
+    """Run 4 item 2: a speaker's voice in this video may be cloned: a check of the real gate passed (or was approved)."""
+    with _api().database.tx() as c:
+        return c.execute("SELECT 1 FROM liveness_attempts WHERE video_id = ? AND method = 'verified' AND status = 'passed' LIMIT 1",
+                         (video_id,)).fetchone() is not None
+
+
+def withdraw_checks(c, video_id: str) -> None:
+    """Consent withdrawn: the video's passed checks no longer count; the next consent reads a new phrase."""
+    c.execute("UPDATE liveness_attempts SET status = 'withdrawn' WHERE video_id = ? AND status IN ('passed', 'review')", (video_id,))
 
 
 # ── withdraw consent now ─────────────────────────────────────────────────────

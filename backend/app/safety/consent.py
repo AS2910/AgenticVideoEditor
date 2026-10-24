@@ -28,9 +28,9 @@ from __future__ import annotations
 import random
 import re
 import unicodedata
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable
 
 MIN_SECONDS = 4.0
 MAX_WER = 0.20

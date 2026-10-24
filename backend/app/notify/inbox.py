@@ -10,7 +10,9 @@ transaction and arrives in the next batched email, never one email per event.
 
 Kinds: job_done (only jobs longer than a threshold), job_failed,
 review_comment, approval, changes_requested, spend_alert (50/80/100% of a
-ceiling, each once per ceiling and period: `spend_alerts`).
+ceiling, each once per ceiling and period: `spend_alerts`), and for admins
+abuse_report and consent_review; consent_decided tells an owner what a
+reviewer decided on their consent recording (run 4 item 2).
 """
 from __future__ import annotations
 
@@ -21,7 +23,8 @@ from app.notify import digest
 from app.store.db import Database
 from app.timefmt import now_iso
 
-KINDS = ("job_done", "job_failed", "review_comment", "approval", "changes_requested", "spend_alert", "abuse_report")
+KINDS = ("job_done", "job_failed", "review_comment", "approval", "changes_requested", "spend_alert", "abuse_report",
+         "consent_review", "consent_decided")
 LABELS = {
     "job_done": "Long work finished",
     "job_failed": "Something failed",
@@ -30,6 +33,8 @@ LABELS = {
     "changes_requested": "Changes asked for",
     "spend_alert": "Spend alerts",
     "abuse_report": "Abuse reports",
+    "consent_review": "Consent recordings to review",
+    "consent_decided": "Consent checks reviewed",
 }
 HELP = {
     "job_done": "An export, a check, a batch or an import that took more than a minute is done.",
@@ -39,6 +44,8 @@ HELP = {
     "changes_requested": "A reviewer asked for changes.",
     "spend_alert": "A video, a project or the month reached 50%, 80% or 100% of its ceiling.",
     "abuse_report": "Someone reported misuse. Only the people who run Voltage get these.",
+    "consent_review": "A speaker's consent recording was close, and needs a person to listen. Only the people who run Voltage get these.",
+    "consent_decided": "A person listened to your consent recording and decided.",
 }
 # (in the app, by email): review news was emailed before G4 (C2's digest), so it stays on.
 DEFAULTS = {
@@ -49,11 +56,13 @@ DEFAULTS = {
     "changes_requested": (True, True),
     "spend_alert": (True, True),
     "abuse_report": (True, True),
+    "consent_review": (True, True),
+    "consent_decided": (True, True),
 }
 # The digest item each kind is emailed as.
 DIGEST_KIND = {"review_comment": "comment", "approval": "approved", "changes_requested": "changes_asked",
                "job_done": "job_done", "job_failed": "job_failed", "spend_alert": "spend_alert",
-               "abuse_report": "abuse_report"}
+               "abuse_report": "abuse_report", "consent_review": "consent_review", "consent_decided": "consent_decided"}
 THRESHOLDS = (50, 80, 100)
 MAX_KEPT = 200
 
@@ -67,7 +76,7 @@ def _settings_in(c: sqlite3.Connection, user: str) -> dict[str, tuple[bool, bool
 
 
 # Kinds only the people who run Voltage get (decision 0: hidden from everyone else).
-ADMIN_KINDS = ("abuse_report",)
+ADMIN_KINDS = ("abuse_report", "consent_review")
 
 
 def kinds_for(admin: bool) -> tuple[str, ...]:

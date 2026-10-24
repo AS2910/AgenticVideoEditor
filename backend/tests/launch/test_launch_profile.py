@@ -9,11 +9,11 @@ from fastapi.testclient import TestClient
 import app.api.main as main
 from app.api.main import app, flags
 from app.config import load_settings
-from app.flags import KNOWN, PROFILES, FlagStore, main as flags_main
+from app.flags import KNOWN, OFF_BY_DEFAULT, PROFILES, FlagStore, main as flags_main
 from app.store.db import Database
 
 PUBLIC_ON = {"projects.consistency", "golive.g1", "golive.g2", "golive.g3", "golive.g4", "golive.g6", "golive.g7", "golive.g8"}
-PUBLIC_OFF = {"projects.batch", "projects.review", "projects.reuse", "projects.check", "golive.g5", "voices.cloning"}
+PUBLIC_OFF = {"projects.batch", "projects.review", "projects.reuse", "projects.check", "golive.g5", "voices.cloning", "voices.cloning_verified"}
 
 
 def test_the_public_profile_turns_on_exactly_the_launch_features():
@@ -22,7 +22,7 @@ def test_the_public_profile_turns_on_exactly_the_launch_features():
     on = set(store.enabled_for(stranger))
     assert on == PUBLIC_ON and PROFILES["public"] == PUBLIC_ON
     assert not (on & PUBLIC_OFF)
-    assert set(store.enabled_for("local")) >= set(KNOWN) - {f for f in KNOWN if f.startswith("launch.")}
+    assert set(store.enabled_for("local")) >= set(KNOWN) - {f for f in KNOWN if f.startswith("launch.")} - OFF_BY_DEFAULT
 
 
 def test_without_a_profile_strangers_get_nothing():

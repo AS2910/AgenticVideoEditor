@@ -19,7 +19,7 @@ def db(tmp_path):
 
 def test_defaults_and_changes_per_kind(db):
     found = {k["kind"]: (k["in_app"], k["email"]) for k in inbox.settings(db, "u")}
-    assert found["job_done"] == (True, False) and found["job_failed"] == (True, True) and len(found) == 7
+    assert found["job_done"] == (True, False) and found["job_failed"] == (True, True) and len(found) == 9   # run 4: consent_review, consent_decided
     changed = {k["kind"]: (k["in_app"], k["email"]) for k in inbox.set_settings(db, "u", {"job_done": {"email": True}, "approval": {"in_app": False}})}
     assert changed["job_done"] == (True, True) and changed["approval"] == (False, True)
     assert {k["kind"]: (k["in_app"], k["email"]) for k in inbox.settings(db, "v")}["approval"] == (True, True)   # per person

@@ -25,7 +25,14 @@ LAUNCH_FLAGS = ("launch.invite_only", "launch.paid_paused")
 # Rehearsal item 1 (launch blocker 4): cloning a voice (your own, or a
 # speaker's) waits for a real liveness check. On for the default owners, not
 # in the public profile; an admin turns it on per person (Features).
-VOICE_FLAGS = ("voices.cloning",)
+# Run 4 item 2: voices.cloning_verified opens cloning a video's speaker once
+# their consent check passes (app.safety.consent: the phrase, the words, the
+# voice). Off for everyone by default, the default owners too, and not in the
+# public profile: the person who runs Voltage turns it on (for `*`, or per
+# owner). It needs golive.g6 (the read-aloud step). It does not open cloning
+# your own voice from an upload; voices.cloning still does that.
+VOICE_FLAGS = ("voices.cloning", "voices.cloning_verified")
+OFF_BY_DEFAULT = frozenset({"voices.cloning_verified"})
 KNOWN = PHASE_FLAGS + GOLIVE_FLAGS + LAUNCH_FLAGS + VOICE_FLAGS
 # The owner a row names to set a flag for everyone. An owner's own row still wins.
 ALL = "*"
@@ -51,7 +58,7 @@ class FlagStore:
         self.profile = PROFILES.get(profile or "", frozenset())
 
     def _default(self, flag: str, owner: str) -> bool:
-        if flag.startswith("launch.") or not is_known(flag):
+        if flag.startswith("launch.") or flag in OFF_BY_DEFAULT or not is_known(flag):
             return False
         return owner in self.default_owners or flag in self.profile
 
