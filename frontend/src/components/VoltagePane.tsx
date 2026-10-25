@@ -487,8 +487,8 @@ export function VoltagePane({
             <span className="tag min-w-0 truncate pm" data-money-scope="turn" title={cap}>{cap ?? 'Nothing is spent until you say go'}</span>
             <span className="flex-1" />
             <span className="kbd pm hidden sm:inline" aria-hidden="true">/</span>
-            <button type="button" className="btn volt sm w-[34px] shrink-0 p-0" onClick={submit} disabled={disabled} aria-label={sendLabel} title={sendLabel} data-tour-action="composer">
-              <ArrowUp size={14} aria-hidden="true" />
+            <button type="button" className={cn('btn volt sm shrink-0', sendLabel === 'Queue' ? 'px-3' : 'w-[34px] p-0')} onClick={submit} disabled={disabled} aria-label={sendLabel} title={sendLabel} data-tour-action="composer">
+              {sendLabel === 'Queue' ? 'Queue' : <ArrowUp size={14} aria-hidden="true" />}
             </button>
           </div>
         </div>

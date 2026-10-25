@@ -711,6 +711,13 @@ export const getJobs = (id: string, active = false) =>
 /** 2026-10-25: Stop whatever holds the video. A turn ends after its step, an Add not landed yet is put back. */
 export const stopVideo = (id: string) =>
   post<{ stopped: boolean; cancelled: number; spent_usd: number; message: string | null; lock: VideoLock | null }>(`/videos/${id}/stop`)
+/** Up next (2026-10-25): a change waits its turn on a busy video (at most three). */
+export interface QueueChange { kind: 'goal' | 'action'; label: string; payload: Record<string, unknown> }
+export const queueChange = (id: string, change: QueueChange) => post<QueueItem>(`/videos/${id}/queue`, change)
+export const removeQueued = (id: string, itemId: number) => del(`/videos/${id}/queue/${itemId}`)
+export const reorderQueue = (id: string, ids: number[]) => put<{ items: QueueItem[]; paused: boolean }>(`/videos/${id}/queue/order`, { ids })
+export const runNextQueued = (id: string) => post<{ items: QueueItem[]; paused: boolean }>(`/videos/${id}/queue/run-next`)
+export const clearQueue = (id: string) => post<{ items: QueueItem[]; paused: boolean }>(`/videos/${id}/queue/clear`)
 /** The 409 a change gets while the video is Working: what holds it, and what is up next. */
 export interface VideoBusy { code: 'video_busy'; message: string; holder: string; action: string; started_by: string | null; lock: VideoLock; queue: QueueItem[] }
 export const videoBusy = (e: unknown): VideoBusy | null => {

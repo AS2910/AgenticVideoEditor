@@ -191,6 +191,31 @@ test.describe('one edit at a time per video', () => {
     await expect(row(page, 1).getByRole('button', { name: /^Add it/ })).toBeEnabled()
   })
 
+  test('two quick Adds: the first runs, the second waits in Up next, both land in order', async ({ page }) => {
+    const world = new World()
+    await open(page, world)
+    await row(page, 0).getByRole('button', { name: /^Add it/ }).click()
+    await expect(page.getByTestId('status-text')).toHaveText(/^Adding 'Fresh every morning'…/)
+    await expect(row(page, 0).getByTestId('row-chip')).toHaveText('Adding…')
+    // While Working the chat button reads Queue.
+    await expect(page.getByTestId('voltage-pane').getByRole('button', { name: 'Queue' })).toHaveText('Queue')
+    // The other Add is not silently grey: pressed, it says what the video is busy with.
+    const second = row(page, 1).getByRole('button', { name: /^Add it/ })
+    await expect(second).toBeEnabled()
+    await second.click()
+    await expect(page.getByTestId('busy-text')).toHaveText(/^Busy with adding 'Fresh every morning'\./)
+    await page.getByTestId('queue-this').click()
+    await expect(page.getByTestId('toast')).toContainText('Queued: Add line 2')
+    await expect(page.getByTestId('up-next-chip')).toHaveText([/Add line 2/])
+    // The first lands; the second starts by itself; then both are in the video, in order.
+    await expect(page.getByTestId('status-text')).toHaveText(/^Adding 'Doors open at seven'…/, { timeout: 10_000 })
+    await expect(page.getByTestId('up-next')).toHaveCount(0)
+    await expect(page.getByTestId('status-text')).not.toHaveText(/Adding/, { timeout: 10_000 })
+    expect(world.adds.map((a) => [a.items, a.status])).toEqual([[[0], 'done'], [[1], 'done']])
+    await expect(row(page, 0).getByTestId('row-chip')).toHaveText(/In the video/)
+    await expect(row(page, 1).getByTestId('row-chip')).toHaveText(/In the video/)
+  })
+
   test('Stop during an Add: the edit set is what it was before the click', async ({ page }) => {
     const world = new World()
     await open(page, world)

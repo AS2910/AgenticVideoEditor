@@ -43,6 +43,7 @@ import type { JobListener } from './jobs/useActivity'
 import { aboutEta, busyWith, coalesce, isActive, isRender, isVoice, stripState, turnJobs, turnSteps, turnSummary } from './jobs/model'
 import { BusyHint } from './components/BusyHint'
 import type { BusyAsk } from './components/BusyHint'
+import { UpNext } from './components/UpNext'
 import type { Toast } from './jobs/model'
 import { TourProvider, TourLayer, useTour } from './tour/engine'
 import { guidedRun, tourById } from './tour/tours'
@@ -71,9 +72,9 @@ import { cn } from '@/lib/utils'
 import { clock } from './transcript/format'
 import {
   createProject, confirmPlace, exportProject, artifactUrl, stageHold, pollJob, PollCancelled, ApiError, listVideos, listFolders, createFolder, createFolderFrom, startTutorial, getProject, deleteProject, getUsage, getSpend, listVoices, updateSpeaker, detectSpeakers, revertEdit, updateSettings, removeLine, dismissItem, easeItem, setEditRole, setCandidateRole, roleQuestion, moveCandidate, moveEdit, getArrangement, putArrangement, undoArrangement, getPlan, approvePlan, readProject, grantConsent, getMe, logout, postTurn, postAllowMore, getMessages, chipEvent, getUnderstanding, correctUnderstanding, setStyle,
-  retryJob, stopVideo, videoBusy, TAB_ID, getLatestRender, startRender, getJobs, listRules,
+  retryJob, stopVideo, videoBusy, TAB_ID, queueChange, removeQueued, reorderQueue, runNextQueued, clearQueue, getLatestRender, startRender, getJobs, listRules,
 } from './api'
-import type { ArrangementView, Me, PlanApproval, RoleChange, RoleQuestion } from './api'
+import type { ArrangementView, Me, PlanApproval, QueueChange, RoleChange, RoleQuestion } from './api'
 import type { Arrangement, Placed } from './transcript/arrange'
 import type {
   Word, Selection, Candidate, Segment, Project, ChatMessage,
@@ -300,17 +301,43 @@ function Studio() {
     }
   }
   const [busyAsk, setBusyAsk] = useState<BusyAsk | null>(null)
+  // Queue this change: what pressing it does for the control that opened the card.
+  const busyQueue = useRef<(() => void) | null>(null)
+  // Part 3: a control that talks to Voltage, pressed again from the card, queues its words instead of sending them.
+  const queueNextTurn = useRef(false)
   /** A control pressed while the video is Working: it says what it is busy with, under the control. */
-  const askBusy = (change: string | null = null) => {
+  const askBusy = (label: string | null = null, queue: (() => void) | null = null) => {
     const lock = lockRef.current
     if (!lock) return
     const anchor = (document.activeElement as HTMLElement | null)?.getBoundingClientRect?.() ?? null
-    setBusyAsk({ text: busyWith(lock, !!lock.tab && lock.tab !== TAB_ID), change, anchor })
+    const theirs = !!lock.tab && lock.tab !== TAB_ID
+    busyQueue.current = theirs ? null : queue
+    setBusyAsk({ text: busyWith(lock, theirs), change: theirs ? null : label, anchor })
   }
-  /** `run` unless the video is Working; then the busy card instead (and a 409 that raced the lock says so too). */
-  const guard = <A extends unknown[], R>(change: ((...a: A) => string) | null, run: (...a: A) => R) => (...a: A): R | undefined => {
-    if (lockRef.current) { askBusy(change ? change(...a) : null); return undefined }
-    return run(...a)
+  /** Up next: the change waits its turn; the toast says so. */
+  const queueIt = async (change: QueueChange) => {
+    if (!projectId) return
+    try {
+      await queueChange(projectId, change)
+      pushToast({ id: `queued-${Date.now()}`, tone: 'ok', text: `Queued: ${change.label}` })
+      void activity.refresh()
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : 'Could not queue that change.')
+    }
+  }
+  /** "line 3", or "the line at 0:05" for one that is not a line of the original. */
+  const lineWord = (start: number) => {
+    const k = (project?.statements ?? []).findIndex((st) => st.start <= start + 0.01 && start < st.end)
+    return k >= 0 ? `line ${k + 1}` : `the line at ${clock(start)}`
+  }
+  /** `run` unless the video is Working; then the busy card instead. `change` is how the press waits in
+   *  Up next: an action the server replays, or 'turn' (the control talks to Voltage: its words wait). */
+  const guard = <A extends unknown[], R>(change: ((...a: A) => QueueChange) | 'turn' | null, run: (...a: A) => R) => (...a: A): R | undefined => {
+    if (!lockRef.current) return run(...a)
+    if (change === 'turn') askBusy('This change', () => { queueNextTurn.current = true; run(...a) })
+    else if (change) { const c = change(...a); askBusy(c.label, () => void queueIt(c)) }
+    else askBusy()
+    return undefined
   }
   const [activityOpen, setActivityOpen] = useState(false)
   const [allJobs, setAllJobs] = useState<ActivityJob[] | null>(null)
@@ -816,7 +843,12 @@ function Studio() {
    *  With words selected on the Precise timeline, the sentence names the time. */
   const submitComposer = (text: string) => {
     // 2026-10-25: while the video is Working the words cannot start a turn (a go Voltage waits for is answered, though).
-    if (lockRef.current && !lockRef.current.waiting) { askBusy('Your words'); return }
+    // Part 3: they wait in Up next instead (the button reads Queue).
+    if (lockRef.current && !lockRef.current.waiting) {
+      if (!othersLock) void queueIt({ kind: 'goal', label: text.length <= 60 ? text : `${text.slice(0, 57).trimEnd()}...`, payload: { text } })
+      else askBusy()
+      return
+    }
     setPicked(null)
     void takeTurn(selection && precise ? `At ${clock(selection.start)}: ${text}` : text)
   }
@@ -828,6 +860,10 @@ function Studio() {
    *  with me — then the same turn goes again, once. */
   const takeTurn = async (text: string, again = false, allowMore = false) => {
     if (!projectId) return
+    if (queueNextTurn.current) {
+      queueNextTurn.current = false
+      return queueIt({ kind: 'goal', label: text.length <= 60 ? text : `${text.slice(0, 57).trimEnd()}...`, payload: { text } })
+    }
     if (autonomy === 'draft' && !consentGiven.current) return withConsent(null, () => void takeTurn(text, again, allowMore))
     if (!again) say({ role: 'user', text })
     setError(null)
@@ -1608,7 +1644,7 @@ function Studio() {
       : editingLine ? 'standing by'
       : readyItems.length > 0 ? `${readyItems.length} proposed`
       : 'ready'
-    const sendLabel = clarifying ? 'Answer' : 'Send'
+    const sendLabel = clarifying ? 'Answer' : lockNow && !lockNow.waiting && !othersLock ? 'Queue' : 'Send'
     const placeholder = clarifying ? 'Answer, or tell Voltage anything else'
       : selection && precise ? 'Ask for a change, e.g. say "30% off" instead'
       : plan ? 'Say what to change, or ask for another take'
@@ -1850,7 +1886,13 @@ function Studio() {
         </header>
         <StatusStrip state={strip} open={activityOpen} onOpen={openActivity} onStop={canStop ? () => void stopAll() : undefined} stopping={stopping} />
         <BusyHint ask={busyAsk} onClose={() => setBusyAsk(null)}
+          onQueue={busyQueue.current && activity.queue.filter((q) => q.status === 'queued').length < 3 ? () => busyQueue.current?.() : undefined}
           onStop={lockNow && !othersLock && lockNow.stoppable ? () => void stopAll() : undefined} />
+        <UpNext items={activity.queue} paused={activity.queuePaused} readOnly={othersLock || watching}
+          onRemove={(q) => { if (projectId) void removeQueued(projectId, q.id).then(() => activity.refresh()).catch((e) => setError(e instanceof ApiError ? e.message : 'Could not remove that.')) }}
+          onReorder={(ids) => { if (projectId) void reorderQueue(projectId, ids).then(() => activity.refresh()).catch(() => {}) }}
+          onRunNext={() => { if (projectId) void runNextQueued(projectId).then(() => activity.refresh()).catch(() => {}) }}
+          onClear={() => { if (projectId) void clearQueue(projectId).then(() => activity.refresh()).catch(() => {}) }} />
   
         <div className="flex min-h-0 flex-1 max-[960px]:flex-col">
           {/* The picture, the transport, the transcript. */}
@@ -1937,21 +1979,21 @@ function Studio() {
                 usdPerChar={usdPerChar}
                 playing={playingTake}
                 onSeek={seekToStatement}
-                onHear={guard(null, hearLine)}
-                onAdd={guard((item: PlanItem) => (item.mix === 'remove' ? `Removing the line at ${clock(item.selection.start)}` : `Adding “${item.new_text}”`), (item: PlanItem) => addItem(item))}
-                onDiscard={guard((item: PlanItem) => `Discarding the line at ${clock(item.selection.start)}`, (item: PlanItem) => discardItem(item))}
-                onAddAll={guard((items: PlanItem[]) => `Adding all ${items.length}`, (items: PlanItem[]) => approveAll(items))}
+                onHear={guard('turn', hearLine)}
+                onAdd={guard((item: PlanItem) => ({ kind: 'action', label: `${item.mix === 'remove' ? 'Remove' : 'Add'} ${lineWord(item.selection.start)}`, payload: { op: 'add', item_ids: [item.item_id], override: !(item.candidate?.continuity.passed ?? true) } }), (item: PlanItem) => addItem(item))}
+                onDiscard={guard((item: PlanItem) => ({ kind: 'action', label: `Discard ${lineWord(item.selection.start)}`, payload: { op: 'discard', item_id: item.item_id } }), (item: PlanItem) => discardItem(item))}
+                onAddAll={guard((items: PlanItem[]) => ({ kind: 'action', label: `Add all ${items.length}`, payload: { op: 'add_all' } }), (items: PlanItem[]) => approveAll(items))}
                 onHearTake={(_item, c) => playTake(c)}
                 onRole={(target, change) => (lockRef.current ? (askBusy(), Promise.resolve(null)) : changeRole(target, change))}
                 mixLines={(version === 'proposals' ? preview?.mix : finalMix)?.lines ?? []}
                 bedUnderDb={project.settings?.mix?.bed_under_db ?? 15}
-                onDelivery={guard(null, (item: PlanItem, delivery: string) => void takeTurn(`Voice ${item.item_id} again, said ${delivery}`))}
-                onRetry={guard(null, (item: PlanItem) => void takeTurn(`Try ${item.item_id} again (“${item.new_text}”): ${item.error ?? 'the last try failed'}`))}
-                onShorten={guard(null, (item: PlanItem) => void takeTurn(shortenSentence([item])))}
-                onShortenAll={guard(null, (items: PlanItem[]) => void takeTurn(shortenSentence(items)))}
+                onDelivery={guard('turn', (item: PlanItem, delivery: string) => void takeTurn(`Voice ${item.item_id} again, said ${delivery}`))}
+                onRetry={guard('turn', (item: PlanItem) => void takeTurn(`Try ${item.item_id} again (“${item.new_text}”): ${item.error ?? 'the last try failed'}`))}
+                onShorten={guard('turn', (item: PlanItem) => void takeTurn(shortenSentence([item])))}
+                onShortenAll={guard('turn', (items: PlanItem[]) => void takeTurn(shortenSentence(items)))}
                 onEase={guard(null, (item: PlanItem) => easeLine(item))}
-                onUndo={guard(null, (id: string) => void revert(id))}
-                onRemove={guard(null, (st: Statement) => void removeStatement(st))}
+                onUndo={guard((id: string) => ({ kind: 'action', label: `Take ${lineWord(approved.find((r) => r.edit_id === id)?.start ?? 0)} out`, payload: { op: 'revert', edit_id: id } }), (id: string) => void revert(id))}
+                onRemove={guard((st: Statement) => ({ kind: 'action', label: `Remove ${lineWord(st.start)}`, payload: { op: 'remove_line', start: st.start, end: st.end } }), (st: Statement) => void removeStatement(st))}
                 arranged={arranged}
                 onArrange={guard(null, (next: Arrangement) => arrange(next))}
                 onArrangeUndo={guard(null, () => arrange('undo'))}

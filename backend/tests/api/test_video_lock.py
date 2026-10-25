@@ -33,6 +33,8 @@ OPEN = {
     "export_project": "export of the last finished render; it says which version it is",
     "start_render": "a render reads the edit set and never changes it",
     "stop_jobs": "Stop", "stop_video": "Stop",
+    "add_to_queue": "Up next: it is how a change waits", "edit_queued": "Up next", "remove_queued": "Up next",
+    "reorder_queue": "Up next", "run_next_queued": "Up next: what runs next takes the lock itself", "clear_queue": "Up next",
     "grant_consent": "consent", "start_liveness": "consent", "check_liveness": "consent", "withdraw_consent": "consent",
     "add_member_comment": "comments", "reply_review_comment": "comments", "resolve_review_comment": "comments",
     "create_review_link": "sharing for review", "revoke_review_link": "sharing for review",
