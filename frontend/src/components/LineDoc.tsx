@@ -32,7 +32,7 @@ import type { LineKey } from '../transcript/keys'
 import type { ActivityJob, RenderIncludes } from '../types'
 import { track } from '../lib/analytics'
 import { Thumbs } from './Thumbs'
-import { CHIP_LABEL, aboutEta, isActive, rowChip } from '../jobs/model'
+import { CHIP_LABEL, aboutEta, rowChip } from '../jobs/model'
 import type { ChipState, RowChip } from '../jobs/model'
 
 /** What the editor asks for a line: the words and the choices. App says it
@@ -85,6 +85,9 @@ interface LineDocProps {
   /** The plan's items (planned and on), so a line carries its take, its progress, or its state. */
   items?: PlanItem[]
   disabled?: boolean
+  /** 2026-10-25: the video is Working ("Busy with adding 'Fresh every morning'"): the verbs stay live, and
+   *  pressing one says so (the editor shows the busy card); nothing is silently grey. */
+  busy?: string | null
   /** The ElevenLabs rate, for the cost line; unknown = no cost shown. */
   usdPerChar?: number | null
   /** The take playing in the video right now, if any. */
@@ -259,7 +262,7 @@ const Spinner = () => <Loader2 size={16} aria-hidden="true" className="shrink-0 
  *  actions, editor and takes. Nothing about a line happens anywhere else. */
 export function LineDoc({
   statements, words = [], speakers = [], voices = [], revisions = [], selection, currentTime,
-  pendingLines = [], items = [], disabled, usdPerChar, playing,
+  pendingLines = [], items = [], disabled, busy = null, usdPerChar, playing,
   onSeek, onHear, onAdd, onDiscard, onAddAll, onUndo, onRemove, onHearTake, onRole, mixLines = [], bedUnderDb = 15, onDelivery, onRetry,
   onShorten, onShortenAll, onEase,
   onEditingChange, onMove, onMoveKept, placing, onPlacing, duration, version = 'edited',
@@ -648,10 +651,8 @@ export function LineDoc({
     const chars = draft.trim().length
     const cost = usdPerChar ? ` · about ${Math.max(1, Math.round(chars * usdPerChar * 100))}¢` : ''
     const eta = chars > 0 ? aboutEta(activity.etaFor?.(chars)) : null
-    // One driver at a time (2026-10-20): a line Voltage is voicing is not voiced from here as well.
-    const row = editing ? rows[editing.order] : null
-    const ids = [row?.kind === 'item' ? row.item.item_id : ownItem(s)?.item_id, row?.kind === 'layer' ? row.rev.edit_id : undefined].filter(Boolean) as string[]
-    const driven = ids.length > 0 && activity.jobs.some((j) => isActive(j) && j.line_ids.some((id) => ids.includes(id)))
+    // One edit at a time per video (2026-10-25, was run 3's one driver at a time): while the video is
+    // Working, Voice it says what it is busy with instead of voicing a line under the work.
     const base = mode === 'edit' ? standing(s) : mode === 'layer' ? s.text : ''
     const badAt = mode === 'add' && at.trim() !== '' && parseTime(at) === null
     const preview = mode !== 'add' && draft.trim() && draft.trim() !== base
@@ -713,7 +714,7 @@ export function LineDoc({
             <span>{mix === 'over' ? 'The picture keeps moving under the line.' : 'The picture waits while the line plays.'}</span>
           </ControlRow>
         )}
-        {driven && <p className="m-0 text-sm text-needs" role="status" data-testid="driven-note">Voltage is voicing these lines. Wait or Stop.</p>}
+        {busy && <p className="m-0 text-sm text-needs" role="status" data-testid="busy-note">{busy}. Voice it once it is done, queue it, or Stop.</p>}
         <div className="flex flex-wrap items-center gap-2 border-t pt-3">
           {chars > 0 && <span className={cn(faint, 'tnum')} data-testid="voice-estimate">≈ {chars} {chars === 1 ? 'character' : 'characters'}{cost}{eta ? ` · ready in ${eta}` : ''} · Voltage voices it; the take comes back proposed</span>}
           <span className="flex-1" />
@@ -721,7 +722,8 @@ export function LineDoc({
           <Button
             type="button"
             aria-label="Voice it"
-            disabled={disabled || driven || !draft.trim() || badAt || (mode === 'edit' && draft.trim() === base && !soundChanged())}
+            disabled={disabled || !draft.trim() || badAt || (mode === 'edit' && draft.trim() === base && !soundChanged())}
+            title={busy ?? undefined}
             onClick={() => hear(s)}
           >
             Voice it
@@ -781,17 +783,17 @@ export function LineDoc({
       <button type="button" className={cn('btn sm', playing === c.candidate_id && 'ink')} aria-pressed={playing === c.candidate_id} onClick={() => onHearTake(item, c)} data-tour-action={item.item_id === firstProposalId ? 'proposal-row' : undefined}>
         <PlayGlyph />{playing === c.candidate_id ? 'Stop' : 'Hear it'}<KBD k="␣" />
       </button>
-      <button type="button" className="btn volt sm" data-tour={item.item_id === firstProposalId ? 'add-it' : undefined} onClick={() => void run(`add-${item.item_id}`, () => onAdd(item))} disabled={disabled || pending !== null} aria-busy={pending === `add-${item.item_id}` || undefined}>
+      <button type="button" className="btn volt sm" data-tour={item.item_id === firstProposalId ? 'add-it' : undefined} onClick={() => void run(`add-${item.item_id}`, () => onAdd(item))} disabled={disabled || (pending !== null && !busy)} title={busy ?? undefined} aria-busy={pending === `add-${item.item_id}` || undefined}>
         <BoltGlyph />{pending === `add-${item.item_id}` ? 'Adding…' : item.mix === 'remove' ? 'Remove it' : 'Add it'}<KBD k="K" />
       </button>
       {inDepth && item.mix !== 'remove' && onDelivery && (
-        <button type="button" className="btn sm" onClick={() => void run(`again-${item.item_id}`, () => onDelivery(item, (item.delivery ?? c.plan.delivery ?? 'the same way')))} disabled={disabled || pending !== null}>
+        <button type="button" className="btn sm" onClick={() => void run(`again-${item.item_id}`, () => onDelivery(item, (item.delivery ?? c.plan.delivery ?? 'the same way')))} disabled={disabled || (pending !== null && !busy)} title={busy ?? undefined}>
           {pending === `again-${item.item_id}` ? 'Asking…' : 'Voice it again'}
         </button>
       )}
       {!inDepth && item.mix !== 'remove' && <button type="button" className="act" onClick={() => setExpanded(item.item_id)}>Edit it</button>}
       {inDepth && item.mix !== 'remove' && <button type="button" className="act" onClick={() => open(order, mode)}>Change the words</button>}
-      <button type="button" className="act" onClick={() => void run(`discard-${item.item_id}`, () => onDiscard(item))} disabled={disabled || pending !== null} aria-busy={pending === `discard-${item.item_id}` || undefined}>
+      <button type="button" className="act" onClick={() => void run(`discard-${item.item_id}`, () => onDiscard(item))} disabled={disabled || (pending !== null && !busy)} title={busy ?? undefined} aria-busy={pending === `discard-${item.item_id}` || undefined}>
         {pending === `discard-${item.item_id}` ? 'Discarding…' : 'Discard'}
       </button>
       {inDepth && <><span className="flex-1" /><button type="button" className="act" onClick={() => setExpanded(null)}><span className="tag">Less ↑</span></button></>}
@@ -919,12 +921,12 @@ export function LineDoc({
           <span className="-ml-2 flex flex-wrap items-center gap-0.5" role="group" aria-label={`What to do with the line at ${clock(item.selection.start)}`}>
             {onShorten && <button type="button" className="act" onClick={() => onShorten(item)} disabled={disabled}>Shorten</button>}
             {onEase && ease !== null && (
-              <button type="button" className="act" onClick={() => void run(`ease-${item.item_id}`, () => onEase(item))} disabled={disabled || pending !== null}
-                title={`Use this take anyway, the picture eases ${ease.toFixed(1)} s. Nothing is paid again.`} aria-busy={pending === `ease-${item.item_id}` || undefined}>
+              <button type="button" className="act" onClick={() => void run(`ease-${item.item_id}`, () => onEase(item))} disabled={disabled || (pending !== null && !busy)}
+                title={busy ?? `Use this take anyway, the picture eases ${ease.toFixed(1)} s. Nothing is paid again.`} aria-busy={pending === `ease-${item.item_id}` || undefined}>
                 Let the picture ease (+{ease.toFixed(1)} s)
               </button>
             )}
-            <button type="button" className="act" onClick={() => void run(`discard-${item.item_id}`, () => onDiscard(item))} disabled={disabled || pending !== null}>Discard</button>
+            <button type="button" className="act" onClick={() => void run(`discard-${item.item_id}`, () => onDiscard(item))} disabled={disabled || (pending !== null && !busy)} title={busy ?? undefined}>Discard</button>
           </span>
         </div>
       )
@@ -937,7 +939,7 @@ export function LineDoc({
         <div className="flex flex-col gap-1.5" data-testid="failed">
           {reason && <div className={cn(metaClass, 'text-needs')} data-testid="failed-reason">{reason}</div>}
           {job && activity.onRetryJob ? (
-            <span className="-ml-2 flex"><button type="button" className="act" onClick={() => void run(`retry-${item.item_id}`, () => activity.onRetryJob!(job))} disabled={disabled || pending !== null} aria-busy={pending === `retry-${item.item_id}` || undefined}>{pending === `retry-${item.item_id}` ? 'Retrying…' : 'Retry'}</button></span>
+            <span className="-ml-2 flex"><button type="button" className="act" onClick={() => void run(`retry-${item.item_id}`, () => activity.onRetryJob!(job))} disabled={disabled || (pending !== null && !busy)} title={busy ?? undefined} aria-busy={pending === `retry-${item.item_id}` || undefined}>{pending === `retry-${item.item_id}` ? 'Retrying…' : 'Retry'}</button></span>
           ) : onRetry && <span className="-ml-2 flex"><button type="button" className="act" onClick={() => onRetry(item)} disabled={disabled}>Retry</button></span>}
         </div>
       )
@@ -1235,7 +1237,7 @@ export function LineDoc({
                 <div className={unfold}>{lineBlock(item, item.speaker, chip)}</div>
                 {item.status === 'ready' && c && verbs(item, c, order, 'layer')}
                 {(item.status === 'needs-you' || (item.status === 'failed' && !ranLong(item)) || item.status === 'planned') && (
-                  <span className="-ml-2 flex"><button type="button" className="act" onClick={() => void run(`discard-${item.item_id}`, () => onDiscard(item))} disabled={disabled || pending !== null}>Discard</button></span>
+                  <span className="-ml-2 flex"><button type="button" className="act" onClick={() => void run(`discard-${item.item_id}`, () => onDiscard(item))} disabled={disabled || (pending !== null && !busy)} title={busy ?? undefined}>Discard</button></span>
                 )}
               </>
             )}
@@ -1468,7 +1470,7 @@ export function LineDoc({
             </span>
           )}
           {proposals.length > 1 && onAddAll && (
-            <button type="button" className="btn volt sm shine" onClick={() => void run('add-all', () => onAddAll(proposals))} disabled={disabled || pending !== null} aria-busy={pending === 'add-all' || undefined}>
+            <button type="button" className="btn volt sm shine" onClick={() => void run('add-all', () => onAddAll(proposals))} disabled={disabled || (pending !== null && !busy)} title={busy ?? undefined} aria-busy={pending === 'add-all' || undefined}>
               <BoltGlyph />{pending === 'add-all' ? 'Adding…' : `Add all ${proposals.length}`}
             </button>
           )}
@@ -1507,7 +1509,7 @@ export function LineDoc({
           )}
           <span className="flex-1" />
           {arranged?.can_undo && onArrangeUndo && (
-            <button type="button" className="act" onClick={() => void run('arrange-undo', () => onArrangeUndo())} disabled={disabled || pending !== null}>Undo the last move</button>
+            <button type="button" className="act" onClick={() => void run('arrange-undo', () => onArrangeUndo())} disabled={disabled || (pending !== null && !busy)} title={busy ?? undefined}>Undo the last move</button>
           )}
         </div>
       )}
@@ -1531,7 +1533,7 @@ export function LineDoc({
         {shownRows.map(({ r: entry, order }) => (
           <Fragment key={`r-${order}`}>
             {order === longFirst && onShortenAll && (
-              <div role="listitem"><FitBanner items={longItems} disabled={disabled || pending !== null} onShortenAll={onShortenAll}
+              <div role="listitem"><FitBanner items={longItems} disabled={disabled || (pending !== null && !busy)} onShortenAll={onShortenAll}
                 onEaseAll={onEase && ((its) => run('ease-all', async () => { for (const it of its) await onEase(it) }))}
                 onDiscardAll={(its) => run('discard-all', async () => { for (const it of its) await onDiscard(it) })} /></div>
             )}

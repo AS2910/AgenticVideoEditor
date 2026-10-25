@@ -40,7 +40,9 @@ import { Toaster } from './components/Toaster'
 import type { TurnSummary } from './components/VoltagePane'
 import { useActivity } from './jobs/useActivity'
 import type { JobListener } from './jobs/useActivity'
-import { aboutEta, coalesce, isActive, isRender, isVoice, stripState, turnJobs, turnSteps, turnSummary } from './jobs/model'
+import { aboutEta, busyWith, coalesce, isActive, isRender, isVoice, stripState, turnJobs, turnSteps, turnSummary } from './jobs/model'
+import { BusyHint } from './components/BusyHint'
+import type { BusyAsk } from './components/BusyHint'
 import type { Toast } from './jobs/model'
 import { TourProvider, TourLayer, useTour } from './tour/engine'
 import { guidedRun, tourById } from './tour/tours'
@@ -69,7 +71,7 @@ import { cn } from '@/lib/utils'
 import { clock } from './transcript/format'
 import {
   createProject, confirmPlace, exportProject, artifactUrl, stageHold, pollJob, PollCancelled, ApiError, listVideos, listFolders, createFolder, createFolderFrom, startTutorial, getProject, deleteProject, getUsage, getSpend, listVoices, updateSpeaker, detectSpeakers, revertEdit, updateSettings, removeLine, dismissItem, easeItem, setEditRole, setCandidateRole, roleQuestion, moveCandidate, moveEdit, getArrangement, putArrangement, undoArrangement, getPlan, approvePlan, readProject, grantConsent, getMe, logout, postTurn, postAllowMore, getMessages, chipEvent, getUnderstanding, correctUnderstanding, setStyle,
-  retryJob, stopJobs, getLatestRender, startRender, getJobs, listRules,
+  retryJob, stopVideo, videoBusy, TAB_ID, getLatestRender, startRender, getJobs, listRules,
 } from './api'
 import type { ArrangementView, Me, PlanApproval, RoleChange, RoleQuestion } from './api'
 import type { Arrangement, Placed } from './transcript/arrange'
@@ -273,6 +275,43 @@ function Studio() {
   const activity = useActivity(project?.video_id ?? null, (job, before) => jobHandler.current?.(job, before), turnBusy)
   const [toast, setToast] = useState<Toast | null>(null)
   const pushToast = (t: Toast) => setToast((prev) => coalesce(prev, t))
+  // One edit at a time per video (2026-10-25): what holds the video, whether it is another tab's or
+  // member's (then the editor is read-only), and the lock as the strip shows it: only once it has held
+  // for 300 ms, so an action that lands at once never flashes the strip.
+  const lockNow = activity.lock
+  const othersLock = !!lockNow && !!lockNow.tab && lockNow.tab !== TAB_ID
+  const [shownLock, setShownLock] = useState<typeof lockNow>(null)
+  useEffect(() => {
+    if (!lockNow) { setShownLock(null); return }
+    const t = window.setTimeout(() => setShownLock(lockNow), 300)
+    return () => window.clearTimeout(t)
+  }, [lockNow])
+  const lockRef = useRef(lockNow)
+  lockRef.current = lockNow
+  const jobsRef = useRef(activity.jobs)
+  jobsRef.current = activity.jobs
+  /** Until the job is over (it is what the pressed button waits on), at most `ms`. */
+  const untilJob = async (jobId: string, ms = 120_000) => {
+    const start = Date.now()
+    while (Date.now() < start + ms) {
+      const j = jobsRef.current.find((x) => x.job_id === jobId)
+      if (j ? !isActive(j) : Date.now() - start > 1000) return
+      await new Promise((r) => setTimeout(r, 200))
+    }
+  }
+  const [busyAsk, setBusyAsk] = useState<BusyAsk | null>(null)
+  /** A control pressed while the video is Working: it says what it is busy with, under the control. */
+  const askBusy = (change: string | null = null) => {
+    const lock = lockRef.current
+    if (!lock) return
+    const anchor = (document.activeElement as HTMLElement | null)?.getBoundingClientRect?.() ?? null
+    setBusyAsk({ text: busyWith(lock, !!lock.tab && lock.tab !== TAB_ID), change, anchor })
+  }
+  /** `run` unless the video is Working; then the busy card instead (and a 409 that raced the lock says so too). */
+  const guard = <A extends unknown[], R>(change: ((...a: A) => string) | null, run: (...a: A) => R) => (...a: A): R | undefined => {
+    if (lockRef.current) { askBusy(change ? change(...a) : null); return undefined }
+    return run(...a)
+  }
   const [activityOpen, setActivityOpen] = useState(false)
   const [allJobs, setAllJobs] = useState<ActivityJob[] | null>(null)
   const [stopping, setStopping] = useState(false)
@@ -637,7 +676,10 @@ function Studio() {
         if (!waiting) endRender('final', seq, result?.export ?? null)
       }
       setPreview(null)
+      // 2026-10-25: the Add is Working until its render lands; its button keeps saying "Adding…" until then.
+      if (result?.render_job) await untilJob(result.render_job.job_id)
     } catch (e) {
+      if (videoBusy(e)) { askBusy(); return }
       if (stageHeld(e, () => void addItem(item, true))) return
       setError(e instanceof ApiError ? e.message : 'Could not add that line.')
     } finally {
@@ -772,7 +814,12 @@ function Studio() {
 
   /** The box is for the whole video: a goal, a change to the plan, an answer.
    *  With words selected on the Precise timeline, the sentence names the time. */
-  const submitComposer = (text: string) => { setPicked(null); void takeTurn(selection && precise ? `At ${clock(selection.start)}: ${text}` : text) }
+  const submitComposer = (text: string) => {
+    // 2026-10-25: while the video is Working the words cannot start a turn (a go Voltage waits for is answered, though).
+    if (lockRef.current && !lockRef.current.waiting) { askBusy('Your words'); return }
+    setPicked(null)
+    void takeTurn(selection && precise ? `At ${clock(selection.start)}: ${text}` : text)
+  }
 
   /** Phase 20: one turn of Voltage with tools. The steps arrive as messages
    *  while it works; the result is the plan and Voltage's closing line. A
@@ -995,7 +1042,9 @@ function Studio() {
       if (result.skipped.length > 0) {
         setError(`${result.skipped.length} ${result.skipped.length === 1 ? 'line was' : 'lines were'} not added. Hear them, then Add it one by one or ask for another take.`)
       }
+      if (result.render_job) await untilJob(result.render_job.job_id)
     } catch (e) {
+      if (videoBusy(e)) { askBusy(); return }
       if (stageHeld(e, () => void approveAll(items, true))) return
       setError(e instanceof ApiError ? e.message : 'Could not add those lines.')
     } finally {
@@ -1261,9 +1310,12 @@ function Studio() {
     if (!projectId) return
     setStopping(true)
     try {
-      const r = await stopJobs(projectId)
+      // 2026-10-25: Stop stops whatever holds the video; an Add not landed yet is put back as it was.
+      const r = await stopVideo(projectId)
       await activity.refresh()
-      pushToast({ id: 'stop', tone: 'ok', text: r.cancelled ? `Stopping. ${r.cancelled} queued ${r.cancelled === 1 ? 'job' : 'jobs'} cancelled; the one running finishes.` : 'Stopping after the step that is running.' })
+      const turnHeld = !!r.lock && (r.lock.holder.startsWith('turn:') && !r.lock.waiting)
+      pushToast({ id: 'stop', tone: 'ok', text: turnHeld || !r.message ? (r.cancelled ? `Stopping. ${r.cancelled} queued ${r.cancelled === 1 ? 'job' : 'jobs'} cancelled; the one running finishes.` : 'Stopping after the step that is running.') : r.message })
+      if (!turnHeld) setStopping(false)
     } catch (e) {
       setStopping(false)
       setError(e instanceof ApiError ? e.message : 'Could not stop that.')
@@ -1344,7 +1396,15 @@ function Studio() {
   }, [activity.turn])
 
   // The tab: a dot while anything runs, "Ready" for a moment when it is all done.
-  const anyBusy = activity.jobs.some(isActive) || activity.turn?.status === 'running' || activity.turn?.status === 'stopping' || turnBusy
+  const anyBusy = activity.jobs.some(isActive) || activity.turn?.status === 'running' || activity.turn?.status === 'stopping' || turnBusy || !!lockNow
+  // 2026-10-25: a Stop put the edit set back (or another tab changed it): the plan, the edits and the thread are read again.
+  useEffect(() => {
+    if (!activity.released.n || !projectId) return
+    if (plan) void getPlan(projectId, plan.plan_id).then(setPlan).catch(() => {})
+    void syncEdits()
+    void pullMessages()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activity.released.n])
   const baseTitle = useRef(typeof document !== 'undefined' ? document.title : 'Voltage')
   const wasBusy = useRef(false)
   useEffect(() => {
@@ -1647,9 +1707,10 @@ function Studio() {
     const strip = stripState({
       jobs: activity.jobs, turn: ourTurn ?? localTurn,
       playing: playingRec?.version ? { version: playingRec.version, created_at: playingRec.at ?? '' } : null,
-      stale, justReady,
+      stale, justReady, lock: shownLock, othersLock,
     })
-    const canStop = activity.jobs.some(isActive) || ourTurn?.status === 'running' || turnBusy
+    // Another tab's or member's work is theirs to stop; an undo that started cannot be stopped.
+    const canStop = !othersLock && (activity.jobs.some(isActive) || ourTurn?.status === 'running' || turnBusy || !!shownLock?.stoppable)
     const steps = ourTurn ? turnSteps(ourTurn, activity.jobs) : []
     const turnDone = ourTurn && (ourTurn.status === 'done' || ourTurn.status === 'failed')
     const summary: TurnSummary | null = turnDone && !clarifying && steps.some((st) => st.key === 'voice' || st.key === 'render') ? {
@@ -1788,6 +1849,8 @@ function Studio() {
           <WhatVoltageMayDo open={mayDoOpen} value={mayDo} onChange={(c) => void changeMayDo(c)} onClose={() => setMayDoOpen(false)} />
         </header>
         <StatusStrip state={strip} open={activityOpen} onOpen={openActivity} onStop={canStop ? () => void stopAll() : undefined} stopping={stopping} />
+        <BusyHint ask={busyAsk} onClose={() => setBusyAsk(null)}
+          onStop={lockNow && !othersLock && lockNow.stoppable ? () => void stopAll() : undefined} />
   
         <div className="flex min-h-0 flex-1 max-[960px]:flex-col">
           {/* The picture, the transport, the transcript. */}
@@ -1869,31 +1932,32 @@ function Studio() {
                 currentTime={sourceClock}
                 pendingLines={pendingLines}
                 items={planItems}
-                disabled={turnBusy || watching}
+                disabled={watching || othersLock}
+                busy={lockNow && !othersLock ? busyWith(lockNow) : null}
                 usdPerChar={usdPerChar}
                 playing={playingTake}
                 onSeek={seekToStatement}
-                onHear={hearLine}
-                onAdd={(item) => addItem(item)}
-                onDiscard={(item) => discardItem(item)}
-                onAddAll={(items) => approveAll(items)}
+                onHear={guard(null, hearLine)}
+                onAdd={guard((item: PlanItem) => (item.mix === 'remove' ? `Removing the line at ${clock(item.selection.start)}` : `Adding “${item.new_text}”`), (item: PlanItem) => addItem(item))}
+                onDiscard={guard((item: PlanItem) => `Discarding the line at ${clock(item.selection.start)}`, (item: PlanItem) => discardItem(item))}
+                onAddAll={guard((items: PlanItem[]) => `Adding all ${items.length}`, (items: PlanItem[]) => approveAll(items))}
                 onHearTake={(_item, c) => playTake(c)}
-                onRole={(target, change) => changeRole(target, change)}
+                onRole={(target, change) => (lockRef.current ? (askBusy(), Promise.resolve(null)) : changeRole(target, change))}
                 mixLines={(version === 'proposals' ? preview?.mix : finalMix)?.lines ?? []}
                 bedUnderDb={project.settings?.mix?.bed_under_db ?? 15}
-                onDelivery={(item, delivery) => void takeTurn(`Voice ${item.item_id} again, said ${delivery}`)}
-            onRetry={(item) => void takeTurn(`Try ${item.item_id} again (“${item.new_text}”): ${item.error ?? 'the last try failed'}`)}
-                onShorten={(item) => void takeTurn(shortenSentence([item]))}
-                onShortenAll={(items) => void takeTurn(shortenSentence(items))}
-                onEase={(item) => easeLine(item)}
-                onUndo={(id) => void revert(id)}
-                onRemove={(s) => void removeStatement(s)}
+                onDelivery={guard(null, (item: PlanItem, delivery: string) => void takeTurn(`Voice ${item.item_id} again, said ${delivery}`))}
+                onRetry={guard(null, (item: PlanItem) => void takeTurn(`Try ${item.item_id} again (“${item.new_text}”): ${item.error ?? 'the last try failed'}`))}
+                onShorten={guard(null, (item: PlanItem) => void takeTurn(shortenSentence([item])))}
+                onShortenAll={guard(null, (items: PlanItem[]) => void takeTurn(shortenSentence(items)))}
+                onEase={guard(null, (item: PlanItem) => easeLine(item))}
+                onUndo={guard(null, (id: string) => void revert(id))}
+                onRemove={guard(null, (st: Statement) => void removeStatement(st))}
                 arranged={arranged}
-                onArrange={(next) => arrange(next)}
-                onArrangeUndo={() => arrange('undo')}
+                onArrange={guard(null, (next: Arrangement) => arrange(next))}
+                onArrangeUndo={guard(null, () => arrange('undo'))}
                 onPreview={setArrangePreview}
-                onMove={(item, c, start) => void moveTake(item, c, start)}
-                onMoveKept={(id, start) => void moveKept(id, start)}
+                onMove={guard(null, (item: PlanItem, c: Candidate, start: number) => void moveTake(item, c, start))}
+                onMoveKept={guard(null, (id: string, start: number) => void moveKept(id, start))}
                 placing={placing}
                 onPlacing={setPlacing}
                 onEditingChange={setEditingLine}

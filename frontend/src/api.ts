@@ -8,14 +8,16 @@ import type {
   Project, ExportManifest, Job, ProjectSummary, ProjectDetail, Usage, Voice, Speaker,
   ProjectSettings, Autonomy, Effort, Plan, Mix, Selection, Candidate, Reading, Sight, ChatMessage,
   ProjectFolder, ProjectDetailFolder, ProjectFile, HelpArticle, Onboarding, ProjectVoice,
-  ActivityJob, TurnView, RenderState, BriefVersion, BriefChange, BriefUpdateRun, ProjectRule, RuleKind, RuleData, CheckPage, Batch, ExportPreset, ExportPresetPage, ExportPresetChange, Preflight, BatchExport, ShareLink, PublicShare,
+  ActivityJob, TurnView, RenderState, VideoLock, QueueItem, BriefVersion, BriefChange, BriefUpdateRun, ProjectRule, RuleKind, RuleData, CheckPage, Batch, ExportPreset, ExportPresetPage, ExportPresetChange, Preflight, BatchExport, ShareLink, PublicShare,
   PublicComment, ReviewAnswer, ReviewComment, ReviewLinkRequest, BinItem, BinKind, BinRestored, Pin, SearchResult, ProjectTemplate, LearnedPage, ImportSource, MembersPage, WorkspaceView, InviteView, MemberRole, NotificationItem, NotificationSetting, AdminAnalytics, BillingView,
 } from './types'
 
 const BASE = '/api'
 // Phase 9c: a state-changing request says it came from Voltage; a cross-site
 // form cannot set this header, which is the CSRF check when sign-in is on.
-const FROM_VOLTAGE = { 'X-Requested-With': 'voltage' }
+// 2026-10-25: which tab a change came from, so another tab of the same video reads it as someone else's.
+export const TAB_ID = Math.random().toString(36).slice(2, 10)
+const FROM_VOLTAGE = { 'X-Requested-With': 'voltage', 'X-Voltage-Tab': TAB_ID }
 
 export class ApiError extends Error {
   status: number
@@ -40,6 +42,8 @@ async function failure(res: Response): Promise<never> {
     parsed = JSON.parse(raw)
     const detail = (parsed as { detail?: unknown } | null)?.detail
     if (typeof detail === 'string') message = detail
+    // A sentence inside a structured refusal (409 video_busy, a stage hold): that is what the user reads.
+    else if (detail && typeof detail === 'object' && typeof (detail as { message?: unknown }).message === 'string') message = (detail as { message: string }).message
   } catch {
     // Not JSON — use the raw body.
   }
@@ -703,7 +707,16 @@ export const setStyle = (id: string, line: string, accepted = true) => put<Under
 
 /** The video's jobs, newest first: `active` for what is queued or running (and the turn's own), else the last 50. */
 export const getJobs = (id: string, active = false) =>
-  get<{ jobs: ActivityJob[]; turn: TurnView | null }>(`/videos/${id}/jobs${active ? '?active=1' : ''}`)
+  get<{ jobs: ActivityJob[]; turn: TurnView | null; lock?: VideoLock | null; queue?: QueueItem[]; queue_paused?: boolean }>(`/videos/${id}/jobs${active ? '?active=1' : ''}`)
+/** 2026-10-25: Stop whatever holds the video. A turn ends after its step, an Add not landed yet is put back. */
+export const stopVideo = (id: string) =>
+  post<{ stopped: boolean; cancelled: number; spent_usd: number; message: string | null; lock: VideoLock | null }>(`/videos/${id}/stop`)
+/** The 409 a change gets while the video is Working: what holds it, and what is up next. */
+export interface VideoBusy { code: 'video_busy'; message: string; holder: string; action: string; started_by: string | null; lock: VideoLock; queue: QueueItem[] }
+export const videoBusy = (e: unknown): VideoBusy | null => {
+  const detail = e instanceof ApiError && e.status === 409 ? (e.body as { detail?: unknown } | null)?.detail : null
+  return detail && typeof detail === 'object' && (detail as { code?: unknown }).code === 'video_busy' ? detail as VideoBusy : null
+}
 /** Try a failed job again through the same flow. */
 export const retryJob = (id: string, jobId: string) => post<ActivityJob>(`/videos/${id}/jobs/${jobId}/retry`)
 /** Stop: queued jobs are cancelled, running ones finish, the turn ends after its current step. */
