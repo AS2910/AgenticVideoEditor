@@ -8065,7 +8065,7 @@ def _locked_turn(project_id: str, record: ProjectRecord, text: str, owner: str, 
             repo.set_settings(project_id, opening_fixed=fixed)     # the run's first step puts this opening in the thread
             outcome = agent_.run(_workbench(), turn, history, content, meter=_meter(project_id, "agent"),
                                  on_step=on_step, on_card=on_card, effort=prefs["effort"] if agent_ is _agent() else None,
-                                 persist=lambda role, c: repo.append_turn(project_id, role, c))
+                                 persist=lambda role, c: repo.append_turn(project_id, role, chips.without_next(c) if role == "assistant" else c))
         except Exception as exc:  # noqa: BLE001 — the user hears a sentence; the log has the rest
             logging.getLogger(__name__).exception("turn failed")
             why = str(exc)[:200] or type(exc).__name__

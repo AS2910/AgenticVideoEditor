@@ -4,7 +4,7 @@ import type { ChatMessage, HelpRef, PlanQuestion, SpendSummary, Suggestion } fro
 import { spendLine } from '../lib/money'
 import { optionsOf } from '../lib/options'
 import { artifactUrl } from '../api'
-import { ArrowUp, Check, Info, Loader2 } from 'lucide-react'
+import { ArrowUp, Check, Info, Loader2, X } from 'lucide-react'
 import type { Step } from '../jobs/model'
 import { cn } from '@/lib/utils'
 import { Markdown } from './Markdown'
@@ -203,6 +203,23 @@ function StepList({ steps }: { steps: Step[] }) {
   )
 }
 
+/** A chip, by what it says: two chips are the same when their kind and label are. */
+const chipId = (c: Suggestion) => `${c.kind}|${c.label.trim().toLowerCase()}`
+/** A set of chips, in any order. */
+export const chipSetKey = (cs: Suggestion[]) => cs.map(chipId).sort().join('\n')
+
+/** The chips one round offers (one edit at a time, part 5): at most three, and never the
+ *  set the round before offered. When the top three are that set, the chips not offered
+ *  then come first; when there are none, the first chip is dropped. */
+export function freshChips(suggestions: Suggestion[], before: string, max = 3): Suggestion[] {
+  const top = suggestions.slice(0, max)
+  if (!before || top.length === 0 || chipSetKey(top) !== before) return top
+  const was = new Set(before.split('\n'))
+  const unseen = suggestions.filter((c) => !was.has(chipId(c)))
+  if (unseen.length > 0) return [...unseen, ...suggestions.filter((c) => was.has(chipId(c)))].slice(0, max)
+  return top.slice(1)
+}
+
 /** What a turn closes with: one short sentence, then Hear changes and Undo all (it asks once before undoing). */
 export interface TurnSummary { text: string; lines: number; onHear?: () => void; onUndo?: () => void | Promise<unknown> }
 function Summary({ summary }: { summary: TurnSummary }) {
@@ -256,9 +273,17 @@ interface VoltagePaneProps {
   sendLabel?: string
   inputRef?: RefObject<HTMLTextAreaElement | null>
   seed?: { text: string; id: number } | null
-  /** Short follow-ups offered under the thread (chips). */
-  /** 2026-10-20: chips from this video; a click puts the chip's prompt in the box, Enter sends. */
+  /** 2026-10-20: chips from this video; a click puts the chip's prompt in the box, Enter sends.
+   *  Part 5: at most three, in one sideways row inside the composer, never saved into the thread. */
   suggestions?: Suggestion[]
+  /** The video is Ready: no turn, no job and no read running on it (the video lock feeds this later).
+   *  Chips show only then. */
+  ready?: boolean
+  /** One more each time a turn finishes: the chips are offered again, never the same set twice in a row,
+   *  and the x that hid them stops holding. */
+  chipRound?: number
+  /** Below the thread, above the composer: a standing note (the line you are on) that is never the thread's newest item. */
+  note?: ReactNode
   /** What happened to a chip: shown, put in the box, sent (as it was, or edited first). */
   onChipEvent?: (event: 'shown' | 'clicked' | 'sent', chip: Suggestion, edited?: boolean) => void
   /** Content before the thread (the first read), and after it (the plan's record). */
@@ -284,10 +309,10 @@ interface VoltagePaneProps {
 
 /** Voltage's pane (Volt, 2026-10-18): black in both themes. The avatar and the
  *  state word, the thread as turns — your bubble, the trace, Voltage's words,
- *  a question as a gate card — then the chips and the composer. */
+ *  a question as a gate card — then the composer, the chips in a row inside it. */
 export function VoltagePane({
   messages, projectId, state, busy, need, engine, chips = [], cap, spend, question, onAnswer, turnCap, onSubmit, placeholder = 'Say what to change…', sendLabel = 'Send',
-  inputRef, seed, suggestions = [], onChipEvent, seeing, before, children, working, empty, onShowMe, picked, steps = [], summary, readOnly,
+  inputRef, seed, suggestions = [], ready = true, chipRound = 0, note, onChipEvent, seeing, before, children, working, empty, onShowMe, picked, steps = [], summary, readOnly,
 }: VoltagePaneProps) {
   const [prompt, setPrompt] = useState('')
   const [openTrace, setOpenTrace] = useState<number | null>(null)
@@ -331,7 +356,19 @@ export function VoltagePane({
   const fromChip = useRef<Suggestion | null>(null)
   const ownBox = useRef<HTMLTextAreaElement | null>(null)
   const box = inputRef ?? ownBox
-  const chipsShown = working || busy ? [] : suggestions.slice(0, 4)
+  // Part 5: the set offered this round, against the set the round before offered. The previous
+  // round's set is read when the round changes; a ref, so a new list in the same round is
+  // compared with the same set (the suggestions may land just before or just after the round).
+  const offered = useRef({ round: chipRound, before: '', now: '' })
+  if (offered.current.round !== chipRound) offered.current = { round: chipRound, before: offered.current.now, now: '' }
+  const chipSet = freshChips(suggestions, offered.current.before)
+  offered.current.now = chipSetKey(chipSet)
+  // The x hides them for this video until the next finished turn.
+  const [hiddenAt, setHiddenAt] = useState<{ video: string; round: number } | null>(null)
+  const chipsHidden = hiddenAt !== null && hiddenAt.video === (projectId ?? '') && hiddenAt.round === chipRound
+  // Shown only when the video is Ready, the box is empty and no question or gate waits on you.
+  const waiting = !!question && !question.resolved
+  const chipsShown = !ready || working || busy || waiting || chipsHidden || prompt !== '' ? [] : chipSet
   const counted = useRef(new Set<string>())
   useEffect(() => {
     for (const c of chipsShown) {
@@ -442,13 +479,14 @@ export function VoltagePane({
               </div>
             )
           })}
+          {/* What the latest turn put in the video; the live step, a question or a gate stays the newest item, under it. */}
+          {children}
           {working && steps.length === 0 && (
             <div className="trace" role="status" data-testid="turn-working">
               <div className="ln"><span className="ts" /><span className="g" aria-hidden="true">└</span><span className="c inline-flex items-center gap-2">{working}<span className="blinkdot inline-block h-3.5 w-[7px] bg-volt" aria-hidden="true" /></span><span /></div>
             </div>
           )}
           {question && <QuestionCard question={question} onAnswer={onAnswer} turnCap={turnCap} />}
-          {children}
         </div>
         {unseen && (
           <button type="button" className="tag absolute bottom-3 left-1/2 z-10 -translate-x-1/2 whitespace-nowrap rounded-full border-[1.5px] border-ink bg-volt px-3 py-1.5 text-ink pointer-coarse:py-3" onClick={toBottom} data-testid="new-from-voltage">
@@ -463,15 +501,23 @@ export function VoltagePane({
         </div>
       ) : (
       <div className="flex min-w-0 flex-none flex-col gap-3 px-5.5 pt-3.5 pb-5.5 @max-[380px]:px-4">
-        {chipsShown.length > 0 && (
-          <div className="flex min-w-0 flex-wrap gap-1.5" role="group" aria-label="Suggestions for this video" data-testid="chips">
-            {chipsShown.map((c) => (
-              <button key={`${c.kind}-${c.label}`} type="button" className="sugg max-w-full truncate" title={c.prompt} data-kind={c.kind} onClick={() => takeChip(c)}>{c.label}</button>
-            ))}
-          </div>
-        )}
+        {note}
         <label htmlFor="ask-voltage" className="sr-only">Describe a change</label>
         <div className={cn('flex flex-col gap-2 rounded-xl border-[1.5px] bg-psunk py-3 pr-3 pl-3.5', turns.length === 0 ? 'border-volt' : 'border-pline')} data-tour="composer">
+          {chipsShown.length > 0 && (
+            // Part 5: one line, inside the box, above the words; it scrolls sideways, never wraps.
+            <div className="flex min-w-0 items-center gap-1" data-testid="chip-row">
+              <div className="chip-row slimbar flex min-w-0 flex-1 flex-nowrap gap-1.5 overflow-x-auto" role="group" aria-label="Suggestions for this video" data-testid="chips">
+                {chipsShown.map((c) => (
+                  <button key={`${c.kind}-${c.label}`} type="button" className="sugg shrink-0" title={c.prompt} data-kind={c.kind} onClick={() => takeChip(c)}>{c.label}</button>
+                ))}
+              </div>
+              <button type="button" className="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-pmuted hover:bg-pane hover:text-ptext focus-visible:outline-2 focus-visible:outline-volt"
+                aria-label="Hide suggestions" title="Hide suggestions" onClick={() => setHiddenAt({ video: projectId ?? '', round: chipRound })} data-testid="hide-chips">
+                <X size={14} aria-hidden="true" />
+              </button>
+            </div>
+          )}
           <textarea
             id="ask-voltage"
             ref={box}

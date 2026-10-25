@@ -159,6 +159,25 @@ def split_reply(reply: str) -> tuple[str, list]:
     return reply[: m.start()].rstrip(), data if isinstance(data, list) else []
 
 
+def without_next(content):
+    """A message as the thread keeps it: Voltage's words without their `<next>`
+    block. The chips are offered in the box and never saved into the history
+    (one edit at a time, part 5). A text left empty keeps one word, as the API
+    refuses an empty text block."""
+    if isinstance(content, str):
+        words, _ = split_reply(content)
+        return words if words.strip() or not _NEXT.search(content) else "Done."
+    if not isinstance(content, list):
+        return content
+    out = []
+    for block in content:
+        if isinstance(block, dict) and block.get("type") == "text" and _NEXT.search(block.get("text") or ""):
+            words, _ = split_reply(block["text"])
+            block = {**block, "text": words if words.strip() else "Done."}
+        out.append(block)
+    return out
+
+
 PROMPT_RULES = """\
 - Suggestions: end your closing message with a line `<next>` and a JSON \
 list of two to four chips for what the user might do next, then `</next>`. \

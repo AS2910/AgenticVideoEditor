@@ -185,6 +185,8 @@ function Studio() {
   const [seed, setSeed] = useState<{ text: string; id: number } | null>(null)
   // 2026-10-20: the chips above Voltage's box, from this video (the first read, then each turn).
   const [suggestions, setSuggestions] = useState<Suggestion[]>([])
+  // One edit at a time, part 5: one more each time a turn of ours finishes; the chips are offered again.
+  const [chipRound, setChipRound] = useState(0)
   // 2026-10-20: what Voltage sees in the video (beats, style, the user's corrections).
   const [seen, setSeen] = useState<Understanding | null>(null)
   const [pendingTour, setPendingTour] = useState<Tour | null>(null)
@@ -917,8 +919,9 @@ function Studio() {
       })
       await pullMessages()
       if (finished.status === 'failed') tell(finished.error ?? "Something went wrong on my side. Say it again and I'll retry.")
-      const result = finished.result as { type?: string; plan?: Plan; spend?: SpendSummary } | null
+      const result = finished.result as { type?: string; plan?: Plan; spend?: SpendSummary; suggestions?: Suggestion[] } | null
       if (result?.spend) setSpend(result.spend)
+      if (result?.suggestions) setSuggestions(result.suggestions)
       let fresh: Plan | null = null
       if (result && result.type === 'turn' && result.plan) fresh = result.plan
       else {
@@ -937,6 +940,7 @@ function Studio() {
     } finally {
       setTurnBusy(false)
       setTurnStep(null)
+      setChipRound((n) => n + 1)
       void refreshUsage(projectId)
       // A turn may have made a voice (designed, or from the library): the catalogue is read again.
       listVoices().then(takeInVoices).catch(() => {})
@@ -2058,6 +2062,11 @@ function Studio() {
               sendLabel={sendLabel}
               working={turnBusy ? (turnStep ?? 'Working…') : null}
               suggestions={readingBusy ? [] : suggestions}
+              ready={!anyBusy && !readingBusy}
+              chipRound={chipRound}
+              note={editingLine && !turnBusy ? (
+                <p className="pm m-0 text-sm" role="status">You're on {clock(editingLine.start)}. Voltage stays out of the way while you write; Enter brings the line to it.</p>
+              ) : undefined}
               onChipEvent={(event, c, edited) => { if (projectId) chipEvent(projectId, event, c.kind, c.label, edited) }}
               seeing={seen && (seen.read || seen.beats.length > 0) ? (
                 <WhatISee
@@ -2111,9 +2120,6 @@ function Studio() {
                     {download && <a className="act" href={download.url} download={download.filename}>Download the file</a>}
                   </div>
                 </div>
-              )}
-              {editingLine && !turnBusy && (
-                <p className="pm m-0 text-sm" role="status">You're on {clock(editingLine.start)}. Voltage stays out of the way while you write; Enter brings the line to it.</p>
               )}
             </VoltagePane>
           </aside>

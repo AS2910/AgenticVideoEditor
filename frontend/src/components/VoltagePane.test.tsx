@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest'
 import { fireEvent, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { VoltagePane } from './VoltagePane'
+import { VoltagePane, freshChips, chipSetKey } from './VoltagePane'
 import type { ChatMessage } from '../types'
 import { unlabelledMoney } from '../lib/money'
 
@@ -64,7 +64,7 @@ describe('VoltagePane: the composer and the gate', () => {
     ]
     render(<VoltagePane messages={[]} state="ready" onSubmit={onSubmit} suggestions={chips} onChipEvent={onChipEvent} />)
     const group = screen.getByRole('group', { name: 'Suggestions for this video' })
-    expect(within(group).getAllByRole('button')).toHaveLength(4)
+    expect(within(group).getAllByRole('button')).toHaveLength(3)       // part 5: three at most
     expect(onChipEvent).toHaveBeenCalledWith('shown', chips[0])
     await userEvent.click(within(group).getByRole('button', { name: 'Say Bhaji Cam clearly' }))
     const box = screen.getByRole('textbox', { name: 'Describe a change' }) as HTMLTextAreaElement
@@ -295,3 +295,119 @@ describe('VoltagePane: rendering at any width (pane-render)', () => {
     expect(screen.queryByTestId('new-from-voltage')).toBeNull()
   })
 })
+
+describe('VoltagePane: chat order and chips (one edit at a time, part 5)', () => {
+  const CHIPS = [
+    { label: 'Make line 1 warmer', prompt: 'Voice line 1 again, warmer.', kind: 'voice' as const, grounded_in: 'words' as const },
+    { label: 'Tighten the line at 0:12', prompt: 'Tighten the line at 0:12.', kind: 'fix' as const, grounded_in: 'time' as const },
+    { label: 'Export', prompt: 'Export the video.', kind: 'finish' as const, grounded_in: 'time' as const },
+    { label: 'Add an offer', prompt: 'Add the offer at the end.', kind: 'add' as const, grounded_in: 'brief' as const },
+  ]
+  const QUESTION = { text: 'Which voice for line 2?', options: ['Warm', 'Bright'], guess: 'Warm' }
+  const labels = () => within(screen.getByRole('group', { name: 'Suggestions for this video' })).getAllByRole('button').map((b) => b.textContent)
+  const noChips = () => expect(screen.queryByRole('group', { name: 'Suggestions for this video' })).toBeNull()
+
+  it('keeps the newest item last: a new reply ends the thread, the turn result and a standing note never stand under it', () => {
+    const reply: ChatMessage = { role: 'assistant', text: 'Line 2 is ready to hear.', kind: 'say', seq: 5 }
+    const { rerender } = render(<VoltagePane messages={[...THREAD, reply]} state="ready" onSubmit={() => {}} suggestions={CHIPS}
+      note={<p data-testid="standing-note">You're on 00:12.</p>}><div data-testid="shipped">In the video</div></VoltagePane>)
+    const log = screen.getByRole('log')
+    // The turn's result belongs to the turn; the note is outside the thread, over the composer.
+    expect(within(log).queryByTestId('standing-note')).toBeNull()
+    expect(screen.getByTestId('standing-note')).toBeInTheDocument()
+    expect(log.lastElementChild).toHaveAttribute('data-testid', 'shipped')
+    // The chips are inside the composer, above the words; never in the thread.
+    const composer = document.querySelector('[data-tour=composer]') as HTMLElement
+    expect(within(composer).getByRole('group', { name: 'Suggestions for this video' })).toBeInTheDocument()
+    expect(within(log).queryByRole('group', { name: 'Suggestions for this video' })).toBeNull()
+    expect(composer.firstElementChild).toHaveAttribute('data-testid', 'chip-row')
+    // A question: the card is the last element, under the turn's result.
+    rerender(<VoltagePane messages={[...THREAD, reply]} state="needs your go" onSubmit={() => {}} suggestions={CHIPS} question={QUESTION}>
+      <div data-testid="shipped">In the video</div></VoltagePane>)
+    expect(log.lastElementChild).toHaveAttribute('data-testid', 'clarify')
+    // A live step: the working line is last.
+    rerender(<VoltagePane messages={[...THREAD, reply, { role: 'user', text: 'Now line 3', seq: 6 }]} state="working" working="Voicing line 3" onSubmit={() => {}}>
+      <div data-testid="shipped">In the video</div></VoltagePane>)
+    expect(log.lastElementChild).toHaveAttribute('data-testid', 'turn-working')
+    // A reply without anything after it: the reply is the last thing said.
+    rerender(<VoltagePane messages={[...THREAD, reply]} state="ready" onSubmit={() => {}} />)
+    expect(log.lastElementChild).toHaveTextContent(/Line 2 is ready to hear\.$/)
+  })
+
+  it('shows at most three chips in one row that scrolls sideways', () => {
+    render(<VoltagePane messages={[]} state="ready" onSubmit={() => {}} suggestions={CHIPS} />)
+    const group = screen.getByRole('group', { name: 'Suggestions for this video' })
+    expect(labels()).toEqual(['Make line 1 warmer', 'Tighten the line at 0:12', 'Export'])
+    expect(group).toHaveClass('flex-nowrap', 'overflow-x-auto')
+    for (const b of within(group).getAllByRole('button')) expect(b).toHaveClass('sugg', 'shrink-0')
+  })
+
+  it('hides the chips while the video is not Ready, while a question or gate waits, and while the box has text', async () => {
+    const { rerender } = render(<VoltagePane messages={[]} state="ready" ready={false} onSubmit={() => {}} suggestions={CHIPS} />)
+    noChips()                                                   // a job runs on this video
+    rerender(<VoltagePane messages={[]} state="needs your go" onSubmit={() => {}} suggestions={CHIPS} question={QUESTION} />)
+    noChips()                                                   // a question waits
+    rerender(<VoltagePane messages={[]} state="needs your go" onSubmit={() => {}} suggestions={CHIPS} question={{ ...QUESTION, gate: true }} />)
+    noChips()                                                   // a gate waits
+    rerender(<VoltagePane messages={[]} state="ready" onSubmit={() => {}} suggestions={CHIPS}
+      question={{ ...QUESTION, resolved: { why: 'you added it', by: 'editor', at: '2026-10-25T10:00:00Z' } }} />)
+    expect(labels()).toHaveLength(3)                            // a settled question waits on no one
+    await userEvent.type(screen.getByRole('textbox', { name: 'Describe a change' }), 'Make it')
+    noChips()                                                   // typing
+    await userEvent.clear(screen.getByRole('textbox', { name: 'Describe a change' }))
+    expect(labels()).toHaveLength(3)
+  })
+
+  it('the x hides the chips for this video until the next finished turn', async () => {
+    const { rerender } = render(<VoltagePane messages={[]} projectId="p1" state="ready" onSubmit={() => {}} suggestions={CHIPS} chipRound={1} />)
+    await userEvent.click(screen.getByRole('button', { name: 'Hide suggestions' }))
+    noChips()
+    rerender(<VoltagePane messages={[]} projectId="p1" state="ready" onSubmit={() => {}} suggestions={[...CHIPS]} chipRound={1} />)
+    noChips()                                                   // still this round
+    rerender(<VoltagePane messages={[]} projectId="p2" state="ready" onSubmit={() => {}} suggestions={CHIPS} chipRound={1} />)
+    expect(labels()).toHaveLength(3)                            // another video
+    rerender(<VoltagePane messages={[]} projectId="p1" state="ready" onSubmit={() => {}} suggestions={CHIPS} chipRound={1} />)
+    noChips()
+    rerender(<VoltagePane messages={[]} projectId="p1" state="ready" onSubmit={() => {}} suggestions={CHIPS} chipRound={2} />)
+    expect(labels().length).toBeGreaterThan(0)                  // a turn finished
+  })
+
+  it('never offers the same set twice in a row', () => {
+    const { rerender } = render(<VoltagePane messages={[]} state="ready" onSubmit={() => {}} suggestions={CHIPS} chipRound={0} />)
+    const first = labels()
+    // The turn finished and its chips are the same: the one not offered comes in.
+    rerender(<VoltagePane messages={[]} state="ready" onSubmit={() => {}} suggestions={CHIPS} chipRound={1} />)
+    const second = labels()
+    expect(new Set(second)).not.toEqual(new Set(first))
+    expect(second).toContain('Add an offer')
+    // Three chips only, the same three again: one drops.
+    const three = CHIPS.slice(0, 3)
+    rerender(<VoltagePane messages={[]} state="ready" onSubmit={() => {}} suggestions={three} chipRound={2} />)
+    const third = labels()
+    rerender(<VoltagePane messages={[]} state="ready" onSubmit={() => {}} suggestions={three} chipRound={3} />)
+    expect(new Set(labels())).not.toEqual(new Set(third))
+    // A new set in the same round as it lands is still compared with the round before.
+    rerender(<VoltagePane messages={[]} state="ready" onSubmit={() => {}} suggestions={[...three]} chipRound={3} />)
+    expect(new Set(labels())).not.toEqual(new Set(third))
+  })
+
+  it('freshChips: the top three unless they are the last set; then the unseen first; else one fewer', () => {
+    const top = CHIPS.slice(0, 3)
+    expect(freshChips(CHIPS, '')).toEqual(top)
+    expect(freshChips(CHIPS, chipSetKey([CHIPS[3]]))).toEqual(top)
+    expect(freshChips(CHIPS, chipSetKey(top))).toEqual([CHIPS[3], ...top.slice(0, 2)])
+    expect(freshChips(top, chipSetKey([...top].reverse()))).toEqual(top.slice(1))
+    expect(freshChips([CHIPS[0]], chipSetKey([CHIPS[0]]))).toEqual([])
+  })
+
+  it('never puts a chip into the conversation: a click only fills the box, and the thread shows what was sent', async () => {
+    const onSubmit = vi.fn()
+    render(<VoltagePane messages={THREAD} state="ready" onSubmit={onSubmit} suggestions={CHIPS} />)
+    const log = screen.getByRole('log')
+    await userEvent.click(screen.getByRole('button', { name: 'Export' }))
+    expect(log).not.toHaveTextContent('Export')
+    expect(log).not.toHaveTextContent('Make line 1 warmer')
+    expect(onSubmit).not.toHaveBeenCalled()
+  })
+})
+
