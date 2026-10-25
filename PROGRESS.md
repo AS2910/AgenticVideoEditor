@@ -4,7 +4,8 @@ Branch `feature/one-edit-at-a-time`, cut from `overnight/cost-and-staging` b912f
 
 | Part | What | Status | Commit | Notes |
 |---|---|---|---|---|
-| 1 | The video lock (backend) | done | (this commit) | `video_locks` (0043), `app/jobs/locks.py`; every write route takes the lock or is classified with a reason (route test); 409 `video_busy`; lease renewed while running, cleared by the stuck-job sweep after a crash; a turn keeps it while it waits for the go; SSE `video.locked` / `video.unlocked`; `GET /videos/{id}/lock`. |
+| 1 | The video lock (backend) | done | e59a04d | `video_locks` (0043), `app/jobs/locks.py`; every write route takes the lock or is classified with a reason (route test); 409 `video_busy`; lease renewed while running, cleared by the stuck-job sweep after a crash; a turn keeps it while it waits for the go; SSE `video.locked` / `video.unlocked`; `GET /videos/{id}/lock`. |
+| 2 | Stop | done | (this commit) | `POST /videos/{id}/stop`: queued work cancelled, the running vendor call finishes with no retry, the turn or job stopped, the lock let go, spend so far returned. The edit set snapshot on the lock is restored exactly before an Add lands; a stopped turn adds nothing and keeps its finished takes as proposals; undo is atomic. "Stopped. Nothing in your video changed. $X spent." |
 
 ---
 

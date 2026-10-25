@@ -32,7 +32,7 @@ INSIDE = {
 OPEN = {
     "export_project": "export of the last finished render; it says which version it is",
     "start_render": "a render reads the edit set and never changes it",
-    "stop_jobs": "Stop",
+    "stop_jobs": "Stop", "stop_video": "Stop",
     "grant_consent": "consent", "start_liveness": "consent", "check_liveness": "consent", "withdraw_consent": "consent",
     "add_member_comment": "comments", "reply_review_comment": "comments", "resolve_review_comment": "comments",
     "create_review_link": "sharing for review", "revoke_review_link": "sharing for review",
