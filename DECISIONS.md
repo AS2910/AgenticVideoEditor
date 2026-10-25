@@ -1,3 +1,16 @@
+# One edit at a time per video (2026-10-25)
+
+Each: what, why, how to undo.
+
+- 1: The lock is a row in `video_locks` (0043), not memory, so a second tab or a member reads the same truth and a restart can tell a crash from a wait. No row means Ready. The lease is 90 s, renewed every 30 s while its holder runs in this process (a turn's job, an Activity job, or the request itself); a crash stops the renewals and the stuck-job sweep (`ActivityJobs.sweep`, run by the SSE ping and every jobs list) clears the row once the lease is out. A restart clears every lock except a go Voltage waits for. Undo: drop the `locked(...)` dependencies and the table.
+- 1: Every video-changing route declares `ticket: LockTicket = locked("<action>")`, a FastAPI dependency (scope "function", so it lets go before the answer leaves). The route passes the lock to the job or turn it starts inside the transaction that makes the job (`activity.create(within=...)`; a turn's in-memory job is made first and the lock handed to `turn:<id>` before the turn is submitted). A job lets go in the same transaction that ends it, so whoever reads the job done finds the video Ready.
+- 1: The route test walks `app.routes` (included routers too) and requires every write route with a video id in its path to be locked or listed with a reason: INSIDE (takes the lock inside: a mix change in settings, Add all, the project check's Fix, batches, Bring up to date, language versions, each per video through `_start_turn`), OPEN (consent, comments, review links, thumbs, chip analytics, the review stage, filing in a folder, variants, the first read, the place, the style line and corrections, export of the last render, Render now, the old Stop), or FOLDER (a project folder's own record). A second test calls every locked route with a foreign lock held and expects 409 `video_busy`.
+- 1: What I locked beyond the spec's list: speaker detection and a speaker's voice or name, Retry of a failed line or render, deleting the video, a language version's Sync, a batch's per-video undo. What I left open: autonomy, turn cap and effort (Voltage's instructions, not the video), the stage, the understanding corrections. Say if any should flip.
+- 1: Waiting for the user's go keeps the lock (a `gate:` holder with a 7 day lease). Only a turn by the same person takes it over (the answer); every other change gets 409 until the go is answered or Stopped. A go that was answered some other way is let go of the next time anyone asks.
+- 1: The old "Voltage is still on the last thing you said" check is gone: the lock is the one rule now. The 409 body is `{code: "video_busy", message, holder, action, started_by, lock, queue}`; `message` is the sentence the editor shows ("Busy with adding 'Fresh every morning'. Queue this change, or Stop.").
+- 1: Add holds the video until its render lands (the render job is the holder), so a click right after an Add is refused; tests that clicked straight after an Add now wait for its render (`add()` / `settle_renders()`).
+- 1: `started_by` is the signed-in person (not the workspace owner); the name is the session's name or the email's first part, and "You" with sign-in off. The tab is the `X-Voltage-Tab` header (a random id per page load).
+
 # Cost and staging decisions (overnight run 4, 2026-10-24)
 
 Each: what, why, how to undo. Run 3's decisions follow below.

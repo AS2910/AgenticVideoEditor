@@ -11,6 +11,7 @@ import statistics
 from concurrent.futures import ThreadPoolExecutor
 import hashlib
 import os
+import uuid
 import logging
 import tempfile
 from contextvars import ContextVar
@@ -105,6 +106,7 @@ from app.jobs.runner import JobRunner
 from app.jobs.activity import ActivityJobs, KINDS as JOB_KINDS
 from app.jobs import batch as batch_mod
 from app.jobs.events import EventBus
+from app.jobs import locks as lock_mod
 from app.agent import loop as agent_loop
 from app.agent.guards import TurnBudget, is_go
 from app.agent.tools import Turn as AgentTurn, Workbench
@@ -224,6 +226,10 @@ runner = JobRunner(jobs, max_workers=settings.job_workers)
 # 2026-10-20 (one processing model): every piece of work the user waits on is
 # an Activity job, persisted; the editor hears each change on its live channel.
 events = EventBus()
+# 2026-10-25: a job that held its video's lock lets go of it as it ends; Stop's cancel reads as stopped.
+_OUTCOME = {"done": "done", "failed": "failed", "cancelled": "stopped"}
+
+
 def _on_job(j) -> None:
     events.publish(j.video_id, "job.updated", j.to_dict())
     notice = globals().get("_job_notice")      # G4, defined further down
@@ -231,8 +237,26 @@ def _on_job(j) -> None:
         notice(j)
 
 
+def _on_lock(video_id: str, lock, outcome: str | None) -> None:
+    """The lock changed: the editor hears it (video.locked / video.unlocked); Part 3's queue hears a release."""
+    if lock is not None:
+        events.publish(video_id, "video.locked", {**lock.to_dict(), "queue": _queue_items(video_id)})
+        return
+    events.publish(video_id, "video.unlocked", {"video_id": video_id, "outcome": outcome, "queue": _queue_items(video_id)})
+    after = globals().get("_after_release")    # Part 3, defined further down
+    if after is not None and outcome is not None:
+        after(video_id, outcome)
+
+
+locks = lock_mod.VideoLocks(database, on_change=_on_lock)
 activity = ActivityJobs(database, on_change=_on_job)
+# A job that holds its video's lock lets go of it in the step that ends it, so whoever reads the job done finds the video Ready.
+activity.on_end_in = lambda c, j: locks.release_in(c, j.video_id, j.job_id, _OUTCOME.get(j.status, "done"))
 activity.interrupt_leftovers()
+# A crash mid-action leaves its lock behind: a restart clears it at once (a gate
+# waiting for a go stays), and a lease nobody renews runs out and is swept.
+locks.clear_leftovers()
+activity.after_sweep = locks.sweep
 # Renders and retries started from the editor run here, off the request thread
 # and apart from the turns' pool, so a long turn never holds a preview back.
 work_pool = ThreadPoolExecutor(max_workers=settings.work_workers, thread_name_prefix="ave-work")
@@ -512,6 +536,169 @@ def current_owner(request: Request) -> str:
     if me is not None and me.user == who.owner:
         return me.owner
     return who.owner
+
+
+# ── One edit at a time per video (2026-10-25): the video lock ────────────────
+# A video is Ready or Working. Every route that changes a video takes its lock
+# (`locked(...)` below, a dependency the route test can see); the lock passes
+# to the job or turn the route starts, in the step that starts it, and is let
+# go when that lands, fails or is stopped. While it is held those routes
+# answer 409 `video_busy` with what holds it and what is up next. A turn that
+# waits for the user's go keeps it (a `gate:` lock); an answer takes it over.
+
+TAB_HEADER = "x-voltage-tab"
+_requests_live: set[str] = set()          # request holders still running here (their lease is renewed)
+_names: dict[str, str] = {}               # a person's name as their requests gave it, for work started later
+
+
+def _person(request: Request | None = None) -> tuple[str | None, str | None]:
+    """(the person acting, their name): the signed-in user, not the workspace they act in."""
+    user = current_actor.get()
+    if settings.auth_mode == "off":
+        return user or LOCAL_OWNER, "You"
+    if request is not None and user and user not in _names:
+        who = signed_in_identity(request)
+        if who is not None:
+            name = who.name or (who.email.split("@")[0] if who.email else None)
+            if name:
+                _names[user] = name
+    return user, _names.get(user or "")
+
+
+def _busy_words(lock: lock_mod.Lock) -> str:
+    """The 409's sentence: what the video is busy with, and the two ways on."""
+    if lock.gate:
+        return "Voltage is waiting for your go on this video. Answer it, queue this change, or Stop."
+    if lock.holder.startswith("turn:"):
+        return "Voltage is working on this video. Queue this change, or Stop."
+    what = lock.action[:1].lower() + lock.action[1:]
+    me, _ = _person()
+    if lock.started_by and me and lock.started_by != me and lock.started_by_name:
+        return f"{lock.started_by_name} is editing this video ({what}). Queue this change, or wait."
+    return f"Busy with {what}. Queue this change, or Stop."
+
+
+def _busy(lock: lock_mod.Lock) -> HTTPException:
+    return HTTPException(status_code=409, detail={
+        "code": "video_busy", "message": _busy_words(lock), "holder": lock.holder, "action": lock.action,
+        "started_by": lock.started_by_name or lock.started_by, "lock": lock.to_dict(), "queue": _queue_items(lock.video_id),
+    })
+
+
+class LockTicket:
+    """A route's hold on its video: taken before the route runs, let go when
+    it returns, unless it passed the lock to the job or turn it started."""
+
+    def __init__(self, video_id: str, holder: str) -> None:
+        self.video_id, self.holder = video_id, holder
+        self.handed_to: str | None = None
+
+    def within(self, action: str | None = None):
+        """For `activity.create(within=...)`: the job made takes the lock in its own transaction."""
+        def hand(c, job_id: str) -> None:
+            if locks.hand_in(c, self.video_id, self.holder, job_id, action=action) is not None:
+                self.handed_to = job_id
+        return hand
+
+    def hand(self, new: str, **kw) -> lock_mod.Lock | None:
+        held = locks.hand(self.video_id, self.holder, new, **kw)
+        if held is not None:
+            self.handed_to = new
+        return held
+
+    def end(self, outcome: str) -> None:
+        _requests_live.discard(self.holder)
+        if self.handed_to is None:
+            locks.release(self.video_id, self.holder, outcome)
+        else:
+            locks.told(self.video_id)
+            job = activity.get(self.handed_to) if not self.handed_to.startswith(("turn:", lock_mod.GATE)) else None
+            if job is not None and job.done:
+                # The job ended before the request did: nothing else will let go of it.
+                locks.release(self.video_id, self.handed_to, _OUTCOME.get(job.status, "done"))
+
+
+def _take_lock(video_id: str, holder: str, action: str, *, request: Request | None = None, tab: str | None = None,
+               stoppable: bool = True, over_gate: bool = False) -> lock_mod.Lock:
+    """The video's lock for `holder`, or 409 video_busy. `over_gate`: a turn
+    may take over a go its own person's turn waits for (it answers it)."""
+    user, name = _person(request)
+    over = (lambda held: held.gate and (held.started_by in (None, user))) if over_gate else None
+    tab = tab or (request.headers.get(TAB_HEADER) if request is not None else None)
+    for _ in range(2):
+        try:
+            return locks.take(video_id, holder, action, started_by=user, started_by_name=name, stoppable=stoppable,
+                              tab=tab, over=over)
+        except lock_mod.VideoBusy as exc:
+            if not (exc.lock.gate and not _gate_waits(video_id)):
+                raise _busy(exc.lock) from None
+            # The go it waited for was answered or dropped some other way: the video is Ready.
+            locks.release(video_id, exc.lock.holder, "done")
+    raise _busy(locks.get(video_id) or lock_mod.Lock(video_id, "?", action))
+
+
+def _gate_waits(video_id: str) -> bool:
+    """Whether a turn's question still waits for the user's go."""
+    plan = repo.latest_plan(video_id)
+    q = plan.question if plan is not None and plan.status == "clarifying" else None
+    return bool(q and q.get("gate") and not q.get("resolved"))
+
+
+@contextlib.contextmanager
+def lock_held(video_id: str, action: str, *, request: Request | None = None, stoppable: bool = True,
+         over_gate: bool = False):
+    """The video's lock for the length of the block (or until it is handed on): 409 when busy."""
+    holder = f"{lock_mod.REQUEST}{uuid.uuid4().hex[:12]}"
+    _take_lock(video_id, holder, action, request=request, stoppable=stoppable, over_gate=over_gate)
+    _requests_live.add(holder)
+    ticket = LockTicket(video_id, holder)
+    outcome = "done"
+    try:
+        yield ticket
+    except BaseException:
+        outcome = "failed"
+        raise
+    finally:
+        ticket.end(outcome)
+
+
+def video_lock(action: str, *, stoppable: bool = True, over_gate: bool = False):
+    """The dependency every video-changing route declares (`locked(...)`): the
+    video is the caller's (else 404) and Ready (else 409 video_busy)."""
+    def dependency(request: Request, owner: str = Depends(current_owner)):
+        params = request.path_params
+        video_id = params.get("video_id") or params.get("project_id")
+        record = repo.get(video_id) if video_id else None
+        if record is None or record.owner != owner:
+            raise HTTPException(status_code=404, detail="video not found")
+        with lock_held(video_id, action, request=request, stoppable=stoppable, over_gate=over_gate) as ticket:
+            yield ticket
+    dependency.video_lock = action          # the route test reads it
+    return dependency
+
+
+def locked(action: str, **kw):
+    # "function": the lock is let go before the answer leaves, so the next click finds the video Ready.
+    return Depends(video_lock(action, **kw), scope="function")
+
+
+def _queue_items(video_id: str) -> list[dict]:
+    """What is up next on the video (Part 3 fills it)."""
+    return []
+
+
+def _lock_alive(lock: lock_mod.Lock) -> bool:
+    """Whether a lock's holder still runs in this process (its lease is renewed while it does)."""
+    if lock.holder.startswith(lock_mod.REQUEST):
+        return lock.holder in _requests_live
+    if lock.holder.startswith("turn:"):
+        held = jobs.get(lock.holder[len("turn:"):])
+        return held is not None and not held.done
+    job = activity.get(lock.holder)
+    return job is not None and not job.done
+
+
+locks.start_renewing(_lock_alive)
 
 
 # ── Launch item 2: media and exports only through signed, expiring URLs ─────
@@ -2275,16 +2462,19 @@ def get_settings(project_id: str, owner: str = Depends(current_owner)) -> dict:
 @app.put("/videos/{project_id}/settings")
 @app.put("/projects/{project_id}/settings", deprecated=True)
 def update_settings(
-    project_id: str, req: SettingsUpdate, owner: str = Depends(current_owner),
+    project_id: str, req: SettingsUpdate, request: Request, owner: str = Depends(current_owner),
 ) -> dict:
     """What Voltage may do on this project: the autonomy, a turn's spend
     cap (between a cent and the project's ceiling), the effort, and which
-    steps still wait for a yes under Just do it."""
+    steps still wait for a yes under Just do it. A change to the mix changes
+    the video's sound, so it takes the video's lock (2026-10-25); the rest are
+    Voltage's instructions and stay open while it works."""
     _owned(project_id, owner)
     turn_usd = None if req.turn_usd is None else _clamp_turn_usd(req.turn_usd)
     ask_before = None if req.ask_before is None else _ask_before({**_settings(project_id, owner)["ask_before"], **req.ask_before})
     mix = None if req.mix is None else _clean_mix({**_settings(project_id, owner)["mix"], **req.mix})
-    repo.set_settings(project_id, autonomy=req.autonomy, turn_usd=turn_usd, effort=req.effort, ask_before=ask_before, mix=mix)
+    with lock_held(project_id, "Changing the mix", request=request) if mix is not None else contextlib.nullcontext():
+        repo.set_settings(project_id, autonomy=req.autonomy, turn_usd=turn_usd, effort=req.effort, ask_before=ask_before, mix=mix)
     return {"settings": _settings(project_id, owner)}
 
 
@@ -2344,6 +2534,7 @@ def get_speakers(project_id: str, owner: str = Depends(current_owner)) -> dict:
 @app.put("/projects/{project_id}/speakers/{label}", deprecated=True)
 def update_speaker(
     project_id: str, label: str, req: SpeakerUpdate, owner: str = Depends(current_owner),
+    ticket: LockTicket = locked("Changing a voice"),
 ) -> dict:
     _owned(project_id, owner)
     if label not in {s.label for s in repo.speakers(project_id)}:
@@ -2356,7 +2547,8 @@ def update_speaker(
 
 @app.post("/videos/{project_id}/speakers/detect")
 @app.post("/projects/{project_id}/speakers/detect", deprecated=True)
-def detect_speakers(project_id: str, owner: str = Depends(current_owner)) -> dict:
+def detect_speakers(project_id: str, owner: str = Depends(current_owner),
+                    ticket: LockTicket = locked("Finding who speaks")) -> dict:
     """Find who speaks when, for a project transcribed before Phase 11."""
     record = _owned(project_id, owner)
     if transcriber_label.startswith("openai"):
@@ -2672,7 +2864,8 @@ def read_project(project_id: str, req: ReadRequest, owner: str = Depends(current
 
 
 @app.delete("/videos/{project_id}", status_code=204)
-def delete_project(project_id: str, owner: str = Depends(current_owner)) -> None:
+def delete_project(project_id: str, owner: str = Depends(current_owner),
+                   ticket: LockTicket = locked("Deleting the video")) -> None:
     """Delete a video (F8): it goes to the Bin, hidden everywhere; the purge
     removes it, its media and its voices at the vendor after 30 days.
     Deleting the account still removes everything at once."""
@@ -3793,7 +3986,9 @@ def _turn_for_job(video_id: str, record: ProjectRecord, job_id: str, goal: str, 
     try:
         started = _start_turn(video_id, record, goal, owner, cap_usd=batch_cap, batch=batch_cap is not None)
     except HTTPException as exc:
-        activity.fail(job_id, "turn_refused", str(exc.detail))
+        # 2026-10-25: a video busy with another change says so (the 409's sentence).
+        why = exc.detail.get("message") if isinstance(exc.detail, dict) else exc.detail
+        activity.fail(job_id, "video_busy" if exc.status_code == 409 else "turn_refused", str(why))
         return None
     activity.update(job_id, detail={"turn_ids": [started["job_id"]]})
     turn_job = _await_turn(started["job_id"])
@@ -4356,6 +4551,7 @@ def add_all_batch(project_id: str, batch_id: str, req: AddAllRequest | None = No
     _stage_gate([c["video_id"] for c in record["children"] if _passing_items(c["video_id"])[1]], owner,
                 bool(req and req.confirm_stage))
     added: dict[str, dict] = {}
+    busy: list[str] = []
     for child in record["children"]:
         video = repo.get(child["video_id"])
         if video is None or video.owner != owner:
@@ -4363,11 +4559,21 @@ def add_all_batch(project_id: str, batch_id: str, req: AddAllRequest | None = No
         plan, ids = _passing_items(child["video_id"])
         if plan is None or not ids:
             continue
-        result = _ship(child["video_id"], video, plan.plan_id, ids, background=True)
+        # 2026-10-25: each video's Add takes that video's lock; a video busy with something else is left for later.
+        try:
+            with lock_held(child["video_id"], "Adding all") as ticket:
+                result = _ship(child["video_id"], video, plan.plan_id, ids, background=True, ticket=ticket)
+        except HTTPException as exc:
+            if exc.status_code != 409:
+                raise
+            busy.append(video.source.filename)
+            continue
         edit_ids = [a["edit_id"] for a in result["approved"]]
         if edit_ids:
             added[child["video_id"]] = {"edit_ids": [*((child.get("added") or {}).get("edit_ids") or []), *edit_ids],
                                         "at": _now(), "undone_at": None}
+    if not added and busy:
+        raise HTTPException(status_code=409, detail=f"{', '.join(busy)} {'is' if len(busy) == 1 else 'are'} busy with another change. Try again when {'it is' if len(busy) == 1 else 'they are'} Ready.")
     if not added:
         raise HTTPException(status_code=409, detail="No proposal in this batch passed its checks. Open a video to hear its lines.")
 
@@ -4383,7 +4589,8 @@ def add_all_batch(project_id: str, batch_id: str, req: AddAllRequest | None = No
 
 
 @app.post("/projects/{project_id}/batches/{batch_id}/videos/{video_id}/undo-add")
-def undo_batch_add(project_id: str, batch_id: str, video_id: str, owner: str = Depends(current_owner)) -> dict:
+def undo_batch_add(project_id: str, batch_id: str, video_id: str, owner: str = Depends(current_owner),
+                   ticket: LockTicket = locked("Undoing", stoppable=False)) -> dict:
     """B1: the one undo per video for what Add all that passed added there:
     each line goes back to a proposal, as Take it out does."""
     record = _owned_batch(project_id, batch_id, owner)
@@ -4659,7 +4866,8 @@ class ConfirmStage(BaseModel):
 
 
 @app.post("/videos/{video_id}/sync", status_code=202)
-def sync_language(video_id: str, req: ConfirmStage | None = None, owner: str = Depends(current_owner)) -> dict:
+def sync_language(video_id: str, req: ConfirmStage | None = None, owner: str = Depends(current_owner),
+                  ticket: LockTicket = locked("Syncing with the original")) -> dict:
     """B2: Sync this change. One turn on the language version for only the
     master's lines changed since it last synced (the press is the yes for
     its paid steps); in step again once that turn finishes."""
@@ -4680,7 +4888,7 @@ def sync_language(video_id: str, req: ConfirmStage | None = None, owner: str = D
     if not _agent_on():
         raise HTTPException(status_code=409, detail="Voltage needs Claude to change a video (set AVE_AGENT=1 and an Anthropic key).")
     goal = _sync_goal(record, master, lines, _keep_words(record.folder_id))
-    started = _start_turn(video_id, record, goal, owner, approve=True)
+    started = _start_turn(video_id, record, goal, owner, approve=True, ticket=ticket)
     with database.tx() as c:
         activity_log.record(c, "language.sync_started", user_actor(owner), video_id=video_id, target=video_id,
                             payload={"master_id": record.master_id, "lines": [ln["edit_id"] for ln in lines], "to": to})
@@ -5895,6 +6103,7 @@ def get_job(job_id: str) -> dict:
 @app.post("/projects/{project_id}/edits", deprecated=True)
 def approve_edit(
     project_id: str, req: ApproveRequest, owner: str = Depends(current_owner),
+    ticket: LockTicket = locked("Adding"),
 ) -> dict:
     _owned(project_id, owner)
     candidate = repo.get_candidate(project_id, req.candidate_id)
@@ -5966,7 +6175,8 @@ def _approve_candidate(project_id: str, candidate: EditCandidate, overridden: bo
 
 @app.post("/videos/{project_id}/edits/{edit_id}/revert")
 @app.post("/projects/{project_id}/edits/{edit_id}/revert", deprecated=True)
-def revert_edit(project_id: str, edit_id: str, owner: str = Depends(current_owner)) -> dict:
+def revert_edit(project_id: str, edit_id: str, owner: str = Depends(current_owner),
+                ticket: LockTicket = locked("Undoing", stoppable=False)) -> dict:
     """Undo an approved edit (Phase 12). The edit is kept and marked, so
     nothing is lost; the render skips it and the transcript shows the line as
     shot. Reverting again is harmless."""
@@ -6596,13 +6806,14 @@ def _plan_or_404(project_id: str, plan_id: str) -> Plan:
 @app.post("/projects/{project_id}/plans/{plan_id}/approve", deprecated=True)
 def approve_plan(
     project_id: str, plan_id: str, req: PlanApproveRequest, owner: str = Depends(current_owner),
+    ticket: LockTicket = locked("Adding"),
 ) -> dict:
     """Approve every ready item (or the ones named) and render. An item whose
     take failed continuity is skipped unless `override` is set."""
     record = _owned(project_id, owner)
     _plan_or_404(project_id, plan_id)
     _stage_gate([project_id], owner, req.confirm_stage)
-    return _ship(project_id, record, plan_id, req.items, req.override, background=True)
+    return _ship(project_id, record, plan_id, req.items, req.override, background=True, ticket=ticket)
 
 
 NUMBER_WORDS = {2: "two", 3: "three", 4: "four", 5: "five", 6: "six", 7: "seven", 8: "eight", 9: "nine", 10: "ten"}
@@ -6629,11 +6840,13 @@ def _resolve_question(project_id: str, plan_id: str, why: str, by: str = "editor
 
 
 def _ship(project_id: str, record: ProjectRecord, plan_id: str, item_ids: list[str] | None,
-          override: bool = False, background: bool = False) -> dict:
+          override: bool = False, background: bool = False, ticket: "LockTicket | None" = None) -> dict:
     """Approve the ready items (or the ones named) and render. With
     `background` (run 4, item 3: the user's Add) the render is a job and the
     answer comes back at once with it: no request ever holds a thread for a
-    render. The agent's ship, already off the request thread, renders in line."""
+    render. The agent's ship, already off the request thread, renders in line.
+    With `ticket` (2026-10-25) the video's lock passes to that render's job:
+    the Add is Working until its render lands."""
     plan = repo.get_plan(project_id, plan_id)
     approved, skipped = [], []
     for item in plan.items:
@@ -6669,7 +6882,8 @@ def _ship(project_id: str, record: ProjectRecord, plan_id: str, item_ids: list[s
     export = job = None
     if approved and background:
         job = activity.create(project_id, "render_preview", line_ids=[a["edit_id"] for a in approved],
-                              detail={"mode": "final", "added": True})
+                              detail={"mode": "final", "added": True},
+                              within=ticket.within(_adding_words(project_id, plan_id, approved)) if ticket else None)
         _in_background(project_id, job.job_id, lambda: rendered(job.job_id))
     elif approved:
         export = rendered()
@@ -6678,6 +6892,21 @@ def _ship(project_id: str, record: ProjectRecord, plan_id: str, item_ids: list[s
         "render_job": job.to_dict() if job else None,
         "plan": _plan_dict(repo.get_plan(project_id, plan_id)),
     }
+
+
+def _adding_words(project_id: str, plan_id: str, approved: list[dict]) -> str:
+    """The Add as the status strip names it: "Adding 'Fresh every morning'", "Adding 3 lines"."""
+    if len(approved) != 1:
+        return f"Adding {len(approved)} lines"
+    plan = repo.get_plan(project_id, plan_id)
+    item = plan.item(approved[0]["item_id"]) if plan else None
+    if item is None:
+        return "Adding a line"
+    if item.mix == "remove" or not item.new_text:
+        return f"Taking out the line at {_clock(item.selection.start)}"
+    words = item.new_text.strip().rstrip(".!?,;:")
+    words = words if len(words) <= 40 else words[:37].rstrip() + "..."
+    return f"Adding '{words}'"
 
 
 # ── UX-1: remove a line ──────────────────────────────────────────────────────
@@ -6713,7 +6942,8 @@ def _room_tone(record: ProjectRecord, seconds: float) -> "np.ndarray":
 
 @app.post("/videos/{project_id}/lines/remove")
 @app.post("/projects/{project_id}/lines/remove", deprecated=True)
-def remove_line(project_id: str, req: RemoveRequest, owner: str = Depends(current_owner)) -> dict:
+def remove_line(project_id: str, req: RemoveRequest, owner: str = Depends(current_owner),
+                ticket: LockTicket = locked("Removing a line")) -> dict:
     """Take a line out (UX-1): its words go, the room's own sound stays in
     their place, the picture is untouched. Approved at once — nothing is
     voiced — and undone like any edit, with Revert."""
@@ -6752,7 +6982,8 @@ class DismissRequest(BaseModel):
 @app.post("/videos/{project_id}/plans/{plan_id}/items/{item_id}/dismiss")
 @app.post("/projects/{project_id}/plans/{plan_id}/items/{item_id}/dismiss", deprecated=True)
 def dismiss_item(project_id: str, plan_id: str, item_id: str, req: DismissRequest | None = None,
-                 owner: str = Depends(current_owner)) -> dict:
+                 owner: str = Depends(current_owner),
+                 ticket: LockTicket = locked("Discarding")) -> dict:
     """Discard a proposal (20e): the line leaves the plan; a shipped one is
     taken out with Revert instead."""
     _owned(project_id, owner)
@@ -6770,7 +7001,8 @@ def dismiss_item(project_id: str, plan_id: str, item_id: str, req: DismissReques
 
 
 @app.post("/videos/{project_id}/plans/{plan_id}/items/{item_id}/ease")
-def ease_item(project_id: str, plan_id: str, item_id: str, owner: str = Depends(current_owner)) -> dict:
+def ease_item(project_id: str, plan_id: str, item_id: str, owner: str = Depends(current_owner),
+              ticket: LockTicket = locked("Easing a line in")) -> dict:
     """p61: a line that ran long, voiced already: use that take with the
     picture easing so it fits. The take was kept when the fit failed; nothing
     is voiced again and nothing is paid."""
@@ -6825,7 +7057,8 @@ def _room_tone_candidate(project_id: str, record: ProjectRecord, selection: Sele
 
 @app.post("/videos/{project_id}/lines/shift")
 @app.post("/projects/{project_id}/lines/shift", deprecated=True)
-def shift_line(project_id: str, req: ShiftRequest, owner: str = Depends(current_owner)) -> dict:
+def shift_line(project_id: str, req: ShiftRequest, owner: str = Depends(current_owner),
+               ticket: LockTicket = locked("Moving a line")) -> dict:
     """Move a line of the original speech to another time, as it was
     spoken: the line is pinned at `to` in the arrangement, its old place
     gets the room's sound, and the other lines flow around it."""
@@ -7122,7 +7355,8 @@ class ArrangementRequest(BaseModel):
 
 
 @app.put("/videos/{project_id}/arrangement")
-def put_arrangement(project_id: str, req: ArrangementRequest, owner: str = Depends(current_owner)) -> dict:
+def put_arrangement(project_id: str, req: ArrangementRequest, owner: str = Depends(current_owner),
+                    ticket: LockTicket = locked("Moving lines")) -> dict:
     """The whole arrangement, as one action (one undo)."""
     record = _owned(project_id, owner)
     _stage_gate([project_id], owner, req.confirm_stage, change=True)
@@ -7135,7 +7369,8 @@ def put_arrangement(project_id: str, req: ArrangementRequest, owner: str = Depen
 
 
 @app.post("/videos/{project_id}/arrangement/undo")
-def undo_arrangement(project_id: str, owner: str = Depends(current_owner)) -> dict:
+def undo_arrangement(project_id: str, owner: str = Depends(current_owner),
+                     ticket: LockTicket = locked("Undoing", stoppable=False)) -> dict:
     """Back to the arrangement before the last action."""
     record = _owned(project_id, owner)
     history = list(repo.settings(project_id).get("arrangement_history") or [])
@@ -7260,7 +7495,8 @@ def _reroled(project_id: str, source: EditCandidate, role: str, offset_db: float
 
 
 @app.post("/videos/{project_id}/candidates/{candidate_id}/role")
-def role_candidate(project_id: str, candidate_id: str, req: RoleRequest, owner: str = Depends(current_owner)) -> dict:
+def role_candidate(project_id: str, candidate_id: str, req: RoleRequest, owner: str = Depends(current_owner),
+                   ticket: LockTicket = locked("Changing a level")) -> dict:
     """A proposed take as a Voice, a Bed or an Effect, or fine-tuned; the plan item follows it.
     The only speech in its span does not silently become a Bed: 409 with the question."""
     record = _owned(project_id, owner)
@@ -7280,7 +7516,8 @@ def role_candidate(project_id: str, candidate_id: str, req: RoleRequest, owner: 
 
 
 @app.post("/videos/{project_id}/edits/{edit_id}/role")
-def role_edit(project_id: str, edit_id: str, req: RoleRequest, owner: str = Depends(current_owner)) -> dict:
+def role_edit(project_id: str, edit_id: str, req: RoleRequest, owner: str = Depends(current_owner),
+              ticket: LockTicket = locked("Changing a level")) -> dict:
     """An added line in the video as a Voice, a Bed or an Effect, or fine-tuned:
     the old edit is reverted and the same take approved in its new role, in one step."""
     record = _owned(project_id, owner)
@@ -7312,6 +7549,7 @@ def _rerole_edit(project_id: str, edit_id: str, role: str, offset_db: float) -> 
 @app.post("/projects/{project_id}/candidates/{candidate_id}/move", deprecated=True)
 def move_candidate(
     project_id: str, candidate_id: str, req: MoveRequest, owner: str = Depends(current_owner),
+    ticket: LockTicket = locked("Moving a line"),
 ) -> dict:
     """A take, placed somewhere else on the timeline. Returns the new
     candidate; the old one is kept, as every candidate is."""
@@ -7336,6 +7574,7 @@ def move_candidate(
 @app.post("/projects/{project_id}/edits/{edit_id}/move", deprecated=True)
 def move_edit(
     project_id: str, edit_id: str, req: MoveRequest, owner: str = Depends(current_owner),
+    ticket: LockTicket = locked("Moving a line"),
 ) -> dict:
     """A kept line, placed somewhere else: the old edit is reverted and the
     same take approved at the new place, in one step."""
@@ -7522,7 +7761,8 @@ def _turn_plan(project_id: str, text: str) -> Plan:
 
 @app.post("/videos/{project_id}/turns", status_code=202)
 @app.post("/projects/{project_id}/turns", status_code=202, deprecated=True)
-def take_turn(project_id: str, req: TurnRequest, owner: str = Depends(current_owner)) -> dict:
+def take_turn(project_id: str, req: TurnRequest, owner: str = Depends(current_owner),
+              ticket: LockTicket = locked("Voltage is planning", over_gate=True)) -> dict:
     """One turn of Voltage with tools (Phase 20): the user's words go in, the
     agent looks, listens, voices and asks through its tools, and the job's
     result is the plan and Voltage's closing line. Steps appear as messages
@@ -7536,7 +7776,7 @@ def take_turn(project_id: str, req: TurnRequest, owner: str = Depends(current_ow
         return replay_turn(repo, project_id, text, owner)
     if not _agent_on():
         raise HTTPException(status_code=503, detail="Voltage needs Claude for this (set AVE_AGENT=1 and an Anthropic key).")
-    return _start_turn(project_id, record, text, owner, approve=req.approve)
+    return _start_turn(project_id, record, text, owner, approve=req.approve, ticket=ticket)
 
 
 def _ceiling_refusal(project_id: str, record: ProjectRecord, owner: str, more_usd: float) -> str | None:
@@ -7561,7 +7801,8 @@ def _ceiling_refusal(project_id: str, record: ProjectRecord, owner: str, more_us
 
 
 @app.post("/videos/{project_id}/turns/allow-more", status_code=202)
-def allow_more(project_id: str, owner: str = Depends(current_owner)) -> dict:
+def allow_more(project_id: str, owner: str = Depends(current_owner),
+               ticket: LockTicket = locked("Voltage is planning", over_gate=True)) -> dict:
     """The way through a question the turn's cap caused: raise this turn's cap
     by exactly what the refused step needs (worked out when the question was
     asked) and carry the same turn on. Refused, naming the scope, when the
@@ -7580,18 +7821,28 @@ def allow_more(project_id: str, owner: str = Depends(current_owner)) -> dict:
         raise HTTPException(status_code=409, detail=refusal)
     carry = {"turn_id": cap.get("turn_id"), "since": cap.get("since"), "cap_usd": round(float(cap["cap_usd"]) + needed, 2),
              "needed_usd": needed}
-    return _start_turn(project_id, record, str(question["options"][0]), owner, carry=carry)
+    return _start_turn(project_id, record, str(question["options"][0]), owner, carry=carry, ticket=ticket)
 
 
 def _start_turn(project_id: str, record: ProjectRecord, text: str, owner: str, approve: bool = False,
-                carry: dict | None = None, cap_usd: float | None = None, batch: bool = False) -> dict:
+                carry: dict | None = None, cap_usd: float | None = None, batch: bool = False,
+                ticket: LockTicket | None = None) -> dict:
     """Queue one turn. `carry` continues the turn a cap question ended: the
     same turn id and start, its cap raised (`cap_usd`), the paid step approved.
     `batch` (F4): one video of a batch turn, past the batch's one gate: its paid
     steps are approved, its cap is `cap_usd` (its share of the batch's) and its
-    lines wait as proposals for the batch board."""
-    if any(j.kind == "turn" and j.project_id == project_id and not j.done for j in jobs.all()):
-        raise HTTPException(status_code=409, detail="Voltage is still on the last thing you said.")
+    lines wait as proposals for the batch board.
+
+    2026-10-25: the turn holds the video's lock from here until it lands
+    (`ticket`, the route's, or one taken here for a run's turn: 409 when busy)."""
+    if ticket is not None:
+        return _locked_turn(project_id, record, text, owner, approve, carry, cap_usd, batch, ticket)
+    with lock_held(project_id, "Voltage is planning", over_gate=True) as own:
+        return _locked_turn(project_id, record, text, owner, approve, carry, cap_usd, batch, own)
+
+
+def _locked_turn(project_id: str, record: ProjectRecord, text: str, owner: str, approve: bool,
+                 carry: dict | None, cap_usd: float | None, batch: bool, ticket: LockTicket) -> dict:
     if carry is None:
         analytics.track("first_turn", owner, {"video_id": project_id, "batch": batch})
     prefs = _settings(project_id, owner)
@@ -7619,6 +7870,8 @@ def _start_turn(project_id: str, record: ProjectRecord, text: str, owner: str, a
     if resolved:
         repo.set_settings(project_id, last_question=resolved)
     job = jobs.create("turn", project_id)
+    holder = f"turn:{job.job_id}"
+    ticket.hand(holder, action="Voltage is planning")
     started_at = _now()
     # Spend scopes: the turn's id is the job's; every charge it causes carries it.
     # A carried-on turn keeps the first one's id and start, so "this turn" is one figure.
@@ -7634,7 +7887,7 @@ def _start_turn(project_id: str, record: ProjectRecord, text: str, owner: str, a
         _queue_lines(project_id, plan.plan_id, turn_id)
     _set_turn(project_id, turn_id=turn_id, status="running", step="Thinking", started_at=_now(), finished_at=None,
               spent_usd=0.0, lines_voiced=0, render=None)
-    held: dict = {}
+    kept: dict = {}
     # The words the user picked, with the sentence under the label when there was one.
     picked = ""
     if asked and asked.get("details"):
@@ -7650,7 +7903,13 @@ def _start_turn(project_id: str, record: ProjectRecord, text: str, owner: str, a
             _set_turn(project_id, step=step)
         try:
             out = turn_work(told)
-            closed = _close_turn(project_id, plan.plan_id, turn_id, since, hash_before, held.get("turn"), out)
+            closed = _close_turn(project_id, plan.plan_id, turn_id, since, hash_before, kept.get("turn"), out)
+            if (out.get("question") or {}).get("gate"):
+                # Waiting for the user's go is still Working: the lock waits with the question.
+                locks.hand(project_id, holder, f"{lock_mod.GATE}{turn_id}", action="Waiting for your go",
+                           lease=lock_mod.GATE_LEASE)
+            else:
+                locks.release(project_id, holder, "failed" if out.get("stopped") == "error" else "done")
             return {**out, **closed, "spend": _spend_summary(owner, video_id=project_id)}
         finally:
             current_turn.reset(token)
@@ -7671,7 +7930,7 @@ def _start_turn(project_id: str, record: ProjectRecord, text: str, owner: str, a
                          spend_approved=approve or bool(carry) or autonomy == "draft" or batch, budget=budget_, started_at=since,
                          report=report, commit_approved=approve, ask_before=prefs["ask_before"],
                          stop_requested=lambda: turn_id in _stops, batch=batch)
-        held["turn"] = turn
+        kept["turn"] = turn
         lines = _lines(record)
         names = [s.name for s in repo.speakers(project_id)]
         # 2026-10-20: the style line is shown before the first paid step: at the start of the first turn it is there.
@@ -7795,8 +8054,14 @@ def _start_turn(project_id: str, record: ProjectRecord, text: str, owner: str, a
         _cancel_leftovers(project_id, turn_id, "The turn failed")
         _stops.discard(turn_id)
         _set_turn(project_id, status="failed", step="Failed", finished_at=_now())
+        locks.release(project_id, holder, "failed")
 
-    submitted = runner.submit(job, _guarded(work, failed_turn))
+    try:
+        submitted = runner.submit(job, _guarded(work, failed_turn))
+    except BaseException:
+        jobs.update(job.job_id, status="failed", step="Failed", error="The turn could not start.")
+        locks.release(project_id, holder, "failed")
+        raise
     return _job_dict(submitted)
 
 
@@ -7878,13 +8143,13 @@ def _jobs_view(project_id: str, active: bool) -> dict:
     live = bool(view) and (view.get("status") in ("running", "stopping") or _recent(view.get("finished_at")))
     if not active:
         found = activity.list(project_id, limit=50)
-        return {"jobs": [j.to_dict() for j in found], "turn": view}
+        return {"jobs": [j.to_dict() for j in found], "turn": view, **_lock_view(project_id)}
     found = {j.job_id: j for j in activity.list(project_id, active=True, limit=200)}
     if live and view.get("turn_id"):
         for j in activity.of_turn(project_id, view["turn_id"]):
             found.setdefault(j.job_id, j)
     ordered = sorted(found.values(), key=lambda j: int(j.job_id[1:]), reverse=True)
-    return {"jobs": [j.to_dict() for j in ordered], "turn": view if live else None}
+    return {"jobs": [j.to_dict() for j in ordered], "turn": view if live else None, **_lock_view(project_id)}
 
 
 @app.get("/videos/{project_id}/jobs")
@@ -7897,7 +8162,8 @@ def list_jobs(project_id: str, active: int = 0, owner: str = Depends(current_own
 
 
 @app.post("/videos/{project_id}/jobs/{job_id}/retry", status_code=202)
-def retry_job(project_id: str, job_id: str, owner: str = Depends(current_owner)) -> dict:
+def retry_job(project_id: str, job_id: str, owner: str = Depends(current_owner),
+              ticket: LockTicket = locked("Trying again")) -> dict:
     """A failed line voiced again with the same words and voice, or a failed
     render run again; a new job, through the same flow."""
     _owned(project_id, owner)
@@ -7912,11 +8178,13 @@ def retry_job(project_id: str, job_id: str, owner: str = Depends(current_owner))
         if activity.active_for_line(project_id, job.line_ids[0]) is not None:
             raise HTTPException(status_code=409, detail="This line is already being voiced.")
         fresh = activity.create(project_id, "voice_line", line_ids=job.line_ids,
-                                detail={**job.detail, "manual": True, "retry_of": job.job_id}, params=job.params)
+                                detail={**job.detail, "manual": True, "retry_of": job.job_id}, params=job.params,
+                                within=ticket.within("Voicing the line again"))
         _in_background(project_id, fresh.job_id, lambda: _retry_line(project_id, fresh.job_id))
         return fresh.to_dict()
     mode = job.detail.get("mode") or "final"
-    fresh = activity.create(project_id, job.kind, detail={"mode": mode, "manual": True, "retry_of": job.job_id})
+    fresh = activity.create(project_id, job.kind, detail={"mode": mode, "manual": True, "retry_of": job.job_id},
+                            within=ticket.within("Rendering again"))
     _in_background(project_id, fresh.job_id, lambda: _export(repo.get(project_id), proposals=mode == "proposals",
                                                              purpose="export" if job.kind == "export" else "preview",
                                                              job_id=fresh.job_id))
@@ -7946,6 +8214,21 @@ def _stop_video(project_id: str) -> int:
     return cancelled
 
 
+@app.get("/videos/{project_id}/lock")
+def video_lock_state(project_id: str, owner: str = Depends(current_owner)) -> dict:
+    """Ready or Working: what holds the video (null when Ready) and what is up next."""
+    _owned(project_id, owner)
+    return _lock_view(project_id)
+
+
+def _lock_view(project_id: str) -> dict:
+    lock = locks.get(project_id)
+    if lock is not None and lock.gate and not _gate_waits(project_id):
+        locks.release(project_id, lock.holder, "done")
+        lock = None
+    return {"lock": lock.to_dict() if lock else None, "queue": _queue_items(project_id)}
+
+
 PING_SECONDS = 15.0
 
 
@@ -7969,6 +8252,10 @@ async def video_events(project_id: str, request: Request, limit: int | None = No
             opening = [("job.updated", j) for j in reversed(state["jobs"])]
             if state["turn"]:
                 opening.append(("turn.updated", state["turn"]))
+            # 2026-10-25: Ready or Working, and what is up next, as it is now.
+            held, up_next = state.get("lock"), state.get("queue") or []
+            opening.append(("video.locked", {**held, "queue": up_next}) if held
+                           else ("video.unlocked", {"video_id": project_id, "outcome": None, "queue": up_next}))
             for event, data in opening:
                 yield _sse(event, data)
                 sent += 1

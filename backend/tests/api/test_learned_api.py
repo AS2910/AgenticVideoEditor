@@ -15,7 +15,7 @@ from app.domain.plan import PlanItem
 from app.domain.models import Selection
 from app.media import ffmpeg
 from app.store import briefs, learned, rules
-from tests.api.test_endpoints import _agent_on, await_job, voiced
+from tests.api.test_endpoints import _agent_on, add, await_job, voiced
 from tests.api.test_folders import upload_into
 
 pytestmark = pytest.mark.skipif(not ffmpeg.available(), reason="ffmpeg/ffprobe not installed")
@@ -64,7 +64,7 @@ def item(n: int, text: str = "Get 30% off today.", first: str | None = None) -> 
 
 def test_adding_and_discarding_proposals_are_logged_with_a_reason(client, in_project, monkeypatch):
     plan = voiced(client, monkeypatch)["plan"]
-    assert client.post(f"/videos/p1/plans/{plan['plan_id']}/approve", json={"items": ["i1"]}).status_code == 200
+    assert add(client, plan["plan_id"], {"items": ["i1"]})["approved"]          # waited for: the Add holds the video until it lands
     plan = voiced(client, monkeypatch, text="Thirty percent off, today.")["plan"]
     gone = client.post(f"/videos/p1/plans/{plan['plan_id']}/items/i1/dismiss", json={"reason": "Too long"})
     assert gone.status_code == 200, gone.text

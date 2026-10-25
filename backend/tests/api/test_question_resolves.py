@@ -1,5 +1,5 @@
 """A waiting question resolves when its subject changes outside the chat (2026-10-20)."""
-from tests.api.test_endpoints import _agent_on, client, project, reset_state, send, take  # noqa: F401
+from tests.api.test_endpoints import _agent_on, add, client, project, reset_state, send, take  # noqa: F401
 from tests.agent.conftest import reply, text as said, use
 
 ASK = {"question": "How should I handle the middle line?",
@@ -44,7 +44,7 @@ def test_a_newer_turn_resolves_the_open_question_and_is_no_gate(client, project,
 def test_a_settled_question_is_no_gate_for_the_next_turn(client, project, monkeypatch):
     import app.api.main as main
     plan = asked(client, monkeypatch)
-    client.post(f"/videos/p1/plans/{plan['plan_id']}/approve", json={"items": ["i1"]})
+    add(client, plan["plan_id"], {"items": ["i1"]})                 # waited for: the Add holds the video until it lands
     scripted = _agent_on(monkeypatch, main, [reply(said("All in."))])
     send(client, "Voice it next turn")                            # the old option's words, said after it settled
     opening = scripted.calls[0]["messages"][-1]["content"]

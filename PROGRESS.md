@@ -1,3 +1,13 @@
+# One edit at a time per video (2026-10-25)
+
+Branch `feature/one-edit-at-a-time`, cut from `overnight/cost-and-staging` b912fbc. Worktree `../AgenticVideoEditor-lock`. Spec: the user's "one edit at a time per video" (base plus addendum), Parts 1, 2, 4 and 3 here (Part 5 is built on another branch). No vendor spend. Each commit is gated by `make launch-check SKIP_ENV=1`.
+
+| Part | What | Status | Commit | Notes |
+|---|---|---|---|---|
+| 1 | The video lock (backend) | done | (this commit) | `video_locks` (0043), `app/jobs/locks.py`; every write route takes the lock or is classified with a reason (route test); 409 `video_busy`; lease renewed while running, cleared by the stuck-job sweep after a crash; a turn keeps it while it waits for the go; SSE `video.locked` / `video.unlocked`; `GET /videos/{id}/lock`. |
+
+---
+
 # Cost and staging (overnight run 4, 2026-10-24)
 
 Branch `overnight/cost-and-staging`, cut from main `cb29d1d` (run 3 merged). Worktree `../AgenticVideoEditor-cost`.
