@@ -134,7 +134,7 @@ export function LanguageDialog({ videoId, filename, onClose, onMade, projectId }
               {gate && facts && (
                 <>
                   <span className="tnum font-semibold">{facts}</span>
-                  <span className="text-[13px] text-muted-foreground">Spends at most {usd(gate.cap_usd)}, each version&apos;s own turn cap added up. Lines wait as proposals until you add them.</span>
+                  <span className="text-[13px] text-muted-foreground">You pay at most {usd(gate.cap_usd)} for all of them. Each new line waits as a proposal until you add it.</span>
                 </>
               )}
             </div>

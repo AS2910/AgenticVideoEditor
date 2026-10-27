@@ -206,7 +206,7 @@ function SpendCard({ card }: { card: string }) {
 }
 
 const SOURCE_WORDS: Record<AdminFlags['flags'][number]['source'], string> = {
-  owner: 'set for them', everyone: 'set for everyone', profile: 'launch profile', default_owner: 'default owner', off: 'off by default',
+  owner: 'set for them', everyone: 'set for everyone', profile: 'launch profile', default_owner: 'default owner', default: 'on by default', off: 'off by default',
 }
 
 /** Launch item 10: turn a feature on or off for one person (their owner id,

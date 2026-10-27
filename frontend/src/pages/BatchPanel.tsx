@@ -9,6 +9,7 @@ import { cn } from '@/lib/utils'
 import { said, usd } from './fmt'
 import { Tip } from '../guides/Tip'
 import { BatchGate } from './BatchGate'
+import { EXAMPLES, boardSummary } from '../lib/batch'
 
 /** What a Fix in all from the project check asks for: that issue, in the videos it names. */
 export interface FixRequest { issueId: number; message: string; videoIds: string[] }
@@ -35,6 +36,9 @@ function Row({ row, busy, onAnswer, onUndo }: { row: BatchRow; busy: string | nu
         {row.spent_usd > 0 && <span className="tnum text-[13px] text-muted-foreground">{usd(row.spent_usd)}</span>}
       </div>
       {row.why && <span className="text-[13px] text-muted-foreground">{row.why}</span>}
+      {row.state === 'ready' && (
+        <a className="act self-start" href={hrefFor({ page: 'editor', projectId: row.video_id })} data-testid="batch-review">Hear the changes in {row.filename}</a>
+      )}
       {row.state === 'waiting' && row.question && (
         <div className="flex flex-col gap-2 rounded-lg border-[1.5px] border-dashed border-ink bg-sunk p-2.5" data-testid="batch-question">
           <span className="text-sm">{row.question.text}</span>
@@ -125,6 +129,8 @@ export function BatchPanel({ projectId, videos, fix, onFixHandled, refresh = 0, 
 
   // A batch dropped at its gate is gone; one cancelled after Go keeps its board (what finished, what did not).
   const showing = batch && !(batch.phase === 'cancelled' && !batch.started_at) && dismissed !== batch.batch_id ? batch : null
+  // First use: no batch has run in this project yet.
+  const firstTime = loaded && !error && batch === null
   const gate = showing?.phase === 'gate'
   const board = showing && !gate
   const passing = showing?.rows.filter((r) => r.state === 'ready').length ?? 0
@@ -154,8 +160,15 @@ export function BatchPanel({ projectId, videos, fix, onFixHandled, refresh = 0, 
     <section aria-label="Ask Voltage about all videos" className="rise flex flex-col gap-3 rounded-xl bg-pane p-[18px] text-ptext" data-testid="batch" data-tour="batch">
       <div className="flex flex-wrap items-baseline gap-2">
         <h2 className="disp m-0 text-xl font-bold">Ask Voltage about all videos</h2>
-        <span className="tag text-pmuted">One plan, one go, a turn per video</span>
+        <span className="tag text-pmuted">One change, every video</span>
       </div>
+      {firstTime && videos.length > 0 && (
+        <ol className="m-0 grid list-none grid-cols-1 gap-2 p-0 text-[13px] text-pmuted sm:grid-cols-3" aria-label="How it works" data-testid="batch-how">
+          <li><span className="text-ptext">1. Say the change once.</span> Pick the videos it is for.</li>
+          <li><span className="text-ptext">2. Check the plan.</span> You see the lines and the cost before anything is spent.</li>
+          <li><span className="text-ptext">3. Review each video.</span> Nothing is added until you add it.</li>
+        </ol>
+      )}
 
       {error && (
         <div className="flex items-center gap-3 text-sm" role="alert">
@@ -169,13 +182,21 @@ export function BatchPanel({ projectId, videos, fix, onFixHandled, refresh = 0, 
           <form className="flex flex-col gap-2.5" onSubmit={(e) => { e.preventDefault(); void plan() }} data-testid="batch-ask">
             <label htmlFor="batch-goal" className="sr-only">What to change in every video</label>
             <textarea id="batch-goal" ref={box} rows={2} className="w-full resize-y rounded-lg border-[1.5px] border-pline bg-psunk p-3 text-[14.5px] leading-[1.5] text-ptext outline-none placeholder:text-pmuted focus-visible:ring-[3px] focus-visible:ring-volt/50" placeholder="Like “make every offer line say 25% off”" value={goal} onChange={(e) => setGoal(e.target.value)} />
+            {!goal.trim() && (
+              <div className="flex flex-wrap items-center gap-2" data-testid="batch-examples">
+                <span className="text-[13px] text-pmuted">Try:</span>
+                {EXAMPLES.map((x) => (
+                  <button key={x} type="button" className="sugg h-auto min-h-8 py-1.5 text-left whitespace-normal pointer-coarse:min-h-11" onClick={() => { setGoal(x); setNote(null); box.current?.focus() }}>{x}</button>
+                ))}
+              </div>
+            )}
             <fieldset className="m-0 flex flex-col gap-1 border-0 p-0" data-testid="batch-picker">
-              <legend className="tag mb-1 text-pmuted">{chosen.size} of {videos.length} videos</legend>
+              <legend className="tag mb-1 text-pmuted">{chosen.size} of {videos.length} videos picked</legend>
               {videos.map((v) => (
                 <label key={v.video_id} className="flex cursor-pointer items-center gap-2.5 rounded-md px-1.5 py-1 hover:bg-psunk">
                   <input type="checkbox" className="size-4 accent-volt" checked={chosen.has(v.video_id)} onChange={() => toggle(v.video_id)} />
                   <span className="min-w-0 flex-1 truncate text-sm">{v.filename}{v.language_label ? ` · ${v.language_label}` : ''}</span>
-                  <span className="tag text-pmuted">{STAGE_WORD[v.stage ?? 'draft'] ?? v.stage}</span>
+                  {reviewOn && <span className="tag text-pmuted">{STAGE_WORD[v.stage ?? 'draft'] ?? v.stage}</span>}
                 </label>
               ))}
             </fieldset>
@@ -196,8 +217,9 @@ export function BatchPanel({ projectId, videos, fix, onFixHandled, refresh = 0, 
         <div className="flex flex-col gap-2 rounded-lg bg-card p-3 text-foreground" data-testid="batch-board" role="status" aria-live="polite">
           <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
             <span className="disp text-base font-bold">{showing.phase === 'running' ? showing.step : showing.phase === 'cancelled' ? 'Batch cancelled' : 'Batch finished'}</span>
-            <span className="tnum text-[13px] text-muted-foreground">{usd(showing.spent_usd)} of {usd(showing.totals.cap_usd)}</span>
+            <span className="tnum text-[13px] text-muted-foreground">{usd(showing.spent_usd)} spent of {usd(showing.totals.cap_usd)} at most</span>
           </div>
+          <span className="text-sm" data-testid="batch-summary">{boardSummary(showing)}</span>
           <span className="text-[13px] text-muted-foreground">{showing.source === 'fix' ? `Fix: ${showing.goal}` : showing.source === 'brief' ? showing.goal : `“${showing.goal}”`}</span>
           <ul className="m-0 flex list-none flex-col p-0">
             {showing.rows.map((r) => (
@@ -207,6 +229,9 @@ export function BatchPanel({ projectId, videos, fix, onFixHandled, refresh = 0, 
             ))}
           </ul>
           {showing.phase === 'running' && <Tip id="first-batch" />}
+          {passing > 0 && !hold && showing.phase !== 'running' && (
+            <span className="text-[13px] text-muted-foreground" data-testid="batch-next">Open a video to hear its changes first, or add every change that passed now. You can undo each video after.</span>
+          )}
           {note && <p className="m-0 text-sm text-destructive" role="alert">{note}</p>}
           {hold && <StageWarning message={hold} busy={busy === 'add'} onCancel={() => setHold(null)} onAnyway={() => void addAll(true)} />}
           <div className="flex flex-wrap items-center justify-end gap-2 border-t border-line pt-2">

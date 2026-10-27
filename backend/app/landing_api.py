@@ -50,7 +50,7 @@ def pricing() -> dict:
         "topups": [{"credits": t, **_price(round(t * prices.TOPUP_MARKUP, 2))} for t in prices.TOPUPS],
         "topup_months": prices.TOPUP_MONTHS,
         "test_mode": bool(provider.test_mode),
-        # Phase B (language versions) is off in the public profile until an admin turns it on.
+        # Phase B (language versions): on in the public profile while launch.batch_public is on (run 5 item 9).
         "languages": api.flags.enabled("projects.batch"),
         "invite_only": api.settings.auth_mode != "off" and api.flags.enabled("launch.invite_only"),
     }

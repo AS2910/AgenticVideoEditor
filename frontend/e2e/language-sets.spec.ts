@@ -98,7 +98,7 @@ test('make language versions, see them stacked with chips, then sync a change fr
   await dialog.getByRole('checkbox', { name: /Tamil/ }).check()
   await expect(dialog.getByRole('radio', { name: /Same voice in the new language/ })).toBeChecked()
   await expect(dialog.getByTestId('language-gate')).toContainText('2 versions · 8 lines · about $0.24')
-  await expect(dialog.getByTestId('language-gate')).toContainText('Spends at most $1.00')
+  await expect(dialog.getByTestId('language-gate')).toContainText('You pay at most $1.00 for all of them')
   if (SHOTS) await page.screenshot({ path: `${SHOTS}/b2-dialog.png`, fullPage: true })
   await dialog.getByRole('button', { name: 'Make 2 versions' }).click()
   expect(posts).toContain('POST /api/videos/p2/languages {"languages":["hi","ta"],"voice":"same"}')

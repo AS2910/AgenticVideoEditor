@@ -2,8 +2,9 @@ import { expect, test } from '@playwright/test'
 import type { Page, Route } from '@playwright/test'
 
 /** B3 in a real browser (API mocked): the Presets section with its three
- *  defaults and a new preset, Export videos with Approved videos picked and
- *  a Not approved one added, the project check's warning, Export, rows that
+ *  defaults and a new preset, Export videos with every video picked (no
+ *  stages without phase C, as in the public profile: run 5 item 9), the
+ *  project check's warning, Export, rows that
  *  move from Queued and Rendering to Ready and Failed (with the reason),
  *  Download all and a share link; then F6's no-account share page, and an
  *  expired link's message. SHOTS=<dir> saves screenshots. */
@@ -117,12 +118,10 @@ test('batch export: presets, pick videos and presets, warnings, files Ready and 
   await expect(rows).toHaveCount(3)
   await expect(rows.nth(0).getByRole('checkbox')).toBeChecked()
   await expect(rows.nth(1).getByRole('checkbox')).toBeChecked()
-  await expect(rows.nth(2).getByRole('checkbox')).not.toBeChecked()
-  await expect(rows.nth(2)).toContainText('Not approved')
+  await expect(rows.nth(2).getByRole('checkbox')).toBeChecked()
+  await expect(panel).not.toContainText('Not approved')
   await expect(panel.getByTestId('export-warnings')).toContainText(WARN.message)
-  await rows.nth(2).getByRole('checkbox').check()
   await panel.getByRole('button', { name: 'Reels 9:16' }).click()
-  await expect(panel.getByTestId('export-warnings')).toContainText('shop-tour.mp4 is not approved yet.')
   await expect(panel.getByTestId('export-warnings')).toContainText('These are warnings. You can still export.')
   if (SHOTS) await page.screenshot({ path: `${SHOTS}/b3-pick.png`, fullPage: true })
   await panel.getByRole('button', { name: 'Export 6 files' }).click()

@@ -11,7 +11,7 @@ A file name is a pattern with these parts: `{project}`, `{video}`, `{lang}`, `{p
 
 A video shot in another shape is never cropped to fit a frame: it is scaled to fit and the rest is black bars (above and below, or at the sides). Each file says which. Captions are the words the video says now: the lines as shot that no change replaced, and every line you added, at the times they play.
 
-Approved videos are picked for you. You can pick others too; they are marked **Not approved**. Before you export, the project check's free checks run and anything they find shows as a warning. Warnings never stop an export.
+Approved videos are picked for you. You can pick others too; they are marked **Not approved**. Without stages on your account, every video is picked and none is marked. Before you export, the project check's free checks run and anything they find shows as a warning. Warnings never stop an export.
 
 **Export** makes one file per video and preset, two at a time, with a bar for the whole export. A file that fails is tried once more; if it fails again it shows **Failed** with the reason, and the others still finish. A video whose files are all made moves to **Exported**.
 

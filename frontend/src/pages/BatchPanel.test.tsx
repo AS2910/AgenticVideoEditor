@@ -2,7 +2,9 @@ import { describe, it, expect, vi, afterEach } from 'vitest'
 import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { BatchPanel } from './BatchPanel'
-import { gateLine } from '../lib/batch'
+import { resetFlags } from '../flags/useFlags'
+import type { Batch } from '../types'
+import { EXAMPLES, boardSummary, gateLine } from '../lib/batch'
 import type { ProjectSummary } from '../types'
 
 const ok = (body: unknown, status = 200) => ({ ok: status < 400, status, json: async () => body, text: async () => JSON.stringify(body) }) as Response
@@ -16,7 +18,7 @@ const batch = (phase: string, rows: unknown[], more: Record<string, unknown> = {
   step: phase === 'running' ? '1 of 3 videos finished' : '3 of 3 videos finished', created_at: '2026-10-21T00:00:00Z', started_at: phase === 'gate' ? null : '2026-10-21T00:00:01Z',
   finished_at: null, totals: { videos: 3, lines: 6, est_usd: 0.42, est_s: 120, cap_usd: 1.5 }, summary: null, rows, counts: {}, spent_usd: 0.12, can_add: false, ...more })
 
-function server(pages: unknown[], extra: (method: string, url: string) => Response | null = () => null) {
+function server(pages: unknown[], extra: (method: string, url: string) => Response | null = () => null, flags: string[] = ['projects.batch']) {
   const calls: string[] = []
   let k = 0
   // What a later read returns: the batch the last change answered with (the panel reads again after each).
@@ -25,6 +27,7 @@ function server(pages: unknown[], extra: (method: string, url: string) => Respon
     const method = init?.method ?? 'GET'
     calls.push(`${method} ${url}${init?.body ? ` ${init.body}` : ''}`)
     if (url.endsWith('/me/onboarding')) return ok({ tour: { step: 0, finished: true, skipped: true }, tips: ['first-batch'], checklist: [], checklist_hidden: true })
+    if (url.endsWith('/me/flags')) return ok({ flags })
     const other = extra(method, url)
     if (other) {
       if (other.ok && method === 'POST') latest = await other.json()
@@ -44,18 +47,45 @@ describe('B1: the gate line', () => {
   })
 })
 
+describe('B1: the board in one sentence', () => {
+  const rows = (states: string[]) => states.map((st, i) => row(i + 1, st, st)) as unknown as Batch['rows']
+  it('says what finished and what is left, in plain words', () => {
+    expect(boardSummary(batch('running', rows(['working', 'queued', 'ready'])) as unknown as Batch)).toBe('Working on 3 videos, 3 at a time. 2 videos still to go.')
+    expect(boardSummary(batch('finished', rows(['ready', 'ready', 'nothing', 'failed'])) as unknown as Batch))
+      .toBe('Done. 2 videos have changes to review, 1 video had nothing to change and 1 video failed.')
+    expect(boardSummary(batch('finished', rows(['added'])) as unknown as Batch)).toBe('Done. 1 video has the changes added.')
+    expect(boardSummary(batch('cancelled', rows(['ready', 'cancelled'])) as unknown as Batch)).toBe('Cancelled. 1 video has changes to review and 1 video was cancelled.')
+  })
+})
+
 describe('B1: Ask Voltage about all videos', () => {
-  afterEach(() => vi.unstubAllGlobals())
+  afterEach(() => { vi.unstubAllGlobals(); resetFlags() })
+
+  it('first use: says how it works and offers examples that fill the box', async () => {
+    const { fetcher, calls } = server([[]])
+    vi.stubGlobal('fetch', fetcher)
+    render(<BatchPanel projectId="f1" videos={[video(1), video(2)]} />)
+    expect(await screen.findByTestId('batch-how')).toHaveTextContent('Say the change once.')
+    const examples = screen.getByTestId('batch-examples')
+    expect(within(examples).getAllByRole('button').map((b) => b.textContent)).toEqual(EXAMPLES)
+    await userEvent.click(within(examples).getByRole('button', { name: 'Make every offer line say 25% off' }))
+    expect(screen.getByLabelText('What to change in every video')).toHaveValue('Make every offer line say 25% off')
+    expect(screen.queryByTestId('batch-examples')).not.toBeInTheDocument()
+    // Pressing an example plans nothing: the user still presses Plan it.
+    expect(calls.some((c) => c.startsWith('POST'))).toBe(false)
+    // Without phase C there are no stages to show.
+    expect(screen.getByTestId('batch-picker')).not.toHaveTextContent('Draft')
+  })
 
   it('picks every video by default, each with its stage, and plans the goal for the ones kept', async () => {
     const gate = batch('gate', [row(1, 'planned', 'Planned'), row(3, 'planned', 'Planned', { lines: null })], { totals: { videos: 2, lines: null, est_usd: null, est_s: null, cap_usd: 1 } })
-    const { fetcher, calls } = server([[]], (method, url) => (url.endsWith('/projects/f1/batches') && method === 'POST' ? ok(gate, 201) : null))
+    const { fetcher, calls } = server([[]], (method, url) => (url.endsWith('/projects/f1/batches') && method === 'POST' ? ok(gate, 201) : null), ['projects.batch', 'projects.review'])
     vi.stubGlobal('fetch', fetcher)
     render(<BatchPanel projectId="f1" videos={[video(1), video(2, 'approved'), video(3)]} />)
     expect(screen.getByRole('status')).toHaveTextContent('Reading the last batch…')
     const picker = await screen.findByTestId('batch-picker')
     expect(within(picker).getAllByRole('checkbox').every((c) => (c as HTMLInputElement).checked)).toBe(true)
-    expect(picker).toHaveTextContent('Approved')
+    expect(await within(picker).findByText('Approved')).toBeInTheDocument()
     await userEvent.click(within(picker).getByRole('checkbox', { name: /ad2\.mp4/ }))
     expect(picker).toHaveTextContent('2 of 3 videos')
     await userEvent.click(screen.getByRole('button', { name: 'Plan it for 2 videos' }))
@@ -65,11 +95,12 @@ describe('B1: Ask Voltage about all videos', () => {
     expect(calls).toContain('POST /api/projects/f1/batches {"source":"ask","goal":"Make it 30% off","video_ids":["p1","p3"]}')
     const card = await screen.findByTestId('batch-gate')
     expect(within(card).getByTestId('batch-totals')).toHaveTextContent(/^2 videos$/)
-    expect(within(card).getByTestId('batch-cap')).toHaveTextContent('Spends at most $1.00')
-    expect(card).toHaveTextContent('Voltage decides')
-    // The user's next action is last: Go.
+    expect(within(card).getByTestId('batch-cap')).toHaveTextContent('You pay at most $1.00 for all of it.')
+    expect(within(card).getByTestId('batch-cap')).toHaveTextContent('nothing is added to a video until you add it')
+    expect(card).toHaveTextContent('Voltage will look')
+    // The user's next action is last: Go, with how many videos it starts.
     const buttons = within(card).getAllByRole('button')
-    expect(buttons[buttons.length - 1]).toHaveTextContent('Go')
+    expect(buttons[buttons.length - 1]).toHaveTextContent('Go · 2 videos')
   })
 
   it('opens the gate with the totals, and Go starts the board', async () => {
@@ -79,11 +110,13 @@ describe('B1: Ask Voltage about all videos', () => {
     vi.stubGlobal('fetch', fetcher)
     render(<BatchPanel projectId="f1" videos={[video(1), video(2), video(3)]} />)
     expect(await screen.findByTestId('batch-totals')).toHaveTextContent('3 videos · 6 lines · about $0.42 · about 2 min')
-    await userEvent.click(screen.getByRole('button', { name: 'Go' }))
+    expect(screen.getByTestId('batch-gate')).toHaveTextContent('2 lines to change')
+    await userEvent.click(screen.getByRole('button', { name: 'Go · 3 videos' }))
     expect(calls).toContain('POST /api/projects/f1/batches/J9/go')
     const rows = await screen.findAllByTestId('batch-row')
     expect(rows.map((r) => r.getAttribute('data-state'))).toEqual(['working', 'queued', 'queued'])
     expect(screen.getByRole('button', { name: 'Cancel the rest' })).toBeInTheDocument()
+    expect(screen.getByTestId('batch-summary')).toHaveTextContent('Working on 3 videos, 3 at a time. 3 videos still to go.')
     expect(within(rows[0]).getByRole('link', { name: 'ad1.mp4' })).toHaveAttribute('href', '#v/p1')
   })
 
@@ -109,6 +142,13 @@ describe('B1: Ask Voltage about all videos', () => {
     const board = await screen.findByTestId('batch-board')
     expect(within(board).getAllByTestId('batch-row').map((r) => r.getAttribute('data-state'))).toEqual(['ready', 'nothing', 'failed', 'waiting', 'cancelled'])
     expect(board).toHaveTextContent('Batch finished')
+    expect(within(board).getByTestId('batch-summary')).toHaveTextContent(
+      'Done. 1 video has changes to review, 1 video needs your answer, 1 video had nothing to change, 1 video failed and 1 video was cancelled.')
+    expect(board).toHaveTextContent('$0.12 spent of $1.50 at most')
+    expect(within(board).getByTestId('batch-review')).toHaveAttribute('href', '#v/p1')
+    expect(within(board).getByTestId('batch-next')).toHaveTextContent('Open a video to hear its changes first')
+    // The next action is last: Add all that passed.
+    expect(within(board).getAllByRole('button').at(-1)).toHaveTextContent('Add all that passed')
     expect(board).toHaveTextContent('the model fell over')
     const q = within(board).getByTestId('batch-question')
     expect(q).toHaveTextContent('Say 30% or 25%?')

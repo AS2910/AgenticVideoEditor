@@ -4,7 +4,7 @@ off for everyone else; a stored row wins over the default."""
 from fastapi.testclient import TestClient
 
 from app.config import load_settings
-from app.flags import GOLIVE_FLAGS, OFF_BY_DEFAULT, VOICE_FLAGS, PHASE_FLAGS, FlagStore
+from app.flags import GOLIVE_FLAGS, OFF_BY_DEFAULT, ON_BY_DEFAULT, VOICE_FLAGS, PHASE_FLAGS, FlagStore
 from app.store.db import Database
 
 
@@ -14,8 +14,9 @@ def test_phase_and_golive_flags_are_on_for_the_default_owners_only():
         assert flags.enabled(flag, "local") and flags.enabled(flag, "team@example.com")
         assert not flags.enabled(flag, "someone@example.com")
     assert not flags.enabled("made.up", "local")                    # an unknown flag is off by default
-    assert flags.enabled_for("local") == sorted({*PHASE_FLAGS, *GOLIVE_FLAGS, *VOICE_FLAGS} - OFF_BY_DEFAULT)
-    assert flags.enabled_for("someone@example.com") == []
+    assert flags.enabled_for("local") == sorted({*PHASE_FLAGS, *GOLIVE_FLAGS, *VOICE_FLAGS, *ON_BY_DEFAULT} - OFF_BY_DEFAULT)
+    # Run 5 item 9: launch.batch_public is on for everyone, but brings nothing without a launch profile.
+    assert flags.enabled_for("someone@example.com") == ["launch.batch_public"]
 
 
 def test_a_stored_row_wins_over_the_default_and_clearing_it_goes_back():
@@ -25,7 +26,7 @@ def test_a_stored_row_wins_over_the_default_and_clearing_it_goes_back():
     flags.set("labs.preview", "local", True)
     assert not flags.enabled("projects.batch", "local")
     assert flags.enabled("projects.review", "beta@example.com")
-    assert flags.enabled_for("beta@example.com") == ["projects.review"]
+    assert flags.enabled_for("beta@example.com") == ["launch.batch_public", "projects.review"]
     assert "labs.preview" in flags.enabled_for("local") and "projects.batch" not in flags.enabled_for("local")
     flags.set("projects.batch", "local", True)                      # a second set updates the row
     assert flags.enabled("projects.batch", "local")

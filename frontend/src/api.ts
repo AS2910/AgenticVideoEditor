@@ -586,7 +586,7 @@ export const getEmailKinds = () => get<{ kinds: EmailKind[] }>('/admin/emails/pr
 export const getEmailPreview = (kind: string) => get<EmailPreview>(`/admin/emails/preview/${encodeURIComponent(kind)}`)
 export const setPaidPause = (paused: boolean) => put<AdminSpend>('/admin/paid-pause', { paused })
 /** Launch item 10: one person's feature flags, and turning one on or off (null: back to the default). */
-export interface AdminFlags { owner: string; profile: string | null; flags: { flag: string; on: boolean; source: 'owner' | 'everyone' | 'profile' | 'default_owner' | 'off' }[] }
+export interface AdminFlags { owner: string; profile: string | null; flags: { flag: string; on: boolean; source: 'owner' | 'everyone' | 'profile' | 'default_owner' | 'default' | 'off' }[] }
 export const getAdminFlags = (owner: string) => get<AdminFlags>(`/admin/flags?owner=${encodeURIComponent(owner)}`)
 export const setAdminFlag = (owner: string, flag: string, enabled: boolean | null) => put<AdminFlags>('/admin/flags', { owner, flag, enabled })
 /** Rehearsal item 10: find a person, read their account, act on it; every action lands in the audit trail. */

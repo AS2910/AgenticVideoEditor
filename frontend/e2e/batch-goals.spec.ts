@@ -123,8 +123,12 @@ test('a batch goal: pick videos, one gate, Go, every row state, an answer, add a
   const picker = panel.getByTestId('batch-picker')
   await expect(picker.getByRole('checkbox')).toHaveCount(4)
   await expect(picker).toContainText('4 of 4 videos')
-  await expect(picker).toContainText('Approved')
-  await expect(picker).toContainText('In review')
+  // Stages belong to phase C (projects.review), off here as in the public profile: the picker shows none.
+  await expect(picker).not.toContainText('Approved')
+  // First use (item 9): how it works in three steps, and an example that fills the box.
+  await expect(panel.getByTestId('batch-how')).toContainText('Say the change once.')
+  await panel.getByTestId('batch-examples').getByRole('button', { name: 'Make every offer line say 25% off' }).click()
+  await expect(panel.getByLabel('What to change in every video')).toHaveValue('Make every offer line say 25% off')
   await panel.getByLabel('What to change in every video').fill('Make every offer line say 30% off')
   if (SHOTS) await page.screenshot({ path: `${SHOTS}/b1-ask.png`, fullPage: true })
   await panel.getByRole('button', { name: 'Plan it for 4 videos' }).click()
@@ -132,10 +136,11 @@ test('a batch goal: pick videos, one gate, Go, every row state, an answer, add a
 
   const gate = panel.getByTestId('batch-gate')
   await expect(gate.getByTestId('batch-totals')).toHaveText('4 videos · 3 lines · about $0.42 · about 2 min')
-  await expect(gate.getByTestId('batch-cap')).toContainText('Spends at most $2.00')
+  await expect(gate.getByTestId('batch-cap')).toContainText('You pay at most $2.00 for all of it')
   await expect(gate).toContainText('nothing to change')
   if (SHOTS) { await page.waitForTimeout(1000); await page.screenshot({ path: `${SHOTS}/b1-gate.png`, fullPage: true }) }
-  await gate.getByRole('button', { name: 'Go' }).click()
+  await expect(gate.getByRole('button').last()).toHaveText('Go · 4 videos')
+  await gate.getByRole('button', { name: 'Go · 4 videos' }).click()
 
   const board = panel.getByTestId('batch-board')
   await expect(board.locator('[data-state="working"]')).toHaveCount(3)
@@ -153,6 +158,8 @@ test('a batch goal: pick videos, one gate, Go, every row state, an answer, add a
   await expect(row('p4')).toContainText('Voltage is still on the last thing you said.')
   await expect(row('p5')).toHaveAttribute('data-state', 'waiting')
   await expect(row('p5').getByTestId('batch-question')).toContainText('This reel says 25%. Change it to 30% too?')
+  await expect(board.getByTestId('batch-summary')).toHaveText('Done. 1 video has changes to review, 1 video needs your answer, 1 video had nothing to change and 1 video failed.')
+  await expect(row('p2').getByTestId('batch-review')).toHaveAttribute('href', '#v/p2')
   if (SHOTS) await page.screenshot({ path: `${SHOTS}/b1-board.png`, fullPage: true })
 
   await row('p5').getByLabel('Your answer for reel-cut.mp4').fill('Change it to 30%')
@@ -167,7 +174,7 @@ test('a batch goal: pick videos, one gate, Go, every row state, an answer, add a
   expect(posts).toContain('POST /api/projects/f1/batches/J9/videos/p2/undo-add')
   await expect(row('p2')).toContainText('Undone. The lines are back as proposals.')
   if (SHOTS) await page.screenshot({ path: `${SHOTS}/b1-added.png`, fullPage: true })
-  await expect(row('p2').getByRole('link', { name: 'bhaji-cam-ad.mp4' })).toHaveAttribute('href', '#v/p2')
+  await expect(row('p2').getByRole('link', { name: 'bhaji-cam-ad.mp4', exact: true })).toHaveAttribute('href', '#v/p2')
 })
 
 test('Fix in all from the project check opens the batch gate for that issue', async ({ page }) => {

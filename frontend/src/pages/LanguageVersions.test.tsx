@@ -32,7 +32,7 @@ describe('B2: language versions', () => {
     await userEvent.click(screen.getByRole('checkbox', { name: /Marathi/ }))
     await userEvent.click(screen.getByRole('radio', { name: /A designed voice per language/ }))
     expect(await screen.findByText('2 versions · 8 lines · about $0.24')).toBeInTheDocument()
-    expect(screen.getByText(/Spends at most \$1.00/)).toBeInTheDocument()
+    expect(screen.getByText(/You pay at most \$1.00 for all of them/)).toBeInTheDocument()
     await userEvent.click(screen.getByRole('button', { name: 'Make 2 versions' }))
     await waitFor(() => expect(made).toHaveBeenCalledWith('f1'))
     expect(posts.at(-1)).toBe(JSON.stringify({ languages: ['hi', 'mr'], voice: 'designed' }))

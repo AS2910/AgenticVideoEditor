@@ -21,7 +21,7 @@ GOLIVE_FLAGS = tuple(f"golive.g{n}" for n in range(1, 9))
 # Launch switches (item 1 of the launch plan). Off for everyone by default,
 # the default owners included; they are usually set for everyone at once
 # with the owner `*` (`FlagStore.set(flag, ALL, True)`).
-LAUNCH_FLAGS = ("launch.invite_only", "launch.paid_paused")
+LAUNCH_FLAGS = ("launch.invite_only", "launch.paid_paused", "launch.batch_public")
 # Rehearsal item 1 (launch blocker 4): cloning a voice (your own, or a
 # speaker's) waits for a real liveness check. On for the default owners, not
 # in the public profile; an admin turns it on per person (Features).
@@ -33,6 +33,15 @@ LAUNCH_FLAGS = ("launch.invite_only", "launch.paid_paused")
 # your own voice from an upload; voices.cloning still does that.
 VOICE_FLAGS = ("voices.cloning", "voices.cloning_verified")
 OFF_BY_DEFAULT = frozenset({"voices.cloning_verified"})
+# Run 5 item 9: `launch.batch_public` is the one launch switch that is on by
+# default (a row for `*` turns it off). While it is on, a launch profile also
+# turns on what B1 (batch goals), B2 (language sets) and B3 (batch export)
+# need: `projects.batch`, which gates all three, the F4 batch engine under
+# them and the export share links (F6). It does not bring A2 (`projects.check`)
+# or phase C (`projects.review`); see DECISIONS.md, run 5 item 9.
+BATCH_PUBLIC = "launch.batch_public"
+BATCH_PUBLIC_IMPLIES = frozenset({"projects.batch"})
+ON_BY_DEFAULT = frozenset({BATCH_PUBLIC})
 KNOWN = PHASE_FLAGS + GOLIVE_FLAGS + LAUNCH_FLAGS + VOICE_FLAGS
 # The owner a row names to set a flag for everyone. An owner's own row still wins.
 ALL = "*"
@@ -63,9 +72,17 @@ class FlagStore:
         self.profile = PROFILES.get(profile or "", frozenset())
 
     def _default(self, flag: str, owner: str) -> bool:
+        if flag in ON_BY_DEFAULT:
+            return True
         if flag.startswith(("launch.", BETA_PREFIX)) or flag in OFF_BY_DEFAULT or not is_known(flag):
             return False
-        return owner in self.default_owners or flag in self.profile
+        return owner in self.default_owners or self._in_profile(flag, owner)
+
+    def _in_profile(self, flag: str, owner: str) -> bool:
+        """The profile's own flags, plus B1 to B3's while `launch.batch_public` is on."""
+        if flag in self.profile:
+            return True
+        return bool(self.profile) and flag in BATCH_PUBLIC_IMPLIES and self.enabled(BATCH_PUBLIC, owner)
 
     def explain(self, owner: str) -> list[dict]:
         """Every known flag for `owner`: on or off, and why (their row, everyone's row, the profile or the default)."""
@@ -80,7 +97,8 @@ class FlagStore:
                 on, source = rows[(flag, ALL)], "everyone"
             else:
                 on = self._default(flag, owner)
-                source = "default_owner" if owner in self.default_owners and on else ("profile" if on else "off")
+                source = ("default" if flag in ON_BY_DEFAULT else "default_owner" if owner in self.default_owners and on
+                          else "profile" if on else "off")
             out.append({"flag": flag, "on": on, "source": source})
         return out
 
@@ -133,10 +151,14 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.command == "profile":
         name = args.flag or "public"
+        profile = PROFILES.get(name, frozenset())
+        batch = profile and BATCH_PUBLIC_IMPLIES or frozenset()
         print(f"AVE_LAUNCH_PROFILE={name} turns on for everyone:")
-        for flag in sorted(PROFILES.get(name, ())):
-            print(f"  on   {flag}")
-        for flag in sorted(set(KNOWN) - PROFILES.get(name, frozenset())):
+        for flag in sorted(profile | ON_BY_DEFAULT):
+            print(f"  on   {flag}" + (" (the default; it brings B1 to B3)" if flag == BATCH_PUBLIC else ""))
+        for flag in sorted(batch):
+            print(f"  on   {flag} (while {BATCH_PUBLIC} is on)")
+        for flag in sorted(set(KNOWN) - profile - batch - ON_BY_DEFAULT):
             print(f"  off  {flag}")
         return 0
     if not args.db:

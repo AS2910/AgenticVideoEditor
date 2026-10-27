@@ -7,8 +7,9 @@ import { LegalLinks } from './LegalPage'
 import { said } from './fmt'
 
 /** Launch item 8: the public landing page, for people who are not signed in (`#`, `#home`;
- *  `#welcome` shows it to anyone). What Voltage does, the sample ad before and after, three
- *  steps, prices read from the server (`GET /pricing`, built from app/billing/prices.py), the
+ *  `#welcome` shows it to anyone). Run 5 item 9: it leads with ad teams and agencies (change
+ *  every ad at once, three steps across a campaign); editing one video, with the sample ad
+ *  before and after, is the second section. Then what Voltage does, prices read from the server (`GET /pricing`, built from app/billing/prices.py), the
  *  FAQ, and Request access while Voltage is invite-only. Slots for real quotes and logos show
  *  as dashed boxes in development only, and are left out of a production build until filled. */
 
@@ -39,7 +40,7 @@ function Demo() {
   return (
     <figure className="m-0 flex min-w-0 flex-col gap-3" aria-labelledby="demo-h" data-testid="landing-demo">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <h2 id="demo-h" className="disp m-0 text-[22px] font-bold">The sample ad</h2>
+        <h3 id="demo-h" className="disp m-0 text-[22px] font-bold">The sample ad</h3>
         <div className="segs" role="group" aria-label="Which version plays">
           <button type="button" className="seg pointer-coarse:h-11" aria-pressed={which === 'before'} onClick={() => setWhich('before')}>Before</button>
           <button type="button" className="seg pointer-coarse:h-11" aria-pressed={which === 'after'} onClick={() => setWhich('after')}>After</button>
@@ -63,19 +64,87 @@ function Demo() {
   )
 }
 
+// Run 5 item 9: the three steps across a campaign, for ad teams and agencies.
 const STEPS: [string, string][] = [
-  ['Upload a video', 'Up to 10 minutes, with speech or none. Voltage reads it: who speaks, what they say, and when.'],
-  ['Say what it should say', 'Voltage proposes changes line by line. Hear each take in place; nothing is voiced or spent until you say go.'],
-  ['Add it and export', 'Add the takes you like and export an MP4. Nothing is in the video until you add it.'],
+  ['Put the campaign in a project', 'Upload every cut of the ad: each size, each length, each market. Voltage reads who speaks, what they say, and when.'],
+  ['Say the change once', 'Type it the way you would brief an editor: "Make every offer line say 25% off." Voltage plans it for every video and shows the cost before anything is spent.'],
+  ['Review and export them all', 'Hear each video\'s new line and add the ones that pass. Then export every video at once, in 16:9, 9:16 or 1:1.'],
 ]
+
+// Editing one video: the second section, under the campaign story.
+const ONE_VIDEO: [string, string][] = [
+  ['Upload a video', 'Up to 10 minutes, with speech or none.'],
+  ['Say what it should say', 'Voltage proposes changes line by line. Hear each take in place before anything is added.'],
+  ['Add it and export', 'Add the takes you like and download an MP4.'],
+]
+
+// What the hero shows: an example campaign, one change across its videos. Words only, no numbers it did not measure.
+const EXAMPLE_ADS: { name: string; hindi?: boolean }[] = [
+  { name: 'Diwali offer, 16:9' },
+  { name: 'Diwali offer, 9:16 reel' },
+  { name: 'Diwali offer, 6 s bumper' },
+  { name: 'Diwali offer, Hindi version', hindi: true },
+]
+
+function CampaignExample() {
+  return (
+    <figure className="m-0 flex min-w-0 flex-col gap-3 rounded-xl border-[1.5px] border-foreground bg-card p-4 shadow-volt sm:p-5" aria-label="An example: one change across four ads" data-testid="landing-campaign">
+      <div className="flex flex-col gap-1 rounded-lg bg-sunk px-3 py-2.5">
+        <span className="tag text-muted-foreground">You say, once</span>
+        <span className="text-[15px] font-medium">“Make every offer line say 25% off.”</span>
+      </div>
+      <ul className="m-0 flex list-none flex-col p-0">
+        {EXAMPLE_ADS.map((a) => (
+          <li key={a.name} className="flex flex-col gap-1 border-t border-line py-2.5 first:border-t-0">
+            <span className="flex flex-wrap items-center gap-2">
+              <span className="min-w-0 flex-1 truncate font-semibold">{a.name}</span>
+              <span className="stamp">Ready to review</span>
+            </span>
+            {a.hindi
+              ? <span className="text-[15px]" lang="hi">“आज ही <del className="text-muted-foreground">20%</del> <ins className="px-1">25%</ins> छूट पाएं।”</span>
+              : <span className="text-[15px]">“Get <del className="text-muted-foreground">20%</del> <ins className="px-1">25%</ins> off today only.”</span>}
+          </li>
+        ))}
+      </ul>
+      <figcaption className="text-sm text-muted-foreground">An example campaign. Each ad keeps its speaker's voice and its picture; only the line changes.</figcaption>
+    </figure>
+  )
+}
+
+function OneVideo() {
+  return (
+    <section id="one-video" className="flex scroll-mt-20 flex-col gap-5" aria-labelledby="one-h" data-testid="landing-one-video">
+      <div className="flex max-w-[680px] flex-col gap-2">
+        <h2 id="one-h" className="disp m-0 text-[32px] leading-tight font-bold">Or change one video</h2>
+        <p className="m-0 text-muted-foreground">
+          The same editor works on a single video. Tell Voltage what the video should say: it rewrites the line,
+          voices it in the speaker's own voice, and keeps the picture moving. No reshoot.
+        </p>
+      </div>
+      <div className="grid grid-cols-1 items-start gap-8 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+        <Demo />
+        <ol className="m-0 flex list-none flex-col gap-3 p-0" aria-label="Changing one video">
+          {ONE_VIDEO.map(([h, t], i) => (
+            <li key={h} className="flex gap-3 rounded-xl border border-line2 bg-card p-4">
+              <span className="stamp quiet self-start" aria-hidden="true">{i + 1}</span>
+              <span className="flex flex-col gap-1"><h3 className="disp m-0 text-lg font-bold">{h}</h3><span className="text-muted-foreground">{t}</span></span>
+            </li>
+          ))}
+        </ol>
+      </div>
+    </section>
+  )
+}
 
 function Features({ languages }: { languages: boolean | null }) {
   const items: [string, string, ReactNode?][] = [
+    ['One change, every video', 'Offers, prices, dates and calls to action, changed across a whole campaign in one go. You see the cost first.'],
+    ['Language versions', 'The same video with every line in Hindi, Hinglish, Tamil or Marathi, or in English.',
+      languages === false ? <span className="stamp need" key="s">On request</span> : undefined],
+    ['Every size at once', 'Export each video for YouTube, Reels and the feed, with captions if you want them, as one download.'],
     ['Replace a line', 'Change the words of a spoken line, voiced in the speaker\'s own voice or one you pick.'],
     ['Add a voice-over', 'Add a line over the picture, or where the picture makes room. Silent clips work too.'],
     ['Your own voice', 'Record ten seconds on the Voices page, then say "in my voice" in any video.'],
-    ['Language versions', 'The same video with every line in Hindi, Hinglish, Tamil or Marathi, or in English.',
-      languages === false ? <span className="stamp need" key="s">On request</span> : undefined],
   ]
   return (
     <section className="flex flex-col gap-5" aria-labelledby="what-h">
@@ -244,6 +313,7 @@ export function LandingPage() {
         <Wordmark href={null} />
         <nav aria-label="Sections" className="ml-2 hidden items-center gap-4 md:flex">
           <button type="button" className="act" onClick={scrollTo('how')}>How it works</button>
+          <button type="button" className="act" onClick={scrollTo('one-video')}>One video</button>
           <button type="button" className="act" onClick={scrollTo('pricing')}>Pricing</button>
           <button type="button" className="act" onClick={scrollTo('faq')}>Questions</button>
         </nav>
@@ -258,22 +328,23 @@ export function LandingPage() {
       <main className="mx-auto flex w-full max-w-[1120px] flex-col gap-16 px-4 pt-10 pb-16 sm:px-6 sm:pt-14">
         <section className="grid grid-cols-1 items-center gap-10 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
           <div className="flex min-w-0 flex-col gap-6">
+            <span className="tag text-muted-foreground">For ad teams and agencies</span>
             <h1 className="disp m-0 text-[clamp(40px,6vw,68px)] leading-[1.06] font-bold">
-              Change what your video <ins className="rounded-md px-2">says.</ins>
+              Change every ad <ins className="rounded-md px-2">at once.</ins>
             </h1>
             <p className="m-0 max-w-[560px] text-lg leading-[1.55] text-muted-foreground">
-              Voltage is an AI agent that edits the voice in your videos. Tell it what the video should say: it rewrites the line,
-              voices it in the speaker's own voice, and keeps the picture moving. No reshoot.
+              Offers, prices, languages. Say the change once and Voltage rewrites the line in every video of the campaign,
+              voices it in the speaker's own voice, and keeps the picture. No reshoot, no edit suite.
             </p>
-            <div className="flex flex-wrap items-center gap-3">{cta}<span className="tag text-faint">Videos up to 10 min · speech or silent</span></div>
+            <div className="flex flex-wrap items-center gap-3">{cta}<span className="tag text-faint">Every video in a project · you see the cost first</span></div>
           </div>
-          <Demo />
+          <CampaignExample />
         </section>
 
         <Slot label="customer quote" />
 
         <section id="how" className="flex scroll-mt-20 flex-col gap-5" aria-labelledby="how-h">
-          <h2 id="how-h" className="disp m-0 text-[32px] leading-tight font-bold">How it works</h2>
+          <h2 id="how-h" className="disp m-0 text-[32px] leading-tight font-bold">How it works for a campaign</h2>
           <ol className="m-0 grid list-none grid-cols-1 gap-4 p-0 md:grid-cols-3">
             {STEPS.map(([h, t], i) => (
               <li key={h} className="flex flex-col gap-2 rounded-xl border-[1.5px] border-foreground bg-card p-5">
@@ -284,6 +355,8 @@ export function LandingPage() {
             ))}
           </ol>
         </section>
+
+        <OneVideo />
 
         <Features languages={pricing ? pricing.languages : null} />
 

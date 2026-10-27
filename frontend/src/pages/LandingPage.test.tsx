@@ -27,15 +27,22 @@ describe('Launch item 8: the landing page', () => {
   it('shows what Voltage does, the before and after, the steps, prices from the server, the FAQ and the legal links', async () => {
     vi.stubGlobal('fetch', vi.fn(async (url: string) => (url.endsWith('/pricing') ? ok(PRICING) : ok({}))))
     render(<LandingPage />)
-    expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('Change what your video says.')
+    // Run 5 item 9: it leads with ad teams and agencies; one video is the second section.
+    expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('Change every ad at once.')
     expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1)
+    expect(screen.getByText('For ad teams and agencies')).toBeInTheDocument()
+    expect(document.querySelector('main')).toHaveTextContent('Offers, prices, languages.')
+    expect(screen.getByTestId('landing-campaign')).toHaveTextContent('Make every offer line say 25% off.')
+    expect(screen.getAllByRole('heading', { level: 2 }).map((h) => h.textContent).slice(0, 2)).toEqual(['How it works for a campaign', 'Or change one video'])
+    const steps = within(screen.getByRole('heading', { name: 'How it works for a campaign' }).closest('section')!).getAllByRole('heading', { level: 3 })
+    expect(steps.map((h) => h.textContent)).toEqual(['Put the campaign in a project', 'Say the change once', 'Review and export them all'])
     // The demo plays the original, then the render.
     const video = screen.getByTestId('demo-video')
     expect(video).toHaveAttribute('src', '/sample-ad.mp4')
     await userEvent.click(screen.getByRole('button', { name: 'After' }))
     expect(screen.getByTestId('demo-video')).toHaveAttribute('src', '/sample-ad-after.mp4')
     expect(screen.getByRole('button', { name: 'After' })).toHaveAttribute('aria-pressed', 'true')
-    expect(screen.getByRole('heading', { name: 'How it works' })).toBeInTheDocument()
+    expect(within(screen.getByTestId('landing-one-video')).getByTestId('landing-demo')).toBeInTheDocument()
     // Prices come from GET /pricing, never the page.
     const plans = await screen.findAllByTestId('plan-card')
     expect(plans.map((p) => within(p).getByRole('heading').textContent)).toEqual(['Starter', 'Studio', 'Agency'])

@@ -8,6 +8,7 @@ import { said } from './fmt'
 import { FillBar } from './bits'
 import { Tip } from '../guides/Tip'
 import { fileSize } from '../lib/exports'
+import { useFlags } from '../flags/useFlags'
 
 const STAMP: Record<ExportFile['state'], string> = { queued: 'live', rendering: 'live', retrying: 'need', ready: 'in', failed: 'need' }
 
@@ -47,13 +48,13 @@ function ShareLine({ projectId, run, onChange }: { projectId: string; run: Batch
 }
 
 /** One file: its state, the preset and video, then the file name and Download, or why it failed. */
-function FileRow({ projectId, exportId, f }: { projectId: string; exportId: string; f: ExportFile }) {
+function FileRow({ projectId, exportId, f, stages }: { projectId: string; exportId: string; f: ExportFile; stages: boolean }) {
   return (
     <li className="flex flex-col gap-0.5 border-t border-line py-2 first:border-t-0" data-testid="export-file" data-state={f.state}>
       <div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1">
         <span className={cn('stamp', STAMP[f.state])}>{f.label}</span>
         <span className="min-w-0 flex-1 truncate text-sm"><span className="font-semibold">{f.preset.name}</span> · <a className="text-foreground" href={hrefFor({ page: 'editor', projectId: f.video_id })}>{f.filename}</a></span>
-        {!f.approved && <span className="stamp need" title="Not Approved when it was exported">Not approved</span>}
+        {stages && !f.approved && <span className="stamp need" title="Not Approved when it was exported">Not approved</span>}
         {f.file && <a className="act" href={exportFileUrl(projectId, exportId, f.index, true)} download={f.file.name} aria-label={`Download ${f.file.name}`}>Download</a>}
       </div>
       {f.file && <span className="tnum truncate text-xs text-faint" title={f.file.name}>{f.file.name} · {fileSize(f.file.size)} · {f.file.report.framing}</span>}
@@ -66,7 +67,10 @@ function FileRow({ projectId, exportId, f }: { projectId: string; exportId: stri
  *  ticked by default; others can be picked and are flagged Not approved)
  *  and presets, see the project check's warnings (never a block), Export;
  *  then one row per file, a bar for the whole export, Download all (.zip)
- *  and a share link. `presets` comes from the Presets section. */
+ *  and a share link. `presets` comes from the Presets section.
+ *  Run 5 item 9: without stages (phase C, `projects.review`, off in the
+ *  public profile) nobody can approve a video, so every video is picked and
+ *  nothing is flagged Not approved. */
 export function BatchExport({ projectId, presets }: { projectId: string; presets: ExportPreset[] | null }) {
   const [pre, setPre] = useState<Preflight | null>(null)
   const [run, setRun] = useState<BatchExportRun | null>(null)
@@ -79,6 +83,8 @@ export function BatchExport({ projectId, presets }: { projectId: string; presets
   const [dismissed, setDismissed] = useState<string | null>(null)
   const [tick, setTick] = useState(0)
   const live = useRef(true)
+  const flags = useFlags()
+  const stages = flags.enabled('projects.review')
 
   useEffect(() => {
     live.current = true
@@ -97,12 +103,12 @@ export function BatchExport({ projectId, presets }: { projectId: string; presets
   }, [projectId, tick])
 
   const all = pre?.videos ?? []
-  const picked = videos ?? new Set(all.filter((v) => v.approved).map((v) => v.video_id))
+  const picked = videos ?? new Set(all.filter((v) => !stages || v.approved).map((v) => v.video_id))
   const list = presets ?? []
   const using = chosen ?? new Set(list.slice(0, 1).map((p) => p.preset_id))
   const usable = list.filter((p) => using.has(p.preset_id))
   const flip = <T,>(set: Set<T>, x: T) => { const next = new Set(set); if (next.has(x)) next.delete(x); else next.add(x); return next }
-  const notApproved = all.filter((v) => picked.has(v.video_id) && !v.approved)
+  const notApproved = stages ? all.filter((v) => picked.has(v.video_id) && !v.approved) : []
   const files = picked.size * usable.length
 
   const start = async () => {
@@ -135,12 +141,12 @@ export function BatchExport({ projectId, presets }: { projectId: string; presets
       {loaded && pre && !showing && (all.length === 0 ? <p className="m-0 text-[13px] text-muted-foreground" data-testid="export-empty">Add videos to this project, then export them here.</p> : (
         <form className="flex flex-col gap-3" onSubmit={(e) => { e.preventDefault(); void start() }} data-testid="export-pick">
           <fieldset className="m-0 flex flex-col gap-0.5 border-0 p-0">
-            <legend className="tag mb-1 text-faint">{picked.size} of {all.length} videos · Approved ones are picked</legend>
+            <legend className="tag mb-1 text-faint">{picked.size} of {all.length} videos{stages ? ' · Approved ones are picked' : ''}</legend>
             {all.map((v) => (
               <label key={v.video_id} className="flex cursor-pointer items-center gap-2.5 rounded-md px-1.5 py-1 hover:bg-sunk" data-testid="export-video">
                 <input type="checkbox" className="size-4 accent-volt" checked={picked.has(v.video_id)} onChange={() => setVideos(flip(picked, v.video_id))} />
                 <span className="min-w-0 flex-1 truncate text-sm">{v.filename}</span>
-                {v.approved ? <span className="tag text-muted-foreground">{v.stage_label}</span> : <span className="stamp need" title={`Stage: ${v.stage_label}`}>Not approved</span>}
+                {stages && (v.approved ? <span className="tag text-muted-foreground">{v.stage_label}</span> : <span className="stamp need" title={`Stage: ${v.stage_label}`}>Not approved</span>)}
               </label>
             ))}
           </fieldset>
@@ -173,7 +179,7 @@ export function BatchExport({ projectId, presets }: { projectId: string; presets
           </div>
           <FillBar share={running ? showing.progress : 1} height={8} strong label={`${showing.counts.ready} of ${showing.counts.total} files ready`} />
           <ul className="m-0 flex list-none flex-col p-0">
-            {showing.files.map((f) => <FileRow key={f.index} projectId={projectId} exportId={showing.export_id} f={f} />)}
+            {showing.files.map((f) => <FileRow key={f.index} projectId={projectId} exportId={showing.export_id} f={f} stages={stages} />)}
           </ul>
           {!running && <Tip id="first-batch-export" />}
           {!running && showing.counts.ready > 0 && <ShareLine projectId={projectId} run={showing} onChange={() => setTick((t) => t + 1)} />}

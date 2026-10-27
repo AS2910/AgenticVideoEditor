@@ -37,7 +37,7 @@ for (const width of [375, 1280]) {
     await signedOut(page, joined)
     await page.goto('/')
     await expect(page.getByTestId('landing-page')).toBeVisible()
-    await expect(page.getByRole('heading', { level: 1 })).toHaveText('Change what your video says.')
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText('Change every ad at once.')
     // No sideways scroll.
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
     // The demo's two files are served without an account.

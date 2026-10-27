@@ -2,6 +2,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest'
 import { render, screen, within, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { BatchExport } from './BatchExport'
+import { resetFlags } from '../flags/useFlags'
 import { ExportPresets } from './ExportPresets'
 import { SharePage } from './SharePage'
 import { fileSize, presetFacts, shareToken } from '../lib/exports'
@@ -24,12 +25,29 @@ const file = (index: number, video_id: string, p: ExportPreset, state: string, e
   ...extra })
 
 describe('B3: export videos', () => {
-  afterEach(() => vi.unstubAllGlobals())
+  afterEach(() => { vi.unstubAllGlobals(); resetFlags() })
+
+  it('without stages (phase C off) picks every video and flags none as not approved', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.endsWith('/me/flags')) return ok({ flags: ['projects.batch'] })
+      if (url.endsWith('/exports/preflight')) return ok({ videos: VIDEOS, warnings: [] })
+      if (url.endsWith('/projects/f1/exports')) return ok({ exports: [] })
+      throw new Error(`unexpected ${url}`)
+    }))
+    render(<BatchExport projectId="f1" presets={PRESETS} />)
+    const rows = await screen.findAllByTestId('export-video')
+    await waitFor(() => expect(within(rows[1]).getByRole('checkbox')).toBeChecked())
+    expect(within(rows[0]).getByRole('checkbox')).toBeChecked()
+    expect(screen.queryByText('Not approved')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('export-warnings')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Export 2 files' })).toBeEnabled()
+  })
 
   it('picks Approved videos by default, flags others, warns before exporting, and starts one file per video and preset', async () => {
     const calls: string[] = []
     let started: object | null = null
     vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.endsWith('/me/flags')) return ok({ flags: ['projects.batch', 'projects.review'] })
       const method = init?.method ?? 'GET'
       if (method !== 'GET') calls.push(`${method} ${url} ${init?.body ?? ''}`)
       if (url.endsWith('/exports/preflight')) return ok({ videos: VIDEOS, warnings: [WARN] })
@@ -43,9 +61,9 @@ describe('B3: export videos', () => {
     render(<BatchExport projectId="f1" presets={PRESETS} />)
     expect(screen.getByRole('status')).toHaveTextContent('Reading the exports…')
     const rows = await screen.findAllByTestId('export-video')
+    expect(await within(rows[1]).findByText('Not approved')).toBeInTheDocument()
     expect(within(rows[0]).getByRole('checkbox')).toBeChecked()
     expect(within(rows[1]).getByRole('checkbox')).not.toBeChecked()
-    expect(within(rows[1]).getByText('Not approved')).toBeInTheDocument()
     expect(screen.getByTestId('export-warnings')).toHaveTextContent(WARN.message)
     expect(screen.getByRole('button', { name: 'YouTube 16:9' })).toHaveAttribute('aria-pressed', 'true')
     expect(screen.getByRole('button', { name: 'Export 1 file' })).toBeEnabled()
@@ -62,6 +80,7 @@ describe('B3: export videos', () => {
       files: [file(0, 'p1', PRESETS[0], 'ready'), file(1, 'p2', PRESETS[0], 'failed', { why: 'The render failed twice. the encoder crashed.', attempts: 2 })],
       counts: { total: 2, ready: 1, failed: 1 }, share: null as null | object }
     vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.endsWith('/me/flags')) return ok({ flags: ['projects.batch', 'projects.review'] })
       const method = init?.method ?? 'GET'
       if (url.endsWith('/exports/preflight')) return ok({ videos: VIDEOS, warnings: [] })
       if (url.endsWith('/projects/f1/exports')) return ok({ exports: [run] })
@@ -78,7 +97,7 @@ describe('B3: export videos', () => {
     expect(ready).toHaveAttribute('data-state', 'ready')
     expect(within(ready).getByRole('link', { name: /Download Diwali_p1/ })).toHaveAttribute('href', '/api/projects/f1/exports/J9/files/0?download=true')
     expect(within(failed).getByText('The render failed twice. the encoder crashed.')).toBeInTheDocument()
-    expect(within(failed).getByText('Not approved')).toBeInTheDocument()
+    expect(await within(failed).findByText('Not approved')).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Download all (.zip)' })).toHaveAttribute('href', '/api/projects/f1/exports/J9/zip')
     await userEvent.click(screen.getByRole('button', { name: 'Share link' }))
     expect(await screen.findByRole('textbox', { name: 'Share link' })).toHaveValue('http://localhost:5173/#s/sh1.sig')
@@ -90,6 +109,7 @@ describe('B3: export videos', () => {
   it('says when there is nothing to export and when the read fails', async () => {
     let fail = true
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.endsWith('/me/flags')) return ok({ flags: ['projects.batch', 'projects.review'] })
       if (fail) return ok({ detail: 'Server down.' }, 500)
       if (url.endsWith('/exports/preflight')) return ok({ videos: [], warnings: [] })
       return ok({ exports: [] })

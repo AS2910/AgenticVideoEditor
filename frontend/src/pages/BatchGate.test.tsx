@@ -18,7 +18,7 @@ describe('BatchGate (decision 0)', () => {
     render(<BatchGate batch={batch({ approved_count: 2, approved_note: '2 approved videos will return to Draft.' })} busy={false} going={false} onGo={onGo} onCancel={vi.fn()} />)
     expect(screen.getByTestId('batch-approved')).toHaveTextContent('2 approved videos will return to Draft.')
     const buttons = screen.getAllByRole('button')
-    expect(buttons.at(-1)).toHaveTextContent('Go')
+    expect(buttons.at(-1)).toHaveTextContent('Go · 2 videos')
     await userEvent.click(buttons.at(-1)!)
     expect(onGo).toHaveBeenCalled()
   })
