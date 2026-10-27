@@ -41,7 +41,7 @@ export const guidedRun: Tour = {
     {
       target: 'gate',
       title: 'Nothing is voiced or spent until you say go',
-      body: 'Voltage asks before any paid step. Under Check with me, it always will.',
+      body: 'Past your spending limit, Voltage asks once, on one card like this. Say go to voice it.',
       hint: '→ Click Go ahead',
       action: 'Go ahead',
       advanceOn: { event: 'take-ready' },
@@ -115,7 +115,7 @@ export const showMe: Record<'goal' | 'add' | 'export' | 'save-voice' | 'autonomy
   autonomy: {
     id: 'autonomy',
     steps: [
-      { target: 'autonomy', title: 'How much Voltage may do', body: 'Check with me waits for your go before any paid step. Just do it voices and fixes on its own, inside your turn cap.', hint: '→ Open the sheet', action: 'Open it', advanceOn: { event: 'autonomy-opened' } },
+      { target: 'autonomy', title: 'How much Voltage may do', body: 'Check with me voices small changes under your limit and asks before anything bigger. Just do it voices and fixes on its own, inside your turn cap.', hint: '→ Open the sheet', action: 'Open it', advanceOn: { event: 'autonomy-opened' } },
       { target: 'autonomy-sheet', title: 'Choose, and keep the asks you want', body: 'Under Just do it, exporting, cloning and designing a voice can still ask first.', action: 'Done', advanceOn: 'click' },
     ],
   },

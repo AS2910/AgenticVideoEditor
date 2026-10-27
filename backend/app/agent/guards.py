@@ -3,7 +3,9 @@
 Three classes of tool, by what they cost the user:
 - **free**: looking and listening; nothing is spent or changed.
 - **spend**: money leaves (a take, a designed voice); bounded by the project's
-  ceiling and a per-turn cap, and under "Check with me" asked once per turn.
+  ceiling and a per-turn cap, and under "Check with me" asked once per turn
+  only past the user's limit (Run 5 item 2: "Ask me before spending more
+  than $X", $0.25 to start); under it, paid steps just run.
 - **commit**: what the user has changes (ship, render); under "Check with me"
   always asked; under "Just do it" done, except deleting, which always asks.
 

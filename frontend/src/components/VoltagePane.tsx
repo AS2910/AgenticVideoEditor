@@ -2,9 +2,9 @@ import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
 import type { ReactNode, RefObject } from 'react'
 import type { ChatMessage, HelpRef, PlanQuestion, SpendSummary, Suggestion } from '../types'
 import { spendLine } from '../lib/money'
-import { optionsOf } from '../lib/options'
 import { artifactUrl } from '../api'
 import { ArrowUp, Check, Info, Loader2 } from 'lucide-react'
+import { QuestionCard } from './QuestionCard'
 import type { Step } from '../jobs/model'
 import { cn } from '@/lib/utils'
 import { Markdown } from './Markdown'
@@ -125,59 +125,6 @@ function EngineInfo({ engine }: { engine: string }) {
         {engine}
       </span>
     </span>
-  )
-}
-
-/** A question (One question) or a gate (Your go is needed): the options stacked,
- *  each wrapping its words; Voltage's pick first and tagged; a long option a
- *  short label with its sentence beneath; the money as one sentence. When the
- *  turn's cap caused it, the first option allows exactly what the step needs. */
-function QuestionCard({ question, onAnswer, turnCap, picked }: { question: PlanQuestion; onAnswer?: (option: string, allowMore?: boolean) => void; turnCap?: number; picked?: string | null }) {
-  const options = optionsOf(question)
-  const cap = question.cap_usd ?? question.turn_cap?.cap_usd ?? turnCap ?? null
-  // 2026-10-20: once an option is picked the card stays where it was, its options off and the pick marked.
-  const done = question.resolved ?? (picked != null ? { why: '', by: 'chat' as const, at: '' } : null)
-  const isPicked = (value: string) => picked != null && value.trim().toLowerCase() === picked.trim().toLowerCase()
-  return (
-    <div className={cn('min-w-0', done ? 'flex flex-col gap-3.5 rounded-xl border border-dashed border-pline p-4' : question.gate ? 'gate' : 'flex flex-col gap-3.5 rounded-xl border border-pline p-4', done && picked == null && 'opacity-80')} data-testid="clarify" data-resolved={done ? true : undefined} data-picked={picked ?? undefined} data-tour={question.gate ? 'gate' : 'question'} role="group" aria-label={question.gate ? 'Your go is needed' : 'One question'}>
-      <span className={cn('tag', question.gate && !done ? 'text-volt' : 'pm')}>{picked != null ? 'Answered' : done ? 'Settled' : question.gate ? '⚡ Your go is needed' : 'One question'}</span>
-      <p className="m-0 text-[15px] leading-relaxed" data-money-scope="step"><strong className="font-medium">{question.text}</strong></p>
-      {!done && (question.cost_usd != null || question.left_usd != null) && (
-        <p className="tnum m-0 text-[13px] leading-snug pm" data-testid="clarify-money">
-          {question.cost_usd != null && <span data-money-scope="step">This step costs about {money(question.cost_usd)}. </span>}
-          {question.left_usd != null && (
-            <span data-money-scope="turn">This turn has {money(question.left_usd)} left{cap != null ? ` of its ${money(cap)} cap` : ''}.</span>
-          )}
-        </p>
-      )}
-      <div className="flex w-full min-w-0 flex-col items-start gap-2" data-testid="clarify-options">
-        {options.map((o, k) => {
-          const volt = !done && (question.gate ? k === 0 : o.way || (o.pick && !question.turn_cap))
-          const mine = isPicked(o.value)
-          return (
-            <button
-              key={o.value}
-              type="button"
-              className={cn('btn sm opt', volt ? 'volt' : 'ghost', volt && question.gate && 'shine', !volt && /^not yet$/i.test(o.value) && 'border-transparent pm', mine && 'opacity-100! border-volt text-volt', picked != null && !mine && 'opacity-50')}
-              disabled={!!done}
-              aria-pressed={picked != null ? mine : undefined}
-              onClick={() => (o.way ? onAnswer?.(o.value, true) : onAnswer?.(o.value))}
-              data-tour-action={k === 0 && question.gate ? 'gate' : undefined}
-              data-option={o.way ? 'allow-more' : o.pick ? 'pick' : undefined}
-              data-money-scope={o.way ? 'turn' : undefined}
-            >
-              {o.pick && !done && <span className="pick" data-testid="pick-tag">Voltage's pick</span>}
-              {mine && <span className="pick" data-testid="your-pick"><Check size={11} aria-hidden="true" className="mr-1 inline" />Your pick</span>}
-              <span className="max-w-full" data-testid="option-label">{o.label}</span>
-              {o.detail && <span className="detail" data-testid="option-detail">{o.detail}</span>}
-            </button>
-          )
-        })}
-      </div>
-      <span className="pm text-xs" role="status" data-testid="clarify-status">
-        {picked != null ? `You picked “${picked}”.` : done ? `Answered in the editor: ${done.why}.` : question.gate ? 'Say go, or pick one.' : 'Pick one, or answer in your own words.'}
-      </span>
-    </div>
   )
 }
 

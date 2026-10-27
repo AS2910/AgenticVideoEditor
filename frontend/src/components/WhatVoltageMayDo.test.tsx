@@ -12,7 +12,7 @@ describe('WhatVoltageMayDo (20d)', () => {
     render(<WhatVoltageMayDo open value={VALUE} onChange={onChange} onClose={() => {}} />)
     const sheet = screen.getByRole('dialog', { name: 'What Voltage may do' })
     expect(within(sheet).getByRole('button', { name: 'Check with me' })).toHaveAttribute('aria-pressed', 'true')
-    expect(sheet).toHaveTextContent('A paid or committing step waits for your yes.')
+    expect(sheet).toHaveTextContent('A change to the video, or a paid step over your limit, waits for your yes.')
     await user.click(within(sheet).getByRole('button', { name: 'Just do it' }))
     expect(onChange).toHaveBeenLastCalledWith({ autonomy: 'draft' })
 
@@ -27,6 +27,13 @@ describe('WhatVoltageMayDo (20d)', () => {
     await user.click(within(sheet).getByRole('button', { name: 'Thorough' }))
     expect(onChange).toHaveBeenLastCalledWith({ effort: 'xhigh' })
     expect(within(sheet).getByRole('button', { name: 'Careful' })).toHaveAttribute('aria-pressed', 'true')
+  })
+
+  it('Run 5 item 2: under Check with me it names the spending limit and points to Settings', () => {
+    render(<WhatVoltageMayDo open value={{ ...VALUE, ask_over_usd: 0.25 }} onChange={() => {}} onClose={() => {}} />)
+    const help = screen.getByTestId('may-do-help')
+    expect(help).toHaveTextContent('Paid steps up to $0.25 a turn go ahead; more than that, and changes to the video, wait for your yes.')
+    expect(screen.getByRole('link', { name: 'Settings' })).toHaveAttribute('href', '#settings')
   })
 
   it('leaves an unchanged choice alone and closes with Escape', async () => {

@@ -13,10 +13,12 @@ export interface MayDo {
   effort: Effort
   /** The project's ceiling, read-only here. */
   ceiling_usd: number
+  /** Run 5 item 2: the user's limit under Check with me, read-only here (Settings sets it). */
+  ask_over_usd?: number
 }
 
 const MODES: { value: Autonomy; label: string; help: string }[] = [
-  { value: 'ask', label: 'Check with me', help: 'A paid or committing step waits for your yes.' },
+  { value: 'ask', label: 'Check with me', help: 'A change to the video, or a paid step over your limit, waits for your yes.' },
   { value: 'draft', label: 'Just do it', help: 'Voltage voices and keeps going; it still says what it spent.' },
 ]
 const EFFORTS: { value: Effort; label: string; help: string }[] = [
@@ -57,7 +59,9 @@ export function WhatVoltageMayDo({ open, value, onChange, onClose }: {
                 <Button key={m.value} type="button" variant="outline" size="sm" className={chip(value.autonomy === m.value)} aria-pressed={value.autonomy === m.value} onClick={() => value.autonomy !== m.value && onChange({ autonomy: m.value })}>{m.label}</Button>
               ))}
             </div>
-            <p className="m-0 text-muted-foreground">{MODES.find((m) => m.value === value.autonomy)?.help}</p>
+            <p className="m-0 text-muted-foreground" data-testid="may-do-help">{value.autonomy === 'ask' && value.ask_over_usd != null && value.ask_over_usd > 0
+              ? <>Paid steps up to <span className="tnum">${value.ask_over_usd.toFixed(2)}</span> a turn go ahead; more than that, and changes to the video, wait for your yes. Change the limit in <a className="underline" href="#settings">Settings</a>.</>
+              : MODES.find((m) => m.value === value.autonomy)?.help}</p>
           </fieldset>
           <div className="flex flex-col gap-2">
             <Label htmlFor="turn-cap">One turn may spend</Label>

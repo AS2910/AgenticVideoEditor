@@ -17,7 +17,7 @@ import { LegalLinks } from './LegalPage'
 interface SettingsPageProps { me: Me | null; onSignedOut: () => void }
 
 const AUTOS: { key: Autonomy; tag: string; title: string; desc: string }[] = [
-  { key: 'ask', tag: 'Default', title: 'Check with me', desc: 'Every paid step or change to the video waits for your go.' },
+  { key: 'ask', tag: 'Default', title: 'Check with me', desc: 'Small paid steps go ahead. Anything over your limit below, and changes to the video, wait for your go.' },
   { key: 'draft', tag: 'Fast', title: 'Just do it', desc: 'Voltage voices, fixes and keeps going. It still asks for the steps below.' },
 ]
 const EFFORTS: { key: Effort; label: string }[] = [{ key: 'medium', label: 'Medium' }, { key: 'high', label: 'High' }, { key: 'xhigh', label: 'Extra' }]
@@ -29,6 +29,8 @@ const ASKS: { key: keyof AskBefore; label: string; desc: string }[] = [
 ]
 // The turn cap moves in 10¢ steps between 10¢ and $2.00, counted in cents so nothing drifts.
 const CAP_MIN = 10, CAP_MAX = 200, CAP_STEP = 10
+// Run 5 item 2: the limit under Check with me moves in 5¢ steps between nothing (always ask) and $2.00.
+const ASK_MIN = 0, ASK_MAX = 200, ASK_STEP = 5
 
 function Switch({ on, label, disabled, onToggle }: { on: boolean; label: string; disabled?: boolean; onToggle?: () => void }) {
   return (
@@ -89,6 +91,8 @@ export function SettingsPage({ me, onSignedOut }: SettingsPageProps) {
   }
   const cents = settings ? Math.round(settings.turn_usd * 100) : CAP_MIN
   const setCap = (c: number) => void save({ turn_usd: Math.min(CAP_MAX, Math.max(CAP_MIN, c)) / 100 })
+  const askCents = settings ? Math.round((settings.ask_over_usd ?? 0.25) * 100) : 25
+  const setAskOver = (c: number) => void save({ ask_over_usd: Math.min(ASK_MAX, Math.max(ASK_MIN, c)) / 100 })
   const toggleAsk = (k: keyof AskBefore) => { if (settings) void save({ ask_before: { ...settings.ask_before, [k]: !settings.ask_before[k] } }) }
 
   const jump = (id: SideSection) => {
@@ -157,7 +161,14 @@ export function SettingsPage({ me, onSignedOut }: SettingsPageProps) {
           </div>
 
           <div className="flex flex-col">
-            <Row title="Money per turn" desc="Voltage stops and asks before a turn spends more than this.">
+            <Row title="Ask me before spending more than" desc={settings?.autonomy === 'draft' ? 'Used under Check with me. Under Just do it, Voltage goes ahead up to the turn cap.' : askCents === 0 ? 'Voltage asks before every paid step.' : 'Per turn. Under this, Voltage voices without asking. Questions about what you mean are still asked.'}>
+              <div className="flex items-center gap-2.5">
+                <button type="button" className="size-9 rounded-lg border-[1.5px] border-foreground text-lg disabled:opacity-50" aria-label="Lower the limit" disabled={!settings || askCents <= ASK_MIN} onClick={() => setAskOver(askCents - ASK_STEP)}>−</button>
+                <span key={askCents} className="tnum inline-block min-w-16 animate-[pop_.3s_ease] text-center text-xl font-semibold" data-testid="ask-over">{settings ? usd(askCents / 100) : '…'}</span>
+                <button type="button" className="size-9 rounded-lg border-[1.5px] border-foreground text-lg disabled:opacity-50" aria-label="Raise the limit" disabled={!settings || askCents >= ASK_MAX} onClick={() => setAskOver(askCents + ASK_STEP)}>+</button>
+              </div>
+            </Row>
+            <Row title="Money per turn" desc="Voltage stops and asks before a turn spends more than this, under either setting.">
               <div className="flex items-center gap-2.5">
                 <button type="button" className="size-9 rounded-lg border-[1.5px] border-foreground text-lg disabled:opacity-50" aria-label="Lower the turn cap" disabled={!settings || cents <= CAP_MIN} onClick={() => setCap(cents - CAP_STEP)}>−</button>
                 <span key={cents} className="tnum inline-block min-w-16 animate-[pop_.3s_ease] text-center text-xl font-semibold" data-testid="turn-cap">{settings ? usd(cents / 100) : '…'}</span>

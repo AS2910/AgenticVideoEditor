@@ -72,7 +72,7 @@ def test_under_check_with_me_a_paid_step_waits_for_the_user_until_they_say_go(wo
     with pytest.raises(WaitingForUser) as w:
         BY_NAME["synthesize_take"].run(world.wb, world.turn(autonomy="ask"), args)
     assert w.value.question == "Voice “Welcome to Goa.” in Varsha's voice, about $0.00?"
-    assert w.value.options == ("Go ahead", "Not yet")
+    assert w.value.options == ("Voice it · $0.00", "Not yet")      # Run 5 item 2: the yes names the step and its price
     assert world.made == []
     BY_NAME["synthesize_take"].run(world.wb, world.turn(autonomy="ask", approved=True), args)
     assert len(world.made) == 1

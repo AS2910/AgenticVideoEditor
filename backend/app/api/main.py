@@ -1145,6 +1145,9 @@ def _project_dict(record: ProjectRecord) -> dict:
 
 EFFORTS = ("medium", "high", "xhigh")
 DEFAULT_AUTONOMY = "ask"
+# Run 5 item 2: "Ask me before spending more than $X" (per user, per turn). Under
+# Check with me, paid steps up to it run without asking; 0 asks before each one.
+DEFAULT_ASK_OVER_USD = 0.25
 
 
 # The steps that can still wait for a yes under Just do it (Volt's Settings).
@@ -1161,15 +1164,23 @@ def _clamp_turn_usd(usd: float) -> float:
     return round(min(ledger.ceiling_usd, max(0.01, usd)), 2)
 
 
+def _clamp_ask_over_usd(usd: float) -> float:
+    """The spend limit under Check with me, between nothing (always ask) and the video ceiling."""
+    return round(min(ledger.ceiling_usd, max(0.0, usd)), 2)
+
+
 def _prefs(owner: str) -> dict:
     """The owner's defaults (Volt): what a new project starts with, and which
-    steps still ask under Just do it. Kept in meta, apart from any project."""
+    steps still ask under Just do it. Kept in meta, apart from any project.
+    `ask_over_usd` is the user's own and is never copied into a video."""
     saved = json.loads(repo.get_meta(f"prefs:{owner}") or "{}")
     return {
         "autonomy": saved.get("autonomy", DEFAULT_AUTONOMY),
         "turn_usd": float(saved.get("turn_usd") or settings.agent_turn_usd),
         "effort": saved.get("effort") or settings.agent_effort,
         "ask_before": _ask_before(saved.get("ask_before")),
+        "ask_over_usd": _clamp_ask_over_usd(float(saved["ask_over_usd"])) if saved.get("ask_over_usd") is not None
+        else DEFAULT_ASK_OVER_USD,
     }
 
 
@@ -1205,6 +1216,8 @@ class PrefsUpdate(BaseModel):
     effort: Literal["medium", "high", "xhigh"] | None = None
     # Any subset of ship / clone / design; the rest stay as they were.
     ask_before: dict[str, bool] | None = None
+    # Run 5 item 2: "Ask me before spending more than $X" a turn, under Check with me.
+    ask_over_usd: float | None = None
 
 
 @app.get("/me/settings")
@@ -1233,6 +1246,8 @@ def update_my_settings(req: PrefsUpdate, owner: str = Depends(current_owner)) ->
         prefs["effort"] = req.effort
     if req.ask_before is not None:
         prefs["ask_before"] = _ask_before({**prefs["ask_before"], **req.ask_before})
+    if req.ask_over_usd is not None:
+        prefs["ask_over_usd"] = _clamp_ask_over_usd(req.ask_over_usd)
     repo.set_meta(f"prefs:{owner}", json.dumps(prefs))
     return prefs
 
@@ -1254,6 +1269,8 @@ def _settings(project_id: str, owner: str | None = None) -> dict:
         "ceiling_usd": ledger.ceiling_usd,
         "ask_before": _ask_before(saved["ask_before"]) if saved.get("ask_before") is not None else defaults["ask_before"],
         "model": settings.agent_model,
+        # Run 5 item 2: the caller's own limit under Check with me, read-only here (Settings sets it).
+        "ask_over_usd": _prefs(owner)["ask_over_usd"],
         # 2026-10-20: how lines are mixed and how loud the render lands.
         "mix": {**MIX_DEFAULTS, **(saved.get("mix") or {})},
     }
@@ -7589,6 +7606,15 @@ def _start_turn(project_id: str, record: ProjectRecord, text: str, owner: str, a
     # A yes to a gate question (a paid or committing step that waited): a go word, or its first option.
     gate = asked if asked and asked.get("gate") else None
     approve = approve or bool(gate and (is_go(text) or text.strip().lower() == str(gate["options"][0]).lower()))
+    # Run 5 item 2: a pick on Voltage's question (not a gate) is the approval for
+    # what its card showed: the paid step at its price, and where the line goes.
+    picked_option = bool(asked and not gate and text.strip().lower() in {
+        str(o.get("label") if isinstance(o, dict) else o).strip().lower() for o in asked.get("options") or []})
+    # Under Check with me, paid steps up to the caller's limit run without asking;
+    # never before the speaker's consent is on record (the yes path asks for it).
+    auto_usd = _prefs(owner)["ask_over_usd"] if record.consent is not None else 0.0
+    if picked_option and record.consent is not None and asked.get("cost_usd"):
+        auto_usd = max(auto_usd, round(float(asked["cost_usd"]), 4))
     # Consent binds before anything synthesizes this speaker's voice: under
     # Just do it before the turn, under Check with me at the yes (and at "allow more").
     if record.consent is None and (autonomy == "draft" or approve or carry or batch):
@@ -7657,7 +7683,7 @@ def _start_turn(project_id: str, record: ProjectRecord, text: str, owner: str, a
         turn = AgentTurn(project_id=project_id, record=record, plan_id=plan.plan_id, autonomy=autonomy, said=text,
                          spend_approved=approve or bool(carry) or autonomy == "draft" or batch, budget=budget_, started_at=since,
                          report=report, commit_approved=approve, ask_before=prefs["ask_before"],
-                         stop_requested=lambda: turn_id in _stops, batch=batch)
+                         stop_requested=lambda: turn_id in _stops, batch=batch, auto_usd=auto_usd, picked=picked_option)
         held["turn"] = turn
         lines = _lines(record)
         names = [s.name for s in repo.speakers(project_id)]
@@ -7690,7 +7716,7 @@ def _start_turn(project_id: str, record: ProjectRecord, text: str, owner: str, a
                        spent_usd=ledger.spent_usd(project_id), ceiling_usd=ledger.ceiling_usd,
                        turn_usd=cap_usd, sight=sight_now,
                        edits=[e for e in repo.list_edits(project_id) if not e.reverted], project=view,
-                       understanding=understood_now, fixed_known=fixed_known)
+                       understanding=understood_now, fixed_known=fixed_known, auto_usd=auto_usd)
         allowed = (f" (They allowed ${carry['needed_usd']:.2f} more for this turn: its cap is now ${cap_usd:.2f}, "
                    "so the step that went over it may run now. Carry on with it.)") if carry else ""
         content = [{"type": "text", "text": head}, {"type": "text", "text": f"The user says: {text}"

@@ -454,7 +454,8 @@ function Studio() {
     setTranscript(loaded.transcript)
     setAutonomy(loaded.settings?.autonomy ?? 'ask')
     setMayDo({ autonomy: loaded.settings?.autonomy ?? 'ask', turn_usd: loaded.settings?.turn_usd ?? MAY_DO.turn_usd,
-      effort: loaded.settings?.effort ?? MAY_DO.effort, ceiling_usd: loaded.settings?.ceiling_usd ?? MAY_DO.ceiling_usd })
+      effort: loaded.settings?.effort ?? MAY_DO.effort, ceiling_usd: loaded.settings?.ceiling_usd ?? MAY_DO.ceiling_usd,
+      ask_over_usd: loaded.settings?.ask_over_usd })
     setPlan(loaded.plan ?? null)
     setReading(loaded.reading ?? null)
     setSuggestions(loaded.suggestions ?? [])
@@ -781,7 +782,9 @@ function Studio() {
    *  with me — then the same turn goes again, once. */
   const takeTurn = async (text: string, again = false, allowMore = false) => {
     if (!projectId) return
-    if (autonomy === 'draft' && !consentGiven.current) return withConsent(null, () => void takeTurn(text, again, allowMore))
+    // Run 5 item 2: under Check with me a paid step under the limit runs without a yes, so consent comes first there too.
+    const goesAhead = autonomy === 'draft' || (mayDo.ask_over_usd ?? 0) > 0
+    if (goesAhead && !consentGiven.current) return withConsent(null, () => void takeTurn(text, again, allowMore))
     if (!again) say({ role: 'user', text })
     setError(null)
     setShippedNote(null)
@@ -1936,7 +1939,7 @@ function Studio() {
               need={clarifying}
               engine={engine}
               chips={contextChips}
-              cap={`Turn cap $${mayDo.turn_usd.toFixed(2)}`}
+              cap={autonomy === 'ask' && (mayDo.ask_over_usd ?? 0) > 0 ? `Asks over $${(mayDo.ask_over_usd ?? 0).toFixed(2)} · turn cap $${mayDo.turn_usd.toFixed(2)}` : `Turn cap $${mayDo.turn_usd.toFixed(2)}`}
               spend={spend}
               question={question}
               picked={picked}

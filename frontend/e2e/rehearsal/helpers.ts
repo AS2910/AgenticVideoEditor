@@ -166,17 +166,22 @@ export async function dismissTips(page: Page): Promise<void> {
 }
 
 /** Take a turn and see it through: a working status shows the whole time; the gate
- *  (Check with me) is answered Go ahead; the proposal row lands, Proposed. */
+ *  (Check with me, past the spending limit) is answered with its yes ("Voice it · $0.04",
+ *  or Go ahead on older cards); the proposal row lands, Proposed. */
 export async function turnToProposal(page: Page, ask: string, rec?: Recorder): Promise<Locator> {
   const box = page.getByLabel('Describe a change')
   await expect(box).toBeEditable()
   await box.fill(ask)
   await box.press('Enter')
+  // Run 5 item 2: under Check with me with a spending limit, consent is asked before the turn starts.
+  if (await page.getByTestId('liveness').waitFor({ state: 'visible', timeout: 3_000 }).then(() => true).catch(() => false)) {
+    await giveConsent(page, rec)
+  }
   const status = page.getByTestId('pane-status')
   await expect(status).toContainText(/working|reading|planning|voicing|thinking/i, { timeout: 30_000 })
   await rec?.shot()
   const proposal = page.locator('[role=listitem][aria-label^="Proposed line"]').filter({ hasText: 'Fresh every morning.' })
-  const go = page.locator('[data-testid=clarify]:not([data-resolved])').getByRole('button', { name: 'Go ahead' })
+  const go = page.locator('[data-testid=clarify]:not([data-resolved])').getByRole('button', { name: /^(Go ahead|Voice it)/ })
   const deadline = Date.now() + 150_000
   while (Date.now() < deadline) {
     if (await proposal.getByRole('button', { name: /Add it/ }).count()) break

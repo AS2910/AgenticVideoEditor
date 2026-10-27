@@ -915,6 +915,8 @@ def test_settings_say_what_voltage_may_do_and_round_trip(client, project):
         "ceiling_usd": main.ledger.ceiling_usd,
         # Volt: which steps still ask under Just do it, and the model (read-only).
         "ask_before": {"ship": False, "clone": False, "design": False}, "model": main.settings.agent_model,
+        # Run 5 item 2: the owner's limit under Check with me, read-only here.
+        "ask_over_usd": 0.25,
         # 2026-10-20: the mix, each in its range.
         "mix": {"voice_default_lufs": -18.0, "bed_under_db": 15.0, "speech_clear_db": 10.0, "loudness": "social"},
     }
@@ -1810,6 +1812,7 @@ def test_under_check_with_me_the_turn_ends_with_a_question_and_go_resumes_it(cli
     import app.api.main as main
     from tests.agent.conftest import reply, text, use
     client.put("/videos/p1/settings", json={"autonomy": "ask"})
+    client.put("/me/settings", json={"ask_over_usd": 0})       # Run 5 item 2: a limit of nothing asks before every paid step
     take_ = use("synthesize_take", "c", text="Get 30% off today only.", voice_id="mock", line=1, start=None, end=None,
                 direction=None, mix=None, item_id=None)
     scripted = _agent_on(monkeypatch, main, [
@@ -1822,7 +1825,7 @@ def test_under_check_with_me_the_turn_ends_with_a_question_and_go_resumes_it(cli
     job = await_job(client, resp.json()["job_id"])
     result = job["result"]
     assert result["question"]["text"] == "Voice “Get 30% off today only.” in Test tone's voice, about $0.00?"
-    assert result["plan"]["status"] == "clarifying" and result["plan"]["question"]["options"] == ["Go ahead", "Not yet"]
+    assert result["plan"]["status"] == "clarifying" and result["plan"]["question"]["options"] == ["Voice it · $0.00", "Not yet"]
     assert result["plan"]["items"] == []
     # A second turn while the first is still open is refused; "go" resumes with the same thread.
     resp = client.post("/videos/p1/turns", json={"text": "go"})
@@ -1938,7 +1941,7 @@ def test_my_defaults_round_trip_and_a_new_project_starts_from_them(client, sampl
     import app.api.main as main
     assert client.get("/me/settings").json() == {
         "autonomy": "ask", "turn_usd": main.settings.agent_turn_usd, "effort": main.settings.agent_effort,
-        "ask_before": {"ship": False, "clone": False, "design": False}}
+        "ask_before": {"ship": False, "clone": False, "design": False}, "ask_over_usd": 0.25}
     resp = client.put("/me/settings", json={"autonomy": "draft", "ask_before": {"ship": True}})
     assert resp.status_code == 200
     assert resp.json()["autonomy"] == "draft" and resp.json()["ask_before"] == {"ship": True, "clone": False, "design": False}
@@ -1995,6 +1998,7 @@ def test_a_paid_gate_question_carries_the_steps_price(client, project, monkeypat
     import app.api.main as main
     _agent_on(monkeypatch, main, [reply_take_under_ask()])
     client.put("/videos/p1/settings", json={"autonomy": "ask"})
+    client.put("/me/settings", json={"ask_over_usd": 0})       # Run 5 item 2: a limit of nothing asks before every paid step
     result = send(client, "make it 30% off")
     assert result["question"]["cost_usd"] == 0.0 and 0 < result["question"]["left_usd"] <= main.settings.agent_turn_usd
 

@@ -46,8 +46,8 @@ def test_a_question_ends_the_turn_with_the_pending_calls_answered_as_not_run(wor
               use("list_voices", "b"), stop="tool_use"),
     ])
     out, persisted, steps = run(world, client, turn=world.turn(autonomy="ask"))
-    assert out.question == {"text": "Voice “Welcome.” in Varsha's voice, about $0.00?", "options": ["Go ahead", "Not yet"], "guess": "Go ahead", "gate": True,
-                            "cost_usd": 0.0024}
+    assert out.question == {"text": "Voice “Welcome.” in Varsha's voice, about $0.00?", "options": ["Voice it · $0.00", "Not yet"], "guess": "Voice it · $0.00",
+                            "gate": True, "cost_usd": 0.0024}
     results = persisted[-1][1]
     assert results[0]["content"].startswith("Waiting for the user:")
     assert results[1]["content"] == "Not run: the turn ended before this step." and results[1]["is_error"] is True

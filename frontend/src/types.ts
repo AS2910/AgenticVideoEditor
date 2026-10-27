@@ -39,7 +39,7 @@ export interface MixLine {
 }
 export interface MixReport { voice_lufs: number; lines: MixLine[]; loudness_lufs: number | null; true_peak_db: number | null }
 
-export interface ProjectSettings { autonomy: Autonomy; turn_usd?: number; effort?: Effort; ceiling_usd?: number; /** Volt: which commits still ask under Just do it, and the model Voltage runs on. */ ask_before?: AskBefore; model?: string; /** The guided run's sample video: its turns replay a recording, free. */ tutorial?: boolean; /** 2026-10-20: the mix. */ mix?: MixSettings }
+export interface ProjectSettings { autonomy: Autonomy; turn_usd?: number; effort?: Effort; ceiling_usd?: number; /** Volt: which commits still ask under Just do it, and the model Voltage runs on. */ ask_before?: AskBefore; model?: string; /** The guided run's sample video: its turns replay a recording, free. */ tutorial?: boolean; /** 2026-10-20: the mix. */ mix?: MixSettings; /** Run 5 item 2: the user's own limit under Check with me (set in Settings). */ ask_over_usd?: number }
 
 /** Where a plan item stands. */
 export type ItemStatus =
@@ -480,7 +480,7 @@ export interface Job {
 
 /** Your defaults for new projects, and what still asks under Just do it. */
 export interface AskBefore { ship: boolean; clone: boolean; design: boolean }
-export interface UserSettings { autonomy: Autonomy; turn_usd: number; effort: Effort; ask_before: AskBefore }
+export interface UserSettings { autonomy: Autonomy; turn_usd: number; effort: Effort; ask_before: AskBefore; /** Run 5 item 2: under Check with me, paid steps up to this a turn go ahead without asking. */ ask_over_usd: number }
 
 /** Spend across your projects for a period (the Usage page). */
 export interface UsageReport {

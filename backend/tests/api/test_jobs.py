@@ -62,6 +62,7 @@ def test_a_version_number_is_new_only_for_a_new_edit_set(client, project):
 def test_go_queues_every_planned_line_at_once_and_each_is_claimed_when_voiced(client, project, monkeypatch):
     import app.api.main as main
     client.put("/videos/p1/settings", json={"autonomy": "ask"})
+    client.put("/me/settings", json={"ask_over_usd": 0})       # Run 5 item 2: a limit of nothing asks before every paid step
     plan_call = use("plan_lines", "pl", voice_id="", speed=1, commentary=False,
                     lines=[{"start": 0.0, "end": 1.1, "text": "Hi."}, {"start": 1.2, "end": 2.3, "text": "Bye."}])
     _agent_on(monkeypatch, main, [reply(plan_call, stop="tool_use"),

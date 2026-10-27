@@ -54,6 +54,16 @@ describe('SettingsPage', () => {
     expect(await screen.findByRole('status')).toHaveTextContent('Saved')
   })
 
+  it('Run 5 item 2: "Ask me before spending more than" defaults to $0.25 a turn and steps by 5¢, saved at once', async () => {
+    const calls = routeFetch()
+    render(<SettingsPage me={ME} onSignedOut={() => {}} />)
+    expect(await screen.findByTestId('ask-over')).toHaveTextContent('$0.25')
+    expect(screen.getByText('Ask me before spending more than')).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: 'Raise the limit' }))
+    await waitFor(() => expect(calls).toContainEqual({ url: '/api/me/settings', method: 'PUT', body: { ask_over_usd: 0.3 } }))
+    expect(screen.getByTestId('ask-over')).toHaveTextContent('$0.30')
+  })
+
   it('steps the turn cap by 10¢, and saves autonomy and effort', async () => {
     const calls = routeFetch()
     render(<SettingsPage me={ME} onSignedOut={() => {}} />)

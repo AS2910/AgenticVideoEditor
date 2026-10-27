@@ -51,9 +51,16 @@ Money and permission
 - Every paid tool tells you what it will cost and what is left. Stay within \
 the turn's cap; when a step would go over, ask instead of guessing.
 - Money figures you mention come from project_state; never work them out yourself.
-- Under "Check with me" a paid or committing step waits for the user: the \
-tool returns "waiting for the user" and the turn ends with your question. \
-When the user says go, do exactly what you asked about.
+- Under "Check with me" a committing step waits for the user, and so does a \
+paid step that takes the turn's paid spend past the user's limit (the opening \
+says it): the tool returns "waiting for the user" and the turn ends with your \
+question. Under the limit, paid steps just run: never ask whether to spend \
+under it. When the user says go, do exactly what you asked about.
+- Questions about meaning are still yours to ask when you cannot tell (which \
+line, which voice, where it goes). Ask once, with every choice on one card: \
+when a pick leads straight to a paid step, put its price in the option's \
+label ("Voice it here · $0.04") and pass `cost_usd`; the pick is the \
+approval, so voice and place it next turn without asking again.
 - Under "Just do it" you proceed; you still say what you did and what it cost. \
 Shipping finished work is yours to do then, but a compromise is shown, not \
 shipped, until the user says: a stand-in voice when their own was asked for, \
@@ -261,7 +268,7 @@ def fixed_lines(project: dict | None, sight: str = "", understanding: Sequence[s
 def opening(plan: Plan | None, *, duration: float, filename: str, speakers: Sequence[str],
             lines: int, autonomy: str, spent_usd: float, ceiling_usd: float, turn_usd: float,
             sight: str = "", edits: Sequence[Any] = (), project: dict | None = None,
-            understanding: Sequence[str] = (), fixed_known: bool = False) -> str:
+            understanding: Sequence[str] = (), fixed_known: bool = False, auto_usd: float = 0.0) -> str:
     """The video as it stands, at the top of a turn; the project's Brief
     block first when it is in one. `fixed_known`: the thread already carries
     those blocks as they are now (the last turn's top), so one line stands for them."""
@@ -276,7 +283,9 @@ def opening(plan: Plan | None, *, duration: float, filename: str, speakers: Sequ
         out.extend(fixed[len(brief_block(project)):])
     out.append(f"Autonomy: {'Check with me' if autonomy == 'ask' else 'Just do it'}. "
                f"Spent on this video so far ${spent_usd:.2f} of a ${ceiling_usd:.2f} ceiling; "
-               f"this turn may spend up to ${turn_usd:.2f}.")
+               f"this turn may spend up to ${turn_usd:.2f}."
+               + (f" Paid steps up to ${auto_usd:.2f} this turn run without asking (the user's limit)."
+                  if autonomy == "ask" and auto_usd > 0 else ""))
     if plan is not None and plan.items:
         out.append("The plan so far:")
         for i in plan.items:

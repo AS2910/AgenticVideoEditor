@@ -146,12 +146,40 @@ class Turn:
     said: str = ""
     # F4: one video of a batch turn: its lines wait as proposals, added from the batch board.
     batch: bool = False
+    # Run 5 item 2: under Check with me, paid steps run without asking while the
+    # turn's paid spend (voice, design; not Voltage's own thinking) stays at or
+    # under this ("Ask me before spending more than $X", the user's Settings).
+    # 0 asks before every paid step, as before.
+    auto_usd: float = 0.0
+    # The user answered Voltage's question by picking one of its options: the
+    # pick is the approval for the placing step it leads to (no "Move it" after).
+    picked: bool = False
 
     def asks_before(self, what: str) -> bool:
         """Whether this committing step waits for the user: always under
         Check with me, and under Just do it when they asked for it in
         Settings; never once they have said yes this turn."""
         return not self.commit_approved and (self.autonomy == "ask" or bool(self.ask_before.get(what)))
+
+    def may_spend(self, paid_usd: float, next_usd: float) -> bool:
+        """Whether a paid step runs without asking: under Just do it or after a
+        yes, always (the turn's cap still holds); under Check with me while this
+        turn's paid steps, this one included, stay within `auto_usd`."""
+        if self.spend_approved or self.autonomy != "ask":
+            return True
+        # A limit of nothing asks before every paid step, a free-looking one too.
+        return self.auto_usd > 0 and paid_usd + next_usd <= self.auto_usd + 1e-9
+
+
+def paid_this_turn(wb: "Workbench", turn: Turn) -> float:
+    """What this turn's paid steps have spent: everything since it started but
+    Voltage's own thinking, which the threshold leaves to the turn's cap."""
+    spent = wb.ledger.spent_usd_since(turn.project_id, turn.started_at)
+    try:
+        thought = wb.ledger.spent_usd_since(turn.project_id, turn.started_at, vendor="anthropic")
+    except TypeError:       # a ledger that cannot split by vendor counts it all
+        thought = 0.0
+    return max(0.0, spent - thought)
 
 
 @dataclass(frozen=True)
@@ -433,7 +461,8 @@ def _project_state(wb: Workbench, turn: Turn, args: dict) -> ToolResult:
     spent_turn = wb.ledger.spent_usd_since(turn.project_id, turn.started_at)
     spent_all = wb.ledger.spent_usd(turn.project_id)
     out = [f"Autonomy: {'Check with me' if turn.autonomy == 'ask' else 'Just do it'}. "
-           f"This turn: ${spent_turn:.2f} of ${turn.budget.usd:.2f}; the video: ${spent_all:.2f}."]
+           f"This turn: ${spent_turn:.2f} of ${turn.budget.usd:.2f}; the video: ${spent_all:.2f}."
+           + (f" Paid steps up to ${turn.auto_usd:.2f} this turn run without asking." if turn.autonomy == "ask" and turn.auto_usd > 0 else "")]
     summary = wb.spend(turn.project_id)
     if summary:
         out.append(spend_state(summary))
@@ -831,8 +860,9 @@ def _synthesize_take(wb: Workbench, turn: Turn, args: dict) -> ToolResult:
         whose = f"{who}'s own voice" if who and wb.voice_for is not None else f"{_voice_name(wb, wb.default_voice())}'s voice"
     else:
         whose = f"{_voice_name(wb, voice_id, turn)}'s voice"
-    if turn.autonomy == "ask" and not turn.spend_approved:
-        raise WaitingForUser(f"Voice “{text}” in {whose}, about ${usd:.2f}?", cost_usd=usd)
+    if not turn.may_spend(paid_this_turn(wb, turn), usd):
+        raise WaitingForUser(f"Voice “{text}” in {whose}, about ${usd:.2f}?", (f"Voice it · ${usd:.2f}", "Not yet"),
+                             cost_usd=usd)
     wb.ensure_spend(turn.project_id)
     voice_notes: tuple[str, ...] = ()
     if own:
@@ -1320,8 +1350,9 @@ def _design_voice(wb: Workbench, turn: Turn, args: dict) -> ToolResult:
         return ToolResult(refusal)
     # A paid step: waits under Check with me like a take, and under Just do it
     # when the user asked to be asked before a voice is designed.
-    if (turn.autonomy == "ask" and not turn.spend_approved) or (turn.ask_before.get("design") and not turn.commit_approved):
-        raise WaitingForUser(f"Design a voice from “{description}”: three previews to hear, about ${usd:.2f}?", cost_usd=usd)
+    if not turn.may_spend(paid_this_turn(wb, turn), usd) or (turn.ask_before.get("design") and not turn.commit_approved):
+        raise WaitingForUser(f"Design a voice from “{description}”: three previews to hear, about ${usd:.2f}?",
+                             (f"Design it · ${usd:.2f}", "Not yet"), cost_usd=usd)
     wb.ensure_spend(turn.project_id)
     turn.report(turn.progress, "Designing a voice")
     jobs = wb.jobs or NO_JOBS
@@ -1483,7 +1514,8 @@ def _shift_line(wb: Workbench, turn: Turn, args: dict) -> ToolResult:
     if line is None:
         return ToolResult(f"There is no line {args.get('line')}.")
     to = float(args.get("to") or 0.0)
-    if turn.autonomy == "ask" and not turn.commit_approved:
+    # A pick on Voltage's question is the approval for the placement it led to.
+    if turn.autonomy == "ask" and not turn.commit_approved and not turn.picked:
         raise WaitingForUser(f"Move line {line.index} (“{line.text}”) to {to:.2f} s, as spoken?", ("Move it", "Not yet"), "Move it")
     out = wb.shift_words(turn.project_id, turn.record, Selection(line.start, line.end), to)
     if out.get("error"):
@@ -1662,8 +1694,11 @@ def _ask(wb: Workbench, turn: Turn, args: dict) -> ToolResult:
     if len(pairs) < 2:
         return ToolResult("Give two or three options to choose from.")
     options = tuple(label for label, _ in pairs)
+    # Run 5 item 2: what the paid step a pick leads to costs; the card shows it, and the pick approves it.
+    cost = args.get("cost_usd")
+    cost = round(float(cost), 4) if isinstance(cost, (int, float)) and cost > 0 else None
     raise WaitingForUser(args["question"].strip(), options, (args.get("guess") or "").strip() or None, gate=False,
-                         details=tuple(detail for _, detail in pairs))
+                         details=tuple(detail for _, detail in pairs), cost_usd=cost)
 
 
 # ── the registry ──────────────────────────────────────────────────────────────
@@ -1789,7 +1824,10 @@ TOOLS: tuple[Tool, ...] = (
                   "options": {"type": "array", "items": _schema({
                       "label": {"type": "string", "description": "The button: a few words, about 40 characters at most."},
                       "detail": {"type": "string", "description": "The full sentence shown under the label; empty for none."}})},
-                  "guess": {"type": "string", "description": "The label of the option you would take; empty for none."}}), Guard.FREE, _ask, strict=True),
+                  "guess": {"type": "string", "description": "The label of the option you would take; empty for none."},
+                  "cost_usd": {"type": "number", "description": "When a pick leads straight to a paid step (voicing the line it names), "
+                               "what that step costs from estimate_cost; the card shows it and the pick approves it, so nothing asks again. "
+                               "0 when nothing paid follows."}}), Guard.FREE, _ask, strict=True),
 
 )
 
