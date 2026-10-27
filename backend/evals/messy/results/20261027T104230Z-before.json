@@ -1,0 +1,2193 @@
+{
+ "label": "before",
+ "at": "20261027T104230Z",
+ "lines": [
+  {
+   "text": "Is the masala chai fresh today?",
+   "start": 0.4,
+   "end": 2.16,
+   "speaker": "A",
+   "words": [
+    "is",
+    "the",
+    "masala",
+    "chai",
+    "fresh",
+    "today"
+   ]
+  },
+  {
+   "text": "Fresh every morning, made with ginger.",
+   "start": 2.82,
+   "end": 4.62,
+   "speaker": "B",
+   "words": [
+    "fresh",
+    "every",
+    "morning",
+    "made",
+    "with",
+    "ginger"
+   ]
+  },
+  {
+   "text": "How much for two cups?",
+   "start": 5.26,
+   "end": 6.47,
+   "speaker": "A",
+   "words": [
+    "how",
+    "much",
+    "for",
+    "two",
+    "cups"
+   ]
+  },
+  {
+   "text": "Forty rupees, and the biscuits are free.",
+   "start": 7.148,
+   "end": 9.148,
+   "speaker": "B",
+   "words": [
+    "forty",
+    "rupees",
+    "and",
+    "the",
+    "biscuits",
+    "are",
+    "free"
+   ]
+  },
+  {
+   "text": "Perfect, I will take two.",
+   "start": 9.78,
+   "end": 11.33,
+   "speaker": "A",
+   "words": [
+    "perfect",
+    "i",
+    "will",
+    "take",
+    "two"
+   ]
+  }
+ ],
+ "rows": [
+  {
+   "variant": "clean",
+   "family": "control",
+   "what": "The chai clip as made.",
+   "has_bed": false,
+   "bed": {
+    "kind": "none",
+    "gap_db": 164.8,
+    "floor_db": -180.0
+   },
+   "transcription": {
+    "recall": 1.0,
+    "invented": 0,
+    "lines_lost": 0,
+    "lines_seen": 6,
+    "speakers_ok": 1.0,
+    "timing": [
+     {
+      "line": 0,
+      "found": true,
+      "start_err": -0.4,
+      "end_err": 0.02,
+      "ok": false
+     },
+     {
+      "line": 1,
+      "found": true,
+      "start_err": 0.24,
+      "end_err": -0.06,
+      "ok": false
+     },
+     {
+      "line": 2,
+      "found": true,
+      "start_err": 0.1,
+      "end_err": -0.09,
+      "ok": true
+     },
+     {
+      "line": 3,
+      "found": true,
+      "start_err": 0.032,
+      "end_err": -0.008,
+      "ok": true
+     },
+     {
+      "line": 4,
+      "found": true,
+      "start_err": 0.14,
+      "end_err": -0.03,
+      "ok": true
+     }
+    ],
+    "timing_broken": 2,
+    "text": "Is the masala chai fresh today? | Fresh every morning made with ginger. | How much for two cups? | 40 rupees and the biscuits are free. | Perfect. | I will take two."
+   },
+   "voice": [
+    {
+     "line": 1,
+     "take": "own",
+     "passed": false,
+     "voice_match": 0.978,
+     "prosody": 0.759,
+     "integration": 0.542,
+     "naturalness": 3.865,
+     "warnings": [
+      "Pitch is -4.8 semitones off the surrounding speech.",
+      "The new line is noisier than the surrounding audio."
+     ]
+    },
+    {
+     "line": 3,
+     "take": "own",
+     "passed": true,
+     "voice_match": 0.972,
+     "prosody": 0.984,
+     "integration": 1.0,
+     "naturalness": 4.278,
+     "warnings": []
+    }
+   ]
+  },
+  {
+   "variant": "music_soft",
+   "family": "music",
+   "what": "Music bed 20 dB under the speech.",
+   "has_bed": true,
+   "bed": {
+    "kind": "music",
+    "gap_db": 23.9,
+    "floor_db": -39.0
+   },
+   "transcription": {
+    "recall": 1.0,
+    "invented": 0,
+    "lines_lost": 0,
+    "lines_seen": 6,
+    "speakers_ok": 1.0,
+    "timing": [
+     {
+      "line": 0,
+      "found": true,
+      "start_err": -0.4,
+      "end_err": 0.02,
+      "ok": false
+     },
+     {
+      "line": 1,
+      "found": true,
+      "start_err": 0.24,
+      "end_err": -0.04,
+      "ok": false
+     },
+     {
+      "line": 2,
+      "found": true,
+      "start_err": 0.1,
+      "end_err": -0.09,
+      "ok": true
+     },
+     {
+      "line": 3,
+      "found": true,
+      "start_err": 0.012,
+      "end_err": -0.008,
+      "ok": true
+     },
+     {
+      "line": 4,
+      "found": true,
+      "start_err": 0.02,
+      "end_err": -0.01,
+      "ok": true
+     }
+    ],
+    "timing_broken": 2,
+    "text": "Is the masala chai fresh today? | Fresh every morning made with ginger. | How much for two cups? | 40 rupees and the biscuits are free. | Perfect. | I will take two."
+   },
+   "voice": [
+    {
+     "line": 1,
+     "take": "own",
+     "passed": false,
+     "voice_match": 0.975,
+     "prosody": 0.757,
+     "integration": 0.769,
+     "naturalness": 3.865,
+     "warnings": [
+      "Pitch is -4.9 semitones off the surrounding speech.",
+      "The new line is noisier than the surrounding audio."
+     ]
+    },
+    {
+     "line": 3,
+     "take": "own",
+     "passed": true,
+     "voice_match": 0.969,
+     "prosody": 0.985,
+     "integration": 1.0,
+     "naturalness": 4.279,
+     "warnings": []
+    }
+   ],
+   "bed_kept": {
+    "separation_s": 13.0,
+    "stems": true,
+    "room": false,
+    "without_stems": {
+     "bed": 0.019,
+     "old_voice": 0.02
+    }
+   }
+  },
+  {
+   "variant": "music_mid",
+   "family": "music",
+   "what": "Music bed 12 dB under the speech.",
+   "has_bed": true,
+   "bed": {
+    "kind": "music",
+    "gap_db": 16.1,
+    "floor_db": -31.1
+   },
+   "transcription": {
+    "recall": 1.0,
+    "invented": 0,
+    "lines_lost": 0,
+    "lines_seen": 6,
+    "speakers_ok": 1.0,
+    "timing": [
+     {
+      "line": 0,
+      "found": true,
+      "start_err": -0.4,
+      "end_err": 0.02,
+      "ok": false
+     },
+     {
+      "line": 1,
+      "found": true,
+      "start_err": 0.24,
+      "end_err": -0.04,
+      "ok": false
+     },
+     {
+      "line": 2,
+      "found": true,
+      "start_err": 0.12,
+      "end_err": -0.09,
+      "ok": true
+     },
+     {
+      "line": 3,
+      "found": true,
+      "start_err": 0.032,
+      "end_err": -0.008,
+      "ok": true
+     },
+     {
+      "line": 4,
+      "found": true,
+      "start_err": 0.02,
+      "end_err": -0.01,
+      "ok": true
+     }
+    ],
+    "timing_broken": 2,
+    "text": "Is the masala chai fresh today? | Fresh every morning made with ginger. | How much for two cups? | 40 rupees and the biscuits are free. | Perfect. | I will take two."
+   },
+   "voice": [
+    {
+     "line": 1,
+     "take": "own",
+     "passed": false,
+     "voice_match": 0.971,
+     "prosody": 0.774,
+     "integration": 1.0,
+     "naturalness": 3.865,
+     "warnings": [
+      "Pitch is -4.5 semitones off the surrounding speech."
+     ]
+    },
+    {
+     "line": 3,
+     "take": "own",
+     "passed": true,
+     "voice_match": 0.963,
+     "prosody": 0.984,
+     "integration": 1.0,
+     "naturalness": 4.278,
+     "warnings": []
+    }
+   ],
+   "bed_kept": {
+    "separation_s": 19.3,
+    "stems": true,
+    "room": false,
+    "without_stems": {
+     "bed": 0.013,
+     "old_voice": 0.02
+    }
+   }
+  },
+  {
+   "variant": "music_loud",
+   "family": "music",
+   "what": "Music bed 6 dB under the speech.",
+   "has_bed": true,
+   "bed": {
+    "kind": "music",
+    "gap_db": 10.5,
+    "floor_db": -25.1
+   },
+   "transcription": {
+    "recall": 0.172,
+    "invented": 0,
+    "lines_lost": 4,
+    "lines_seen": 2,
+    "speakers_ok": 1.0,
+    "timing": [
+     {
+      "line": 0,
+      "found": false
+     },
+     {
+      "line": 1,
+      "found": false
+     },
+     {
+      "line": 2,
+      "found": false
+     },
+     {
+      "line": 3,
+      "found": false
+     },
+     {
+      "line": 4,
+      "found": true,
+      "start_err": 0.02,
+      "end_err": -0.01,
+      "ok": true
+     }
+    ],
+    "timing_broken": 4,
+    "text": "Perfect. | I will take two."
+   },
+   "voice": [
+    {
+     "line": 1,
+     "take": "own",
+     "passed": true,
+     "voice_match": 0.973,
+     "prosody": 0.818,
+     "integration": 1.0,
+     "naturalness": 3.864,
+     "warnings": []
+    },
+    {
+     "line": 3,
+     "take": "own",
+     "passed": true,
+     "voice_match": 0.959,
+     "prosody": 0.984,
+     "integration": 1.0,
+     "naturalness": 4.276,
+     "warnings": []
+    }
+   ],
+   "bed_kept": {
+    "separation_s": 11.4,
+    "stems": true,
+    "room": false,
+    "without_stems": {
+     "bed": 0.007,
+     "old_voice": 0.02
+    }
+   }
+  },
+  {
+   "variant": "music_beat_loud",
+   "family": "music",
+   "what": "A dance beat 4 dB under the speech.",
+   "has_bed": true,
+   "bed": {
+    "kind": "music",
+    "gap_db": 13.8,
+    "floor_db": -27.8
+   },
+   "transcription": {
+    "recall": 1.0,
+    "invented": 0,
+    "lines_lost": 0,
+    "lines_seen": 6,
+    "speakers_ok": 1.0,
+    "timing": [
+     {
+      "line": 0,
+      "found": true,
+      "start_err": -0.4,
+      "end_err": 0.04,
+      "ok": false
+     },
+     {
+      "line": 1,
+      "found": true,
+      "start_err": 0.26,
+      "end_err": -0.04,
+      "ok": false
+     },
+     {
+      "line": 2,
+      "found": true,
+      "start_err": 0.12,
+      "end_err": -0.09,
+      "ok": true
+     },
+     {
+      "line": 3,
+      "found": true,
+      "start_err": 0.032,
+      "end_err": 0.012,
+      "ok": true
+     },
+     {
+      "line": 4,
+      "found": true,
+      "start_err": 0.02,
+      "end_err": -0.03,
+      "ok": true
+     }
+    ],
+    "timing_broken": 2,
+    "text": "Is the masala chai fresh today? | Fresh every morning made with ginger. | How much for two cups? | 40 rupees and the biscuits are free. | Perfect. | I will take two."
+   },
+   "voice": [
+    {
+     "line": 1,
+     "take": "own",
+     "passed": false,
+     "voice_match": 0.971,
+     "prosody": 0.638,
+     "integration": 1.0,
+     "naturalness": 3.864,
+     "warnings": [
+      "Pitch is -7.2 semitones off the surrounding speech."
+     ]
+    },
+    {
+     "line": 3,
+     "take": "own",
+     "passed": true,
+     "voice_match": 0.97,
+     "prosody": 0.977,
+     "integration": 1.0,
+     "naturalness": 4.275,
+     "warnings": []
+    }
+   ],
+   "bed_kept": {
+    "separation_s": 10.2,
+    "stems": true,
+    "room": false,
+    "without_stems": {
+     "bed": 0.009,
+     "old_voice": 0.02
+    }
+   }
+  },
+  {
+   "variant": "cafe_light",
+   "family": "noise",
+   "what": "Cafe noise 20 dB under the speech.",
+   "has_bed": true,
+   "bed": {
+    "kind": "noise",
+    "gap_db": 24.2,
+    "floor_db": -39.3
+   },
+   "transcription": {
+    "recall": 1.0,
+    "invented": 0,
+    "lines_lost": 0,
+    "lines_seen": 6,
+    "speakers_ok": 1.0,
+    "timing": [
+     {
+      "line": 0,
+      "found": true,
+      "start_err": -0.4,
+      "end_err": 0.04,
+      "ok": false
+     },
+     {
+      "line": 1,
+      "found": true,
+      "start_err": 0.26,
+      "end_err": -0.04,
+      "ok": false
+     },
+     {
+      "line": 2,
+      "found": true,
+      "start_err": 0.12,
+      "end_err": -0.09,
+      "ok": true
+     },
+     {
+      "line": 3,
+      "found": true,
+      "start_err": 0.032,
+      "end_err": -0.028,
+      "ok": true
+     },
+     {
+      "line": 4,
+      "found": true,
+      "start_err": 0.02,
+      "end_err": -0.01,
+      "ok": true
+     }
+    ],
+    "timing_broken": 2,
+    "text": "Is the masala chai fresh today? | Fresh every morning made with ginger. | How much for two cups? | 40 rupees and the biscuits are free. | Perfect. | I will take two."
+   },
+   "voice": [
+    {
+     "line": 1,
+     "take": "own",
+     "passed": false,
+     "voice_match": 0.955,
+     "prosody": 0.758,
+     "integration": 0.778,
+     "naturalness": 3.864,
+     "warnings": [
+      "Pitch is -4.8 semitones off the surrounding speech.",
+      "The new line is noisier than the surrounding audio."
+     ]
+    },
+    {
+     "line": 3,
+     "take": "own",
+     "passed": true,
+     "voice_match": 0.972,
+     "prosody": 0.986,
+     "integration": 1.0,
+     "naturalness": 4.279,
+     "warnings": []
+    }
+   ],
+   "bed_kept": {
+    "separation_s": 20.0,
+    "stems": true,
+    "room": false,
+    "without_stems": {
+     "bed": -0.081,
+     "old_voice": 0.02
+    }
+   }
+  },
+  {
+   "variant": "cafe_heavy",
+   "family": "noise",
+   "what": "Cafe noise 6 dB under the speech.",
+   "has_bed": true,
+   "bed": {
+    "kind": "noise",
+    "gap_db": 11.1,
+    "floor_db": -25.6
+   },
+   "transcription": {
+    "recall": 1.0,
+    "invented": 0,
+    "lines_lost": 0,
+    "lines_seen": 5,
+    "speakers_ok": 1.0,
+    "timing": [
+     {
+      "line": 0,
+      "found": true,
+      "start_err": -0.4,
+      "end_err": 0.04,
+      "ok": false
+     },
+     {
+      "line": 1,
+      "found": true,
+      "start_err": 0.24,
+      "end_err": -0.02,
+      "ok": false
+     },
+     {
+      "line": 2,
+      "found": true,
+      "start_err": 0.14,
+      "end_err": -0.07,
+      "ok": true
+     },
+     {
+      "line": 3,
+      "found": true,
+      "start_err": 0.032,
+      "end_err": -0.008,
+      "ok": true
+     },
+     {
+      "line": 4,
+      "found": true,
+      "start_err": 0.02,
+      "end_err": -0.01,
+      "ok": true
+     }
+    ],
+    "timing_broken": 2,
+    "text": "Is the masala chai fresh today? | Fresh every morning made with ginger. | How much for two cups? | 40 rupees and the biscuits are free. | Perfect, I will take two."
+   },
+   "voice": [
+    {
+     "line": 1,
+     "take": "own",
+     "passed": false,
+     "voice_match": 0.934,
+     "prosody": 0.755,
+     "integration": 1.0,
+     "naturalness": 3.865,
+     "warnings": [
+      "Pitch is -4.9 semitones off the surrounding speech."
+     ]
+    },
+    {
+     "line": 3,
+     "take": "own",
+     "passed": true,
+     "voice_match": 0.933,
+     "prosody": 0.981,
+     "integration": 1.0,
+     "naturalness": 4.277,
+     "warnings": []
+    }
+   ],
+   "bed_kept": {
+    "separation_s": 18.1,
+    "stems": true,
+    "room": false,
+    "without_stems": {
+     "bed": -0.013,
+     "old_voice": 0.02
+    }
+   }
+  },
+  {
+   "variant": "babble",
+   "family": "noise",
+   "what": "Crowd babble 8 dB under the speech.",
+   "has_bed": true,
+   "bed": {
+    "kind": "noise",
+    "gap_db": 17.8,
+    "floor_db": -32.5
+   },
+   "transcription": {
+    "recall": 1.0,
+    "invented": 0,
+    "lines_lost": 0,
+    "lines_seen": 5,
+    "speakers_ok": 0.69,
+    "timing": [
+     {
+      "line": 0,
+      "found": true,
+      "start_err": -0.4,
+      "end_err": 0.06,
+      "ok": false
+     },
+     {
+      "line": 1,
+      "found": true,
+      "start_err": 0.24,
+      "end_err": 0.02,
+      "ok": false
+     },
+     {
+      "line": 2,
+      "found": true,
+      "start_err": 0.12,
+      "end_err": -0.07,
+      "ok": true
+     },
+     {
+      "line": 3,
+      "found": true,
+      "start_err": -0.128,
+      "end_err": -0.028,
+      "ok": true
+     },
+     {
+      "line": 4,
+      "found": true,
+      "start_err": 0.06,
+      "end_err": -0.05,
+      "ok": true
+     }
+    ],
+    "timing_broken": 2,
+    "text": "Is the masala chai fresh today? | Fresh every morning made with ginger. | How much for two cups? | 40 rupees and the biscuits are free. | Perfect, I will take two."
+   },
+   "voice": [
+    {
+     "line": 1,
+     "take": "own",
+     "passed": false,
+     "voice_match": 0.972,
+     "prosody": 0.766,
+     "integration": 0.999,
+     "naturalness": 3.674,
+     "warnings": [
+      "Pitch is -4.7 semitones off the surrounding speech."
+     ]
+    },
+    {
+     "line": 3,
+     "take": "own",
+     "passed": true,
+     "voice_match": 0.953,
+     "prosody": 0.997,
+     "integration": 0.993,
+     "naturalness": 3.905,
+     "warnings": []
+    }
+   ],
+   "bed_kept": {
+    "separation_s": 18.1,
+    "stems": true,
+    "room": false,
+    "without_stems": {
+     "bed": 0.051,
+     "old_voice": 0.02
+    }
+   }
+  },
+  {
+   "variant": "hum_hiss",
+   "family": "noise",
+   "what": "Mains hum and hiss 14 dB under the speech.",
+   "has_bed": true,
+   "bed": {
+    "kind": "noise",
+    "gap_db": 16.8,
+    "floor_db": -31.9
+   },
+   "transcription": {
+    "recall": 1.0,
+    "invented": 0,
+    "lines_lost": 0,
+    "lines_seen": 6,
+    "speakers_ok": 1.0,
+    "timing": [
+     {
+      "line": 0,
+      "found": true,
+      "start_err": -0.4,
+      "end_err": 0.02,
+      "ok": false
+     },
+     {
+      "line": 1,
+      "found": true,
+      "start_err": 0.24,
+      "end_err": -0.04,
+      "ok": false
+     },
+     {
+      "line": 2,
+      "found": true,
+      "start_err": 0.12,
+      "end_err": -0.07,
+      "ok": true
+     },
+     {
+      "line": 3,
+      "found": true,
+      "start_err": 0.052,
+      "end_err": -0.028,
+      "ok": true
+     },
+     {
+      "line": 4,
+      "found": true,
+      "start_err": 0.02,
+      "end_err": -0.01,
+      "ok": true
+     }
+    ],
+    "timing_broken": 2,
+    "text": "Is the masala chai fresh today? | Fresh every morning made with ginger. | How much for two cups? | 40 rupees and the biscuits are free. | Perfect. | I will take two."
+   },
+   "voice": [
+    {
+     "line": 1,
+     "take": "own",
+     "passed": false,
+     "voice_match": 0.957,
+     "prosody": 0.756,
+     "integration": 0.965,
+     "naturalness": 3.865,
+     "warnings": [
+      "Pitch is -4.9 semitones off the surrounding speech."
+     ]
+    },
+    {
+     "line": 3,
+     "take": "own",
+     "passed": true,
+     "voice_match": 0.963,
+     "prosody": 0.982,
+     "integration": 1.0,
+     "naturalness": 4.278,
+     "warnings": []
+    }
+   ],
+   "bed_kept": {
+    "separation_s": 12.5,
+    "stems": true,
+    "room": false,
+    "without_stems": {
+     "bed": 0.059,
+     "old_voice": 0.02
+    }
+   }
+  },
+  {
+   "variant": "echo_small",
+   "family": "echo",
+   "what": "A small room, RT60 0.4 s.",
+   "has_bed": false,
+   "bed": {
+    "kind": "none",
+    "gap_db": 150.5,
+    "floor_db": -165.5
+   },
+   "transcription": {
+    "recall": 1.0,
+    "invented": 0,
+    "lines_lost": 0,
+    "lines_seen": 6,
+    "speakers_ok": 1.0,
+    "timing": [
+     {
+      "line": 0,
+      "found": true,
+      "start_err": -0.4,
+      "end_err": 0.06,
+      "ok": false
+     },
+     {
+      "line": 1,
+      "found": true,
+      "start_err": 0.2,
+      "end_err": -0.04,
+      "ok": true
+     },
+     {
+      "line": 2,
+      "found": true,
+      "start_err": 0.12,
+      "end_err": -0.07,
+      "ok": true
+     },
+     {
+      "line": 3,
+      "found": true,
+      "start_err": 0.012,
+      "end_err": 0.012,
+      "ok": true
+     },
+     {
+      "line": 4,
+      "found": true,
+      "start_err": 0.14,
+      "end_err": -0.01,
+      "ok": true
+     }
+    ],
+    "timing_broken": 1,
+    "text": "Is the masala chai fresh today? | Fresh every morning made with ginger. | How much for two cups? | 40 rupees and the biscuits are free. | Perfect. | I will take two."
+   },
+   "voice": [
+    {
+     "line": 1,
+     "take": "own",
+     "passed": false,
+     "voice_match": 0.979,
+     "prosody": 0.768,
+     "integration": 0.689,
+     "naturalness": 3.836,
+     "warnings": [
+      "Pitch is -4.6 semitones off the surrounding speech.",
+      "The new line is noisier than the surrounding audio."
+     ]
+    },
+    {
+     "line": 3,
+     "take": "own",
+     "passed": true,
+     "voice_match": 0.95,
+     "prosody": 0.987,
+     "integration": 1.0,
+     "naturalness": 4.263,
+     "warnings": []
+    }
+   ]
+  },
+  {
+   "variant": "echo_large",
+   "family": "echo",
+   "what": "A hall, RT60 1.2 s.",
+   "has_bed": false,
+   "bed": {
+    "kind": "none",
+    "gap_db": 32.6,
+    "floor_db": -47.5
+   },
+   "transcription": {
+    "recall": 1.0,
+    "invented": 0,
+    "lines_lost": 0,
+    "lines_seen": 5,
+    "speakers_ok": 1.0,
+    "timing": [
+     {
+      "line": 0,
+      "found": true,
+      "start_err": -0.4,
+      "end_err": 0.08,
+      "ok": false
+     },
+     {
+      "line": 1,
+      "found": true,
+      "start_err": 0.24,
+      "end_err": -0.02,
+      "ok": false
+     },
+     {
+      "line": 2,
+      "found": true,
+      "start_err": 0.12,
+      "end_err": -0.03,
+      "ok": true
+     },
+     {
+      "line": 3,
+      "found": true,
+      "start_err": 0.012,
+      "end_err": 0.032,
+      "ok": true
+     },
+     {
+      "line": 4,
+      "found": true,
+      "start_err": 0.02,
+      "end_err": 0.01,
+      "ok": true
+     }
+    ],
+    "timing_broken": 2,
+    "text": "Is the Masala Chai fresh today? | Fresh every morning made with ginger. | How much for two cups? | 40 rupees and the biscuits are free. | Perfect, I will take two."
+   },
+   "voice": [
+    {
+     "line": 1,
+     "take": "own",
+     "passed": false,
+     "voice_match": 0.964,
+     "prosody": 0.71,
+     "integration": 0.642,
+     "naturalness": 3.808,
+     "warnings": [
+      "Pitch is -5.8 semitones off the surrounding speech.",
+      "The new line is noisier than the surrounding audio."
+     ]
+    },
+    {
+     "line": 3,
+     "take": "own",
+     "passed": true,
+     "voice_match": 0.948,
+     "prosody": 0.988,
+     "integration": 0.997,
+     "naturalness": 3.984,
+     "warnings": []
+    }
+   ]
+  },
+  {
+   "variant": "echo_far",
+   "family": "echo",
+   "what": "Far from the mic: mostly reverb, RT60 0.9 s.",
+   "has_bed": false,
+   "bed": {
+    "kind": "none",
+    "gap_db": 39.2,
+    "floor_db": -54.5
+   },
+   "transcription": {
+    "recall": 1.0,
+    "invented": 0,
+    "lines_lost": 0,
+    "lines_seen": 5,
+    "speakers_ok": 1.0,
+    "timing": [
+     {
+      "line": 0,
+      "found": true,
+      "start_err": -0.4,
+      "end_err": 0.2,
+      "ok": false
+     },
+     {
+      "line": 1,
+      "found": true,
+      "start_err": 0.26,
+      "end_err": 0.06,
+      "ok": false
+     },
+     {
+      "line": 2,
+      "found": true,
+      "start_err": 0.14,
+      "end_err": 0.01,
+      "ok": true
+     },
+     {
+      "line": 3,
+      "found": true,
+      "start_err": 0.032,
+      "end_err": 0.072,
+      "ok": true
+     },
+     {
+      "line": 4,
+      "found": true,
+      "start_err": 0.04,
+      "end_err": 0.03,
+      "ok": true
+     }
+    ],
+    "timing_broken": 2,
+    "text": "Is the masala chai fresh today? | Fresh every morning made with ginger. | How much for two cups? | 40 rupees and the biscuits are free. | Perfect, I will take two."
+   },
+   "voice": [
+    {
+     "line": 1,
+     "take": "own",
+     "passed": false,
+     "voice_match": 0.943,
+     "prosody": 0.689,
+     "integration": 0.495,
+     "naturalness": 3.751,
+     "warnings": [
+      "Pitch is -6.2 semitones off the surrounding speech.",
+      "The new line is noisier than the surrounding audio."
+     ]
+    },
+    {
+     "line": 3,
+     "take": "own",
+     "passed": true,
+     "voice_match": 0.858,
+     "prosody": 0.998,
+     "integration": 1.0,
+     "naturalness": 4.208,
+     "warnings": []
+    }
+   ]
+  },
+  {
+   "variant": "crosstalk_brief",
+   "family": "overlap",
+   "what": "A second voice talks over the end of line 1.",
+   "has_bed": false,
+   "bed": {
+    "kind": "none",
+    "gap_db": 164.8,
+    "floor_db": -180.0
+   },
+   "transcription": {
+    "recall": 1.0,
+    "invented": 7,
+    "lines_lost": 0,
+    "lines_seen": 6,
+    "speakers_ok": 0.931,
+    "timing": [
+     {
+      "line": 0,
+      "found": true,
+      "start_err": -0.4,
+      "end_err": -0.12,
+      "ok": false
+     },
+     {
+      "line": 1,
+      "found": true,
+      "start_err": 0.32,
+      "end_err": -0.06,
+      "ok": false
+     },
+     {
+      "line": 2,
+      "found": true,
+      "start_err": 0.12,
+      "end_err": -0.07,
+      "ok": true
+     },
+     {
+      "line": 3,
+      "found": true,
+      "start_err": -0.048,
+      "end_err": -0.028,
+      "ok": true
+     },
+     {
+      "line": 4,
+      "found": true,
+      "start_err": 0.16,
+      "end_err": -0.03,
+      "ok": true
+     }
+    ],
+    "timing_broken": 2,
+    "text": "Is the masala chai fresh today? | 40 rupees and the biscuits are free. | Fresh every morning made with ginger. | How much for two cups? | 40 rupees and the biscuits are free. | Perfect. I will take two."
+   },
+   "voice": [
+    {
+     "line": 1,
+     "take": "own",
+     "passed": false,
+     "voice_match": 0.979,
+     "prosody": 0.759,
+     "integration": 0.542,
+     "naturalness": 3.864,
+     "warnings": [
+      "Pitch is -4.8 semitones off the surrounding speech.",
+      "The new line is noisier than the surrounding audio."
+     ]
+    },
+    {
+     "line": 3,
+     "take": "own",
+     "passed": true,
+     "voice_match": 0.965,
+     "prosody": 0.984,
+     "integration": 1.0,
+     "naturalness": 4.261,
+     "warnings": []
+    }
+   ]
+  },
+  {
+   "variant": "crosstalk_heavy",
+   "family": "overlap",
+   "what": "Both speakers talk over each other twice, at the same level.",
+   "has_bed": false,
+   "bed": {
+    "kind": "none",
+    "gap_db": 165.7,
+    "floor_db": -180.0
+   },
+   "transcription": {
+    "recall": 1.0,
+    "invented": 7,
+    "lines_lost": 0,
+    "lines_seen": 6,
+    "speakers_ok": 0.931,
+    "timing": [
+     {
+      "line": 0,
+      "found": true,
+      "start_err": -0.4,
+      "end_err": -0.1,
+      "ok": false
+     },
+     {
+      "line": 1,
+      "found": true,
+      "start_err": 0.24,
+      "end_err": -0.06,
+      "ok": false
+     },
+     {
+      "line": 2,
+      "found": true,
+      "start_err": 0.12,
+      "end_err": -0.07,
+      "ok": true
+     },
+     {
+      "line": 3,
+      "found": true,
+      "start_err": -0.008,
+      "end_err": -0.088,
+      "ok": true
+     },
+     {
+      "line": 4,
+      "found": true,
+      "start_err": -0.0,
+      "end_err": -0.03,
+      "ok": true
+     }
+    ],
+    "timing_broken": 2,
+    "text": "Is the masala chai fresh today? | 40 rupees and the biscuits are free. | Fresh every morning made with ginger. | How much for two cups? | 40 rupees and the biscuits are free. | Perfect. I will take two."
+   },
+   "voice": [
+    {
+     "line": 1,
+     "take": "own",
+     "passed": false,
+     "voice_match": 0.924,
+     "prosody": 0.672,
+     "integration": 0.606,
+     "naturalness": 3.863,
+     "warnings": [
+      "Pitch is -6.6 semitones off the surrounding speech.",
+      "The new line is noisier than the surrounding audio."
+     ]
+    },
+    {
+     "line": 3,
+     "take": "own",
+     "passed": true,
+     "voice_match": 0.96,
+     "prosody": 0.984,
+     "integration": 1.0,
+     "naturalness": 4.278,
+     "warnings": []
+    }
+   ]
+  },
+  {
+   "variant": "phone",
+   "family": "phone",
+   "what": "Phone quality: 300 to 3400 Hz at 8 kHz, mu-law.",
+   "has_bed": false,
+   "bed": {
+    "kind": "none",
+    "gap_db": 158.1,
+    "floor_db": -180.0
+   },
+   "transcription": {
+    "recall": 1.0,
+    "invented": 0,
+    "lines_lost": 0,
+    "lines_seen": 5,
+    "speakers_ok": 1.0,
+    "timing": [
+     {
+      "line": 0,
+      "found": true,
+      "start_err": -0.4,
+      "end_err": 0.0,
+      "ok": false
+     },
+     {
+      "line": 1,
+      "found": true,
+      "start_err": 0.26,
+      "end_err": 0.14,
+      "ok": false
+     },
+     {
+      "line": 2,
+      "found": true,
+      "start_err": 0.12,
+      "end_err": -0.07,
+      "ok": true
+     },
+     {
+      "line": 3,
+      "found": true,
+      "start_err": 0.052,
+      "end_err": -0.028,
+      "ok": true
+     },
+     {
+      "line": 4,
+      "found": true,
+      "start_err": 0.16,
+      "end_err": -0.03,
+      "ok": true
+     }
+    ],
+    "timing_broken": 2,
+    "text": "Is the masala chai fresh today? | Fresh every morning made with ginger. | How much for two cups? | 40 rupees and the biscuits are free. | Perfect. I will take two."
+   },
+   "voice": [
+    {
+     "line": 1,
+     "take": "own",
+     "passed": false,
+     "voice_match": 0.974,
+     "prosody": 0.595,
+     "integration": 0.634,
+     "naturalness": 3.861,
+     "warnings": [
+      "Pitch is -8.1 semitones off the surrounding speech.",
+      "The new line is noisier than the surrounding audio."
+     ]
+    },
+    {
+     "line": 3,
+     "take": "own",
+     "passed": true,
+     "voice_match": 0.97,
+     "prosody": 0.986,
+     "integration": 1.0,
+     "naturalness": 4.301,
+     "warnings": []
+    }
+   ]
+  },
+  {
+   "variant": "phone_dropouts",
+   "family": "phone",
+   "what": "Phone quality with dropped packets.",
+   "has_bed": false,
+   "bed": {
+    "kind": "none",
+    "gap_db": 157.8,
+    "floor_db": -180.0
+   },
+   "transcription": {
+    "recall": 1.0,
+    "invented": 0,
+    "lines_lost": 0,
+    "lines_seen": 5,
+    "speakers_ok": 1.0,
+    "timing": [
+     {
+      "line": 0,
+      "found": true,
+      "start_err": -0.4,
+      "end_err": 0.0,
+      "ok": false
+     },
+     {
+      "line": 1,
+      "found": true,
+      "start_err": 0.26,
+      "end_err": -0.04,
+      "ok": false
+     },
+     {
+      "line": 2,
+      "found": true,
+      "start_err": 0.14,
+      "end_err": -0.09,
+      "ok": true
+     },
+     {
+      "line": 3,
+      "found": true,
+      "start_err": 0.032,
+      "end_err": -0.028,
+      "ok": true
+     },
+     {
+      "line": 4,
+      "found": true,
+      "start_err": 0.14,
+      "end_err": -0.03,
+      "ok": true
+     }
+    ],
+    "timing_broken": 2,
+    "text": "Is the masala chai fresh today? | Fresh every morning made with ginger. | How much for two cups? | 40 rupees and the biscuits are free. | Perfect. I will take two."
+   },
+   "voice": [
+    {
+     "line": 1,
+     "take": "own",
+     "passed": false,
+     "voice_match": 0.974,
+     "prosody": 0.617,
+     "integration": 0.233,
+     "naturalness": 3.86,
+     "warnings": [
+      "Pitch is -7.7 semitones off the surrounding speech.",
+      "The new line is noisier than the surrounding audio."
+     ]
+    },
+    {
+     "line": 3,
+     "take": "own",
+     "passed": false,
+     "voice_match": 0.955,
+     "prosody": 0.985,
+     "integration": 0.101,
+     "naturalness": 4.3,
+     "warnings": [
+      "The new line is noisier than the surrounding audio."
+     ]
+    }
+   ]
+  },
+  {
+   "variant": "phone_noisy",
+   "family": "phone",
+   "what": "Phone quality from a cafe.",
+   "has_bed": true,
+   "bed": {
+    "kind": "noise",
+    "gap_db": 12.8,
+    "floor_db": -34.6
+   },
+   "transcription": {
+    "recall": 1.0,
+    "invented": 0,
+    "lines_lost": 0,
+    "lines_seen": 5,
+    "speakers_ok": 1.0,
+    "timing": [
+     {
+      "line": 0,
+      "found": true,
+      "start_err": -0.4,
+      "end_err": 0.04,
+      "ok": false
+     },
+     {
+      "line": 1,
+      "found": true,
+      "start_err": 0.24,
+      "end_err": -0.02,
+      "ok": false
+     },
+     {
+      "line": 2,
+      "found": true,
+      "start_err": 0.14,
+      "end_err": -0.09,
+      "ok": true
+     },
+     {
+      "line": 3,
+      "found": true,
+      "start_err": -0.008,
+      "end_err": -0.028,
+      "ok": true
+     },
+     {
+      "line": 4,
+      "found": true,
+      "start_err": 0.14,
+      "end_err": -0.01,
+      "ok": true
+     }
+    ],
+    "timing_broken": 2,
+    "text": "Is the masala chai fresh today? | Fresh every morning, made with ginger. | How much for two cups? | 40 rupees and the biscuits are free. | Perfect, I will take two."
+   },
+   "voice": [
+    {
+     "line": 1,
+     "take": "own",
+     "passed": false,
+     "voice_match": 0.91,
+     "prosody": 0.595,
+     "integration": 1.0,
+     "naturalness": 3.86,
+     "warnings": [
+      "Pitch is -8.1 semitones off the surrounding speech."
+     ]
+    },
+    {
+     "line": 3,
+     "take": "own",
+     "passed": true,
+     "voice_match": 0.928,
+     "prosody": 0.983,
+     "integration": 1.0,
+     "naturalness": 4.302,
+     "warnings": []
+    }
+   ]
+  },
+  {
+   "variant": "clipped_mild",
+   "family": "clipped",
+   "what": "Recorded 10 dB too hot: peaks clipped.",
+   "has_bed": false,
+   "bed": {
+    "kind": "none",
+    "gap_db": 171.4,
+    "floor_db": -180.0
+   },
+   "transcription": {
+    "recall": 1.0,
+    "invented": 0,
+    "lines_lost": 0,
+    "lines_seen": 5,
+    "speakers_ok": 1.0,
+    "timing": [
+     {
+      "line": 0,
+      "found": true,
+      "start_err": -0.4,
+      "end_err": 0.16,
+      "ok": false
+     },
+     {
+      "line": 1,
+      "found": true,
+      "start_err": 0.24,
+      "end_err": -0.04,
+      "ok": false
+     },
+     {
+      "line": 2,
+      "found": true,
+      "start_err": 0.08,
+      "end_err": -0.09,
+      "ok": true
+     },
+     {
+      "line": 3,
+      "found": true,
+      "start_err": 0.032,
+      "end_err": -0.028,
+      "ok": true
+     },
+     {
+      "line": 4,
+      "found": true,
+      "start_err": 0.02,
+      "end_err": -0.03,
+      "ok": true
+     }
+    ],
+    "timing_broken": 2,
+    "text": "Is the masala chai fresh today? | Fresh every morning made with ginger. | How much for two cups? | 40 rupees and the biscuits are free. | Perfect, I will take two."
+   },
+   "voice": [
+    {
+     "line": 1,
+     "take": "own",
+     "passed": false,
+     "voice_match": 0.968,
+     "prosody": 0.759,
+     "integration": 0.569,
+     "naturalness": 3.864,
+     "warnings": [
+      "Pitch is -4.8 semitones off the surrounding speech.",
+      "The new line is noisier than the surrounding audio."
+     ]
+    },
+    {
+     "line": 3,
+     "take": "own",
+     "passed": false,
+     "voice_match": 0.958,
+     "prosody": 0.984,
+     "integration": 0.774,
+     "naturalness": 4.275,
+     "warnings": []
+    }
+   ]
+  },
+  {
+   "variant": "clipped_hard",
+   "family": "clipped",
+   "what": "Recorded 22 dB too hot: heavily clipped.",
+   "has_bed": false,
+   "bed": {
+    "kind": "none",
+    "gap_db": 175.8,
+    "floor_db": -180.0
+   },
+   "transcription": {
+    "recall": 1.0,
+    "invented": 0,
+    "lines_lost": 0,
+    "lines_seen": 5,
+    "speakers_ok": 1.0,
+    "timing": [
+     {
+      "line": 0,
+      "found": true,
+      "start_err": -0.4,
+      "end_err": 0.02,
+      "ok": false
+     },
+     {
+      "line": 1,
+      "found": true,
+      "start_err": 0.16,
+      "end_err": -0.04,
+      "ok": true
+     },
+     {
+      "line": 2,
+      "found": true,
+      "start_err": 0.08,
+      "end_err": -0.07,
+      "ok": true
+     },
+     {
+      "line": 3,
+      "found": true,
+      "start_err": -0.008,
+      "end_err": 0.012,
+      "ok": true
+     },
+     {
+      "line": 4,
+      "found": true,
+      "start_err": 0.02,
+      "end_err": -0.03,
+      "ok": true
+     }
+    ],
+    "timing_broken": 1,
+    "text": "Is the masala chai fresh today? | Fresh every morning made with ginger. | How much for two cups? | 40 rupees and the biscuits are free. | Perfect, I will take two."
+   },
+   "voice": [
+    {
+     "line": 1,
+     "take": "own",
+     "passed": false,
+     "voice_match": 0.945,
+     "prosody": 0.767,
+     "integration": 0.399,
+     "naturalness": 3.864,
+     "warnings": [
+      "Level is +13.1 dB off the surrounding speech, too far to correct.",
+      "Pitch is -4.7 semitones off the surrounding speech."
+     ]
+    },
+    {
+     "line": 3,
+     "take": "own",
+     "passed": false,
+     "voice_match": 0.864,
+     "prosody": 0.989,
+     "integration": 0.378,
+     "naturalness": 4.275,
+     "warnings": [
+      "Level is +12.4 dB off the surrounding speech, too far to correct."
+     ]
+    }
+   ]
+  },
+  {
+   "variant": "music_echo",
+   "family": "combo",
+   "what": "Music bed 10 dB under, in a hall (RT60 1.0 s).",
+   "has_bed": true,
+   "bed": {
+    "kind": "music",
+    "gap_db": 13.8,
+    "floor_db": -28.6
+   },
+   "transcription": {
+    "recall": 1.0,
+    "invented": 0,
+    "lines_lost": 0,
+    "lines_seen": 5,
+    "speakers_ok": 1.0,
+    "timing": [
+     {
+      "line": 0,
+      "found": true,
+      "start_err": -0.4,
+      "end_err": 0.08,
+      "ok": false
+     },
+     {
+      "line": 1,
+      "found": true,
+      "start_err": 0.26,
+      "end_err": -0.02,
+      "ok": false
+     },
+     {
+      "line": 2,
+      "found": true,
+      "start_err": 0.12,
+      "end_err": -0.05,
+      "ok": true
+     },
+     {
+      "line": 3,
+      "found": true,
+      "start_err": 0.032,
+      "end_err": 0.052,
+      "ok": true
+     },
+     {
+      "line": 4,
+      "found": true,
+      "start_err": 0.02,
+      "end_err": 0.01,
+      "ok": true
+     }
+    ],
+    "timing_broken": 2,
+    "text": "Is the Masala Chai fresh today? | Fresh every morning made with ginger. | How much for two cups? | 40 rupees and the biscuits are free. | Perfect, I will take two."
+   },
+   "voice": [
+    {
+     "line": 1,
+     "take": "own",
+     "passed": false,
+     "voice_match": 0.976,
+     "prosody": 0.721,
+     "integration": 1.0,
+     "naturalness": 3.865,
+     "warnings": [
+      "Pitch is -5.6 semitones off the surrounding speech."
+     ]
+    },
+    {
+     "line": 3,
+     "take": "own",
+     "passed": true,
+     "voice_match": 0.947,
+     "prosody": 0.987,
+     "integration": 1.0,
+     "naturalness": 4.275,
+     "warnings": []
+    }
+   ]
+  },
+  {
+   "variant": "everything",
+   "family": "combo",
+   "what": "Music, cafe, a room and a phone at once.",
+   "has_bed": true,
+   "bed": {
+    "kind": "noise",
+    "gap_db": 13.6,
+    "floor_db": -35.2
+   },
+   "transcription": {
+    "recall": 1.0,
+    "invented": 0,
+    "lines_lost": 0,
+    "lines_seen": 5,
+    "speakers_ok": 1.0,
+    "timing": [
+     {
+      "line": 0,
+      "found": true,
+      "start_err": -0.4,
+      "end_err": 0.08,
+      "ok": false
+     },
+     {
+      "line": 1,
+      "found": true,
+      "start_err": 0.26,
+      "end_err": 0.4,
+      "ok": false
+     },
+     {
+      "line": 2,
+      "found": true,
+      "start_err": 0.14,
+      "end_err": -0.01,
+      "ok": true
+     },
+     {
+      "line": 3,
+      "found": true,
+      "start_err": 0.012,
+      "end_err": 0.012,
+      "ok": true
+     },
+     {
+      "line": 4,
+      "found": true,
+      "start_err": 0.02,
+      "end_err": 0.01,
+      "ok": true
+     }
+    ],
+    "timing_broken": 2,
+    "text": "Is the masala chai fresh today? | Fresh every morning, made with ginger. | How much for two cups? | 40 rupees and the biscuits are free. | Perfect, I will take two."
+   },
+   "voice": [
+    {
+     "line": 1,
+     "take": "own",
+     "passed": false,
+     "voice_match": 0.949,
+     "prosody": 0.694,
+     "integration": 1.0,
+     "naturalness": 3.86,
+     "warnings": [
+      "Pitch is -6.1 semitones off the surrounding speech."
+     ]
+    },
+    {
+     "line": 3,
+     "take": "own",
+     "passed": true,
+     "voice_match": 0.824,
+     "prosody": 0.984,
+     "integration": 1.0,
+     "naturalness": 4.299,
+     "warnings": []
+    }
+   ]
+  }
+ ],
+ "spend": {
+  "usd": 0.0012,
+  "calls": [
+   {
+    "vendor": "openai",
+    "what": "whisper-1",
+    "amount": 0.199,
+    "unit": "minutes",
+    "usd": 0.0,
+    "cached": true
+   },
+   {
+    "vendor": "openai",
+    "what": "gpt-4o-transcribe-diarize",
+    "amount": 0.199,
+    "unit": "minutes",
+    "usd": 0.0012,
+    "cached": false
+   },
+   {
+    "vendor": "openai",
+    "what": "whisper-1",
+    "amount": 0.199,
+    "unit": "minutes",
+    "usd": 0.0,
+    "cached": true
+   },
+   {
+    "vendor": "openai",
+    "what": "gpt-4o-transcribe-diarize",
+    "amount": 0.199,
+    "unit": "minutes",
+    "usd": 0.0,
+    "cached": true
+   },
+   {
+    "vendor": "openai",
+    "what": "whisper-1",
+    "amount": 0.199,
+    "unit": "minutes",
+    "usd": 0.0,
+    "cached": true
+   },
+   {
+    "vendor": "openai",
+    "what": "gpt-4o-transcribe-diarize",
+    "amount": 0.199,
+    "unit": "minutes",
+    "usd": 0.0,
+    "cached": true
+   },
+   {
+    "vendor": "openai",
+    "what": "whisper-1",
+    "amount": 0.199,
+    "unit": "minutes",
+    "usd": 0.0,
+    "cached": true
+   },
+   {
+    "vendor": "openai",
+    "what": "gpt-4o-transcribe-diarize",
+    "amount": 0.199,
+    "unit": "minutes",
+    "usd": 0.0,
+    "cached": true
+   },
+   {
+    "vendor": "openai",
+    "what": "whisper-1",
+    "amount": 0.199,
+    "unit": "minutes",
+    "usd": 0.0,
+    "cached": true
+   },
+   {
+    "vendor": "openai",
+    "what": "gpt-4o-transcribe-diarize",
+    "amount": 0.199,
+    "unit": "minutes",
+    "usd": 0.0,
+    "cached": true
+   },
+   {
+    "vendor": "openai",
+    "what": "whisper-1",
+    "amount": 0.199,
+    "unit": "minutes",
+    "usd": 0.0,
+    "cached": true
+   },
+   {
+    "vendor": "openai",
+    "what": "gpt-4o-transcribe-diarize",
+    "amount": 0.199,
+    "unit": "minutes",
+    "usd": 0.0,
+    "cached": true
+   },
+   {
+    "vendor": "openai",
+    "what": "whisper-1",
+    "amount": 0.199,
+    "unit": "minutes",
+    "usd": 0.0,
+    "cached": true
+   },
+   {
+    "vendor": "openai",
+    "what": "gpt-4o-transcribe-diarize",
+    "amount": 0.199,
+    "unit": "minutes",
+    "usd": 0.0,
+    "cached": true
+   },
+   {
+    "vendor": "openai",
+    "what": "whisper-1",
+    "amount": 0.199,
+    "unit": "minutes",
+    "usd": 0.0,
+    "cached": true
+   },
+   {
+    "vendor": "openai",
+    "what": "gpt-4o-transcribe-diarize",
+    "amount": 0.199,
+    "unit": "minutes",
+    "usd": 0.0,
+    "cached": true
+   },
+   {
+    "vendor": "openai",
+    "what": "whisper-1",
+    "amount": 0.199,
+    "unit": "minutes",
+    "usd": 0.0,
+    "cached": true
+   },
+   {
+    "vendor": "openai",
+    "what": "gpt-4o-transcribe-diarize",
+    "amount": 0.199,
+    "unit": "minutes",
+    "usd": 0.0,
+    "cached": true
+   },
+   {
+    "vendor": "openai",
+    "what": "whisper-1",
+    "amount": 0.199,
+    "unit": "minutes",
+    "usd": 0.0,
+    "cached": true
+   },
+   {
+    "vendor": "openai",
+    "what": "gpt-4o-transcribe-diarize",
+    "amount": 0.199,
+    "unit": "minutes",
+    "usd": 0.0,
+    "cached": true
+   },
+   {
+    "vendor": "openai",
+    "what": "whisper-1",
+    "amount": 0.199,
+    "unit": "minutes",
+    "usd": 0.0,
+    "cached": true
+   },
+   {
+    "vendor": "openai",
+    "what": "gpt-4o-transcribe-diarize",
+    "amount": 0.199,
+    "unit": "minutes",
+    "usd": 0.0,
+    "cached": true
+   },
+   {
+    "vendor": "openai",
+    "what": "whisper-1",
+    "amount": 0.199,
+    "unit": "minutes",
+    "usd": 0.0,
+    "cached": true
+   },
+   {
+    "vendor": "openai",
+    "what": "gpt-4o-transcribe-diarize",
+    "amount": 0.199,
+    "unit": "minutes",
+    "usd": 0.0,
+    "cached": true
+   },
+   {
+    "vendor": "openai",
+    "what": "whisper-1",
+    "amount": 0.199,
+    "unit": "minutes",
+    "usd": 0.0,
+    "cached": true
+   },
+   {
+    "vendor": "openai",
+    "what": "gpt-4o-transcribe-diarize",
+    "amount": 0.199,
+    "unit": "minutes",
+    "usd": 0.0,
+    "cached": true
+   },
+   {
+    "vendor": "openai",
+    "what": "whisper-1",
+    "amount": 0.199,
+    "unit": "minutes",
+    "usd": 0.0,
+    "cached": true
+   },
+   {
+    "vendor": "openai",
+    "what": "gpt-4o-transcribe-diarize",
+    "amount": 0.199,
+    "unit": "minutes",
+    "usd": 0.0,
+    "cached": true
+   },
+   {
+    "vendor": "openai",
+    "what": "whisper-1",
+    "amount": 0.199,
+    "unit": "minutes",
+    "usd": 0.0,
+    "cached": true
+   },
+   {
+    "vendor": "openai",
+    "what": "gpt-4o-transcribe-diarize",
+    "amount": 0.199,
+    "unit": "minutes",
+    "usd": 0.0,
+    "cached": true
+   },
+   {
+    "vendor": "openai",
+    "what": "whisper-1",
+    "amount": 0.199,
+    "unit": "minutes",
+    "usd": 0.0,
+    "cached": true
+   },
+   {
+    "vendor": "openai",
+    "what": "gpt-4o-transcribe-diarize",
+    "amount": 0.199,
+    "unit": "minutes",
+    "usd": 0.0,
+    "cached": true
+   },
+   {
+    "vendor": "openai",
+    "what": "whisper-1",
+    "amount": 0.199,
+    "unit": "minutes",
+    "usd": 0.0,
+    "cached": true
+   },
+   {
+    "vendor": "openai",
+    "what": "gpt-4o-transcribe-diarize",
+    "amount": 0.199,
+    "unit": "minutes",
+    "usd": 0.0,
+    "cached": true
+   },
+   {
+    "vendor": "openai",
+    "what": "whisper-1",
+    "amount": 0.199,
+    "unit": "minutes",
+    "usd": 0.0,
+    "cached": true
+   },
+   {
+    "vendor": "openai",
+    "what": "gpt-4o-transcribe-diarize",
+    "amount": 0.199,
+    "unit": "minutes",
+    "usd": 0.0,
+    "cached": true
+   },
+   {
+    "vendor": "openai",
+    "what": "whisper-1",
+    "amount": 0.199,
+    "unit": "minutes",
+    "usd": 0.0,
+    "cached": true
+   },
+   {
+    "vendor": "openai",
+    "what": "gpt-4o-transcribe-diarize",
+    "amount": 0.199,
+    "unit": "minutes",
+    "usd": 0.0,
+    "cached": true
+   },
+   {
+    "vendor": "openai",
+    "what": "whisper-1",
+    "amount": 0.199,
+    "unit": "minutes",
+    "usd": 0.0,
+    "cached": true
+   },
+   {
+    "vendor": "openai",
+    "what": "gpt-4o-transcribe-diarize",
+    "amount": 0.199,
+    "unit": "minutes",
+    "usd": 0.0,
+    "cached": true
+   },
+   {
+    "vendor": "openai",
+    "what": "whisper-1",
+    "amount": 0.199,
+    "unit": "minutes",
+    "usd": 0.0,
+    "cached": true
+   },
+   {
+    "vendor": "openai",
+    "what": "gpt-4o-transcribe-diarize",
+    "amount": 0.199,
+    "unit": "minutes",
+    "usd": 0.0,
+    "cached": true
+   }
+  ]
+ }
+}

@@ -59,3 +59,23 @@ def test_failures_are_none_not_exceptions(tmp_path):
 def test_unavailable_demucs_is_none(tmp_path, monkeypatch):
     monkeypatch.setattr(stems, "available", lambda: False)
     assert stems.separate(_wav(tmp_path / "clip.wav"), tmp_path / "cache") is None
+
+
+def test_two_asks_at_once_separate_once(tmp_path):
+    """Run 5 item 8: the upload's background job and an export can ask together."""
+    import threading
+    import time
+    wav = _wav(tmp_path / "clip.wav")
+
+    class Slow(Fake):
+        def __call__(self, wav, out):
+            time.sleep(0.2)
+            super().__call__(wav, out)
+    run, got = Slow(), []
+    threads = [threading.Thread(target=lambda: got.append(stems.separate(wav, tmp_path / "cache", run=run)))
+               for _ in range(3)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert run.calls == 1 and len(got) == 3 and all(g is not None and g == got[0] for g in got)

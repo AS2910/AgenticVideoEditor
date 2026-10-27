@@ -82,13 +82,16 @@ class Room:
     """What 15c knows about the original: the bed under the voice and the
     voice's own room, ready to put on a new take."""
     accompaniment: np.ndarray            # (samples, channels), the length of the source audio
-    profile: roommod.RoomProfile
+    profile: roommod.RoomProfile | None  # None: a dry voice (no tail to read); the bed still plays
     context: np.ndarray                  # the speaker's separated vocals
 
     @classmethod
     def prepare(cls, stems: Stems | None, channels: int, samples: int) -> Room | None:
-        """None — so the render stays exactly as without stems — when there are
-        no stems, no audible bed, or too little speech to hear the room."""
+        """None, so the render stays exactly as without stems, when there are
+        no stems or no audible bed. Run 5 item 8: a dry voice (a lavalier or a
+        voice-over, no reverb tail to read) used to return None here too, and
+        the music under a replaced line dropped out; now the bed stays and only
+        the reverb match is skipped."""
         if stems is None:
             return None
         try:
@@ -100,13 +103,11 @@ class Room:
         if rms < 10 ** (SILENT_BED_DB / 20):
             return None
         profile = roommod.estimate_reverb(vocals, OUT_RATE)
-        if profile is None:
-            return None
         return cls(bed, profile, vocals.mean(axis=1))
 
     def take(self, audio: np.ndarray) -> np.ndarray:
         """A generated take in the speaker's room and spectrum."""
-        wet = roommod.match_room(audio, self.profile, OUT_RATE)
+        wet = roommod.match_room(audio, self.profile, OUT_RATE) if self.profile is not None else audio
         return roommod.spectral_match(wet, self.context, OUT_RATE).astype(np.float32)
 
 

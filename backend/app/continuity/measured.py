@@ -83,12 +83,24 @@ def level_score(delta_db: float | None) -> float | None:
     return _clamp(1 - abs(delta_db) / LEVEL_DB_PER_POINT)
 
 
+# Run 5 item 8 (evals/messy, phone_dropouts): dropped packets read 50 dB and
+# more under the speech. Counted as the floor, they made a phone clip's context
+# look far clearer than it sounds, and a perfect take failed as noisier. A floor
+# is read only from frames within this of the speech: anything quieter is a
+# hole in the sound, not a room, and as clean as clarity needs to know.
+FLOOR_RANGE_DB = 40.0
+
+
 def clarity(x: np.ndarray) -> float | None:
-    """How far the speech stands above the quietest part of the clip, in dB."""
+    """How far the speech stands above the quietest part of the clip, in dB
+    (the quietest part that is a room at all: dropouts are not a floor)."""
     level = signals.speech_level_db(x)
     if level is None:
         return None
-    return level - signals.noise_floor_db(x)
+    levels = signals.frame_levels_db(x)
+    heard = levels[levels > level - FLOOR_RANGE_DB]
+    floor = float(np.percentile(heard, 10)) if heard.size else level - FLOOR_RANGE_DB
+    return level - floor
 
 
 def clarity_score(generated_db: float | None, context_db: float | None) -> float | None:

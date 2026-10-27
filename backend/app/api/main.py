@@ -48,6 +48,7 @@ from app.media import understand as understand_mod
 from app import arrange
 from app.media import frames as frames_mod, motion, shots
 from app.media import stems as stems_module
+from app.media import bed as bed_module
 from app.media import ffmpeg, ingest, sniff
 from app.adapters.base import VendorError
 from app.adapters.mock import MockLipSyncAdapter
@@ -1392,6 +1393,7 @@ def _ingest_staged(staged: Path, filename: str, consent: bool, folder: Project |
                       minutes * WHISPER_USD_PER_MINUTE)
     if any(w.speaker for w in transcript.words) and kept is None:
         _record_diarization(project_id, source.duration)
+    _hear_bed(project_id)
     analytics.track("video_uploaded", owner, {"video_id": project_id, "seconds": round(source.duration, 1),
                                               "project_id": folder.project_id if folder else None})
     from app import lipsync_api
@@ -6188,14 +6190,72 @@ def _pieces(record: ProjectRecord, manifest, edits: list[ApprovedEdit]) -> list[
 def _stems(record: ProjectRecord, manifest):
     """The original's voice apart from its music and room (Phase 15c), so an
     edited line can sit over the bed that was always there. Only when something
-    is edited, only when the optional model is installed, and kept per source."""
+    is edited, only when the optional model is installed, and kept per source.
+    Run 5 item 8: a clip the upload heard no bed under is not separated at all
+    (there is nothing to keep), and one it did is usually separated already."""
     if not settings.stems or not stems_module.available():
         return None
     if not any(s.kind == "edited" for s in manifest.segments):
         return None
+    heard = repo.settings(record.source.project_id).get("bed")
+    if isinstance(heard, dict) and heard.get("kind") == "none":
+        return None
+    return _separate_source(record.source)
+
+
+def _separate_source(source: Source):
+    """Demucs on the source's sound, cached under the project by the audio's sha
+    (the extraction is bit-exact, so the upload's job and the export share it)."""
     with tempfile.TemporaryDirectory() as tmp:
-        wav, _ = ffmpeg.extract_audio(record.source.media.path, Path(tmp) / "source.wav", sample_rate=44100)
-        return stems_module.separate(wav, artifacts.root / record.source.project_id / "stems")
+        wav, _ = ffmpeg.extract_audio(source.media.path, Path(tmp) / "source.wav", sample_rate=44100)
+        return stems_module.separate(wav, artifacts.root / source.project_id / "stems")
+
+
+# ── Run 5 item 8: music or noise under the speech, heard on upload ──────────
+# Tests run the separation inline; the server runs it on the work pool, so the
+# upload answers as soon as the transcript is in.
+SEPARATE_IN_BACKGROUND = True
+
+
+def _hear_bed(project_id: str) -> None:
+    """Measure the bed under the speech (well under a second) and keep it in the
+    video's settings; with music or noise there, separate the voice from it as
+    a `separate` job, so a replaced line keeps the bed and the first export does
+    not wait on Demucs. Never fails the upload."""
+    if not settings.stems_on_upload:
+        return
+    record = repo.get(project_id)
+    if record is None:
+        return
+    found = bed_module.detect(record.source.media.path)
+    if found is None:
+        return
+    repo.set_settings(project_id, bed=found.as_dict())
+    log.info("bed video=%s kind=%s gap_db=%.1f", project_id, found.kind, found.gap_db)
+    if not found.present or not settings.stems or not stems_module.available():
+        return
+    what = "music" if found.kind == "music" else "background noise"
+    job = activity.create(project_id, "separate", step_label="Queued", detail={"bed": found.kind})
+
+    def run() -> None:
+        activity.start(job.job_id, f"Separating the voice from the {what}")
+        started = time.time()
+        try:
+            stems = _separate_source(record.source)
+        except Exception:  # noqa: BLE001 - separation is best-effort; an export tries again
+            log.exception("separation failed video=%s", project_id)
+            stems = None
+        seconds = round(time.time() - started, 1)
+        log.info("separate video=%s ok=%s seconds=%.1f", project_id, stems is not None, seconds)
+        if stems is None:
+            activity.fail(job.job_id, "separation_failed",
+                          f"Could not separate the voice from the {what}. New lines are mixed over the original sound.")
+        else:
+            activity.finish(job.job_id, step_label=f"The {what} stays under new lines", detail={"seconds": seconds})
+    if SEPARATE_IN_BACKGROUND:
+        work_pool.submit(run)
+    else:
+        run()
 
 
 def _segments_with_layers(manifest) -> list[dict]:

@@ -42,6 +42,10 @@ os.environ["AVE_MOUTH_MEASURE"] = "0"
 os.environ["AVE_ON_CAMERA"] = "0"
 for _name in ("SYNC_API_KEY", "AVE_LIPSYNC_PROVIDER", "LIPSYNC_SELFHOSTED_URL", "LIPSYNC_SELFHOSTED_TOKEN"):
     os.environ[_name] = ""
+
+# Run 5 item 8: an upload does not listen for a bed or start a separation job,
+# so suites written before it see the uploads they were written for; its own tests turn it on.
+os.environ["AVE_STEMS_ON_UPLOAD"] = "0"
 # A developer's DATABASE_URL never points the suite at their Postgres.
 os.environ["DATABASE_URL"] = ""
 

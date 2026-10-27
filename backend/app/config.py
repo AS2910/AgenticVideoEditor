@@ -124,6 +124,10 @@ class Settings:
     # Phase 15c: keep the original's music and room under an edited line, by
     # separating the voice from the bed (needs the optional `room` extra).
     stems: bool = True
+    # Run 5 item 8: on upload, listen for music or noise under the speech and,
+    # when there is some, separate it in the background (a `separate` job), so
+    # the first export does not wait on Demucs.
+    stems_on_upload: bool = True
     clone_min_seconds: float = DEFAULT_CLONE_MIN_SECONDS
     voice_route: str = DEFAULT_VOICE_ROUTE
     # Phase 9c: "off" keeps the single local owner; "google" requires sign-in
@@ -264,6 +268,7 @@ def load_settings() -> Settings:
         max_living=max(1.0, _amount("AVE_MAX_LIVING", DEFAULT_MAX_LIVING)),
         interpolator=(os.environ.get("AVE_INTERPOLATOR") or DEFAULT_INTERPOLATOR).strip().lower(),
         stems=os.environ.get("AVE_STEMS", "1").strip().lower() not in {"0", "false", "no", "off"},
+        stems_on_upload=os.environ.get("AVE_STEMS_ON_UPLOAD", "1").strip().lower() not in {"0", "false", "no", "off"},
         clone=os.environ.get("AVE_CLONE", "1").strip().lower() not in {"0", "false", "no", "off"},
         agent=os.environ.get("AVE_AGENT", "1").strip().lower() in {"1", "true", "yes", "on"},
         agent_turn_usd=_amount("AVE_AGENT_TURN_USD", 0.50),

@@ -200,3 +200,18 @@ def test_a_replacement_an_octave_off_is_flagged_but_an_added_line_in_another_voi
     assert added.report.prosody is None
     held = m.MeasuredContinuityEngine(store).assess(source, words, EditPlan(Selection(1.2, 1.2), "new", "v", mix="concatenate"), _high_line(tmp_path, store))
     assert not any("semitones" in w for w in held.report.warnings)
+
+
+def test_dropouts_are_not_a_noise_floor():
+    """Run 5 item 8 (evals/messy, phone_dropouts): a phone clip's dropped
+    packets read far under the speech, so its clarity looked high and a perfect take
+    failed as noisier. Clarity now reads its floor within 40 dB of the speech."""
+    import numpy as np
+    from app.continuity import measured, signals
+    rng = np.random.default_rng(5)
+    voice = rng.standard_normal(signals.RATE * 2) * 0.1 + rng.standard_normal(signals.RATE * 2) * 0.001
+    holed = voice.copy()
+    for i in range(0, len(holed), signals.RATE // 4):
+        holed[i:i + signals.RATE // 20] = rng.standard_normal(signals.RATE // 20) * 3e-4   # 50 ms dropped every 250 ms, codec hiss left
+    assert abs(measured.clarity(holed) - measured.clarity(voice)) < 6
+    assert measured.clarity(np.zeros(signals.RATE)) is None

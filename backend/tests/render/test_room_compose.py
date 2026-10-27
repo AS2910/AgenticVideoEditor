@@ -69,11 +69,13 @@ def test_room_is_prepared_only_when_there_is_something_to_match(world, tmp_path)
     assert compose.Room.prepare(None, 1, n) is None
     room = compose.Room.prepare(stems, 1, n)
     assert room is not None and room.profile.rt60 == pytest.approx(0.5, rel=0.3)
-    # A silent bed, and a clip with no speech tails, both fall back.
+    # A silent bed falls back.
     silent = Stems(stems.vocals, _wave(tmp_path / "silent.wav", np.zeros(n)))
     assert compose.Room.prepare(silent, 1, n) is None
+    # Run 5 item 8: a voice with no tails to read keeps the bed; only the reverb match is skipped.
     mute = Stems(_wave(tmp_path / "mute.wav", np.zeros(n)), stems.accompaniment)
-    assert compose.Room.prepare(mute, 1, n) is None
+    dry = compose.Room.prepare(mute, 1, n)
+    assert dry is not None and dry.profile is None
     assert compose.Room.prepare(Stems(tmp_path / "nope.wav", stems.accompaniment), 1, n) is None
 
 
@@ -120,3 +122,24 @@ def test_compose_with_stems_writes_a_playable_file(world, tmp_path):
     edit = approved(tmp_path, 2.0, 3.5)
     dest = compose.compose(source, render(source, [edit]).segments, tmp_path / "room.mp4", stems=stems)
     assert ffmpeg.duration_of(dest) == pytest.approx(source.duration, abs=0.1)
+
+
+def test_a_dry_voice_keeps_the_music_under_a_new_line(world, tmp_path):
+    """Run 5 item 8 (evals/messy): a lavalier or voice-over voice has no reverb
+    tail, so no room could be read and the bed under a replaced line dropped
+    out. The bed now plays on; the take is only EQ'd, not reverberated."""
+    source, stems, _ = world
+    rng = np.random.default_rng(3)
+    dry = np.zeros(round(SECONDS * RATE))
+    for t in np.arange(0.2, SECONDS - 0.4, 1.2):   # bursts that stop dead: no tail
+        i = round(t * RATE)
+        dry[i:i + round(0.3 * RATE)] = rng.standard_normal(round(0.3 * RATE)) * 0.2
+    dry_stems = Stems(_wave(tmp_path / "dry.wav", dry), stems.accompaniment)
+    edit = approved(tmp_path, 2.0, 3.5)
+    base = compose.decode(source.media.path)
+    room = compose.Room.prepare(dry_stems, 1, len(base))
+    assert room is not None and room.profile is None
+    out = compose.splice(base, render(source, [edit]).segments, room)
+    mid = slice(round(2.3 * RATE), round(3.2 * RATE))
+    assert _band(out[mid, 0], 1000) == pytest.approx(_band(room.accompaniment[mid, 0], 1000), rel=0.15)
+    assert _band(out[mid, 0], 300) > 5 * _band(base[mid, 0], 300)

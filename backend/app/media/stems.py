@@ -12,12 +12,23 @@ import importlib.util
 import shutil
 import subprocess
 import sys
+import threading
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
 MODEL = "htdemucs"
 _CHUNK = 1 << 20
+# Run 5 item 8: the upload's background job and an export can ask for the same
+# source at once; the second waits for the first's files instead of running
+# Demucs again into the same scratch folder.
+_locks: dict[str, threading.Lock] = {}
+_locks_guard = threading.Lock()
+
+
+def _lock_for(home: Path) -> threading.Lock:
+    with _locks_guard:
+        return _locks.setdefault(str(home), threading.Lock())
 
 
 @dataclass(frozen=True)
@@ -64,6 +75,16 @@ def separate(
         vocals, rest = home / "vocals.wav", home / "accompaniment.wav"
         if vocals.is_file() and rest.is_file():
             return Stems(vocals, rest)
+        with _lock_for(home):
+            return _make(wav, home, vocals, rest, run)
+    except Exception:  # noqa: BLE001 - separation is best-effort; the render goes on without it
+        return None
+
+
+def _make(wav: Path, home: Path, vocals: Path, rest: Path, run) -> Stems | None:
+    if vocals.is_file() and rest.is_file():        # made while this one waited
+        return Stems(vocals, rest)
+    try:
         scratch = home / "work"
         shutil.rmtree(scratch, ignore_errors=True)
         scratch.mkdir(parents=True, exist_ok=True)
