@@ -1,204 +1,157 @@
-# Good morning: cost and staging (overnight run 4)
+# Good morning: review fixes (overnight run 5)
 
-Branch `overnight/cost-and-staging`, cut from main `cb29d1d` (run 3 merged). Worktree
-`../AgenticVideoEditor-cost`. Not pushed; main untouched; tag `1.0.0-rc1` on this branch
-only (not pushed). Run 3's summary: `git show cb29d1d:MORNING.md`.
+Branch `overnight/review-fixes`, cut from main `b912fbc`. Worktree `../AgenticVideoEditor-review`.
+Not pushed; main untouched. Your running app (main checkout, :8000 and :5173) does not have any of this yet.
+Run 4's summary: `git show b912fbc:MORNING.md`.
 
 In one breath:
-- **Cost per turn did not fall 40%.** Question turns are 97% cheaper and re-uploads are free, but the average fresh turn stayed at about $0.22, and one run per scenario turned out to be inside the noise.
-- **Consent-verified cloning is built** behind `voices.cloning_verified`, off for everyone.
-- **Add and Export are jobs now, so no request renders.** A real 60 s render takes about 7 s on the 4 vCPU VM after a 4x cheaper loudness pass, and the safe count stays 30 people, now for 60 s videos too.
-- **No staging:** there is no `deploy/staging.env`, so item 7 did not run.
-- **Real spend: $3.57**, all of it in item 1, under the $4 stop.
-- **Your OpenAI key had expired.** You replaced it during the run; the live app reloaded with it and OpenAI accepts it.
+- **Part 1 is all done and gated together** on this branch: honest errors, fewer confirmations, tips, no invented lines, less to read. None of it is live until you merge (section 9).
+- **Fast path:** a 4-word change is ready to hear in 4.8 s p50 / 6.1 s p95 with simulated vendor latency, against 25.7 s / 40.7 s for a full turn.
+- **Voice tone:** built and measured, but no clear win yet; the A/B page is ready for your ears.
+- **Messy audio:** 20 variants; the top 3 breaks fixed (lines lost under loud music, music dropping out under a new line, phone takes rejected).
+- **Batch is public:** `launch.batch_public` is ON.
+- **Lip-sync:** foundations only, no provider on. Recommendation: sync.so lipsync-2 first.
+- **Real spend: $1.17** of the $4 stop ($1.12 ElevenLabs in item 7, $0.05 Whisper in item 8).
+- **Yesterday's "refused on my side"** was an invalid Anthropic key; you replaced it. Item 1 means the next one reads "Something went wrong on our end" and alerts admins.
 
 ## 1. What shipped
 
-Each item was built on its own branch (`cost/item<N>`, worktrees `../AgenticVideoEditor-c<N>`)
-and cherry-picked here, then gated with `make launch-check SKIP_ENV=1` on this branch.
+Each item was built on its own branch (`review/item<N>`, worktrees `../AgenticVideoEditor-v<N>`), one commit, gated there with `make launch-check SKIP_ENV=1`, then cherry-picked here and gated again on this branch.
 
-| # | Item | Commits |
-|---|---|---|
-| 1 | Evals, then cost per turn | 72a9346 (evals), 88e2b94 (baseline), 66e6688 (1a caching), 34e9a5a, 4175978 (1b Haiku), e674d58 (1c takes), 916a108 (1d content cache, 0038), b65e5e8 (1e opening view), e425de1 (after run, COSTS.md section 8) |
-| 2 | Consent-verified cloning | ad71ff3 (threshold study), ecb2ce2 (gate, 0039, flag), 238c59a (review queue), a4a25f1 (UI, Help, copy) |
-| 3 | Capacity | cbd2d73 (Add is a job), a42401f (60 s render measured), 38f9068 (loudness pass 4x cheaper), 58e97af (Export is a job) |
-| 4 | Fixes from run 3 | df2845d (sign-in per account and address), ad0f414 (receipt, invoice PDF, account deleted emails), e1e3a16 (no 401s signed out) |
-| 5 | Production setup kit | ba1ffa7 (provision.sh), e4f2809 (deploy, migrate, rollback), 9e0c687 + 92831d6 (CHANGELOG) |
-| 6 | Beta kit | bf4b662 (badge, Known issues), 80fc219 (invite email), 6ecf02d (cohort, credits), 237c8d5 (checklist), 0e008b1 (survey, 0042), cd6959c (admin Beta view), 96edb16 + 2e887d3 (Known issues updated) |
-| 7 | Staging | not run: no `deploy/staging.env` |
-| 8 | Legal drafts v2 | 502ec41 (Terms), 50f5ee9 (Privacy, sub-processors), 61d1832 (Acceptable use) |
-
-## 2. Cost per turn, before and after (COSTS.md section 8)
-
-Real vendors, one fresh upload and one turn per scenario, through the app's ledger.
-
-| Scenario | Before | After (typical) | Scores, before to after |
+| # | Item | Commit | Status |
 |---|---|---|---|
-| One-line fix | $0.058 | $0.059 | WER 0 to 0, SIM-o 0.63 to 0.52 / 0.62, UTMOS 4.34 to 4.39, duration error 0.11 to 0.18 s, plan 1 to 1 |
-| 5-line rewrite | $0.485 | $0.485 | WER 0.03 to 0.24, SIM-o 0.71 to 0.73, UTMOS 4.14 to 3.75, duration error 0.36 to 0.33 s, plan 1 to 1 |
-| New voice-over | $0.117 | $0.159 | WER 0 to 0, UTMOS 4.46 to 4.46, duration error 0 to 0, plan 1 to 1 |
-| Hinglish line | $0.140 | $0.140 | WER 0.63 to 0.63, SIM-o 0.82 to 0.79, UTMOS 3.95 to 3.97 / 2.95, plan 1 to 1 / 0 |
-| Hindi version | $0.453 | not re-run (budget) | WER 0.33, SIM-o 0.84, UTMOS 3.48, duration error 0.40 s |
-| Question turn | $0.034 | **$0.001** | plan 1 to 1, help article used |
-| **Average** | **$0.215** | **$0.216** | |
+| - | Gate fix: migration check skips the content cache | 2e53505 | done |
+| 1 | Honest error messages | e6353d6 | done |
+| 2 | Fewer confirmations | 8b34340 | done |
+| 3 | Tips | ffb9da0 | done |
+| 4 | Transcription that makes things up | 4c54e46 | done |
+| 5 | Less to read | 9f8f39c | done |
+| 9 | Lead with many videos at once | b3db466 | done |
+| 10 | Lip-sync foundations | 2cc21fc | done |
+| 8 | Messy real-world audio | b86529d | done |
+| 7 | Voice tone and feel | 4208b80 | partial (see 4) |
+| 6 | Fast path for small edits | 4df7778 | done |
 
-What worked:
-- **Question turns:** how-do-I questions now go to claude-haiku-5-5, a 97% cut.
-- **Re-uploads:** a re-uploaded clip's setup cost fell from $0.03 to $0.06 to $0, because transcripts and readings are kept by the file's hash.
-- **Later turns:** their opening view is 65 to 74% smaller.
+Gates on this branch (`make launch-check SKIP_ENV=1`, against a copy of your live database):
+- after item 1: backend 2166 passed; one front-end test (SettingsPage) timed out under load and passed alone, then the rerun of every later step passed (550/550, Playwright 145/145, migrations ok).
+- items 2, 3 and 5 sat directly on the branch head, so their own passing gate ran on exactly this tree.
+- after items 3 and 4: all steps passed (backend 2238, vitest 565, Playwright 148).
+- after items 9, 10, 8 and 7 (picked together, then gated once; each had passed its own gate first): all steps passed (backend 2400, vitest 589, Playwright 152).
+- after item 6, the final tree: **all steps passed** (backend 2420 passed, 16 skipped; vitest 597/597; build; lint; Playwright 152/152; migrations ok; em dash check).
 
-Why the average didn't move:
-- **The levers miss single fresh edits:** caching was already 93% of the agent's input, and most lines needed all three takes.
-- **The noise is bigger than the bar:** the same one-line fix cost $0.051 to $0.151 across three identical runs, so a 5% bar needs three or more runs per scenario (about $4.50 a pass).
-- **Off behind a flag:** a wider take band (`AVE_TAKE_ACCEPT`) measured worse, so it is off.
+Flaky under the night's load (load averages up to about 400 while five gates ran at once): single timeouts in Thumbs, SettingsPage, NotificationBell and go-run.spec; each passed on rerun, none is in code changed tonight.
 
-Levers left for you (not changed): the ledger prices Opus 5.5 at the $5/$25 fallback. If your bill shows the list price is lower, agent cost is about 30% lower than shown. Other levers are two takes per line instead of three, a lower agent effort, and shorter tool descriptions.
+Conflicts resolved while merging: appended blocks in DECISIONS.md, PROGRESS.md and `.env.example`; the batch panel's tip line (items 3 and 9); test blocks in conftest, LineDoc and the room tests; App.tsx's import list (items 5 and 6). One real interaction: items 7 and 8 together let a noisy take pass the clarity check; fixed inside item 7's commit with a regression test.
 
-## 3. Pricing at 2.5x (COSTS.md; no price in code changed)
+## 2. Part 1: ready for beta?
 
-The credit price is unchanged from run 3: **$2.62, or Rs 216 + GST, a credit** keeps 2.5x vendor cost after payment fees and 18% GST. Your current placeholder prices are still at about cost. What each scenario costs a user at that price:
+All five are on this branch and pass the gate together. Live = after you merge to main and restart (section 9).
 
-| Scenario | Credits | USD | INR before GST | INR with GST |
-|---|---|---|---|---|
-| One-line fix (2.3 s) | 0.059 | $0.15 | Rs 13 | Rs 15 |
-| 5-line rewrite (13 s) | 0.485 | $1.27 | Rs 105 | Rs 124 |
-| New voice-over, one line (6 s) | 0.159 | $0.42 | Rs 34 | Rs 41 |
-| Hinglish line (2.3 s) | 0.140 | $0.37 | Rs 30 | Rs 36 |
-| Hindi version, 5 lines (13 s) | 0.453 | $1.19 | Rs 98 | Rs 116 |
-| Question turn | 0.001 | under $0.01 | under Rs 1 | under Rs 1 |
-| Average of the six | 0.216 | $0.57 | Rs 47 | Rs 55 |
+1. **Honest error messages: ready.** One classifier (`backend/app/failures.py`) for every failure a person can read: agent turns, transcription, voicing, cloning, renders, exports, batches, the job runner.
+   - Our side (bad or missing key, vendor auth, quota, outage, timeout): "Something went wrong on our end. Nothing was charged. Try again in a minute." The real cause goes to Admin > Feedback > Errors reported (and Sentry when set), plus a new admin bell and email notice "Failures on our side", at most once per vendor and cause every 30 minutes.
+   - A vendor's safety filter: names the line ("the line at 0:06 (...)") and says to reword it.
+   - Your input: what and how to fix it.
+   - "Nothing was charged" is kept true: every voice call refunds on failure; a turn that paid for earlier steps says what it spent instead.
+   - 25 tests force each failure through a mocked vendor (Anthropic 401/403/429/500/timeout/reset, ElevenLabs 401/429/reset/refusal, OpenAI 401/500/timeout/reset).
+2. **Fewer confirmations: ready.** Settings: "Ask me before spending more than $X" (default $0.25 a turn, per user). Under it Voltage voices without asking. Over it: one card whose button names the step and price ("Voice it here · $0.04"); picking an option is the approval; no separate Move it. Meaning questions (which line, which voice) are still asked. Test: a $0.04 voice-over is one click from request to a proposal you can hear.
+3. **Tips: ready.** All 29 first-time tips go through one queue: one on screen, two a session (30 idle minutes ends a session; the count survives reloads), in Voltage's pane or under the top bar, never over the transcript or player (Playwright checks at three sizes). Fixed a real bug: Got it was only saved for 10 of the 29 tips; the other 19 came back after every reload.
+4. **No invented lines: ready.** Voice activity detection before transcription (only speech is sent; a silent clip makes no call), sound captions ("[Music]", "♪") always dropped, subtitle credits in 8 more languages, off-language segments kept only if confident and at least 1 s, high no-speech segments dropped. Zero invented lines on a silent clip, a WhatsApp-style clip, a music-only clip and a clip with no audio track. Speech under loud music is still transcribed (item 8's fix, built in). **A video with no audio track is now accepted** (it gets a silent track, is never transcribed or charged, and opens the Voice-over panel).
+5. **Less to read: ready.** New and existing users start in a simple view (player, transcript, Voltage pane); "More controls" in the header brings back the three-way switch, tracks, counts, timing bar, Voice / Bed / Effect and Fine-tune, remembered per user. "Hear changes" on/off replaces the three-way switch. Monospace capitals only on timecodes and costs (a Playwright test fails on any other). Plain words ("Spent $0.34 of $10", "Asks you before spending over $0.25"). Voltage replies are two sentences; the rest goes behind "Why?" (nothing is deleted). The "Get started" pill no longer covers the transcript.
 
-These are short eval clips. Run 3's 60 s figures and the live ledger's $0.47 a real turn still stand.
+## 3. Fast path timings (item 6)
 
-## 4. Cloning thresholds and test results (docs/cloning-consent.md)
+Click a line, change the words, press Enter. Up to 8 changed words in one existing line, same voice, under the spending limit: no planning, one take with the line's voice and delivery, the fit check, a proposal ready to hear. A fit failure hands over to a full turn with a note. Story checks (a different price or percentage on another line, a negated repeat, a repeated 3+ word run) run after and show one gentle "Worth a look" message; they are local and free.
 
-The check, in order:
-1. The speaker reads a random 8 to 12 word phrase. It is made on the server, single use, and good for 10 minutes.
-2. Length: the recording must be at least 4 s.
-3. Words: what Whisper hears must match the phrase with WER under 20%.
-4. Voice: SIM-o (WavLM, run locally) is compared with the clone's source audio.
+**Simulated vendor latency** (the rehearsal's timed mocks, LOAD.md values: Claude 1 to 3 s a call, a voiced line 2 to 6 s, a render 5 to 20 s), 4-word change, 24 runs each:
 
-| SIM-o | Result |
-|---|---|
-| 0.92 or more | pass |
-| 0.84 to 0.92, or not measurable | admin review queue: approve or reject with a reason, audited, owner notified |
-| below 0.84 | did not pass, with what to try |
-
-Each attempt stores the phrase, what was heard, the scores, the deciding rule, the model names and the times (migration 0039).
-
-Test set: 82 local clips, with 125 same-speaker pairs and 3,112 different-speaker pairs. Whisper was mocked, so this cost $0.
-
-| Pairs | Median | Pass | Review | Fail |
-|---|---|---|---|---|
-| Same speaker (clean, and phone vs clean) | 0.95 to 0.97 | 90 of 97 | 6 | 1 (a phone copy at 0.835) |
-| Different speakers | 0.62 | 1.6% | 7.5% | 90.9% |
-
-- **False passes:** every different-speaker pass was two synthetic voices from one engine.
-- **One threshold instead of bands:** a single bar at the model card's 0.86 would let 6.6% of strangers through. 0.94 would cut that to 0.6% but send more checks to review.
-- **Caveat:** the set is small and mostly synthetic, and only one real person has two clips.
-- **Flag:** `voices.cloning_verified` is off for everyone and not in the public profile. Turn it on for one person on Admin, Features. It needs `golive.g6`.
-
-## 5. Render time and the safe user count (LOAD.md)
-
-The test render: 60 s of 1080x1920 at 30 fps, with 4 replaced lines and an 8 s voice-over, through the app's real render path. Two thirds of the time went to the export loudness pass's true-peak check.
-
-| Where | Before | After the cheaper pass (same loudness within 0.05 LU, peak within 0.1 dB) |
+| Path | p50 | p95 |
 |---|---|---|
-| Api image, Colima VM, 4 vCPU | 22.0 / 23.0 / 24.5 s | **6.0 / 6.8 / 7.9 s** |
-| This laptop | 20.5 / 18.9 s | 5.5 / 5.6 s |
+| Fast path, Enter to proposal ready | 4.8 s | 6.1 s |
+| Full turn, its take ready mid-turn | 6.8 s | 8.2 s |
+| Full turn, turn finished | 25.7 s | 40.7 s |
 
-How the safe count follows:
-- The VM's 4 render workers do about 34 renders a minute.
-- At one render every 2 minutes per active person, with the workers kept under 70% busy, that holds about 48 people.
-- So the load-tested **30 people at once with no slowdown** now holds for 60 s videos, with 50 at the edge. A 3 minute video holds about 16.
-- Before the fix, the real render would have meant about 10 people.
-- Check the `render done ... seconds=` log on the real VM in its first week.
+From your real history (read-only copy of the database): full turns p50 25.1 s, p95 95.3 s (30 turns); single line voicings, which is what the fast path runs, p50 6.4 s, p95 34.4 s (55 jobs). So under 15 s holds at p50; the real p95 is the voice vendor's tail. Not measured with real vendors (no spend allowed in item 6).
 
-## 6. Staging
+## 4. Voice tone, before and after (item 7)
 
-**No staging.** There is no `deploy/staging.env`, so nothing was deployed: no journeys there, no real 5-line run, no VM render timing, no off-machine backup check. Item 7's $1 of budget was not spent.
+- When only the voice changes, the take is the original line converted into the new voice (speech to speech), so pace and emotion follow the original. When the words change, ElevenLabs has no audio style reference; steering the first take from the original's measured settings is built but off (`AVE_VOICE_TONE_REFERENCE`): it cost naturalness for no gain.
+- Each take is measured against the speaker's neighbouring lines (pitch register, range, rate, contour) and retaken if outside; lines asked for in a particular delivery are never refused.
+- The take gets the room's EQ and reverb when the room is clean enough, and room tone loops smoothly under it.
+- A prosody distance ranks takes and shows on the card as "Delivery".
 
-What I ran instead, on this machine:
-- **Rollback rehearsal** on a local stack: older build, newer build, migrate, then roll back in 15 s with data intact. A switch is about 15 s of outage.
-- **Provision script:** `provision.sh` ran twice in an Ubuntu 24.04 container; the second run reported "no changes".
-- **Journeys:** the three journeys on a fresh local stack of this branch were green 3 runs in a row (section 8).
+Real vendors, your owl story (p66, its existing clone; no new clone made), 5 lines, old method vs as shipped:
 
-## 7. Decisions to confirm
+| Voice similarity | Naturalness (UTMOS) | Delivery gap | Loudness delta | Duration error |
+|---|---|---|---|---|
+| 0.964 to 0.957 | 4.13 to 4.06 | 1.30 to 1.26 | 0.65 to 0.80 dB | 0.146 to 0.092 s |
 
-All are in DECISIONS.md with how to undo them. The ones that need your call:
-- **Check model:** it moves from claude-haiku-4-5 to **claude-haiku-5-5** (AVE_CHECK_MODEL). Question turns also run on Haiku 5.5 (AVE_QUESTION_MODEL; empty turns it off).
-- **Opus 5.5 rate:** the ledger's rate for Opus 5.5 was left at the fallback. Compare it with your Anthropic bill.
-- **Cloning bands:** pass at 0.92, review from 0.84. The flag is off. English phrases only.
-- **Beta cohort:** it gets all of `projects.batch` (B1, B2, B3) and all of `projects.review` (C1, C2), because those are phase flags. The 10 credits never lapse. The Beta stamp is always shown in the shell.
-- **Sign-in limits:** 20 per 10 minutes per account and address, plus 100 per 10 minutes per address. One account guessed slowly from many addresses is not limited across them.
-- **Invoice PDF:** standard fonts only, so it prints "INR", not the rupee sign, and a non-Latin buyer name prints as "?". The HTML email shows the name as typed.
-- **Export answers:** `POST /videos/{id}/export` answers 202 with a job when the render isn't made yet. Any outside caller has to follow the job.
-- **Rollback:** migrations only add, and a rollback never runs `down`. The firewall also opens 443/udp. provision.sh does not change SSH settings.
-- **Legal proposals for counsel:** keep consent records 7 years, anonymised analytics 24 months, error reports 90 days, export zips 7 days. None of this is built.
+No clear win: the old method run twice moved the delivery gap by up to 0.5. No take was refused on this clip. Spend $1.12.
 
-## 8. How to test it
+**A/B page:** `#admin/voice-ab` (admins), original line then the old and new takes in blind order, a vote, then which was which and the scores. The eval's clips are of your own video, so they are kept on this machine only (git-ignored, `backend/evals/results/voice-ab/`). They are in `../AgenticVideoEditor-v7/backend/evals/results/voice-ab/`; copy that folder into the main checkout after you merge (section 9) so the page has trials. Your votes should decide whether room EQ and reverb stay on takes.
 
-```sh
-R="$HOME/Documents/Ashish - Personal/Ashish - Personal Experimentation/AgenticVideoEditor-cost"
-cd "$R"
-colima start                                    # if stopped
-RH_NAME=voltage-r4 RH_PORT=8086 scripts/rehearsal.sh up
-cd frontend && RH_NAME=voltage-r4 RH_PORT=8086 REHEARSAL_URL=http://localhost:8086 npx playwright test -c playwright.rehearsal.config.ts
-```
+## 5. Messy audio (item 8)
 
-- **Cost evals** (real spend: about $1.50 a pass): run a backend with real keys on a DB copy with a day cap, then `cd backend && python -m evals run --base http://127.0.0.1:8101 --db <copy>/ave.db ...` and `python -m evals compare results/a.json results/b.json`. The usage is in `backend/evals/__main__.py`.
-- **Consent check:** turn on `golive.g6` and `voices.cloning_verified` for yourself on Admin, Features. Then try a clone from a speaker. Borderline checks appear under Admin, Consent reviews.
-- **Beta:** on Admin, use Beta, Add to beta, or Waitlist, Invite to beta. The invite is in `#admin/emails`. The survey shows after a first export.
-- **Emails:** buy a top-up in test mode. The receipt and the invoice with a PDF land in the dev outbox.
-- **Render timing:** `tools/load/render_bench.py` (LOAD.md).
-- **Deploy kit:** `scripts/deploy.sh <sha>`, `scripts/migrate.sh`, `scripts/rollback.sh` (OPS.md "Deploy, migrate and roll back").
+Upload now listens for music or noise under the speech (0.4 s for a 49 s clip) and separates it with Demucs in the background (12 to 24 s a clip under heavy load), so a replaced line keeps the bed. `backend/evals/messy/` makes 20 variants (music, cafe noise, echo, crosstalk, phone, clipped) and reports per stage; `evals/messy/real/` waits for your 20 real clips.
 
-Final gate on `92831d6`, `make launch-check SKIP_ENV=1`: all steps passed.
+Top 3 fixed: lines lost under a loud music bed (recall 0.17 to 1.00), music dropping out under a new line (1% to 96 to 100% kept; heavy cafe noise 76%), a good take refused on a phone clip with dropouts (0.10 to 1.00).
 
-| Step | Result |
-|---|---|
-| Backend | 2140 passed, 10 skipped |
-| Vitest | 549 passed |
-| Build and lint | clean |
-| Playwright | 145 passed |
-| Migrations | up and down on a copy of your live DB, ok |
-| Em dash check | ok |
+Still broken: clipped audio (a new take needs more level correction than allowed), crowd babble mostly stays in the voice track (5 to 15% of it kept), Whisper puts the first word about 0.4 s early on every clip, one line end off by 0.46 s on the hardest variant.
 
-The rehearsal journeys (owner, Reviewer, Editor) on a fresh stack of this branch, with Postgres, the public profile and mocked vendors, were green **3 runs in a row** (1.4 to 1.6 min a run, against 3.1 to 4.9 min in run 3). They now go through Add and Export as jobs.
+Combining items 7 and 8 briefly let a noisy take pass the clarity check; fixed in item 7's commit (clarity is judged before the room's EQ), with a test.
 
-## 9. What you must set up
+## 6. Batch public: ON (item 9)
 
-Run 3's list still stands: VM, domain, Resend, Stripe/Razorpay live keys, Sentry, prices, legal, a real sample clip, someone watching reports. New tonight:
-- **Staging (optional):** add `deploy/staging.env` with a STAGING host to have the next run deploy there. Provision it with `scripts/provision.sh`.
-- **Backups:** an object storage bucket and an rclone remote in `/etc/voltage/backup.env` on the VM (`docs/ops/monitoring.md`, DEPLOY.md).
-- **Monitoring:** `SENTRY_DSN`, plus an uptime check on `/api/ready` (`docs/ops/monitoring.md`).
-- **Opus 5.5 rate:** check its price in `backend/app/usage.py` against your bill.
+`launch.batch_public`, default on, turns on `projects.batch` for the public profile: B1 (one goal across many videos), B2 (language versions), B3 (export everything). The paid project check and review stages stay off for the public. B1 has example prompts ("Make every offer line say 25% off"), a gate that says "You pay at most $X for all of it" and a results board that opens with one plain sentence. The batch journeys run in the rehearsal suite with mocks (2 of 2 passes). The landing page now leads with "For ad teams and agencies. Change every ad at once. Offers, prices, languages." and single-video editing is the second section.
+
+## 7. Lip-sync foundations (item 10)
+
+- On upload, each line is marked on camera, off camera or unsure (face found, mouth moving with the sound), 0.2 to 0.4 s per second of video, in the background.
+- Voltage prefers off-camera lines; a changed on-camera line says "... is on screen saying this line, so the lips won't match yet."
+- `LipSyncProvider`: only the changed span plus 0.5 s handles goes out, never across a cut, and is stitched back frame for frame. A fake provider, a sync.so stub and a self-hosted LatentSync stub; a provider needs both `AVE_LIPSYNC_PROVIDER` and its key, so your sync.so key alone does nothing. `/health` says lip-sync is off.
+- Quality: a 0 to 1 confidence (SyncNet when installed), and a side-by-side review on the admin page.
+
+**LIPSYNC.md recommends** sync.so lipsync-2 first (about $0.18 a 3 s line), then try fal.ai LatentSync ($0.20 a span; needs a new account), self-host only at volume; Wav2Lip is out (non-commercial licence). Not yet checked on real talking-head clips (none here); before turning a provider on: real clips, wire it into export, make export a job.
+
+## 8. Decisions to confirm
+
+All logged in DECISIONS.md (section "Run 5").
+
+1. Item 1: ElevenLabs safety refusals are recognised by pattern (no real moderation payload was available); a missing ffmpeg now gets the "our end" sentence; missing-key and vendor-failure alerts email admins by default.
+2. Item 2: Voltage's own thinking cost is not counted against the limit; the limit applies only under Check with me; consent is asked before the first turn when the limit is above $0; $0.00 means always ask.
+3. Item 3: a session is 30 idle minutes, counted per browser; tips take room in the page (content moves down) instead of floating.
+4. Item 4: a clip whose only line is "Thank you." gets no lines; music-only clips are still sent (and paid) because loud sound is always sent to protect speech under music; **transcription is still billed for the clip's full length even when only speech or nothing was sent** (an overcharge; cost work was out of scope).
+5. Item 5: existing users also start in the simple view; Hear changes plays proposals when there are any; the facts line goes behind Why?.
+6. Item 6: story checks are local heuristics (a Claude check would be about $0.002 a line); a delivery-only change still takes the full turn; the fast path skips the preview render.
+7. Item 7: reference settings off; room EQ and reverb on takes until the A/B votes say otherwise.
+8. Item 8: bed threshold 28 dB; separation on by default; clips heard clean at upload are never separated.
+9. Item 9: the public gets batch only, not the project check or review stages; B3 exports every video when stages are off.
+10. Item 10: the lips note shows only on changed lines; the provider recommendation above.
+
+## 9. How to go live for beta
+
+1. Back up the database: `cp backend/var/ave.db backend/var/ave.db.bak-20261028-pre-review-fixes`.
+2. Merge in a worktree, then fast-forward main (never merge in the main checkout while uvicorn reloads there).
+3. Migrations: item 7 adds 0047 (`voice_ab_votes`). Nothing else adds one. Apply with the usual migrate step; `make migrations-check` passes on a copy of your live database.
+4. Restart the backend (the new settings are read at start).
+5. New settings, all optional, in `.env.example`: `AVE_STEMS_ON_UPLOAD`, `AVE_ON_CAMERA`, `AVE_LIPSYNC_PROVIDER`, `AVE_LIPSYNC_MODEL`, `LIPSYNC_SELFHOSTED_URL` and `_TOKEN` and `_USD_PER_SECOND`, `AVE_MODEL_CACHE`, `AVE_MOUTH_MEASURE`, `AVE_VOICE_TONE`, `AVE_VOICE_TONE_REFERENCE`, `AVE_VOICE_AB_DIR`. Your existing `SYNC_API_KEY` does nothing unless `AVE_LIPSYNC_PROVIDER=sync_so`.
+6. Copy the A/B trials: `cp -R ../AgenticVideoEditor-v7/backend/evals/results/voice-ab backend/evals/results/`.
+7. Run the rehearsal suite once against the stack (item 2 changed button wording the helper now expects; item 9 ran it).
 
 ## 10. LAUNCH BLOCKERS (refreshed)
 
-Fixed tonight and off the list:
-- the expired OpenAI key (you replaced it)
-- the sign-in limit behind one office address
-- receipts and invoices not emailed
-- console 401s
-- Add and Export rendering inside the request
-- the unknown 60 s render time (now measured at 7 s)
-- no deploy, migrate or rollback commands
-- no provisioning script
+Fixed tonight and off the list: errors that blamed the user or showed SDK text; invented lines on silent or music clips; uploads with no audio refused.
 
-Still unsafe for public users, most serious first:
+Still unsafe for public users, most serious first (unchanged from run 4 unless noted):
 
-1. **No production deployment exists.** `scripts/provision.sh` and `deploy.sh` are ready but have never run on a real VM. ufw, swap and the service restarts are untested outside a container.
-2. **Legal pages are drafts** (v2 is fuller, for counsel). Don't open sign-ups until a lawyer replaces them.
-3. **No email provider.** Without Resend nobody can confirm an address or reset a password, and receipts and invoices can't go out.
-4. **Prices sell at about cost.** Set them from COSTS.md, or keep to the free trial.
-5. **Payments are untested against the real providers.** Do one real test-mode purchase per provider on the VM.
-6. **Off-machine backups aren't configured.** The script and the cron job are ready; they need a bucket.
-7. **No real end-to-end run on the VM.** Do one 5-line run with real vendors (under $0.50) and confirm the 7 s render time there.
-8. **The sample video is a placeholder.** Every visitor sees it on the landing page.
-9. **Abuse reports, consent reviews and beta feedback need a person watching** (RUNBOOK.md, Admin).
+1. **No production deployment exists.** provision.sh and deploy.sh have never run on a real VM.
+2. **Legal pages are drafts.** Don't open sign-ups until a lawyer replaces them.
+3. **No email provider.** No address confirmation, password reset, receipts, or (new) admin failure emails without Resend.
+4. **Prices sell at about cost.**
+5. **Payments untested against the real providers.**
+6. **Off-machine backups aren't configured.**
+7. **No real end-to-end run on the VM.**
+8. **The sample video is a placeholder.**
+9. **Abuse reports, consent reviews, beta feedback and (new) "Failures on our side" need a person watching.**
+10. **New: transcription is billed for the full clip length** even when VAD sends less. Fine for a free beta, wrong once people pay.
 
-Not blockers, worth knowing:
-- Cloning stays closed for the public until you turn on `voices.cloning_verified`.
-- Reviewers can't comment in the public profile (beta accounts can).
-- Consent recordings and some logs have no expiry yet (legal v2 proposes periods).
+Not blockers, worth knowing: fast-path p95 depends on the voice vendor's tail; voice tone shows no measured win yet; lip-sync is off; clipped audio and crowd babble still break voice matching.
