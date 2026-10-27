@@ -7,6 +7,8 @@ into a temp dir and never touches the original. On the copy: every pending
 step up; every step after `--since` down, then up again. Each table's row
 count must be the same after each round trip, and the copy must pass
 PRAGMA integrity_check. Exits 1 with the reason on any difference.
+Caches whose `down` drops them by design (CACHE_TABLES) are not counted:
+nothing in them is lost that cannot be read again.
 """
 from __future__ import annotations
 
@@ -18,12 +20,15 @@ from pathlib import Path
 
 from app.store import migrate
 
+# 0038's down drops the content cache on purpose; its rows are paid reads that are read again.
+CACHE_TABLES = frozenset({"content_cache"})
+
 
 def _counts(conn: sqlite3.Connection) -> dict[str, int]:
     names = [r[0] for r in conn.execute(
         "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name != 'schema_migrations' "
         "AND name NOT LIKE 'search_fts%'")]
-    return {n: conn.execute(f"SELECT COUNT(*) FROM {n}").fetchone()[0] for n in sorted(names)}
+    return {n: conn.execute(f"SELECT COUNT(*) FROM {n}").fetchone()[0] for n in sorted(names) if n not in CACHE_TABLES}
 
 
 def check(source: Path, since: int) -> list[str]:

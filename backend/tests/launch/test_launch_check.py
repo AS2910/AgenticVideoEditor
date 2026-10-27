@@ -32,3 +32,15 @@ def test_the_env_check_reads_a_file_and_names_what_is_missing(tmp_path, monkeypa
     assert "OPENAI_API_KEY is missing" in capsys.readouterr().out
     env.write_text(env.read_text() + "OPENAI_API_KEY=o\n")
     assert env_check.main(["--env-file", str(env)]) == 0
+
+
+@pytest.mark.sqlite_only
+def test_the_migration_check_does_not_count_a_cache_its_down_step_drops(tmp_path):
+    # 0038's down drops content_cache by design; a live database with cached reads still passes.
+    from app.store import content_cache
+    path = tmp_path / "ave.db"
+    db = Database(path)
+    repo = ProjectRepository(db)
+    repo.create(make_source(project_id="p1"), Transcript(words=()))
+    content_cache.put(db, "local", "a" * 64, "transcript", "", {"words": []})
+    assert migration_check.check(path, 29) == []
