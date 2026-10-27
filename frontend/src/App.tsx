@@ -68,10 +68,11 @@ import { approvedWords } from './pages/feedWords'
 import { LearnWord } from './components/LearnWord'
 import { go, hrefFor, parseRoute, useRoute } from './lib/route'
 import { cn } from '@/lib/utils'
+import { SlidersHorizontal } from 'lucide-react'
 import { clock } from './transcript/format'
 import {
   createProject, confirmPlace, exportProject, artifactUrl, stageHold, pollJob, PollCancelled, ApiError, listVideos, listFolders, createFolder, createFolderFrom, startTutorial, getProject, deleteProject, getUsage, getSpend, listVoices, updateSpeaker, detectSpeakers, revertEdit, updateSettings, removeLine, dismissItem, easeItem, setEditRole, setCandidateRole, roleQuestion, moveCandidate, moveEdit, getArrangement, putArrangement, undoArrangement, getPlan, approvePlan, readProject, grantConsent, getMe, logout, postTurn, postAllowMore, getMessages, chipEvent, getUnderstanding, correctUnderstanding, setStyle,
-  retryJob, stopJobs, getLatestRender, startRender, getJobs, listRules,
+  retryJob, stopJobs, getLatestRender, startRender, getJobs, listRules, updateUserSettings,
 } from './api'
 import type { ArrangementView, Me, PlanApproval, RoleChange, RoleQuestion } from './api'
 import type { Arrangement, Placed } from './transcript/arrange'
@@ -271,6 +272,9 @@ function Studio() {
   const composerRef = useRef<HTMLTextAreaElement>(null)
   // Volt: the tracks panel under the scrubber, and the word-precise timeline inside it.
   const [tracksOpen, setTracksOpen] = useState(false)
+  // Run 5 item 5: the simple view (player, transcript, Voltage) unless the user asked for More controls.
+  // Remembered per user on the server; every video reads it with its settings.
+  const [moreControls, setMoreControls] = useState(false)
   // 2026-10-20: while the editor is on screen, html and body never scroll (its panes do); elsewhere the page scrolls.
   useEffect(() => {
     document.documentElement.classList.toggle('app-locked', !!document.querySelector('[data-testid=editor-shell]'))
@@ -466,6 +470,7 @@ function Studio() {
     setMayDo({ autonomy: loaded.settings?.autonomy ?? 'ask', turn_usd: loaded.settings?.turn_usd ?? MAY_DO.turn_usd,
       effort: loaded.settings?.effort ?? MAY_DO.effort, ceiling_usd: loaded.settings?.ceiling_usd ?? MAY_DO.ceiling_usd,
       ask_over_usd: loaded.settings?.ask_over_usd })
+    setMoreControls(loaded.settings?.more_controls === true)
     setPlan(loaded.plan ?? null)
     setReading(loaded.reading ?? null)
     setSuggestions(loaded.suggestions ?? [])
@@ -756,6 +761,18 @@ function Studio() {
       setMayDo((m) => ({ ...m, turn_usd: saved.turn_usd ?? m.turn_usd, effort: saved.effort ?? m.effort, ceiling_usd: saved.ceiling_usd ?? m.ceiling_usd }))
     } catch (e) {
       tell(e instanceof ApiError ? e.message : "I couldn't save that setting. Try it again.")
+    }
+  }
+
+  /** Run 5 item 5: More controls on or off, at once on screen, then kept for the user (a failed save says so). */
+  const toggleMoreControls = async () => {
+    const next = !moreControls
+    setMoreControls(next)
+    if (!next) setTracksOpen(false)
+    try {
+      await updateUserSettings({ more_controls: next })
+    } catch (e) {
+      tell(e instanceof ApiError ? e.message : "I couldn't remember that choice. It holds until you leave this video.")
     }
   }
 
@@ -1440,6 +1457,9 @@ function Studio() {
     go({ page: 'projects' })
   }
 
+  const showChecklist = me !== null && !(me.mode !== 'off' && (!me.user || signedOut)) && !project?.settings?.tutorial
+  // Run 5 item 5: in the editor the Get started pill sits in the status strip, not fixed over the transcript.
+  let editorShown = false
   const page = (() => {
   if (me === null) {
       return (
@@ -1524,6 +1544,7 @@ function Studio() {
         </div>
       )
     }
+    editorShown = true
   
     const speakers = project.speakers ?? []
     // 20f: the spoken lines only; added lines and proposals are rows of their own in LineDoc.
@@ -1612,10 +1633,18 @@ function Studio() {
       ['proposals', 'With proposals', readyItems.length > 0, 'No proposals are waiting'] as const,
       ['original', 'As shot', true, ''] as const,
     ]
+    // Run 5 item 5: Hear changes (the simple view) maps onto the three modes: off is As shot; on is With
+    // proposals while any proposal waits (your added lines plus what waits), else Edited.
+    const hearOn = view !== 'original'
+    const hearTarget = readyItems.length > 0 ? 'proposals' as const : 'final' as const
+    const canHear = changes > 0 || readyItems.length > 0
     // Player truth: the badge names the mode and the version playing.
     const playingRec = view === 'final' && rendered ? rendered : view === 'proposals' && previewReady ? preview : null
     const MODE_WORD = { final: 'Edited', proposals: 'With proposals', original: 'As shot' } as const
-    const badge = view === 'original' ? 'Playing original'
+    // Run 5 item 5: the simple view has one switch, Hear changes, so the badge says it in those words, no version.
+    const simple = !moreControls
+    const badge = simple ? (view === 'original' ? 'Playing the original' : shown ? 'Playing your changes' : 'Playing the original for now')
+      : view === 'original' ? 'Playing original'
       : shown ? `Playing ${playingRec?.version ? `v${playingRec.version} · ` : ''}${MODE_WORD[view]}`
       : `Playing original · ${MODE_WORD[view]} not ready`
     // What is rendering for the mode playing, or what is not in it yet.
@@ -1632,11 +1661,11 @@ function Studio() {
       && (modeNow === 'final' ? changes > 0 : readyItems.length > 0)
       && !(playingRec?.hash && playingRec.hash === modeState.current_hash)
     const renderNote = renderJob || inProgress || localRender ? (
-      <span className="tag" role="status" data-testid="render-note">{renderingVersion ? `v${renderingVersion} rendering…` : 'Rendering…'}{renderingEta ? ` ${renderingEta}` : ''}</span>
+      <span className="tag" role="status" data-testid="render-note">{simple ? 'Getting your changes ready…' : renderingVersion ? `v${renderingVersion} rendering…` : 'Rendering…'}{renderingEta ? ` ${renderingEta}` : ''}</span>
     ) : stale && modeNow ? (
       <>
-        <span className="tag text-needs" role="status" data-testid="render-note">Changes not in preview yet</span>
-        <button type="button" className="btn sm" onClick={() => void renderNow(modeNow)}>Render now</button>
+        <span className="tag text-needs" role="status" data-testid="render-note">{simple ? 'Your changes are not in the player yet' : 'Changes not in preview yet'}</span>
+        <button type="button" className="btn sm" onClick={() => void renderNow(modeNow)}>{simple ? 'Update the player' : 'Render now'}</button>
       </>
     ) : null
     // The rows' one chip reads what the video playing carries (the edited render while As shot plays) and what is rendering.
@@ -1660,7 +1689,7 @@ function Studio() {
     const strip = stripState({
       jobs: activity.jobs, turn: ourTurn ?? localTurn,
       playing: playingRec?.version ? { version: playingRec.version, created_at: playingRec.at ?? '' } : null,
-      stale, justReady,
+      stale, justReady, plain: simple,
     })
     const canStop = activity.jobs.some(isActive) || ourTurn?.status === 'running' || turnBusy
     const steps = ourTurn ? turnSteps(ourTurn, activity.jobs) : []
@@ -1725,9 +1754,10 @@ function Studio() {
         <PausedBanner floating />
         <header className="z-30 flex min-h-[62px] min-w-0 flex-wrap max-[960px]:sticky max-[960px]:top-0 items-center gap-x-4 gap-y-2 border-b-[1.5px] border-foreground bg-card px-4 py-2 sm:px-6 max-[1600px]:gap-x-3 lg:[&>*:not(h1)]:shrink-0" data-testid="editor-header">
           <Wordmark />
-          <span className="text-faint max-[1600px]:hidden" aria-hidden="true">/</span>
-          {/* Folders: the project the video is in, with its menu; or a dashed "No project" that opens the move dialog. */}
-          <div className="relative" data-crumb>
+          {(!simple || project.project_id) && <span className="text-faint max-[1600px]:hidden" aria-hidden="true">/</span>}
+          {/* Folders: the project the video is in, with its menu; or a dashed "No project" that opens the move dialog
+              (under More controls: the simple view names a project only when the video is in one). */}
+          {(!simple || project.project_id) && <div className="relative" data-crumb>
             {project.project_id ? (
               <button type="button" className="inline-flex h-[34px] items-center gap-2 rounded-lg border-[1.5px] border-line2 bg-card px-2.5 font-semibold hover:border-foreground" aria-haspopup="menu" aria-expanded={crumbMenu} onClick={() => setCrumbMenu((m) => !m)} data-testid="crumb">
                 <span aria-hidden="true" className="h-3 w-4 shrink-0 rounded-[3px] border-[1.5px] border-ink bg-volt" /><span className="max-w-[28ch] truncate max-[1600px]:max-w-[14ch]" title={project.project_name ?? undefined}>{project.project_name ?? 'Project'}</span><span aria-hidden="true" className="text-xs">▾</span>
@@ -1753,7 +1783,7 @@ function Studio() {
                 </div>
               </div>
             )}
-          </div>
+          </div>}
           {/* The status chips (archived, brief changed, language version, out of sync) take a row of their own under the header's row, so the file name, Export, the bell and the account always fit. */}
           {(reuseOn && project.project_id && project.project_archived) || (consistency && project.project_id && project.brief_changed) || (batchOn && project.master_id) ? (
           <div className="order-last flex min-w-0 basis-full flex-wrap items-center gap-2" data-testid="header-chips">
@@ -1773,7 +1803,17 @@ function Studio() {
           ) : null}
           <span className="text-faint max-[1600px]:hidden" aria-hidden="true">/</span>
           <h1 className="disp m-0 min-w-0 max-w-[28ch] truncate text-[15px] font-semibold lg:max-w-none lg:flex-[1_1_0]" title={project.filename}>{project.filename}</h1>
-          <span className="tag text-faint max-[1600px]:hidden">{timecode(project.duration)}{speakers.length > 0 ? ` · ${speakers.length} ${speakers.length === 1 ? 'voice' : 'voices'}` : ''}</span>
+          {!simple && <span className="text-faint max-[1600px]:hidden"><span className="tnum text-xs">{timecode(project.duration)}</span><span className="tag">{speakers.length > 0 ? ` · ${speakers.length} ${speakers.length === 1 ? 'voice' : 'voices'}` : ''}</span></span>}
+          {simple ? (
+            // Run 5 item 5: one switch. On plays your changes (with what is proposed, when anything is); off plays the video as shot.
+            <button type="button" role="switch" aria-checked={hearOn} className="act text-foreground disabled:cursor-not-allowed" onClick={() => switchView(hearOn ? 'original' : hearTarget)}
+              disabled={!hearOn && !canHear} title={hearOn ? 'Turn off to hear the video as shot (O)' : canHear ? 'Turn on to hear your changes (O)' : 'Nothing has changed yet'} data-tour="playback-switch" data-testid="hear-changes">
+              <span aria-hidden="true" className={cn('inline-block h-4 w-7 shrink-0 rounded-full border-[1.5px] border-foreground p-px transition-colors motion-reduce:transition-none', hearOn && 'bg-foreground')}>
+                <span className={cn('block size-2.5 rounded-full bg-foreground transition-transform motion-reduce:transition-none', hearOn && 'translate-x-3 bg-volt')} />
+              </span>
+              {hearOn && view === 'proposals' && !previewReady && previewing ? 'Hear changes…' : 'Hear changes'}
+            </button>
+          ) : (
           <div className="segs" role="group" aria-label="Play" data-tour="playback-switch">
             {views.map(([v, label, on, why]) => (
               <button key={v} type="button" className="seg disabled:cursor-not-allowed disabled:opacity-45" aria-pressed={view === v} onClick={() => switchView(v)} disabled={!on}
@@ -1782,12 +1822,17 @@ function Studio() {
               </button>
             ))}
           </div>
+          )}
+          <button type="button" className="act" aria-pressed={moreControls} onClick={() => void toggleMoreControls()} data-testid="more-controls"
+            title={moreControls ? 'Back to the simple view: the player, the transcript and Voltage' : 'Tracks, Bed, Effect, Fine-tune, the counts and the three ways to play'}>
+            <SlidersHorizontal size={14} aria-hidden="true" />{moreControls ? 'Fewer controls' : 'More controls'}
+          </button>
           <span className="flex-1 lg:hidden" />
           {!watching && <button type="button" className="act" onClick={() => { setMayDoOpen(true); tour.notify('autonomy-opened') }} data-tour="autonomy" data-tour-action="autonomy" aria-haspopup="dialog" aria-label={`${autonomy === 'ask' ? 'Check with me' : 'Just do it'}. What Voltage may do`}>
             <span className="tag">{autonomy === 'ask' ? 'Check with me' : 'Just do it'}</span>
             <svg width="12" height="12" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>
           </button>}
-          <SpendPill summary={spend} videoId={project.video_id} />
+          <SpendPill summary={spend} videoId={project.video_id} simple={simple} />
           {!watching && <a className={cn('btn ink sm', exporting && 'opacity-70')} href={hrefFor({ page: 'export', projectId: project.video_id })} aria-busy={exporting || undefined} data-tour="export" data-tour-action="export">
             {exporting ? 'Rendering…' : 'Export'}
           </a>}
@@ -1799,7 +1844,8 @@ function Studio() {
             onSent={() => setProject((p) => (p ? { ...p, stage: 'in_review' } : p))} /></LazyPart>}
           <WhatVoltageMayDo open={mayDoOpen} value={mayDo} onChange={(c) => void changeMayDo(c)} onClose={() => setMayDoOpen(false)} />
         </header>
-        <StatusStrip state={strip} open={activityOpen} onOpen={openActivity} onStop={canStop ? () => void stopAll() : undefined} stopping={stopping} />
+        <StatusStrip state={strip} open={activityOpen} onOpen={openActivity} onStop={canStop ? () => void stopAll() : undefined} stopping={stopping}
+          extra={showChecklist ? <Checklist inline onShowMe={showMe} /> : undefined} />
   
         <div className="flex min-h-0 flex-1 max-[960px]:flex-col">
           {/* The picture, the transport, the transcript. */}
@@ -1822,12 +1868,12 @@ function Studio() {
                 markers={markers}
                 bigPlay={firstRead}
               >
-                <button type="button" className="act" aria-expanded={tracksOpen} aria-controls="tracks" onClick={() => setTracksOpen((t) => !t)}>
+                {!simple && <button type="button" className="act" aria-expanded={tracksOpen} aria-controls="tracks" onClick={() => setTracksOpen((t) => !t)}>
                   <span className="tag">Tracks</span>
                   <svg width="12" height="12" viewBox="0 0 16 16" aria-hidden="true" className={cn('transition-transform', tracksOpen && 'rotate-180')}><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>
-                </button>
+                </button>}
               </Player>
-              {tracksOpen && (
+              {tracksOpen && !simple && (
                 <section id="tracks" className="flex flex-col gap-3 rounded-xl border-[1.5px] border-line2 bg-card p-4" aria-label="Tracks">
                   <Lanes
                     duration={project.duration}
@@ -1913,6 +1959,7 @@ function Studio() {
                 version={version}
                 activity={rowActivity}
                 bannedWords={projectRules.filter((r) => r.kind === 'banned').map((r) => r.data.word ?? '').filter(Boolean)}
+                simple={simple}
               />
               {consistency && project.project_id && (
                 <LearnWord projectId={project.project_id} projectName={project.project_name} onAdded={(rule) => setProjectRules((r) => [...r, rule])} />
@@ -1941,6 +1988,7 @@ function Studio() {
           <aside className="pane flex min-h-0 w-[400px] min-w-0 max-w-full shrink-0 flex-col overflow-clip max-[960px]:h-[85dvh] max-[960px]:min-h-[60dvh] max-[960px]:w-auto" aria-label="Voltage" aria-busy={turnBusy || undefined}>
             <VoltagePane
               readOnly={watching ? REVIEWER_NOTE : null}
+              simple={simple}
               messages={messages}
               projectId={project.video_id}
               state={stateWord}
@@ -1948,7 +1996,9 @@ function Studio() {
               need={clarifying}
               engine={engine}
               chips={contextChips}
-              cap={autonomy === 'ask' && (mayDo.ask_over_usd ?? 0) > 0 ? `Asks over $${(mayDo.ask_over_usd ?? 0).toFixed(2)} · turn cap $${mayDo.turn_usd.toFixed(2)}` : `Turn cap $${mayDo.turn_usd.toFixed(2)}`}
+              cap={simple
+                ? (autonomy === 'ask' ? `Asks you before spending over $${(mayDo.ask_over_usd ?? 0).toFixed(2)}` : `Spends up to $${mayDo.turn_usd.toFixed(2)} each time you ask`)
+                : autonomy === 'ask' && (mayDo.ask_over_usd ?? 0) > 0 ? `Asks over $${(mayDo.ask_over_usd ?? 0).toFixed(2)} · turn cap $${mayDo.turn_usd.toFixed(2)}` : `Turn cap $${mayDo.turn_usd.toFixed(2)}`}
               spend={spend}
               question={question}
               picked={picked}
@@ -2046,11 +2096,10 @@ function Studio() {
       </FeedbackProvider>
     )
   })()
-  const showChecklist = me !== null && !(me.mode !== 'off' && (!me.user || signedOut)) && !project?.settings?.tutorial
   return (
     <>
       {page}
-      {showChecklist && <Checklist onShowMe={showMe} />}
+      {showChecklist && !editorShown && <Checklist onShowMe={showMe} />}
       {me !== null && !(me.mode !== 'off' && (!me.user || signedOut)) && <FeedbackHost />}
       {me !== null && !(me.mode !== 'off' && (!me.user || signedOut)) && <BetaSurveyHost />}
     </>

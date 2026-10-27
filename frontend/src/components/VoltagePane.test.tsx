@@ -18,7 +18,7 @@ describe('VoltagePane: the thread as turns', () => {
     const log = screen.getByRole('log', { name: 'The conversation' })
     expect(log).toHaveTextContent('Make it 30% off')
     const trace = screen.getByTestId('trace')
-    expect(trace).toHaveTextContent('Trace · 2 steps')
+    expect(trace).toHaveTextContent('What Voltage did · 2 steps')
     const steps = within(screen.getByRole('list', { name: 'What Voltage did' })).getAllByRole('listitem')
     expect(steps[0]).toHaveTextContent('0:01')
     expect(steps[0]).toHaveTextContent('read_transcript')
@@ -293,5 +293,29 @@ describe('VoltagePane: rendering at any width (pane-render)', () => {
     rerender(<VoltagePane messages={[...more, { role: 'assistant', text: 'And another.', seq: 10 }]} state="ready" onSubmit={() => {}} />)
     expect(log.scrollTop).toBe(2000)
     expect(screen.queryByTestId('new-from-voltage')).toBeNull()
+  })
+})
+
+describe('VoltagePane: two sentences, then Why? (run 5 item 5)', () => {
+  it('shows the two sentences and keeps the rest behind Why?, open on a click', async () => {
+    const said: ChatMessage[] = [
+      { role: 'user', text: 'Make it 30% off', seq: 1 },
+      { role: 'assistant', text: 'Line 1 is ready to hear. Add it if it sounds right.', kind: 'say', seq: 2, data: { why: 'I used the stock voice because the clip is short.\n0:00 to 0:02 · one line · $0.01' } },
+    ]
+    const user = userEvent.setup()
+    render(<VoltagePane messages={said} state="ready" onSubmit={() => {}} />)
+    const log = screen.getByRole('log', { name: 'The conversation' })
+    expect(log).toHaveTextContent('Line 1 is ready to hear. Add it if it sounds right.')
+    expect(log).not.toHaveTextContent('stock voice')
+    const why = screen.getByRole('button', { name: 'Why?' })
+    expect(why).toHaveAttribute('aria-expanded', 'false')
+    await user.click(why)
+    expect(screen.getByTestId('why-text')).toHaveTextContent('I used the stock voice because the clip is short.')
+    expect(screen.getByRole('button', { name: 'Hide why' })).toHaveAttribute('aria-expanded', 'true')
+  })
+
+  it('has no Why? when the words fit', () => {
+    render(<VoltagePane messages={THREAD} state="ready" onSubmit={() => {}} />)
+    expect(screen.queryByRole('button', { name: 'Why?' })).toBeNull()
   })
 })

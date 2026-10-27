@@ -40,7 +40,7 @@ const money = (n: number) => `$${n.toFixed(2)}`
 
 /** The trace: `time ├ sentence tool  cost`, mono, rising in; the last line closes with └.
  *  The latest turn's footer names every scope: "This turn $0.03 · video $0.61 · project $0.61". */
-function Trace({ steps, open, onToggle, spend }: { steps: ChatMessage[]; open: boolean; onToggle: () => void; spend?: SpendSummary | null }) {
+function Trace({ steps, open, onToggle, spend, simple }: { steps: ChatMessage[]; open: boolean; onToggle: () => void; spend?: SpendSummary | null; simple?: boolean }) {
   const spent = steps.reduce((t, s) => t + (s.cost ?? 0), 0)
   const last = steps[steps.length - 1]
   const seconds = typeof last?.data?.t === 'number' ? last.data.t : null
@@ -48,14 +48,14 @@ function Trace({ steps, open, onToggle, spend }: { steps: ChatMessage[]; open: b
   return (
     <div className="flex flex-col gap-2.5 rounded-[10px] border border-pline px-3.5 py-3" data-testid="trace" data-tour="trace">
       <div className="flex items-center gap-2">
-        <span className="tag pm">Trace · {steps.length} {steps.length === 1 ? 'step' : 'steps'}{seconds !== null ? ` · ${Math.round(seconds)} s` : ''}</span>
+        <span className="tag pm">What Voltage did · {steps.length} {steps.length === 1 ? 'step' : 'steps'}{seconds !== null ? ` · ${Math.round(seconds)} s` : ''}</span>
         <span className="flex-1" />
         {spent > 0 && !spend && <span className="tnum font-semibold text-volt" data-money-scope="turn"><span className="pm font-normal">This turn </span>{money(spent)}</span>}
       </div>
       <ol className="trace m-0 list-none p-0" role="list" aria-label="What Voltage did">
         {shown.map((s, k) => {
           const isLast = k === shown.length - 1
-          const tool = typeof s.data?.tool === 'string' && s.data.tool !== 'thinking' ? s.data.tool : null
+          const tool = !simple && typeof s.data?.tool === 'string' && s.data.tool !== 'thinking' ? s.data.tool : null
           const t = typeof s.data?.t === 'number' ? mmss(s.data.t) : ''
           return (
             <li key={s.seq ?? k} className="ln" role="listitem" data-money-scope="step">
@@ -72,7 +72,7 @@ function Trace({ steps, open, onToggle, spend }: { steps: ChatMessage[]; open: b
           {open ? 'Show less ↑' : `Show all ${steps.length} →`}
         </button>
       )}
-      {spend && <span className="tnum border-t border-pline pt-2 text-xs pm" data-money-scope="turn" data-testid="trace-spend">{spendLine(spend)}</span>}
+      {spend && <span className="border-t border-pline pt-2 text-xs pm" data-money-scope="turn" data-testid="trace-spend">{spendLine(spend)}</span>}
     </div>
   )
 }
@@ -85,7 +85,7 @@ function Previews({ projectId, m }: { projectId?: string; m: ChatMessage }) {
       <span className="tag pm">{previews.length === 1 ? 'One preview' : `${previews.length} previews`} · you choose</span>
       {previews.map((p) => (
         <div key={p.generated_voice_id} className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 rounded-[10px] bg-psunk px-3 py-2.5">
-          <span className="tnum text-xs">Preview {p.n} <span className="pm">· {Math.round(p.duration)} s</span></span>
+          <span className="text-xs">Preview {p.n} <span className="pm">· <span className="tnum">{Math.round(p.duration)} s</span></span></span>
           {projectId ? (
             <audio className="h-9 min-w-0" controls preload="none" src={artifactUrl(projectId, p.sha256)} aria-label={`Play preview ${p.n}`} />
           ) : <span />}
@@ -148,6 +148,21 @@ function StepList({ steps }: { steps: Step[] }) {
         </li>
       ))}
     </ol>
+  )
+}
+
+/** Run 5 item 5: Voltage's words stand at two sentences; the rest (the reasons, the facts
+ *  line) waits behind "Why?", a quiet disclosure under them, open on a click. */
+function Why({ text }: { text: string }) {
+  const [open, setOpen] = useState(false)
+  const id = useId()
+  return (
+    <div className="flex flex-col items-start gap-1.5" data-testid="why">
+      <button type="button" className="act -ml-2 h-8 px-2 pointer-coarse:h-11" aria-expanded={open} aria-controls={id} onClick={() => setOpen((o) => !o)}>
+        {open ? 'Hide why' : 'Why?'}
+      </button>
+      {open && <div id={id} className="pm text-sm leading-relaxed whitespace-pre-line" data-testid="why-text"><Markdown text={text} /></div>}
+    </div>
   )
 }
 
@@ -228,6 +243,8 @@ interface VoltagePaneProps {
   summary?: TurnSummary | null
   /** Rehearsal item 7: a Reviewer cannot ask for changes; this sentence stands where the chips and the composer would. */
   readOnly?: string | null
+  /** Run 5 item 5: the simple view: the trace leaves out the tools' internal names (read_transcript). */
+  simple?: boolean
 }
 
 /** Voltage's pane (Volt, 2026-10-18): black in both themes. The avatar and the
@@ -235,7 +252,7 @@ interface VoltagePaneProps {
  *  a question as a gate card — then the chips and the composer. */
 export function VoltagePane({
   messages, projectId, state, busy, need, engine, chips = [], cap, spend, question, onAnswer, turnCap, onSubmit, placeholder = 'Say what to change…', sendLabel = 'Send',
-  inputRef, seed, suggestions = [], onChipEvent, seeing, before, children, working, empty, onShowMe, picked, steps = [], summary, readOnly,
+  inputRef, seed, suggestions = [], onChipEvent, seeing, before, children, working, empty, onShowMe, picked, steps = [], summary, readOnly, simple,
 }: VoltagePaneProps) {
   const [prompt, setPrompt] = useState('')
   const [openTrace, setOpenTrace] = useState<number | null>(null)
@@ -345,7 +362,7 @@ export function VoltagePane({
           {turns.length === 0 && !before && empty}
           {hidden > 0 && (
             <button type="button" className="tag pm flex gap-2.5 rounded-lg bg-psunk px-3 py-2 text-left" onClick={() => setShowAll(true)}>
-              <span className="flex-1">{hidden} earlier {hidden === 1 ? 'turn' : 'turns'}</span><span className="tnum">show</span>
+              <span className="flex-1">{hidden} earlier {hidden === 1 ? 'turn' : 'turns'}</span><span>Show</span>
             </button>
           )}
           {shown.map((t, i) => {
@@ -369,11 +386,16 @@ export function VoltagePane({
                   <button type="button" className="tag pm self-start bg-transparent p-0 text-left hover:text-ptext" onClick={() => setOpenTrace(index)} data-testid="trace-details">
                     Details · {t.steps.length} {t.steps.length === 1 ? 'step' : 'steps'} →
                   </button>
-                ) : <Trace steps={t.steps} open={openTrace === index} onToggle={() => setOpenTrace((o) => (o === index ? null : index))} spend={isLatest && t.user ? spend : null} />)}
+                ) : <Trace steps={t.steps} open={openTrace === index} onToggle={() => setOpenTrace((o) => (o === index ? null : index))} spend={isLatest && t.user ? spend : null} simple={simple} />)}
                 {t.cards.map((c) => <Previews key={c.seq} projectId={projectId} m={c} />)}
                 {t.said.length > 0 && (
                   <div className="flex flex-col gap-2.5 text-[15px] leading-relaxed [&_strong]:font-medium [&_strong]:text-volt">
-                    {t.said.map((m, k) => <div key={m.seq ?? k}><span className="sr-only">Voltage: </span><Markdown text={m.text} /></div>)}
+                    {t.said.map((m, k) => (
+                      <div key={m.seq ?? k} className="flex flex-col gap-1">
+                        <div><span className="sr-only">Voltage: </span><Markdown text={m.text} /></div>
+                        {m.data?.why && <Why text={m.data.why} />}
+                      </div>
+                    ))}
                     {/* G8: a thumb on Voltage's reply, once the turn has said its piece. */}
                     {t.user && !(isLatest && working) && t.said[t.said.length - 1].seq != null && <Thumbs target="turn" targetId={`m${t.said[t.said.length - 1].seq}`} dark />}
                   </div>

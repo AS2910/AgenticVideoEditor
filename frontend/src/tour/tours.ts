@@ -48,9 +48,9 @@ export const guidedRun: Tour = {
     },
     {
       targets: ['proposal-row', 'playback-switch'],
-      title: 'Hear it in the video, then flip to As shot',
-      body: 'Play the new line in place, then switch to As shot at the top (or press O) to hear the clip without it.',
-      hint: '→ Click Hear it, then As shot',
+      title: 'Hear it in the video, then without it',
+      body: 'Play the new line in place, then turn off Hear changes at the top (or press O) to hear the clip as shot.',
+      hint: '→ Click Hear it, then Hear changes',
       action: 'Hear it',
       advanceOn: { event: 'heard-and-original' },
     },
@@ -101,7 +101,7 @@ export const showMe: Record<'goal' | 'add' | 'export' | 'save-voice' | 'autonomy
   export: {
     id: 'export',
     steps: [
-      { target: 'playback-switch', title: 'Final is what you will get', body: 'Final plays what is in the video. With proposals adds what is still waiting for you.', action: 'Next', advanceOn: 'click' },
+      { target: 'playback-switch', title: 'Hear changes plays what you will get', body: 'With Hear changes on, the player plays your changes. Off, it plays the video as shot.', action: 'Next', advanceOn: 'click' },
       { target: 'export', title: 'Export renders the file', body: 'An MP4 with everything you added, ready to download or share. Proposals you did not add stay out.', hint: '→ Click Export', action: 'Export', advanceOn: { event: 'export-opened' } },
     ],
   },

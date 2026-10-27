@@ -734,3 +734,25 @@ describe('A3: the project words on a line', () => {
     expect(screen.queryByTestId('banned-warning')).toBeNull()
   })
 })
+
+describe('LineDoc: the simple view (run 5 item 5)', () => {
+  const arranged: ArrangementView = {
+    arrangement: EMPTY, duration: 12, overrun: 0, ease_ok: true, min_gap_default: 0.15, can_undo: false,
+    lines: place(specs(STATEMENTS), EMPTY).map((p, i) => ({ ...p, index: i + 1, text: STATEMENTS[i].text, speaker: STATEMENTS[i].speaker, orig_start: STATEMENTS[i].start, orig_end: STATEMENTS[i].end, length: STATEMENTS[i].end - STATEMENTS[i].start, gap: 0, replaced_by: null })),
+  }
+  it('has no counts, no timing bar and no "Original" on untouched lines; a proposal keeps its chip and verbs', () => {
+    doc({ simple: true, items: [item()], arranged, onArrange: vi.fn() })
+    expect(screen.queryByTestId('counts')).toBeNull()
+    expect(screen.queryByTestId('arrange-bar')).toBeNull()
+    expect(screen.queryByText('3 lines')).toBeNull()
+    expect(screen.getAllByTestId('row-chip').map((c) => c.textContent)).toEqual(['Ready to hear'])
+    expect(screen.getByRole('button', { name: /Add it/ })).toBeInTheDocument()
+  })
+
+  it('under More controls the counts, the timing bar and every chip are back', () => {
+    doc({ items: [item()], arranged, onArrange: vi.fn() })
+    expect(screen.getByTestId('counts')).toBeInTheDocument()
+    expect(screen.getByTestId('arrange-bar')).toBeInTheDocument()
+    expect(screen.getAllByTestId('row-chip').map((c) => c.textContent)).toEqual(['Original', 'Ready to hear', 'Original'])
+  })
+})

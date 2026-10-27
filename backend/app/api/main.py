@@ -1181,6 +1181,9 @@ def _prefs(owner: str) -> dict:
         "ask_before": _ask_before(saved.get("ask_before")),
         "ask_over_usd": _clamp_ask_over_usd(float(saved["ask_over_usd"])) if saved.get("ask_over_usd") is not None
         else DEFAULT_ASK_OVER_USD,
+        # Run 5 item 5: the editor's "More controls" (Bed, Effect, Fine-tune, counts, the three
+        # play modes, Tracks). Off until the user turns it on, for new and existing users alike.
+        "more_controls": bool(saved.get("more_controls", False)),
     }
 
 
@@ -1218,6 +1221,8 @@ class PrefsUpdate(BaseModel):
     ask_before: dict[str, bool] | None = None
     # Run 5 item 2: "Ask me before spending more than $X" a turn, under Check with me.
     ask_over_usd: float | None = None
+    # Run 5 item 5: the editor's simple view (False) or More controls (True), remembered per user.
+    more_controls: bool | None = None
 
 
 @app.get("/me/settings")
@@ -1248,6 +1253,8 @@ def update_my_settings(req: PrefsUpdate, owner: str = Depends(current_owner)) ->
         prefs["ask_before"] = _ask_before({**prefs["ask_before"], **req.ask_before})
     if req.ask_over_usd is not None:
         prefs["ask_over_usd"] = _clamp_ask_over_usd(req.ask_over_usd)
+    if req.more_controls is not None:
+        prefs["more_controls"] = req.more_controls
     repo.set_meta(f"prefs:{owner}", json.dumps(prefs))
     return prefs
 
@@ -1271,6 +1278,8 @@ def _settings(project_id: str, owner: str | None = None) -> dict:
         "model": settings.agent_model,
         # Run 5 item 2: the caller's own limit under Check with me, read-only here (Settings sets it).
         "ask_over_usd": _prefs(owner)["ask_over_usd"],
+        # Run 5 item 5: the simple view or More controls, the user's own (the editor's toggle sets it).
+        "more_controls": _prefs(owner)["more_controls"],
         # 2026-10-20: how lines are mixed and how loud the render lands.
         "mix": {**MIX_DEFAULTS, **(saved.get("mix") or {})},
     }
@@ -7780,10 +7789,12 @@ def _start_turn(project_id: str, record: ProjectRecord, text: str, owner: str, a
             outcome = replace(outcome, reply=(outcome.reply or "").rstrip() + "\n\n" + " ".join(fixes))
         if outcome.reply:
             outcome = replace(outcome, reply=plain(outcome.reply, text))
-            from app.agent.reply_lint import lint
+            from app.agent.reply_lint import lint, split
             if issues := lint(outcome.reply, text):
                 logging.getLogger(__name__).info("reply lint for %s: %s", project_id, ", ".join(issues))
-            repo.add_message(project_id, "assistant", outcome.reply)
+            # Run 5 item 5: two sentences stand in the thread; the rest waits behind "Why?".
+            said, why = split(outcome.reply, text)
+            repo.add_message(project_id, "assistant", said, data={"why": why} if why else None)
         # What Voltage's own thinking cost this turn, as a step of its own (20d):
         # the tools say what they spent; this is the rest of the turn's money.
         thought = ledger.spent_usd_since(project_id, started_at, vendor="anthropic")

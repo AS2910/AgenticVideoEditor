@@ -38,7 +38,7 @@ Colour never carries meaning alone: every state has a word (Proposed, ✓ In the
 Three faces, self-hosted (`@fontsource-variable/*`, no network request):
 - **Space Grotesk** (`.disp`, `--font-display`, letter-spacing −0.02em) for display: the wordmark, page titles (26–40 px), card titles, big numbers, and every `.btn`.
 - **Geist** (`--font-sans`, body 14 px) for UI and sentences; the transcript's words are `.say` 16 px / 1.55.
-- **JetBrains Mono** (`--font-mono`, `.tnum`) for times, money, counts, tags and the trace. `.tag` and `.who` are 12 px mono, uppercase, tracked (.05–.06em).
+- **JetBrains Mono** (`--font-mono`, `.tnum`) for timecodes and costs only (run 5 item 5). Labels (`.tag`, `.who`, `.stamp`, `.seg`, `.nav`) are sentence case in Geist, 12 to 13 px, no capitals and no tracking; `e2e/simple-view.spec.ts` fails on CSS capitals or on mono text that is more than a time or an amount.
 
 **12 px is the floor**; nothing smaller, nothing in 8–10 px however the hand-off drew it. One `h1` per screen. Verdicts are sentences first; **no number appears that was not measured or recorded.**
 
@@ -70,6 +70,10 @@ Every surface reads the same jobs (`frontend/src/jobs/model.ts`, contract in `do
 - **Chat**: a picked option stays on its card (off, "Your pick"), your words echo at once, a step list under them updates in place, one summary closes the turn with Undo all (asked once) and Hear changes last.
 - **Toasts**: one at a time, bottom centre, coalesced ("3 lines ready"); a failure is never replaced by good news. The tab title carries "● " while jobs run and "Ready · " for a moment after.
 - No time is shown that was not measured: an estimate appears only once jobs of that kind have finished.
+
+## The simple view (run 5 item 5)
+
+New users (and anyone who has not asked for more) see the player, the transcript and Voltage. The header carries **Hear changes** (a switch: off = As shot; on = With proposals while a proposal waits, else Edited) and **More controls** (`aria-pressed`, kept per user in `/me/settings`), which brings back the three play modes, Tracks, the counts, the timing bar, Voice · Bed · Effect, Fine-tune and the "Original" chip. Simple-view words carry no version numbers and no "render" or "preview". Voltage's words stand at two sentences; the rest is behind **Why?**. In the editor the Get started pill sits at the end of the status strip.
 
 ## The transcript (one transcript, four verbs)
 

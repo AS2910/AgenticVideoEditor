@@ -194,10 +194,12 @@ export interface StripFacts {
   /** A render just finished and is playing (for "Ready. v4 is playing"). */
   justReady?: boolean
   now?: number
+  /** Run 5 item 5: the simple view's words: no version numbers, no "render" or "preview". */
+  plain?: boolean
 }
 
 /** One line: "Voicing line 2 of 5 · Jeevan · about 12 s" -> "Checking fit" -> "Rendering preview v4" -> "Ready. v4 is playing"; idle: "Up to date · v4 · 2 min ago". */
-export function stripState({ jobs, turn, playing, stale, justReady, now }: StripFacts): StripState {
+export function stripState({ jobs, turn, playing, stale, justReady, now, plain }: StripFacts): StripState {
   const active = jobs.filter(isActive)
   const render = active.find(isRender)
   const voice = active.find((j) => isVoice(j) && j.status === 'running') ?? active.find(isVoice)
@@ -214,7 +216,8 @@ export function stripState({ jobs, turn, playing, stale, justReady, now }: Strip
   if (render) {
     const v = render.detail?.version
     const eta = aboutEta(render.eta_s)
-    return { busy: true, tone: 'busy', text: [`Rendering ${render.kind === 'export' ? 'export' : 'preview'}${v ? ` v${v}` : ''}`, eta].filter(Boolean).join(' · ') }
+    const what = plain ? (render.kind === 'export' ? 'Making your file' : 'Updating the player') : `Rendering ${render.kind === 'export' ? 'export' : 'preview'}${v ? ` v${v}` : ''}`
+    return { busy: true, tone: 'busy', text: [what, eta].filter(Boolean).join(' · ') }
   }
   // A1: a "bring up to date" job wraps a turn; while the turn runs, its step says more (A2: so does a check's Fix in all; F4: a batch's video).
   const wraps = (j: ActivityJob) => j.kind === 'brief_update' || j.kind === 'check' || j.kind === 'batch'
@@ -225,9 +228,9 @@ export function stripState({ jobs, turn, playing, stale, justReady, now }: Strip
   }
   const update = active.find(wraps)
   if (update) return { busy: true, tone: 'busy', text: update.step_label || (update.kind === 'check' ? 'Fixing an issue from the project check' : update.kind === 'batch' ? 'Working on it as part of a batch' : 'Bringing it up to date with the brief') }
-  if (stale) return { busy: false, tone: 'idle', text: 'Changes not in preview yet' }
-  if (justReady && playing) return { busy: false, tone: 'ready', text: `Ready. v${playing.version} is playing` }
-  if (playing) return { busy: false, tone: 'idle', text: ['Up to date', `v${playing.version}`, ago(playing.created_at, now)].filter(Boolean).join(' · ') }
+  if (stale) return { busy: false, tone: 'idle', text: plain ? 'Your changes are not in the player yet' : 'Changes not in preview yet' }
+  if (justReady && playing) return { busy: false, tone: 'ready', text: plain ? 'Ready to play' : `Ready. v${playing.version} is playing` }
+  if (playing) return { busy: false, tone: 'idle', text: ['Up to date', plain ? null : `v${playing.version}`, ago(playing.created_at, now)].filter(Boolean).join(' · ') }
   return { busy: false, tone: 'idle', text: 'Up to date' }
 }
 

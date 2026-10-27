@@ -25,8 +25,10 @@ export const BETA_CHECKLIST: ChecklistItem[] = [
 ]
 
 /** The "Get started 2/5" pill at the bottom left, opening the checklist card.
- *  Gone once every item is done, or once it is hidden. In the beta it is the welcome checklist. */
-export function Checklist({ onShowMe, className }: { onShowMe: (tourId: string) => void; className?: string }) {
+ *  Gone once every item is done, or once it is hidden. In the beta it is the welcome checklist.
+ *  Run 5 item 5: `inline` in the editor, at the end of the status strip, the card dropping
+ *  under it: a pill fixed at the bottom left covered the transcript at phone width. */
+export function Checklist({ onShowMe, className, inline = false }: { onShowMe: (tourId: string) => void; className?: string; inline?: boolean }) {
   const { onboarding, loaded, hideChecklist } = useOnboarding()
   const beta = useFlags().enabled('beta.cohort')
   const [open, setOpen] = useState(false)
@@ -36,10 +38,8 @@ export function Checklist({ onShowMe, className }: { onShowMe: (tourId: string) 
   const done = items.filter((i) => onboarding.checklist.includes(i.id)).length
   if (!loaded || onboarding.checklist_hidden || done >= items.length) return null
 
-  return (
-    <div className={cn('fixed bottom-5 left-5 z-30 flex w-[300px] max-w-[calc(100vw-40px)] flex-col items-start', className)}>
-      {open && (
-        <section id={panel} aria-label={title} className="rise mb-2.5 w-full rounded-xl border-[1.5px] border-ink bg-card px-4 pt-3.5 pb-1.5 text-foreground shadow-ink-lg">
+  const card = open && (
+        <section id={panel} aria-label={title} className={cn('rise rounded-xl border-[1.5px] border-ink bg-card px-4 pt-3.5 pb-1.5 text-foreground shadow-ink-lg', inline ? 'absolute top-full right-0 z-40 mt-1.5 w-[300px] max-w-[calc(100vw-32px)]' : 'mb-2.5 w-full')}>
           <div className="flex items-baseline gap-2">
             <h2 className="disp m-0 text-lg font-bold">{title}</h2>
             <span className="tnum font-semibold">{done}/{items.length}</span>
@@ -64,14 +64,18 @@ export function Checklist({ onShowMe, className }: { onShowMe: (tourId: string) 
             })}
           </ul>
         </section>
-      )}
+  )
+  return (
+    <div className={cn(inline ? 'relative flex shrink-0 flex-col items-end' : 'fixed bottom-5 left-5 z-30 flex w-[300px] max-w-[calc(100vw-40px)] flex-col items-start', className)} data-testid="checklist">
+      {!inline && card}
       <button
         type="button" aria-expanded={open} aria-controls={open ? panel : undefined} aria-label={`${title}, ${done} of ${items.length} done`}
-        className="inline-flex h-10 items-center gap-2.5 rounded-full bg-ink px-3.5 text-volt hover:opacity-90 focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none"
+        className={cn('inline-flex items-center gap-2.5 rounded-full bg-ink px-3.5 text-volt hover:opacity-90 focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none', inline ? 'h-7 pointer-coarse:h-11' : 'h-10')}
         onClick={() => setOpen((o) => !o)}
       >
         <span className="tag">{beta ? 'Welcome' : 'Get started'}</span><span className="tnum font-semibold">{done}/{items.length}</span>
       </button>
+      {inline && card}
     </div>
   )
 }

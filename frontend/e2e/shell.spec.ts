@@ -128,6 +128,8 @@ test.describe('the editor shell', () => {
     expect((await player.boundingBox())!.y).toBe(before)     // only the list moved
     // Tracks open: the inner height is measured again, and the column scrolls to show them.
     const h0 = await list.evaluate((el) => el.getBoundingClientRect().height)
+    // Run 5 item 5: Tracks is under More controls.
+    await page.getByRole('button', { name: /More controls/ }).click()
     await page.getByRole('button', { name: /^Tracks/ }).click()
     await page.locator('#tracks').scrollIntoViewIfNeeded()
     await expect(page.locator('#tracks')).toBeInViewport()

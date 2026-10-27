@@ -157,7 +157,7 @@ async function serve(page: Page, world: World) {
   const project = () => ({
     video_id: 'p1', project_id: null, project_name: null, filename: 'riverside-final-round.mp4', duration: 30, media: MEDIA, created_at: AT,
     consent_granted_at: AT, transcript: LINES.flatMap((l) => l.text.split(' ').map((w, k, ws) => ({ text: w, start: l.start + (k * (l.end - l.start)) / ws.length, end: l.start + ((k + 0.9) * (l.end - l.start)) / ws.length }))),
-    statements: LINES, speakers: [{ label: 'A', name: 'Jeevan', voice_id: null }], settings: { autonomy: 'ask', turn_usd: 0.5 },
+    statements: LINES, speakers: [{ label: 'A', name: 'Jeevan', voice_id: null }], settings: { autonomy: 'ask', turn_usd: 0.5, more_controls: true },   // run 5 item 5: versions are named under More controls
     plan: world.plan(), reading: { opening: 'One commentator, six lines.', roles: [] }, suggestions: [], frames: [], edits: [KEPT],
     messages: [
       { role: 'user', text: 'Add commentary for the five big moments', kind: 'say', seq: 1 },

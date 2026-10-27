@@ -86,7 +86,7 @@ describe('the tour engine', () => {
 
     await userEvent.click(within(coach()).getByRole('button', { name: 'Go ahead' }))
     expect(coach()).toHaveTextContent('Step 5 of 7')
-    expect(coach()).toHaveTextContent('Hear it in the video, then flip to As shot')
+    expect(coach()).toHaveTextContent('Hear it in the video, then without it')
     await userEvent.click(within(coach()).getByRole('button', { name: 'Hear it' }))
     expect(coach()).toHaveTextContent('Step 6 of 7')
     await userEvent.click(within(coach()).getByRole('button', { name: 'Add it' }))

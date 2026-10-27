@@ -1,4 +1,5 @@
 import { ChevronDown, Square } from 'lucide-react'
+import type { ReactNode } from 'react'
 import { cn } from '@/lib/utils'
 import type { StripState } from '../jobs/model'
 
@@ -11,13 +12,15 @@ interface StatusStripProps {
   stopping?: boolean
   /** The tour and the tests find it here. */
   open?: boolean
+  /** Run 5 item 5: the Get started pill sits at the strip's end in the editor, over nothing. */
+  extra?: ReactNode
 }
 
 /** The status strip (2026-10-20): one line under the header, always there.
  *  While anything runs it says what, which line and how long ("Voicing line 2
  *  of 5 · Jeevan · about 12 s"); idle it is a quiet "Up to date · v4 · 2 min
  *  ago". Clicking it opens Activity; Stop sits at its end while work runs. */
-export function StatusStrip({ state, onOpen, onStop, stopping, open }: StatusStripProps) {
+export function StatusStrip({ state, onOpen, onStop, stopping, open, extra }: StatusStripProps) {
   return (
     <div
       className={cn('flex min-h-8 min-w-0 items-center gap-2 border-b border-line px-4 sm:px-6', state.busy ? 'bg-card' : 'bg-background')}
@@ -42,6 +45,7 @@ export function StatusStrip({ state, onOpen, onStop, stopping, open }: StatusStr
           <Square size={11} fill="currentColor" aria-hidden="true" />{stopping ? 'Stopping…' : 'Stop'}
         </button>
       )}
+      {extra}
     </div>
   )
 }

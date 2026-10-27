@@ -146,12 +146,15 @@ interface LineDocProps {
   activity?: RowActivity
   /** A3: the project's banned words; a line typed with one is warned about, never blocked. */
   bannedWords?: string[]
+  /** Run 5 item 5: the simple view. No counts, no timing bar, no Voice · Bed · Effect or Fine-tune,
+   *  and no "Original" chip on a line nothing happened to; the rest of a row is as it is. */
+  simple?: boolean
 }
 
 /** The picture's flex for a take, as a factor ("0.94"), or null when it plays as shot. */
 const eased = (c: Candidate) => (c.plan.flex && Math.abs(c.plan.flex - 1) > 0.005 ? c.plan.flex.toFixed(2) : null)
 
-const NOT_IN_VERSION = <span className="tag rounded-[4px] border border-dashed border-line2 px-1.5 py-px text-faint" data-testid="not-in-version">not in this version</span>
+const NOT_IN_VERSION = <span className="tag rounded-[4px] border border-dashed border-line2 px-1.5 py-px text-faint" data-testid="not-in-version">Not in this version</span>
 
 const overlaps = (a: { start: number; end: number }, b: { start: number; end: number }) =>
   a.start < b.end && b.start < a.end
@@ -263,7 +266,7 @@ export function LineDoc({
   onSeek, onHear, onAdd, onDiscard, onAddAll, onUndo, onRemove, onHearTake, onRole, mixLines = [], bedUnderDb = 15, onDelivery, onRetry,
   onShorten, onShortenAll, onEase,
   onEditingChange, onMove, onMoveKept, placing, onPlacing, duration, version = 'edited',
-  arranged, onArrange, onArrangeUndo, onPreview, activity = NO_ACTIVITY, bannedWords = [],
+  arranged, onArrange, onArrangeUndo, onPreview, activity = NO_ACTIVITY, bannedWords = [], simple = false,
 }: LineDocProps) {
   const chipOf = (facts: { item?: PlanItem | null; editId?: string | null; removed?: boolean }) => rowChip({ ...facts, ...activity })
   const asShot = version === 'as-shot'
@@ -322,6 +325,8 @@ export function LineDoc({
   // original timing shown instead, the "Starts at" being typed, the gap Tighten gaps uses.
   const [reorder, setReorder] = useState<{ key: string; index: number; moved: boolean } | null>(null)
   const [showOriginal, setShowOriginal] = useState(false)
+  // The simple view has no timing bar, so nothing can be left showing the original timing.
+  useEffect(() => { if (simple) setShowOriginal(false) }, [simple])
   const [startsAt, setStartsAt] = useState<{ key: string; text: string } | null>(null)
   const [gapText, setGapText] = useState(String(arranged?.min_gap_default ?? 0.15))
   const arrangement: Arrangement = arranged?.arrangement ?? EMPTY
@@ -739,7 +744,7 @@ export function LineDoc({
       <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground" data-testid="place">
         {!open ? (
           <>
-            <span className="tnum">Starts at {timecode(start)}</span>
+            <span>Starts at <span className="tnum">{timecode(start)}</span></span>
             {onPlacing && <LinkButton onClick={() => { onPlacing({ id, start, duration }); setPlaceText(timecode(start)) }}>Move</LinkButton>}
           </>
         ) : (
@@ -764,7 +769,7 @@ export function LineDoc({
 
   /** 2026-10-20: Voice · Bed · Effect on an added line, its facts, Fine-tune and the mix's word on it. */
   const levelControl = (plan: { role?: Role | null; offset_db?: number | null }, target: { editId?: string; candidate?: Candidate; item?: PlanItem }, at: Statement) => {
-    if (!onRole) return null
+    if (!onRole || simple) return null
     const measured = mixLines.find((m) => (target.editId && m.edit_id === target.editId) || (target.candidate && m.candidate_id === target.candidate.candidate_id)) ?? null
     return (
       <RoleControl
@@ -872,7 +877,7 @@ export function LineDoc({
                     <span className="tag text-faint">{f.label === 'SIM-o' ? 'Voice match' : f.label === 'UTMOS' ? 'Natural' : f.label}</span>
                     <span className="disp text-2xl font-bold">{num}</span>
                     <div className="meter"><span style={{ width: `${pct}%`, background: f.tone === 'needs' ? 'var(--warn)' : undefined }} /></div>
-                    <span className="tnum text-xs text-muted-foreground">bar {wants} · {n >= w ? 'pass' : 'below'}</span>
+                    <span className="text-xs text-muted-foreground">Bar <span className="tnum">{wants}</span> · {n >= w ? 'pass' : 'below'}</span>
                   </div>
                 )
               })}
@@ -986,7 +991,7 @@ export function LineDoc({
   }
   const dropMarker = () => drag && (
     <div className="relative mx-2.5 h-0 border-t-2 border-primary" data-testid="drop-line" role="presentation">
-      <span className="tnum absolute -top-3 right-0 rounded-full bg-primary px-2 py-0.5 text-xs font-semibold text-primary-foreground">Starts at {timecode(drag.to)}</span>
+      <span className="absolute -top-3 right-0 rounded-full bg-primary px-2 py-0.5 text-xs font-semibold text-primary-foreground">Starts at <span className="tnum">{timecode(drag.to)}</span></span>
     </div>
   )
 
@@ -1248,7 +1253,7 @@ export function LineDoc({
   /** Where a dragged line would land: a bar above it, with its new start. */
   const insertionBar = (start: number) => (
     <div className="relative mx-2.5 h-0 border-t-2 border-primary" data-testid="insertion-bar" role="presentation">
-      <span className="tnum absolute -top-3 right-0 rounded-full bg-primary px-2 py-0.5 text-xs font-semibold text-primary-foreground">Starts at {timecode(start)}</span>
+      <span className="absolute -top-3 right-0 rounded-full bg-primary px-2 py-0.5 text-xs font-semibold text-primary-foreground">Starts at <span className="tnum">{timecode(start)}</span></span>
     </div>
   )
 
@@ -1297,8 +1302,8 @@ export function LineDoc({
             </>
           ) : (
             <>
-              <button type="button" className="tnum rounded-sm underline decoration-dotted underline-offset-4 outline-none hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50" onClick={() => setStartsAt({ key: p.key, text: timecode(p.start) })} aria-label={`Starts at ${timecode(p.start)}: type another time to pin it`}>
-                Starts at {timecode(p.start)}
+              <button type="button" className="rounded-sm underline decoration-dotted underline-offset-4 outline-none hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50" onClick={() => setStartsAt({ key: p.key, text: timecode(p.start) })} aria-label={`Starts at ${timecode(p.start)}: type another time to pin it`}>
+                Starts at <span className="tnum">{timecode(p.start)}</span>
               </button>
               {p.pinned && (
                 <button type="button" className="act h-8 gap-1" onClick={() => unpin(p.key)} aria-label="Pinned. Unpin it so it follows the line before it" data-testid="pin">
@@ -1355,7 +1360,8 @@ export function LineDoc({
     const chip = !liveItem && pending && pending.status !== 'reading' && PENDING_CHIP[pending.status]
       ? { state: PENDING_CHIP[pending.status]!, label: CHIP_LABEL[PENDING_CHIP[pending.status]!] }
       : chipOf({ item: liveItem, editId: revision?.edit_id ?? null, removed })
-    const stamp = pending?.status === 'reading' ? <StatusBadge status="reading" role="status">{STATUS.reading}</StatusBadge> : <RowStamp chip={chip} />
+    const stamp = pending?.status === 'reading' ? <StatusBadge status="reading" role="status">{STATUS.reading}</StatusBadge>
+      : simple && chip.state === 'original' ? null : <RowStamp chip={chip} />
     const wordsButton = (
       <button className={cn(lineClass, proposed && 'text-lg')} onClick={() => open(order, 'edit')} title="Change the words" data-testid={shown ? 'revision' : undefined}>
         {(removed && !asShot) || (own?.mix === 'remove' && own.status === 'ready') ? <del>{s.text}</del>
@@ -1460,9 +1466,9 @@ export function LineDoc({
       <div className="flex flex-col gap-1.5 px-1 pt-1" ref={headRef} data-testid="transcript-head">
         <div className="flex flex-wrap items-end gap-3.5">
           <h2 className="disp m-0 text-[26px] leading-none font-bold">Transcript</h2>
-          <span className="tag pb-0.5 text-faint">{rows.length} {rows.length === 1 ? 'line' : 'lines'}</span>
+          {!simple && <span className="tag pb-0.5 text-faint">{rows.length} {rows.length === 1 ? 'line' : 'lines'}</span>}
           <span className="flex-1" />
-          {(proposals.length > 0 || inVideo > 0) && (
+          {!simple && (proposals.length > 0 || inVideo > 0) && (
             <span className="tag pb-1" role="status" aria-label="Where things stand" data-testid="counts">
               <span className={cn('rounded-[3px] px-1.5 py-px', proposals.length > 0 ? 'bg-volt text-ink' : 'bg-sunk')}>{proposals.length}</span> proposed · {inVideo} added
             </span>
@@ -1483,7 +1489,7 @@ export function LineDoc({
         </span>
       </div>
 
-      {specsOf.length > 1 && onArrange && (
+      {specsOf.length > 1 && onArrange && !simple && (
         <div className="flex flex-wrap items-center gap-x-3 gap-y-2 px-1 text-sm" role="group" aria-label="Timing of the lines" data-testid="arrange-bar">
           <button type="button" className="act" aria-pressed={showOriginal} onClick={() => setShowOriginal((v) => !v)}>
             <span aria-hidden="true" className={cn('inline-block h-3.5 w-6 rounded-full border border-line2 p-px transition-colors', showOriginal && 'bg-foreground')}>

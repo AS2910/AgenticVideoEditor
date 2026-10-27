@@ -5,8 +5,10 @@
    primary buttons; no glows, blurs or gradients. Light and dark are siblings
    (the pane is black in both). Colour lives here as tokens; components use
    the utilities and the component classes below and never spell a colour.
-   Space Grotesk for display, Geist for UI and body, JetBrains Mono for every
-   timecode, cost, count and uppercase tag. See design-system/voltage/MASTER.md. */
+   Space Grotesk for display, Geist for UI, body and labels, JetBrains Mono
+   only for timecodes and costs (`.tnum`). Run 5 item 5: labels (tags, stamps,
+   speaker names, the play switch, the nav) are sentence case in the UI face,
+   no capitals and no mono. See design-system/voltage/MASTER.md. */
 @import 'tailwindcss';
 @import 'tw-animate-css';
 @import '@fontsource-variable/space-grotesk';
@@ -243,8 +245,9 @@
   }
   /* Type */
   .disp { font-family: var(--font-display); letter-spacing: -0.02em; }
-  .tag { font-family: var(--font-mono); font-size: 12px; font-weight: 500; letter-spacing: .06em; text-transform: uppercase; }
-  .who { font-family: var(--font-mono); font-size: 12px; font-weight: 500; letter-spacing: .05em; text-transform: uppercase; color: var(--faint); }
+  /* Run 5 item 5: labels in sentence case, the UI face; mono is for times and money (.tnum) only. */
+  .tag { font-family: var(--font-sans); font-size: 13px; font-weight: 500; letter-spacing: 0; }
+  .who { font-family: var(--font-sans); font-size: 13px; font-weight: 500; letter-spacing: 0; color: var(--muted-foreground); }
   .say { font-size: 16px; line-height: 1.55; }
   .meta { font-size: 13px; color: var(--muted-foreground); }
   .kbd { font-family: var(--font-mono); font-size: 12px; line-height: 1; padding: 3px 5px; border-radius: 4px; border: 1px solid currentColor; opacity: .7; }
@@ -270,15 +273,15 @@
   /* Rehearsal item 7: a quiet verb on the black pane reads in the pane's muted colour (the page's is too dark there). */
   .pane .act { color: var(--pmuted); }
   .pane .act:hover { background: var(--psunk); color: var(--ptext); }
-  /* Segmented control: mono uppercase; the active segment ink-filled with volt text */
+  /* Segmented control: sentence case; the active segment ink-filled with volt text */
   .segs { display: inline-flex; padding: 3px; gap: 2px; border: 1.5px solid var(--foreground); border-radius: 9px; }
-  .seg { font-family: var(--font-mono); font-size: 12px; font-weight: 500; letter-spacing: .05em; text-transform: uppercase; height: 30px; padding: 0 12px; border: 0; border-radius: 6px; background: transparent; color: var(--muted-foreground); cursor: pointer; white-space: nowrap; }
+  .seg { font-family: var(--font-sans); font-size: 13px; font-weight: 500; letter-spacing: 0; height: 30px; padding: 0 12px; border: 0; border-radius: 6px; background: transparent; color: var(--muted-foreground); cursor: pointer; white-space: nowrap; }
   .seg:hover { color: var(--foreground); }
   .seg.on, .seg[aria-pressed="true"], .seg[aria-selected="true"] { background: var(--ink); color: var(--volt); }
   .dark .seg.on, .dark .seg[aria-pressed="true"], .dark .seg[aria-selected="true"] { background: var(--volt); color: var(--ink); }
   .seg:focus-visible { outline: 3px solid color-mix(in oklch, var(--ring) 50%, transparent); outline-offset: 1px; }
   /* Stamps */
-  .stamp { font-family: var(--font-mono); font-size: 12px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; background: var(--volt); color: var(--ink); padding: 2px 7px; border-radius: 4px; white-space: nowrap; }
+  .stamp { font-family: var(--font-sans); font-size: 12px; font-weight: 600; letter-spacing: 0; background: var(--volt); color: var(--ink); padding: 2px 7px; border-radius: 4px; white-space: nowrap; }
   .stamp.need { background: var(--warn); }
   .stamp.in { background: transparent; color: var(--muted-foreground); border: 1px solid var(--line2); }
   .stamp.inkd { background: var(--ink); color: var(--volt); }
@@ -316,10 +319,10 @@
   .lineref { font: inherit; color: inherit; background: none; border: 0; padding: 0; text-decoration: underline; text-decoration-style: dotted; text-underline-offset: 3px; cursor: pointer; }
   .lineref:focus-visible { outline: 3px solid color-mix(in oklch, var(--ring) 50%, transparent); outline-offset: 2px; border-radius: 2px; }
   .pane .pm { color: var(--pmuted); }
-  .trace { font-family: var(--font-mono); font-size: 12.5px; line-height: 1.5; display: flex; flex-direction: column; gap: 5px; }
+  .trace { font-size: 13px; line-height: 1.5; display: flex; flex-direction: column; gap: 5px; }
   .trace .ln { display: grid; grid-template-columns: 44px 14px minmax(0, 1fr) auto; gap: 8px; align-items: baseline; animation: rise .45s cubic-bezier(.2, .8, .2, 1) both; }
   .trace .ln:nth-child(2) { animation-delay: .15s; } .trace .ln:nth-child(3) { animation-delay: .3s; } .trace .ln:nth-child(4) { animation-delay: .45s; } .trace .ln:nth-child(5) { animation-delay: .6s; }
-  .trace .ts { color: var(--pmuted); opacity: .8; }
+  .trace .ts { font-family: var(--font-mono); font-size: 12px; color: var(--pmuted); opacity: .8; }
   .trace .g { color: var(--pline); filter: brightness(1.8); }
   .trace .c { color: var(--ptext); }
   .trace .tool { color: var(--pmuted); opacity: .8; }
@@ -342,7 +345,7 @@
   /* An option on a question or gate card: its words wrap, the button grows to fit them. */
   .pane .opt { white-space: normal; text-align: left; width: fit-content; max-width: 100%; height: auto; min-height: 32px; padding: 10px 14px; line-height: 1.35; display: inline-flex; flex-direction: column; align-items: flex-start; justify-content: center; gap: 3px; overflow-wrap: anywhere; }
   .pane .opt .detail { font-family: var(--font-sans); font-size: 13px; font-weight: 400; opacity: .78; }
-  .pane .opt .pick { font-family: var(--font-mono); font-size: 12px; font-weight: 500; letter-spacing: .06em; text-transform: uppercase; opacity: .8; white-space: nowrap; }
+  .pane .opt .pick { font-family: var(--font-sans); font-size: 12px; font-weight: 500; letter-spacing: 0; opacity: .8; white-space: nowrap; }
   @media (pointer: coarse) { .pane .opt { min-height: 44px; } }
   /* The avatar: slow volt bars idle, fast when working, amber when it needs you */
   .wave { display: inline-flex; align-items: center; gap: 2px; height: 20px; }
@@ -368,13 +371,13 @@
   .rec { animation: ringpulse 1.6s ease-out infinite; }
   /* Cards and nav on the account pages */
   .vcard { background: var(--card); border: 1.5px solid var(--foreground); border-radius: 12px; }
-  .nav a, .nav button { font-family: var(--font-mono); font-size: 12px; font-weight: 500; letter-spacing: .06em; text-transform: uppercase; color: var(--muted-foreground); text-decoration: none; padding: 7px 10px; border-radius: 6px; background: none; border: 0; cursor: pointer; }
+  .nav a, .nav button { font-family: var(--font-sans); font-size: 13px; font-weight: 500; letter-spacing: 0; color: var(--muted-foreground); text-decoration: none; padding: 7px 10px; border-radius: 6px; background: none; border: 0; cursor: pointer; }
   .nav a:hover, .nav button:hover { color: var(--foreground); background: var(--sunk); }
   .nav a.on, .nav button.on, .nav [aria-current="page"] { color: var(--volt); background: var(--ink); }
   .dark .nav a.on, .dark .nav button.on, .dark .nav [aria-current="page"] { color: var(--ink); background: var(--volt); }
   .meter { height: 6px; border-radius: 2px; background: var(--line); overflow: hidden; }
   .meter span { display: block; height: 100%; background: var(--foreground); animation: fill 1.2s .3s cubic-bezier(.2, .8, .2, 1) both; }
-  .lane-n { font-family: var(--font-mono); font-size: 12px; letter-spacing: .05em; text-transform: uppercase; color: var(--faint); }
+  .lane-n { font-family: var(--font-sans); font-size: 12px; letter-spacing: 0; color: var(--faint); }
   .blk { position: absolute; top: 0; height: 22px; border-radius: 4px; font-size: 12px; line-height: 20px; padding: 0 6px; overflow: hidden; white-space: nowrap; color: var(--foreground); font-family: var(--font-mono); background: var(--lane); transform-origin: left center; animation: grow .6s cubic-bezier(.2, .8, .2, 1) both; }
   .blk.p { background: var(--volt); border: 1.5px solid var(--ink); color: var(--ink); }
   /* Rehearsal item 7: on a touch screen every control is at least 44 px (MASTER.md Targets).

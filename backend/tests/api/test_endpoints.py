@@ -933,6 +933,8 @@ def test_settings_say_what_voltage_may_do_and_round_trip(client, project):
         "ask_before": {"ship": False, "clone": False, "design": False}, "model": main.settings.agent_model,
         # Run 5 item 2: the owner's limit under Check with me, read-only here.
         "ask_over_usd": 0.25,
+        # Run 5 item 5: the owner's simple view (False) or More controls, read-only here.
+        "more_controls": False,
         # 2026-10-20: the mix, each in its range.
         "mix": {"voice_default_lufs": -18.0, "bed_under_db": 15.0, "speech_clear_db": 10.0, "loudness": "social"},
     }
@@ -1957,7 +1959,7 @@ def test_my_defaults_round_trip_and_a_new_project_starts_from_them(client, sampl
     import app.api.main as main
     assert client.get("/me/settings").json() == {
         "autonomy": "ask", "turn_usd": main.settings.agent_turn_usd, "effort": main.settings.agent_effort,
-        "ask_before": {"ship": False, "clone": False, "design": False}, "ask_over_usd": 0.25}
+        "ask_before": {"ship": False, "clone": False, "design": False}, "ask_over_usd": 0.25, "more_controls": False}
     resp = client.put("/me/settings", json={"autonomy": "draft", "ask_before": {"ship": True}})
     assert resp.status_code == 200
     assert resp.json()["autonomy"] == "draft" and resp.json()["ask_before"] == {"ship": True, "clone": False, "design": False}

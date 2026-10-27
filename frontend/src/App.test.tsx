@@ -50,8 +50,17 @@ const SEGMENTS = [
   { start: 0.9, end: 2.3, kind: 'original', ref: 'sample-ad.mp4', artifact: null },
 ]
 
+/** Run 5 item 5: these tests were written for the full editor (the three play modes, Tracks, Bed,
+ *  Effect, the counts), so a video comes back with More controls on, as a user who turned it on;
+ *  `simpleView = true` (reset before each test) answers as a new user, in the simple view. */
+let simpleView = false
+const withControls = (body: unknown) => {
+  const b = body as { video_id?: string; media?: unknown; settings?: Record<string, unknown> } | null
+  if (simpleView || !b || typeof b !== 'object' || Array.isArray(b) || !b.video_id || !b.media) return body
+  return { ...b, settings: { more_controls: true, ...(b.settings ?? {}) } }
+}
 const ok = (body: unknown) =>
-  ({ ok: true, status: 200, json: async () => body, text: async () => '' }) as Response
+  ({ ok: true, status: 200, json: async () => withControls(body), text: async () => '' }) as Response
 
 const PLAN_ITEM = {
   item_id: 'i1', selection: { start: 0, end: 2.3 }, old_text: 'Get 20% off today only.',
@@ -238,6 +247,7 @@ async function hearNewWords(user: ReturnType<typeof userEvent.setup>, words = 'G
 
 beforeEach(() => {
   vi.restoreAllMocks()
+  simpleView = false
   window.location.hash = ''   // opening a project writes its id here
 })
 
@@ -1136,7 +1146,7 @@ describe('App with Voltage as an agent (Phase 20a)', () => {
     expect(within(list).getAllByRole('listitem').map((li) => li.textContent)).toEqual([
       '├Listened: no one speaksfree', '├Looked through 25 voicesfree', '└Voiced “Welcome to Goa.” with Varsha · warm and unhurried$0.03',
     ])
-    expect(screen.getByTestId('trace')).toHaveTextContent('Trace · 3 steps')
+    expect(screen.getByTestId('trace')).toHaveTextContent('What Voltage did · 3 steps')
     expect(await screen.findByText("One line over the opening shot, in Varsha's voice. Hear it below.")).toBeInTheDocument()
     await waitFor(() => expect(screen.getByText('Ready to hear')).toBeInTheDocument())
     // 20e: the verbs are on the proposal's row; the panel holds no ship card.
@@ -1608,7 +1618,7 @@ describe('App: Edited, As shot, With proposals (2026-10-19)', () => {
     expect(screen.getByRole('listitem', { name: /Line at 0:00/ })).toHaveTextContent('Get 20% off today only.')
     expect(within(screen.getByRole('listitem', { name: /Line at 0:00/ })).getByTestId('not-in-version')).toBeInTheDocument()
     const dimmed = screen.getByRole('listitem', { name: 'Added line at 0:01' })
-    expect(within(dimmed).getByTestId('not-in-version')).toHaveTextContent('not in this version')
+    expect(within(dimmed).getByTestId('not-in-version')).toHaveTextContent('Not in this version')
     expect(dimmed).toHaveClass('opacity-50')
     expect(screen.getByTestId('lane-a2')).toHaveAttribute('data-muted', 'true')
 
@@ -1641,6 +1651,54 @@ describe('App: Edited, As shot, With proposals (2026-10-19)', () => {
     expect(badge()).toHaveTextContent('Playing original')
   })
 
+  // Run 5 item 5: a new user's editor is the simple view.
+  it('opens a new user in the simple view: Hear changes, and no play modes, Tracks, counts or Bed, Effect, Fine-tune', async () => {
+    simpleView = true
+    opened(EDITS, READY)
+    const inner = globalThis.fetch as unknown as (url: string, init?: RequestInit) => Promise<Response>
+    const saved: unknown[] = []
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.endsWith('/me/settings') && init?.method === 'PUT') { saved.push(JSON.parse(String(init.body))); return ok({ more_controls: true }) }
+      return inner(url, init)
+    }))
+    const user = userEvent.setup()
+    render(<App />)
+    const hear = await screen.findByRole('switch', { name: 'Hear changes' })
+    await waitFor(() => expect(hear).toHaveAttribute('aria-checked', 'true'))
+    expect(badge()).toHaveTextContent('Playing your changes')
+    expect(screen.queryByRole('group', { name: 'Play' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Tracks' })).toBeNull()
+    expect(screen.queryByTestId('counts')).toBeNull()
+    expect(screen.queryByRole('group', { name: 'What this line is in the mix' })).toBeNull()
+    expect(screen.queryByText('Fine-tune')).toBeNull()
+    expect(screen.getByTestId('spend')).toHaveTextContent('Spent')
+    // Off plays the video as shot; on again plays the changes with the proposal waiting (With proposals).
+    await user.click(hear)
+    expect(hear).toHaveAttribute('aria-checked', 'false')
+    expect(badge()).toHaveTextContent('Playing the original')
+    await user.click(hear)
+    expect(hear).toHaveAttribute('aria-checked', 'true')
+    // More controls: the three modes, Tracks and the counts come back, and the choice is kept for the user.
+    await user.click(screen.getByRole('button', { name: /More controls/ }))
+    expect(saved).toEqual([{ more_controls: true }])
+    const play = screen.getByRole('group', { name: 'Play' })
+    expect(within(play).getAllByRole('button').map((b) => b.textContent)).toEqual(['Edited', 'With proposals', 'As shot'])
+    expect(within(play).getByRole('button', { name: /With proposals/ })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByRole('button', { name: 'Tracks' })).toBeInTheDocument()
+    expect(screen.getByTestId('counts')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Fewer controls/ })).toHaveAttribute('aria-pressed', 'true')
+  })
+
+  it('in the simple view, Hear changes is off and says why while nothing has changed', async () => {
+    simpleView = true
+    opened([])
+    render(<App />)
+    const hear = await screen.findByRole('switch', { name: 'Hear changes' })
+    expect(hear).toHaveAttribute('aria-checked', 'false')
+    expect(hear).toBeDisabled()
+    expect(hear).toHaveAttribute('title', 'Nothing has changed yet')
+  })
+
   it('keeps the moment when switching mid-playback', async () => {
     opened(EDITS)
     const user = userEvent.setup()
@@ -1669,9 +1727,9 @@ describe('Spend scopes in the editor header', () => {
     await user.click(pill)
     const pop = screen.getByRole('dialog', { name: 'Spend' })
     expect(within(pop).getByTestId('meter-video')).toHaveTextContent('This video $0.61 of $10')
-    expect(within(pop).getByTestId('meter-project')).toHaveTextContent('Project Ashish Testing $0.61 of $1stops paid work first')
+    expect(within(pop).getByTestId('meter-project')).toHaveTextContent('Project Ashish Testing $0.61 of $1Stops paid work first')
     expect(within(pop).getByTestId('meter-month')).toHaveTextContent('October $3.10 of $100')
-    expect(within(pop).getByTestId('meter-month')).not.toHaveTextContent('stops paid work first')
+    expect(within(pop).getByTestId('meter-month')).not.toHaveTextContent('Stops paid work first')
     expect(within(pop).getByRole('link', { name: 'See this video in Usage →' })).toHaveAttribute('href', '#usage/v/p1')
     expect(unlabelledMoney(screen.getByTestId('editor-header'))).toEqual([])
     expect(unlabelledMoney(screen.getByRole('log', { name: 'The conversation' }))).toEqual([])
@@ -1692,7 +1750,7 @@ describe('Spend scopes in the editor header', () => {
     const pop = screen.getByRole('dialog', { name: 'Spend' })
     expect(within(pop).getByTestId('meter-no-project')).toHaveTextContent('No project')
     expect(within(pop).queryByTestId('meter-project')).toBeNull()
-    expect(within(pop).getByTestId('meter-video')).toHaveTextContent('stops paid work first')
+    expect(within(pop).getByTestId('meter-video')).toHaveTextContent('Stops paid work first')
     expect(unlabelledMoney(pop)).toEqual([])
   })
 })

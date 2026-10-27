@@ -21,7 +21,7 @@ export function ScopeMeter({ scope, s, binding = false }: { scope: SpendScopeKey
         <span className="tnum text-[13px]">{ofCeiling(s)}{s.ceiling_usd == null && <span className="text-faint"> · no ceiling</span>}</span>
       </div>
       {s.ceiling_usd != null && <FillBar share={share} height={8} strong={binding} label={`${s.label}: ${ofCeiling(s)}`} />}
-      {binding && <span className="stamp self-start">stops paid work first</span>}
+      {binding && <span className="stamp self-start">Stops paid work first</span>}
     </div>
   )
 }
@@ -30,7 +30,7 @@ export function ScopeMeter({ scope, s, binding = false }: { scope: SpendScopeKey
  *  "Project $0.61 of $10". It opens the scopes stacked (this video, the
  *  project or "No project", the month), the binding one marked, and a link
  *  to Usage filtered to this video. */
-export function SpendPill({ summary, videoId }: { summary: SpendSummary | null; videoId: string }) {
+export function SpendPill({ summary, videoId, simple = false }: { summary: SpendSummary | null; videoId: string; /** Run 5 item 5: the simple view says "Spent", whichever scope binds. */ simple?: boolean }) {
   const [open, setOpen] = useState(false)
   const box = useRef<HTMLDivElement>(null)
   const button = useRef<HTMLButtonElement>(null)
@@ -46,7 +46,7 @@ export function SpendPill({ summary, videoId }: { summary: SpendSummary | null; 
   }, [open])
   const key: SpendScopeKey = summary?.binding && summary[summary.binding] ? summary.binding : 'video'
   const shown = summary?.[key] ?? null
-  const word = shown ? PILL_WORD[key] || shown.label : 'Spend'
+  const word = simple ? 'Spent' : shown ? PILL_WORD[key] || shown.label : 'Spend'
   const share = shown?.ceiling_usd ? shown.spent_usd / shown.ceiling_usd : 0
   return (
     <div className="relative" ref={box}>
@@ -61,7 +61,7 @@ export function SpendPill({ summary, videoId }: { summary: SpendSummary | null; 
         data-tour="spend"
         data-money-scope={key}
       >
-        <span className="font-medium">{word}</span>{' '}
+        <span className="font-sans font-medium">{word}</span>{' '}
         {shown ? <span>{ofCeiling(shown)}</span> : <span aria-hidden="true">…</span>}
         {shown?.ceiling_usd != null && (
           <span className="h-2 w-10 overflow-hidden rounded-sm bg-line max-[1600px]:hidden" aria-hidden="true"><span className="block h-full bg-foreground" style={{ width: `${Math.min(100, share * 100)}%` }} /></span>
@@ -76,7 +76,7 @@ export function SpendPill({ summary, videoId }: { summary: SpendSummary | null; 
               {summary.video && <ScopeMeter scope="video" s={summary.video} binding={summary.binding === 'video'} />}
               {summary.project
                 ? <ScopeMeter scope="project" s={summary.project} binding={summary.binding === 'project'} />
-                : <div className="flex items-baseline gap-2" data-testid="meter-no-project"><span className="flex-1 font-medium text-muted-foreground">No project</span><span className="tag text-faint">standalone video</span></div>}
+                : <div className="flex items-baseline gap-2" data-testid="meter-no-project"><span className="flex-1 font-medium text-muted-foreground">No project</span><span className="tag text-faint">Standalone video</span></div>}
               <ScopeMeter scope="month" s={summary.month} binding={summary.binding === 'month'} />
             </>
           )}
