@@ -14,6 +14,11 @@ class Assessment:
     """
     report: ContinuityReport
     audio: MediaArtifact
+    # Run 5 item 7: the take already carries the room's EQ and reverb (the
+    # render must not add them again), and how its delivery compared with the
+    # speaker's lines around it (a `prosody.Verdict`, for steering a retake).
+    roomed: bool = False
+    delivery: object | None = None
 
 # Metric keys, in a fixed order, paired with a human label for warnings.
 _METRICS = (

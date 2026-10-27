@@ -19,6 +19,7 @@ export const ADMIN_SECTIONS: AdminSection[] = [
   // ── other admin sections go here, one line each ──
   { id: 'waitlist', label: 'Waitlist', render: (c) => <AdminWaitlist card={c} /> },
   { id: 'emails', label: 'Emails', href: '#admin/emails' },
+  { id: 'voice-ab', label: 'Voice A/B', href: '#admin/voice-ab' },
   { id: 'beta-cohort', label: 'Beta', render: (c) => <BetaSection card={c} /> },
   { id: 'beta', label: 'Beta feedback', render: (c) => <BetaFeedbackSection card={c} /> },
   { id: 'consent', label: 'Consent reviews', render: (c) => <ConsentReviewsSection card={c} /> },

@@ -151,7 +151,8 @@ def splice(
         piece = audio[offset:offset + length]
         if len(piece) < length:
             piece = np.pad(piece, ((0, length - len(piece)), (0, 0)))
-        if room is not None and edit.plan.mix != "layer":
+        # Run 5 item 7: a take put in the room when it was made is not put there twice.
+        if room is not None and edit.plan.mix != "layer" and not getattr(edit.plan, "roomed", None):
             piece = room.take(piece)
         fade = min(round(CROSSFADE * OUT_RATE), length // 2)
         new = np.ones(length, dtype=np.float32)

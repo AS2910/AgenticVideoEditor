@@ -1627,6 +1627,9 @@ def _measure(wb: Workbench, turn: Turn, args: dict) -> ToolResult:
                               ("voice match", "voice_match", r.voice_match), ("naturalness", "naturalness", r.naturalness)):
         if value is not None:
             scores.append(f"{label} {value:.2f}" + (" of 5" if key == "naturalness" else "") + ("" if key in r.measured else " (estimated)"))
+    if getattr(r, "prosody_distance", None) is not None:
+        # Run 5 item 7: lower is closer to how the speaker said the line; 1 is just noticeable.
+        scores.append(f"delivery {r.prosody_distance:.2f} off the original (under 1 is close)")
     out = [f"Take {c.candidate_id}: {'passed' if r.passed else 'did not pass'} the sound check" + (f" ({'; '.join(scores)})" if scores else "") + "."]
     out.append(f"Runs {c.audio.duration:.2f} s" + (
         f"; {len(c.words)} words, {len(c.words) / max(0.1, c.words[-1].end - c.words[0].start):.1f} a second" if c.words else "") + ".")

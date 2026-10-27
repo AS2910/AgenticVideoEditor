@@ -8,6 +8,10 @@ const WANTS = { voice_match: 0.75, naturalness: 3.0, prosody: 0.8, audio_integra
 const NAMES = { voice_match: 'SIM-o', naturalness: 'UTMOS', prosody: 'Prosody', audio_integration: 'Room' } as const
 const MODELS: Record<string, string> = { eleven_multilingual_v2: 'v2', eleven_v3: 'v3', eleven_v4: 'v4', eleven_v4_turbo: 'v4 turbo' }
 
+// Run 5 item 7: notes the pipeline writes when a take followed the speaker's own delivery.
+const MATCHED = 'delivery matched to the speaker'
+const ORIGINAL = "spoken from the original line's delivery"
+
 const pct = (factor: number) => `${factor >= 1 ? '+' : '−'}${Math.round(Math.abs(factor - 1) * 100)}%`
 
 /** The facts a proposal's card shows (UX-9): the grid — voice and model, the
@@ -17,10 +21,14 @@ const pct = (factor: number) => `${factor >= 1 ? '+' : '−'}${Math.round(Math.a
 export function takeFacts(c: Candidate, voiceName?: string | null): { grid: Fact[]; measured: Fact[]; flagged: string | null } {
   const plan = c.plan
   const model = plan.model ? (MODELS[plan.model] ?? plan.model) : null
+  const notes = c.fit_notes ?? []
   const dials = plan.voice_settings
     ? Object.entries(plan.voice_settings).map(([k, v]) => `${k === 'similarity_boost' ? 'similarity' : k} ${Number(v).toFixed(2)}`).join(' · ')
-    : plan.delivery ? plan.delivery : 'as voiced'
-  const fitNotes = (c.fit_notes ?? []).filter((n) => !n.startsWith('nearest') && !n.startsWith('moved') && !n.startsWith('level'))
+    : plan.delivery ? plan.delivery
+    : notes.includes(ORIGINAL) ? 'the original line, new voice'
+    : notes.some((n) => n.startsWith(MATCHED)) ? 'matched to the speaker' : 'as voiced'
+  const fitNotes = notes.filter((n) => !n.startsWith('nearest') && !n.startsWith('moved') && !n.startsWith('level')
+    && !n.startsWith(MATCHED) && n !== ORIGINAL)
   const picture = plan.flex && Math.abs(plan.flex - 1) > 0.005 ? `${pct(plan.flex)} flexed` : 'as shot'
   const grid: Fact[] = [
     { label: 'Voice', value: [voiceName ?? null, model].filter(Boolean).join(' · ') || 'the default' },
@@ -36,6 +44,11 @@ export function takeFacts(c: Candidate, voiceName?: string | null): { grid: Fact
     const digits = k === 'naturalness' ? 1 : 2
     return [{ label: NAMES[k], value: `${NAMES[k]} ${v.toFixed(digits)} · wants ${wants.toFixed(digits)}`, tone: v >= wants ? 'ok' as const : 'needs' as const }]
   })
+  // The prosody distance: lower is closer, one point is just noticeable.
+  if (r.prosody_distance != null && r.measured.includes('prosody_distance')) {
+    const d = r.prosody_distance
+    measured.push({ label: 'Delivery', value: `Delivery ${d.toFixed(2)} off · wants under 1.00`, tone: d <= 1 ? 'ok' : 'needs' })
+  }
   const flagged = r.passed ? null : (r.warnings.find((w) => !w.startsWith('Stock voice') && !w.startsWith('Regenerated')) ?? 'Did not pass its check').replace(/\.$/, '')
   return { grid, measured, flagged }
 }

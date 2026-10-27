@@ -91,6 +91,9 @@ class EditPlan:
     role: str | None = None
     # The user's fine-tune on top of the role's level, in dB (-24 to +6).
     offset_db: float | None = None
+    # Run 5 item 7: the take was put in the speaker's room when it was made
+    # (EQ and reverb), so the render's stems path does not add them again.
+    roomed: bool | None = None
 
 
 ROLES = ("voice", "bed", "effect")
@@ -156,6 +159,10 @@ class ContinuityReport:
     measured: tuple[str, ...] = ()
     # Mean opinion score of the take, 1-5 (Phase 15d); None when not measured.
     naturalness: float | None = None
+    # Run 5 item 7: how far the take's delivery (pitch contour plus speaking
+    # rate) is from the line it replaces, 0 = the same, 1 = just noticeable;
+    # None when not measured. Lower is better, unlike the scores above.
+    prosody_distance: float | None = None
 
 
 @dataclass(frozen=True)

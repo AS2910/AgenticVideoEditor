@@ -646,6 +646,19 @@ export const listConsentReviews = (status: 'review' | 'decided' = 'review') => g
 export const decideConsentReview = (id: string, decision: 'approve' | 'reject', reason: string) => post<ConsentReview>(`/admin/consent-reviews/${id}`, { decision, reason })
 export const consentRecordingUrl = (id: string) => `${BASE}/admin/consent-reviews/${id}/recording`
 export const consentSourceUrl = (id: string) => `${BASE}/admin/consent-reviews/${id}/source`
+/** Run 5 item 7: the voice A/B page. A trial is blind (`voted` false) until this admin votes. */
+export type VoiceAbMethod = 'old' | 'new'
+export type VoiceAbScores = { sim_o: number | null; utmos: number | null; prosody_distance: number | null; loudness_delta_db: number | null; duration_error_s: number | null }
+export interface VoiceAbTrial {
+  id: string; speaker: string | null; before: string; after: string; start: number; end: number; voted: boolean
+  choice?: 'a' | 'b' | 'same'; a_is?: VoiceAbMethod; scores?: Record<VoiceAbMethod, VoiceAbScores>
+}
+export interface VoiceAbPage { run: string | null; runs: string[]; clip?: string | null; trials: VoiceAbTrial[]; tally: Record<VoiceAbMethod | 'same', number>; voters: number }
+export const getVoiceAb = (run?: string) => get<VoiceAbPage>(`/admin/voice-ab${run ? `?run=${encodeURIComponent(run)}` : ''}`)
+export const voteVoiceAb = (run: string, trial: string, choice: 'a' | 'b' | 'same') =>
+  post<VoiceAbPage>(`/admin/voice-ab/${encodeURIComponent(run)}/${encodeURIComponent(trial)}/vote`, { choice })
+export const voiceAbClipUrl = (run: string, trial: string, clip: 'original' | 'a' | 'b') =>
+  `${BASE}/admin/voice-ab/${encodeURIComponent(run)}/${encodeURIComponent(trial)}/${clip}`
 export const getAdminAudit = async (limit = 50) => (await get<{ entries: AdminAuditEntry[] }>(`/admin/audit?limit=${limit}`)).entries
 /** Beta kit: the three questions after a first export. */
 export interface BetaQuestion { id: 'useful' | 'almost_stopped' | 'would_pay'; text: string; choices?: [string, string][]; optional?: boolean }

@@ -340,6 +340,7 @@ def _continuity_dict(report: ContinuityReport) -> dict:
         "voice_match": report.voice_match,
         "naturalness": report.naturalness,
         "prosody": report.prosody,
+        "prosody_distance": report.prosody_distance,
         "audio_integration": report.audio_integration,
         "lip_sync": report.lip_sync,
         "passed": report.passed,

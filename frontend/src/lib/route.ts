@@ -29,6 +29,8 @@ export type Route =
   | { page: 'admin' }
   // Launch item 9: the email preview (admins only).
   | { page: 'adminEmails' }
+  // Run 5 item 7: the voice A/B listening page (admins only).
+  | { page: 'adminVoiceAb' }
   | { page: 'legal'; doc: 'terms' | 'privacy' | 'acceptable-use' | 'subprocessors' }
   | { page: 'invite'; token: string }
   // Launch item 5: a password reset link, and the sign-in page (with an error a link landed on).
@@ -66,6 +68,7 @@ export function parseRoute(hash: string): Route {
   if (h === 'notifications') return { page: 'notifications' }
   if (h === 'admin') return { page: 'admin' }
   if (h === 'admin/emails') return { page: 'adminEmails' }
+  if (h === 'admin/voice-ab') return { page: 'adminVoiceAb' }
   if (h === 'terms' || h === 'privacy' || h === 'acceptable-use' || h === 'subprocessors') return { page: 'legal', doc: h }
   const help = /^help(?:\/([A-Za-z0-9_-]+))?$/.exec(h)
   if (help) return { page: 'help', slug: help[1] ?? null }
@@ -80,6 +83,7 @@ export const hrefFor = (r: Route): string =>
     : r.page === 'help' ? (r.slug ? `#help/${r.slug}` : '#help')
     : r.page === 'projects' ? '#home'
     : r.page === 'adminEmails' ? '#admin/emails'
+    : r.page === 'adminVoiceAb' ? '#admin/voice-ab'
     : r.page === 'knownIssues' ? '#known-issues'
     : r.page === 'invite' ? `#invite/${r.token}`
     : r.page === 'reset' ? `#reset/${r.token}`

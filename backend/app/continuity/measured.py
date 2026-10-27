@@ -15,10 +15,24 @@ What is measured, and why only this:
 - **Voice match** (SIM-o) and **naturalness** (UTMOS) come from open models
   (Phase 15d, extra `measure`); without them they stay None and block nothing.
 - Lip-sync stays None until Phase 17.
+- **Delivery** (run 5 item 7, `continuity.prosody`): the take's pitch span,
+  register and speaking rate against the same speaker's lines either side, and
+  a prosody distance (pitch contour plus rate) to the line it replaces. A take
+  outside the neighbours' range is refused (so it is retaken, steered back) and
+  the distance ranks takes in the pick. A line asked for in another delivery
+  ("more excited", or Voltage's own settings) is measured but never refused
+  for differing: the difference was the point.
+- **The room** (run 5 item 7): when the speech around the line is clean enough
+  to hear the room in, the take is EQ'd toward the speaker's spectrum and given
+  the room's reverb here, so the proposal already sounds in place; the render
+  then does not add them again (`EditPlan.roomed`). A noisy or music-backed
+  clip is left to the render's stems path, as before. Room tone is laid under
+  the line as a crossfaded loop, not a hard-tiled one.
 """
 from __future__ import annotations
 
 import math
+import os
 import tempfile
 import wave
 from collections.abc import Callable
@@ -27,8 +41,9 @@ from pathlib import Path
 
 import numpy as np
 
-from app.continuity import signals, similarity
+from app.continuity import prosody as tone, signals, similarity
 from app.continuity.engine import Assessment
+from app.media import room as roommod
 from app.domain.models import (
     ContinuityReport, EditPlan, MediaArtifact, Selection, Source, Transcript, Word,
 )
@@ -53,6 +68,45 @@ CLARITY_DB_PER_POINT = 30.0
 # The speaker's own speech used as the identity reference: a wider window than
 # the pitch context, because a speaker embedding settles on more speech.
 VOICE_WINDOW = 30.0
+
+# Run 5 item 7: the room is matched on the take only when the speech around it
+# stands this far above the quietest part of that stretch (a clean room, or a
+# bed far under the voice: EQ toward a loud mix of voice and music would colour
+# the voice). Seconds of the original either side read for this and the reverb.
+CLEAN_ROOM_DB = 25.0
+ROOM_READ_SECONDS = 8.0
+LOOP_FADE = 0.03            # crossfade between repeats of the room tone, seconds
+
+
+def tone_on() -> bool:
+    """Run 5 item 7's delivery and room work, on unless AVE_VOICE_TONE=0."""
+    return os.environ.get("AVE_VOICE_TONE", "1").strip().lower() not in {"0", "false", "no", "off"}
+
+
+def reference_on() -> bool:
+    """Whether the first take follows the speaker's measured delivery (AVE_VOICE_TONE_REFERENCE=1)."""
+    return os.environ.get("AVE_VOICE_TONE_REFERENCE", "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def loop_room(room: np.ndarray, size: int, rate: int) -> np.ndarray:
+    """`room` repeated to `size` samples with equal-power crossfades at each
+    join, so the room tone under a line has no click every repeat."""
+    fade = min(int(LOOP_FADE * rate), room.size // 4)
+    if room.size == 0 or size <= 0:
+        return np.zeros(max(0, size), dtype=np.float32)
+    if fade < 2 or room.size >= size:
+        return np.resize(room, size).astype(np.float32)
+    ramp = np.sin(np.linspace(0, np.pi / 2, fade, dtype=np.float32))
+    out = np.zeros(size + room.size, dtype=np.float32)
+    step, at = room.size - fade, 0
+    while at < size:
+        piece = room.astype(np.float32).copy()
+        if at:
+            piece[:fade] *= ramp
+        piece[-fade:] *= ramp[::-1]
+        out[at:at + room.size] += piece
+        at += step
+    return out[:size]
 
 
 @dataclass(frozen=True)
@@ -159,6 +213,12 @@ def quiet_part(x: np.ndarray, rate: int, below_db: float) -> np.ndarray:
     return frames[levels < below_db].reshape(-1)
 
 
+def directed(plan: EditPlan) -> bool:
+    """Whether the line was asked for in a delivery of its own (UX-1's words,
+    or Voltage's vendor settings): then differing from the speaker is the point."""
+    return bool(plan.delivery or plan.voice_settings)
+
+
 def _read_wav(path: str) -> tuple[np.ndarray, int]:
     with wave.open(path, "rb") as w:
         rate = w.getframerate()
@@ -197,9 +257,17 @@ class MeasuredContinuityEngine:
         self, store: ArtifactStore, thresholds: MeasuredThresholds | None = None, *,
         match: Callable[[Path, Path], float | None] | None = None,
         mos: Callable[[Path], float | None] | None = None,
+        tone: bool | None = None, room: bool | None = None, reference: bool | None = None,
     ) -> None:
         self._store = store
         self.thresholds = thresholds or MeasuredThresholds()
+        # Run 5 item 7: delivery (steer, refuse, rank) and the room on the take.
+        self.tone = tone_on() if tone is None else tone
+        # Its two parts that change the take itself, apart (the eval's ablations).
+        self.room = self.tone if room is None else room
+        # The first take in settings that follow the speaker: off unless
+        # AVE_VOICE_TONE_REFERENCE=1 (run 5 item 7's eval: no gain past noise).
+        self.use_reference = (self.tone and reference_on()) if reference is None else reference
         live = similarity.available()
         self._match = match or (similarity.speaker_similarity if live else None)
         self._mos = mos or (similarity.naturalness if live else None)
@@ -232,6 +300,15 @@ class MeasuredContinuityEngine:
                 gain = math.copysign(MAX_GAIN_DB, gain)
             corrected *= 10 ** (gain / 20)
 
+        # Run 5 item 7: the speaker's spectrum and room on the take itself.
+        roomed = False
+        # The take as made (level-corrected, before the room): what clarity is
+        # read on. The room's EQ can take a take's own hiss down with it, and
+        # a noisy take must not pass because the room was put on it.
+        dry = corrected.copy()
+        if self.room and context is not None and plan.mix != "layer":
+            corrected, roomed = self._in_room(src, transcript, plan, corrected, rate, context)
+
         # Without context speech there is no level to call "quiet" against, so
         # no room tone: unfiltered gaps can hold speech (see `quiet_part`).
         room = None
@@ -245,7 +322,10 @@ class MeasuredContinuityEngine:
             if room_db > ROOM_TONE_AUDIBLE_DB:
                 # Lay the room's own sound under the new line, so the splice
                 # does not drop into studio silence.
-                corrected += np.resize(room, corrected.size)
+                tone_bed = (loop_room(room, corrected.size, rate) if self.tone
+                            else np.resize(room, corrected.size))
+                corrected += tone_bed
+                dry += tone_bed
 
         peak = float(np.max(np.abs(corrected))) if corrected.size else 0.0
         if peak > PEAK_CEILING:
@@ -263,7 +343,7 @@ class MeasuredContinuityEngine:
         natural = self._mos(Path(fixed.path)) if self._mos else None
         if context is None:
             warnings.append("Not enough surrounding speech to check continuity.")
-            return Assessment(self._report(None, None, warnings, naturalness=natural), fixed)
+            return Assessment(self._report(None, None, warnings, naturalness=natural), fixed, roomed=roomed)
 
         final = signals.load(fixed.path)
         final_f0, context_f0 = signals.median_f0(final), signals.median_f0(context)
@@ -285,17 +365,90 @@ class MeasuredContinuityEngine:
             final_level - context_level
             if final_level is not None and context_level is not None else None
         )
-        clear = clarity_score(clarity(final), clarity(context))
+        heard = final
+        if roomed:
+            with tempfile.TemporaryDirectory() as tmp:
+                _write_wav(Path(tmp) / "dry.wav", dry, rate)
+                heard = signals.load(Path(tmp) / "dry.wav")
+        clear = clarity_score(clarity(heard), clarity(context))
         if clear is not None and clear < self.thresholds.audio_integration:
             warnings.append("The new line is noisier than the surrounding audio.")
         scores = [s for s in (level, clear) if s is not None]
         integration = min(scores) if scores else None
 
         voice = self._voice_match(source, transcript, plan, Path(fixed.path))
+        verdict, refused = None, False
+        if self.tone:
+            verdict = self._delivery(src, transcript, plan, signals.load(audio.path))
+            # A directed line (a delivery asked for, or Voltage's own settings)
+            # and an added line are measured, never refused for differing.
+            if verdict is not None and verdict.outside and not added and not directed(plan):
+                warnings.extend(verdict.outside)
+                refused = True
         return Assessment(
-            self._report(prosody, integration, warnings, voice_match=voice, naturalness=natural),
-            fixed,
+            self._report(prosody, integration, warnings, voice_match=voice, naturalness=natural,
+                         prosody_distance=verdict.distance if verdict is not None else None, refused=refused),
+            fixed, roomed=roomed, delivery=verdict,
         )
+
+    def _in_room(self, src: str, transcript: Transcript, plan: EditPlan, take: np.ndarray,
+                 rate: int, context: np.ndarray) -> tuple[np.ndarray, bool]:
+        """The take EQ'd toward the speaker's own speech and given the room's
+        reverb, when the speech around it is clean enough to hear the room in.
+        Same length and level either way."""
+        try:
+            sel = plan.selection
+            around = signals.load(src, max(0.0, sel.start - ROOM_READ_SECONDS), sel.end + ROOM_READ_SECONDS)
+            level = signals.speech_level_db(around)
+            if level is None or level - signals.noise_floor_db(around) < CLEAN_ROOM_DB:
+                return take, False
+            speech = _concat(src, context_spans(transcript, plan.selection), rate=rate)
+            around = [(a, b) for a, b in ((max(0.0, sel.start - ROOM_READ_SECONDS), sel.start),
+                                          (sel.end, sel.end + ROOM_READ_SECONDS)) if b - a >= 1.0]
+            profile = None
+            for a, b in sorted(around, key=lambda s: s[0] - s[1]):   # the longer stretch first
+                profile = roommod.estimate_reverb(signals.load(src, a, b, rate=rate), rate)
+                if profile is not None:
+                    break
+            out = take
+            if speech is not None and speech.size:
+                out = roommod.spectral_match(out, speech, rate)
+            if profile is not None:
+                out = roommod.match_room(out, profile, rate)
+            return out.astype(np.float32), True
+        except Exception:  # noqa: BLE001 - a room that cannot be read leaves the take as it was
+            return take, False
+
+    def _delivery(self, src: str, transcript: Transcript, plan: EditPlan, take: np.ndarray):
+        """The take's delivery against the line it replaces and the speaker's
+        lines either side (`prosody.judge`), or None when nothing could be read."""
+        try:
+            neighbours, reference = self.deliveries(src, transcript, plan)
+            return tone.judge(tone.measure(take), reference, neighbours)
+        except Exception:  # noqa: BLE001 - delivery is a score, never a reason a take fails to exist
+            return None
+
+    def deliveries(self, src: str, transcript: Transcript, plan: EditPlan):
+        """(the neighbours' deliveries, the replaced line's delivery or None)."""
+        sel = plan.selection
+        spans = tone.lines_near(transcript, sel, speaker_of(transcript, sel))
+        neighbours = [tone.measure(signals.load(src, a, b)) for a, b in spans]
+        reference = None
+        if plan.mix not in ("layer", "concatenate") and sel.end - sel.start >= tone.MIN_LINE_SECONDS:
+            reference = tone.measure(signals.load(src, sel.start, sel.end))
+        return neighbours, reference
+
+    def reference(self, source: Source, transcript: Transcript | None, plan: EditPlan) -> dict | None:
+        """Vendor settings for a first take that follows the speaker's own
+        delivery (`prosody.reference_settings`), or None: tone off, a directed
+        or added line, or nothing measurable."""
+        if not (self.tone and self.use_reference) or transcript is None or directed(plan) or plan.mix != "replace":
+            return None
+        try:
+            neighbours, ref = self.deliveries(source.media.path, transcript, plan)
+            return tone.reference_settings(ref, neighbours)
+        except Exception:  # noqa: BLE001
+            return None
 
     def _voice_match(
         self, source: Source, transcript: Transcript, plan: EditPlan, take: Path,
@@ -315,6 +468,7 @@ class MeasuredContinuityEngine:
     def _report(
         self, prosody: float | None, integration: float | None, warnings: list[str],
         *, voice_match: float | None = None, naturalness: float | None = None,
+        prosody_distance: float | None = None, refused: bool = False,
     ) -> ContinuityReport:
         if voice_match is not None and voice_match < self.thresholds.voice_match:
             warnings.append(
@@ -330,12 +484,14 @@ class MeasuredContinuityEngine:
             "voice_match": voice_match, "prosody": prosody,
             "audio_integration": integration, "naturalness": naturalness,
         }
-        passed = all(
+        passed = not refused and all(
             value >= getattr(self.thresholds, key)
             for key, value in checks.items() if value is not None
         )
         return ContinuityReport(
             voice_match=voice_match, prosody=prosody, audio_integration=integration, lip_sync=None,
             passed=passed, warnings=tuple(warnings), naturalness=naturalness,
-            measured=tuple(key for key, value in checks.items() if value is not None),
+            measured=tuple(key for key, value in checks.items() if value is not None)
+            + (("prosody_distance",) if prosody_distance is not None else ()),
+            prosody_distance=prosody_distance,
         )

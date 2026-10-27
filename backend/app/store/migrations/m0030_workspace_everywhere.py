@@ -39,6 +39,7 @@ EXEMPT = frozenset({
     "waitlist",  # 0035: asked for access, no account yet
     # 0036: the admin's audit trail and suspensions (admin-only, like abuse_reports).
     "admin_audit", "suspensions",
+    "voice_ab_votes",  # 0047 (run 5 item 7): admins' votes on the voice A/B page
 })
 # How a table's row finds its owner, in order of preference.
 VIDEO_KEYS = ("video_id", "project_id")

@@ -1,4 +1,6 @@
 """Cloning through the ElevenLabs adapter (Phase 15a). No network, no spend."""
+import math
+
 import pytest
 
 from app.adapters.elevenlabs import ElevenLabsVoiceAdapter, VoiceConfigError, VoiceError, _raise_for
@@ -186,3 +188,36 @@ def test_the_conversion_cannot_overspend_the_budget(store, take):
     with pytest.raises(BudgetExceeded):
         a.revoice(make_source(project_id="p1"), plan(CLONE), take)
     assert convert.calls == []
+
+
+# --- Run 5 item 7: the original line as the delivery reference ----------------
+
+def _spoken_source(tmp_path):
+    from app.domain.models import MediaArtifact
+    from tests.factories import make_source as _make
+    wav, duration = ffmpeg.generate_tone(tmp_path / "src.wav", 2.0, 180)
+    return _make(project_id="p1", media=MediaArtifact("audio", "s" * 64, str(wav), duration, "wav"), duration=duration)
+
+
+@needs_ffmpeg
+def test_a_line_whose_words_stay_is_the_original_converted_into_the_voice(store, tmp_path):
+    from app.domain.models import Transcript, Word
+    convert = FakeConvert()
+    a, budget = changer(store, convert)
+    source = _spoken_source(tmp_path)
+    words = Transcript(words=(Word("twenty", 0.4, 0.8), Word("off", 0.85, 1.3)))
+    out = a.speak_like(source, plan(STOCK), words)
+    assert convert.calls[0][0] == STOCK                       # any voice, not only a clone
+    assert convert.calls[0][1] > 0                            # the original span was sent
+    sel = plan(STOCK).selection
+    assert out.duration == pytest.approx(sel.end - sel.start, abs=0.03)
+    assert budget.remaining("p1") == 1000 - math.ceil((sel.end - sel.start) * 17)
+    assert all(w.start >= -0.03 for w in a.last_words)
+
+
+@needs_ffmpeg
+def test_carrying_the_delivery_is_refunded_when_the_vendor_fails(store, tmp_path):
+    a, budget = changer(store, FakeConvert(status=503))
+    with pytest.raises(VoiceError):
+        a.speak_like(_spoken_source(tmp_path), plan(STOCK), None)
+    assert budget.remaining("p1") == 1000

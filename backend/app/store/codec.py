@@ -42,6 +42,7 @@ def plan(d: dict) -> EditPlan:
         voice_profile_id=d["voice_profile_id"], fit=d.get("fit"), mix=d.get("mix", "replace"),
         delivery=d.get("delivery"), flex=d.get("flex"),
         voice_settings=d.get("voice_settings"), model=d.get("model"), flex_max=d.get("flex_max"),
+        roomed=d.get("roomed"),
         # Before 2026-10-20 a line had a level, not a role: -12 dB reads as a bed.
         **({"role": d.get("role"), "offset_db": d.get("offset_db")} if "role" in d or "offset_db" in d
            else dict(zip(("role", "offset_db"), role_from_level(d.get("level_db"))))),
@@ -53,6 +54,7 @@ def report(d: dict) -> ContinuityReport:
         voice_match=d["voice_match"], prosody=d["prosody"],
         audio_integration=d["audio_integration"], lip_sync=d["lip_sync"],
         passed=d["passed"], warnings=tuple(d["warnings"]), measured=tuple(d.get("measured", ())),
+        naturalness=d.get("naturalness"), prosody_distance=d.get("prosody_distance"),
     )
 
 

@@ -143,3 +143,21 @@ def test_a_dry_voice_keeps_the_music_under_a_new_line(world, tmp_path):
     mid = slice(round(2.3 * RATE), round(3.2 * RATE))
     assert _band(out[mid, 0], 1000) == pytest.approx(_band(room.accompaniment[mid, 0], 1000), rel=0.15)
     assert _band(out[mid, 0], 300) > 5 * _band(base[mid, 0], 300)
+
+def test_a_take_put_in_the_room_when_it_was_made_is_not_put_there_twice(world):
+    """Run 5 item 7: a roomed take keeps the bed under it but gets no second reverb."""
+    from dataclasses import replace
+    source, stems, tmp_path = world
+    edit = approved(tmp_path, 2.0, 3.5)
+    roomed = replace(edit, plan=replace(edit.plan, roomed=True))
+    base = compose.decode(source.media.path)
+    room = compose.Room.prepare(stems, 1, len(base))
+    wet = compose.splice(base, render(source, [edit]).segments, room)
+    dry = compose.splice(base, render(source, [roomed]).segments, room)
+    mid = slice(round(2.3 * RATE), round(3.2 * RATE))
+    assert _band(dry[mid, 0], 1000) == pytest.approx(_band(room.accompaniment[mid, 0], 1000), rel=0.15)
+    assert not np.allclose(wet[mid, 0], dry[mid, 0])
+    take = compose.decode(edit.audio.path)[:, 0]
+    # The roomed take is spliced as it was made: the bed plus the take, nothing added.
+    expect = room.accompaniment[mid, 0] + take[round(0.3 * RATE):round(0.3 * RATE) + (mid.stop - mid.start)]
+    assert np.allclose(dry[mid, 0], expect, atol=2e-3)

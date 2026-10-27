@@ -46,3 +46,6 @@ backend/bench/clips/
 # scripts/deploy.sh: which build is running (per stack), and local backups
 .deploy/
 backups/
+
+# Voice A/B eval runs: clips of the owner's own videos, kept local (run 5)
+backend/evals/results/voice-ab/

@@ -354,3 +354,47 @@ def decide_consent(attempt_id: str, req: ConsentDecision, who: str = Depends(_ad
         analytics.track_in(c, "consent.reviewed", who, {"approved": approve})
         row = c.execute("SELECT * FROM liveness_attempts WHERE id = ?", (attempt_id,)).fetchone()
     return _review_row(row)
+
+
+# ── Run 5 item 7: the voice A/B listening page ──────────────────────────────
+#
+#    GET  /admin/voice-ab?run=                      the newest run (or `run`): trials, blind
+#                                                   until voted, the tally and the runs there are
+#    GET  /admin/voice-ab/{run}/{trial}/{clip}      original | a | b, as this admin hears them
+#    POST /admin/voice-ab/{run}/{trial}/vote        {choice: a | b | same}
+
+from app import voice_ab  # noqa: E402
+
+
+class VoiceAbVote(BaseModel):
+    choice: str
+
+
+@router.get("/admin/voice-ab")
+def voice_ab_page(run: str | None = None, who: str = Depends(_admin)) -> dict:
+    names = voice_ab.runs()
+    if not names:
+        return {"run": None, "runs": [], "trials": [], "tally": {"old": 0, "new": 0, "same": 0}, "voters": 0}
+    chosen = run if run in names else names[0]
+    with _api().database.tx() as c:
+        return voice_ab.page(c, chosen, who)
+
+
+@router.get("/admin/voice-ab/{run}/{trial_id}/{clip}")
+def voice_ab_clip(run: str, trial_id: str, clip: str, who: str = Depends(_admin)) -> FileResponse:
+    path = voice_ab.clip_path(run, trial_id, who, clip)
+    if path is None:
+        raise HTTPException(status_code=404, detail="That clip is not there.")
+    return _audio(path, f"{trial_id}-{clip}")
+
+
+@router.post("/admin/voice-ab/{run}/{trial_id}/vote")
+def voice_ab_vote(run: str, trial_id: str, req: VoiceAbVote, who: str = Depends(_admin)) -> dict:
+    if req.choice not in voice_ab.CHOICES:
+        raise HTTPException(status_code=422, detail="Choose A, B or the same.")
+    if voice_ab.trial(run, trial_id) is None:
+        raise HTTPException(status_code=404, detail="That trial is not there.")
+    with _api().database.tx() as c:
+        voice_ab.vote(c, run, trial_id, who, req.choice)
+        analytics.track_in(c, "voice_ab.voted", who, {"run": run})
+        return voice_ab.page(c, run, who)

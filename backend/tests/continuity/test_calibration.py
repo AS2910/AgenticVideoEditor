@@ -90,7 +90,13 @@ def assess(store, source, path):
 def test_good_edits_pass(store, source, tmp_path, name):
     report = assess(store, source, GOOD[name](tmp_path)).report
     assert report.passed, (name, report)
-    assert report.measured == ("prosody", "audio_integration")
+    # Run 5 item 7 adds the prosody distance to what is measured.
+    assert report.measured == ("prosody", "audio_integration", "prosody_distance")
+
+
+def test_the_speakers_own_line_is_no_distance_from_itself(store, source, tmp_path):
+    report = assess(store, source, original_line(tmp_path)).report
+    assert report.prosody_distance == pytest.approx(0.0, abs=0.01)
 
 
 @pytest.mark.parametrize("name", BAD)
@@ -121,3 +127,15 @@ def test_a_loud_line_is_corrected_to_the_context_level(store, source, tmp_path):
 def test_voice_and_lip_sync_are_not_measured(store, source, tmp_path):
     report = assess(store, source, original_line(tmp_path)).report
     assert report.voice_match is None and report.lip_sync is None
+
+
+def test_the_room_on_a_take_never_changes_how_noisy_it_is_judged(store, source, tmp_path):
+    """Run 5 merge of items 7 and 8: the room's EQ can take a noisy take's hiss
+    down with it. Clarity is read on the take before the room, so the integration
+    score is the same with the room on or off, and the noisy take fails either way."""
+    path = noisy(tmp_path)
+    roomed = MeasuredContinuityEngine(store, tone=True).assess(source, WORDS, PLAN, stored(store, path))
+    plain = MeasuredContinuityEngine(store, tone=True, room=False).assess(source, WORDS, PLAN, stored(store, path))
+    assert roomed.roomed and not plain.roomed
+    assert roomed.report.audio_integration == pytest.approx(plain.report.audio_integration, abs=0.01)
+    assert not roomed.report.passed

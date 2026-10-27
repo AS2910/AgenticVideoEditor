@@ -94,6 +94,7 @@ const BinPage = lazy(() => import('./pages/BinPage').then((m) => ({ default: m.B
 const TemplatesPage = lazy(() => import('./pages/Templates').then((m) => ({ default: m.TemplatesPage })))
 const AdminPage = lazy(() => import('./pages/AdminPage').then((m) => ({ default: m.AdminPage })))
 const AdminEmails = lazy(() => import('./pages/AdminEmails').then((m) => ({ default: m.AdminEmails })))
+const AdminVoiceAb = lazy(() => import('./pages/AdminVoiceAb').then((m) => ({ default: m.AdminVoiceAb })))
 const LanguageDialog = lazy(() => import('./pages/LanguageVersions').then((m) => ({ default: m.LanguageDialog })))
 const SyncChip = lazy(() => import('./pages/LanguageVersions').then((m) => ({ default: m.SyncChip })))
 
@@ -1527,6 +1528,7 @@ function Studio() {
     if (route.page === 'notifications') return <NotificationsPage me={me} />
     if (route.page === 'admin') return <LazyPage><AdminPage me={me} /></LazyPage>
     if (route.page === 'adminEmails') return <LazyPage><AdminEmails me={me} /></LazyPage>
+    if (route.page === 'adminVoiceAb') return <LazyPage><AdminVoiceAb me={me} /></LazyPage>
     if (route.page === 'invite') return <InvitePage token={route.token} />
     if (route.page === 'templates') return <LazyPage><TemplatesPage me={me} onMade={() => void refreshProjects()} /></LazyPage>
     if (route.page === 'export') {

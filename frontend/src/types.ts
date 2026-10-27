@@ -178,6 +178,8 @@ export interface ContinuityReport {
   lip_sync: number | null
   /** UTMOS, when measured (20b). */
   naturalness?: number | null
+  /** Run 5 item 7: how far the take's delivery (pitch contour plus rate) is from the line it replaces; lower is closer. */
+  prosody_distance?: number | null
   passed: boolean
   warnings: string[]
   measured: string[]

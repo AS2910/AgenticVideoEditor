@@ -746,6 +746,43 @@ class ElevenLabsVoiceAdapter:
                 source.project_id, exact, kind="audio", container="wav", duration=ffmpeg.duration_of(exact),
             )
 
+    def speak_like(self, source: Source, plan: EditPlan, transcript: Transcript | None = None) -> MediaArtifact | None:
+        """Run 5 item 7: the original line itself, through the Voice Changer
+        into the plan's voice. For a line whose words do not change (a new
+        voice only): the vendor has no style reference for text-to-speech,
+        but speech-to-speech keeps the input's pace, energy and emotion, so
+        the original line is the best reference there is. The same length as
+        the selection; charged by the second, like `revoice`."""
+        sel = plan.selection
+        seconds = sel.end - sel.start
+        if seconds <= 0:
+            return None
+        voice_id = self.voice_for(plan)
+        cost = math.ceil(seconds * STS_CHARS_PER_SECOND)
+        with tempfile.TemporaryDirectory() as tmp:
+            original, _ = ffmpeg.extract_segment(source.media.path, Path(tmp) / "original.wav",
+                                                 sel.start, sel.end, sample_rate=SAMPLE_RATE)
+            with self._budget.held(source.project_id, cost):
+                status, content, text = self._convert(self._api_key, voice_id, original.read_bytes(), self._timeout)
+                if status != 200:
+                    _raise_for(status, text.replace(self._api_key, "***"))
+            raw, _ = ffmpeg.pcm_to_wav(content, Path(tmp) / "changed.wav", SAMPLE_RATE)
+            exact = Path(tmp) / "exact.wav"
+            ffmpeg._run(ffmpeg.FFMPEG, [
+                "-y", "-loglevel", "error", *ffmpeg._BITEXACT_IN, "-i", str(raw),
+                "-af", "apad", "-t", f"{seconds:.3f}", "-c:a", "pcm_s16le", *ffmpeg._BITEXACT_OUT, str(exact),
+            ])
+            self.last_notes = []
+            self.last_measure = None
+            self.last_words = tuple(
+                Word(w.text, round(w.start - sel.start, 3), round(w.end - sel.start, 3), w.speaker)
+                for w in (transcript.words if transcript else ())
+                if w.start >= sel.start - 0.02 and w.end <= sel.end + 0.02
+            )
+            return self._store.put_file(
+                source.project_id, exact, kind="audio", container="wav", duration=ffmpeg.duration_of(exact),
+            )
+
     def delete_clone(self, voice_id: str) -> None:
         """Remove a clone from the vendor. Already gone (404) counts as done."""
         self.delete_voice(voice_id)

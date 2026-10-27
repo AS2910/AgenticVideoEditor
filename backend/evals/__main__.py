@@ -4,6 +4,8 @@
     python -m evals run --base http://127.0.0.1:8101 --db <copy>/ave.db --log <backend log> \\
         --label baseline --budget 2.00 [--only one_line_fix question]
     python -m evals compare results/a.json results/b.json
+    python -m evals voice-tone --clip <video> --transcript <words.json> --voice <clone id> \\
+        [--stems <dir>] [--only 1 3] --budget-chars 2000     # run 5 item 7, real speech only
 """
 from __future__ import annotations
 
@@ -28,11 +30,25 @@ def main() -> int:
     c = sub.add_parser("compare", help="before and after, per scenario")
     c.add_argument("a")
     c.add_argument("b")
+    v = sub.add_parser("voice-tone", help="the same lines voiced the old way and the new way (run 5 item 7)")
+    v.add_argument("--clip", required=True)
+    v.add_argument("--transcript", required=True, help='JSON with {"words": [{text, start, end, speaker}]}')
+    v.add_argument("--voice", required=True, help="the speaker's clone voice id")
+    v.add_argument("--stems", help="a folder with vocals.wav and accompaniment.wav of the clip")
+    v.add_argument("--only", nargs="*", type=int)
+    v.add_argument("--budget-chars", type=int, required=True, help="characters each method may bill per line")
+    v.add_argument("--label", default="")
+    v.add_argument("--methods", nargs="*", default=["old", "new"], help="old new noref noroom")
     args = ap.parse_args()
     if args.cmd == "clips":
         from evals.clips import build
         for p in build():
             print(p)
+        return 0
+    if args.cmd == "voice-tone":
+        from evals.voice_tone import run as voice_tone
+        voice_tone(Path(args.clip), Path(args.transcript), args.voice, Path(args.stems) if args.stems else None,
+                   args.only, args.budget_chars, args.label, tuple(args.methods))
         return 0
     if args.cmd == "compare":
         from evals.compare import main as compare
