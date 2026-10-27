@@ -1329,8 +1329,15 @@ def _ingest_staged(staged: Path, filename: str, consent: bool, folder: Project |
         probed = ingest.probe_source(staged)
     except ingest.IngestError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if not probed.has_audio:
+        # Run 5 item 4: no audio track is taken, given a silent one, and never
+        # sent to be transcribed; the editor offers a voice-over to place.
+        try:
+            staged = ingest.add_silent_audio(staged, container, probed.duration)
+        except ingest.IngestError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
 
-    if transcriber_label.startswith("openai"):
+    if transcriber_label.startswith("openai") and probed.has_audio:
         # Launch item 3: transcription is paid; it is refused before anything is stored.
         try:
             _ensure_owner_spend(owner)
@@ -1347,6 +1354,10 @@ def _ingest_staged(staged: Path, filename: str, consent: bool, folder: Project |
     # Cost 1d: the same file from the same owner is transcribed once.
     heard_key = content_cache.key_of(transcriber_label)
     kept = content_cache.get(database, owner, media.sha256, "transcript", heard_key)
+    if not probed.has_audio:
+        # Run 5 item 4: nothing to hear, so no lines, no call and no charge;
+        # held as if it were kept, so nothing below records or caches it.
+        kept = {"words": [], "statements": []}
     try:
         transcript = store_codec.transcript(kept) if kept is not None else transcriber.transcribe(source)
     except TranscriptionError as exc:

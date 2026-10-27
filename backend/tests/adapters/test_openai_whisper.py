@@ -13,7 +13,7 @@ from app.adapters.openai_whisper import (
     WhisperTranscriptionAdapter, TranscriptionError, to_transcript, MODEL,
 )
 from app.media import ffmpeg
-from tests.factories import make_source
+from tests.factories import make_source, voiced_video
 
 FIXTURE = json.loads(
     (Path(__file__).parents[1] / "fixtures" / "whisper-verbose-json.json").read_text()
@@ -66,14 +66,9 @@ def test_transcribe_extracts_audio_and_parses_the_reply(tmp_path):
     if not ffmpeg.available():
         pytest.skip("ffmpeg not installed")
 
-    # A real video with a real audio track for the adapter to extract from.
-    video, _ = ffmpeg.generate_solid_video(tmp_path / "v.mp4", 1.0)
-    audio, _ = ffmpeg.generate_silence(tmp_path / "a.wav", 1.0)
-    muxed = tmp_path / "with-audio.mp4"
-    ffmpeg._run(ffmpeg.FFMPEG, [
-        "-y", "-loglevel", "error", "-i", str(video), "-i", str(audio),
-        "-c:v", "copy", "-c:a", "aac", "-shortest", str(muxed),
-    ])
+    # A real video with a real audio track for the adapter to extract from
+    # (run 5 item 4: one with something to hear; silence is never sent).
+    muxed = voiced_video(tmp_path / "with-audio.mp4", 1.0)
 
     seen = {}
 
@@ -106,13 +101,7 @@ def test_a_source_without_audio_fails_with_a_clear_error(tmp_path):
 def test_vendor_failures_surface_as_transcription_errors(tmp_path):
     if not ffmpeg.available():
         pytest.skip("ffmpeg not installed")
-    video, _ = ffmpeg.generate_solid_video(tmp_path / "v.mp4", 1.0)
-    audio, _ = ffmpeg.generate_silence(tmp_path / "a.wav", 1.0)
-    muxed = tmp_path / "m.mp4"
-    ffmpeg._run(ffmpeg.FFMPEG, [
-        "-y", "-loglevel", "error", "-i", str(video), "-i", str(audio),
-        "-c:v", "copy", "-c:a", "aac", "-shortest", str(muxed),
-    ])
+    muxed = voiced_video(tmp_path / "m.mp4", 1.0)
 
     def boom(path, api_key, timeout):
         raise TranscriptionError("OpenAI transcription failed (429): rate limited")
@@ -289,3 +278,47 @@ def test_hear_returns_a_takes_words_in_one_call_without_diarizing(tmp_path):
     adapter = WhisperTranscriptionAdapter("sk-test", post=lambda *a: calls.append(a) or FIXTURE, post_diarize=no_diarize)
     words = adapter.hear(make_source(media=_artifact_for(audio)))
     assert words[:2] == ["Get", "20"] and len(calls) == 1
+
+
+def _music_clip(path, speech_db_over_music):
+    """8 s of a music bed; three 'words' (noise bursts) over it from 1 s to 4 s,
+    nothing but the music from 4 s on."""
+    import wave
+    import numpy as np
+    rate = 16000
+    t_ = np.arange(rate * 8) / rate
+    music = 0.1 * (np.sin(2 * np.pi * 220 * t_) + 0.6 * np.sin(2 * np.pi * 330 * t_))
+    rms = float(np.sqrt(np.mean(music ** 2)))
+    x = music.copy()
+    rng = np.random.default_rng(2)
+    for start in (1.0, 2.0, 3.0):
+        i = int(start * rate)
+        x[i:i + int(0.7 * rate)] += rng.standard_normal(int(0.7 * rate)) * rms * 10 ** (speech_db_over_music / 20)
+    with wave.open(str(path), "wb") as w:
+        w.setnchannels(1); w.setsampwidth(2); w.setframerate(rate)
+        w.writeframes((np.clip(x, -1, 1) * 32767).astype("<i2").tobytes())
+    return path
+
+
+@pytest.mark.skipif(not ffmpeg.available(), reason="ffmpeg not installed")
+def test_speech_over_a_loud_music_bed_is_kept(tmp_path):
+    """Run 5 item 8 (evals/messy, music_loud): speech 6 dB over music read as
+    under 8 dB over the floor (the floor is the music) and was dropped."""
+    from app.domain.models import Statement, Transcript, Word
+    path = _music_clip(tmp_path / "bed.wav", 5)
+    words = (Word("one", 1.0, 1.7), Word("two", 2.0, 2.7), Word("three", 3.0, 3.7))
+    t = Transcript(words=words, statements=(Statement("one two three", 1.0, 3.7),))
+    assert without_silent_speech(t, path).statements == t.statements
+
+
+@pytest.mark.skipif(not ffmpeg.available(), reason="ffmpeg not installed")
+def test_an_invented_line_over_the_music_alone_still_goes(tmp_path):
+    from app.domain.models import Statement, Transcript, Word
+    path = _music_clip(tmp_path / "bed.wav", 5)
+    real = (Word("one", 1.0, 1.7), Word("two", 2.0, 2.7), Word("three", 3.0, 3.7))
+    invented = (Word("Thanks", 5.5, 6.0), Word("for", 6.0, 6.2), Word("watching", 6.2, 6.9))
+    t = Transcript(words=real + invented, statements=(Statement("one two three", 1.0, 3.7),
+                                                     Statement("Thanks for watching", 5.5, 6.9)))
+    cleaned = without_silent_speech(t, path)
+    assert [s.text for s in cleaned.statements] == ["one two three"]
+    assert [w.text for w in cleaned.words] == ["one", "two", "three"]

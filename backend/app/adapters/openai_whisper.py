@@ -20,7 +20,7 @@ import re
 from app.adapters.base import idempotency_header, VendorError
 from app.domain.models import Source, Statement, Transcript, Word
 from app.domain.transcript import assign_speakers
-from app.media import ffmpeg
+from app.media import ffmpeg, vad
 
 MODEL = "whisper-1"
 ENDPOINT = "https://api.openai.com/v1/audio/transcriptions"
@@ -62,7 +62,30 @@ HALLUCINATIONS = {
     "시청해주셔서 감사합니다", "시청해 주셔서 감사합니다", "구독과 좋아요 부탁드립니다", "구독 부탁드립니다", "감사합니다",
     # Hindi
     "देखने के लिए धन्यवाद", "धन्यवाद", "सब्सक्राइब करें", "चैनल को सब्सक्राइब करें", "वीडियो देखने के लिए धन्यवाद",
+    # Run 5 item 4: the subtitle credits and channel lines Whisper copies from
+    # its training captions, in the Latin-script languages the script check
+    # cannot tell apart from English.
+    "subtítulos realizados por la comunidad de amara org", "subtitulos realizados por la comunidad de amara org",
+    "subtítulos por la comunidad de amara org", "sous titres réalisés para la communauté d amara org",
+    "sous titres réalisés par la communauté d amara org", "untertitel der amara org community",
+    "untertitel im auftrag des zdf für funk 2017", "untertitel im auftrag des zdf 2017", "untertitel von stephanie geiges",
+    "legendas pela comunidade amara org", "sottotitoli creati dalla comunità amara org",
+    "ondertiteling door de amara org gemeenschap", "napisy stworzone przez społeczność amara org",
+    "продолжение следует", "субтитры сделал dimatorzok", "субтитры создавались сообществом amara org",
+    "редактор субтитров а семкин корректор а егорова",
+    "thank you very much for watching", "thanks for watching and see you next time", "don t forget to subscribe",
+    "please like and subscribe", "hit the bell", "bye bye",
 }
+# Run 5 item 4: what a caption writes for sound that is not speech. In
+# brackets ("[Music]") or as bare symbols ("♪ ♪") it always goes; as bare
+# words it is held to the known phrases' doubt bar.
+SOUND_CAPTIONS = {
+    "music", "music playing", "upbeat music", "soft music", "dramatic music", "gentle music", "background music",
+    "instrumental music", "music continues", "music fades", "applause", "laughter", "laughs", "silence", "no audio",
+    "inaudible", "noise", "static", "wind", "birds chirping", "sighs", "breathing", "coughs",
+    "音楽", "音乐", "拍手", "笑", "música", "musica", "musique", "musik", "음악", "박수", "संगीत", "музыка",
+}
+_BRACKETED = re.compile(r"^\s*(\[[^\]]*\]|\([^)]*\)|（[^）]*）|【[^】]*】|[♪♫][^♪♫]*[♪♫]|\*[^*]*\*)\s*$")
 # "Thanks for watching" and "subscribe" in any language: a short segment that
 # holds one of these is a sign-off too, however it is worded around them.
 SIGN_OFF_STEMS = (
@@ -86,6 +109,14 @@ SCRIPT_OF_LANGUAGE = {
 }
 # Speech has to stand out from the recording's own noise by this much.
 SPEECH_ABOVE_FLOOR_DB = 8.0
+# Run 5 item 8 (evals/messy): under a loud music bed the quietest tenth of the
+# clip IS the music, so real speech 6 dB over it read as 7 to 8 dB "over the
+# floor" and four of five lines were dropped. A statement that misses the floor
+# bar gets a second chance against what plays between the words: speech adds
+# to the bed there, an invented line over music does not.
+SPEECH_ABOVE_GAPS_DB = 4.0
+MIN_GAP_SECONDS = 1.0           # this much sound between words to judge by
+GAP_PAD = 0.05                  # seconds kept clear around each word
 # A word this close to a dropped segment's edge belongs to it (seconds).
 EDGE = 0.02
 
@@ -150,15 +181,30 @@ def clip_script(payload: dict) -> str | None:
 
 def is_sign_off(text: str) -> bool:
     n = _normal(text)
-    if n in HALLUCINATIONS:
+    if n in HALLUCINATIONS or n in SOUND_CAPTIONS:
         return True
     words = n.split()
     return 0 < len(words) <= SIGN_OFF_MAX_WORDS and any(stem.replace(" ", "") in n.replace(" ", "") for stem in SIGN_OFF_STEMS)
 
 
+def is_sound_caption(text: str) -> bool:
+    """Run 5 item 4: "[Music]", "♪", "(upbeat music)", "[音楽]", "♪ la la ♪":
+    a caption for a sound, not speech. A segment wholly in brackets or
+    between music notes, or with no letters or digits at all."""
+    stripped = text.strip()
+    return bool(stripped) and (not _normal(stripped) or bool(_BRACKETED.match(stripped)))
+
+
+# Run 5 item 4: a segment in another writing system than the clip's is kept
+# only when it is long enough to be real speech as well as confident.
+OFF_LANGUAGE_MIN_SECONDS = 1.0
+
+
 def doubtful(segment: dict, clip: str | None = None) -> str | None:
     """Why a segment looks invented, or None when it looks like real speech.
     `clip` is the clip's own writing system (see `clip_script`)."""
+    if is_sound_caption(segment.get("text") or ""):
+        return "a caption for a sound, not speech"
     nsp = segment.get("no_speech_prob")
     if nsp is not None and float(nsp) > NO_SPEECH_PROB_MAX:
         return f"no_speech_prob {float(nsp):.2f}"
@@ -174,6 +220,13 @@ def doubtful(segment: dict, clip: str | None = None) -> str | None:
     if clip and script and script != clip and (
             (nsp is not None and float(nsp) > OFF_LANGUAGE_NO_SPEECH) or (lp is not None and float(lp) < OFF_LANGUAGE_LOGPROB)):
         return f"{script} on a {clip} clip, and Whisper unsure of it"
+    if clip and script and script != clip:
+        try:
+            seconds = float(segment["end"]) - float(segment["start"])
+        except (KeyError, TypeError, ValueError):
+            seconds = 0.0
+        if seconds < OFF_LANGUAGE_MIN_SECONDS:
+            return f"{script} on a {clip} clip, too short to be real speech"
     return None
 
 
@@ -221,6 +274,12 @@ def to_transcript(payload: dict) -> Transcript:
             continue
         if text and end > start and not invented(start, end):
             statements.append(Statement(text=text, start=start, end=end))
+    if statements and all(is_sign_off(st.text) for st in statements):
+        # Run 5 item 4: a clip that says nothing but "Thank you." or "Thanks
+        # for watching" is the classic invention on silence or music, however
+        # sure Whisper is of it.
+        log.info("dropped a lone sign-off %r", " ".join(st.text for st in statements))
+        return Transcript(words=())
     return Transcript(words=tuple(words), statements=tuple(statements))
 
 
@@ -236,11 +295,13 @@ def without_silent_speech(transcript: Transcript, audio_path: Path) -> Transcrip
     except Exception:  # noqa: BLE001 - a failed measurement must not fail the upload
         return transcript
     floor = signals.noise_floor_db(audio)
+    between = _between_words_db(audio, transcript)
     kept, dropped = [], []
     for st in transcript.statements:
         span = audio[int(st.start * signals.RATE): int(st.end * signals.RATE)]
         level = signals.speech_level_db(span) if len(span) else None
-        if level is None or level - floor < SPEECH_ABOVE_FLOOR_DB:
+        over_bed = level is not None and between is not None and level - between >= SPEECH_ABOVE_GAPS_DB
+        if level is None or (level - floor < SPEECH_ABOVE_FLOOR_DB and not over_bed):
             dropped.append(st)
             log.info("dropped %r: no speech energy there (%s dB over a %.0f dB floor)",
                      st.text, "none" if level is None else f"{level - floor:.0f}", floor)
@@ -252,6 +313,22 @@ def without_silent_speech(transcript: Transcript, audio_path: Path) -> Transcrip
                   if not any(w.start < d.end and d.start < w.end
                              or (d.start - EDGE <= w.start <= d.end + EDGE and d.start - EDGE <= w.end <= d.end + EDGE) for d in dropped))
     return Transcript(words=words, statements=tuple(kept))
+
+
+def _between_words_db(audio, transcript: Transcript) -> float | None:
+    """The level of what plays between the words (the bed, the room), as RMS
+    in dB, or None with too little of it to judge by (run 5 item 8)."""
+    import numpy as np
+
+    from app.continuity import signals
+    rate = signals.RATE
+    keep = np.ones(len(audio), dtype=bool)
+    for w in transcript.words:
+        keep[max(0, int((w.start - GAP_PAD) * rate)): int((w.end + GAP_PAD) * rate)] = False
+    if keep.sum() < MIN_GAP_SECONDS * rate:
+        return None
+    power = float(np.mean(np.asarray(audio, dtype=np.float64)[keep] ** 2))
+    return 10 * np.log10(max(power, 1e-10))
 
 
 def _sha(path: Path) -> str:
@@ -339,7 +416,8 @@ class WhisperTranscriptionAdapter:
         post: Callable[[Path, str, float], dict] = _post,
         post_diarize: Callable[[Path, str, float], dict] = _post_diarize,
         timeout: float = DEFAULT_TIMEOUT,
-        # Drop statements with no speech energy behind them. Off only in
+        # Send only the spans where someone might be speaking (run 5 item 4),
+        # and drop statements with no speech energy behind them. Off only in
         # tests that replay a recording over a silent fixture.
         screen_silence: bool = True,
     ) -> None:
@@ -351,20 +429,40 @@ class WhisperTranscriptionAdapter:
 
     def transcribe(self, source: Source) -> Transcript:
         """Words and statements, labelled by speaker when diarization works.
-        Diarization failing never fails the upload: the words stand alone."""
+        Diarization failing never fails the upload: the words stand alone.
+
+        Run 5 item 4: both calls hear only the spans where someone might be
+        speaking (`media/vad.py`), and every time in their replies is mapped
+        back onto the clip. A clip with no such span is not sent at all."""
         with tempfile.TemporaryDirectory() as tmp:
             audio = self._audio(source, Path(tmp))
-            transcript = to_transcript(self._post(audio, self._api_key, self._timeout))
+            sent, mapping = self._speech_only(audio, Path(tmp))
+            if sent is None:
+                log.info("no speech heard in %s; nothing sent to be transcribed", source.project_id)
+                return Transcript(words=())
+            transcript = to_transcript(vad.map_times(self._post(sent, self._api_key, self._timeout), mapping))
             if self._screen_silence:
                 transcript = without_silent_speech(transcript, audio)
             if not transcript.words:
                 return transcript
             try:
-                turns = to_turns(self._post_diarize(audio, self._api_key, self._timeout))
+                turns = to_turns(vad.map_times(self._post_diarize(sent, self._api_key, self._timeout), mapping))
             except TranscriptionError as exc:
                 log.warning("diarization failed for %s: %s", source.project_id, exc)
                 return transcript
         return assign_speakers(transcript, turns)
+
+    def _speech_only(self, audio: Path, tmp: Path) -> tuple[Path | None, vad.TimeMap | None]:
+        """What to send for `audio` (None when nothing is speech), and the map
+        from its times back to the clip's (None when it is the clip itself)."""
+        if not self._screen_silence:
+            return audio, None
+        try:
+            sent, mapping, spans = vad.speech_only(audio, tmp / "speech.wav")
+        except Exception:  # noqa: BLE001 - a failed measurement sends the whole clip, as before
+            log.exception("voice activity detection failed; sending the whole clip")
+            return audio, None
+        return (sent, mapping) if spans else (None, None)
 
     def hear(self, source: Source) -> list[str]:
         """9a: the words alone, in order, for checking a take against the
@@ -379,7 +477,10 @@ class WhisperTranscriptionAdapter:
         """Speaker turns alone — for projects transcribed before Phase 11."""
         with tempfile.TemporaryDirectory() as tmp:
             audio = self._audio(source, Path(tmp))
-            return to_turns(self._post_diarize(audio, self._api_key, self._timeout))
+            sent, mapping = self._speech_only(audio, Path(tmp))
+            if sent is None:
+                return []
+            return to_turns(vad.map_times(self._post_diarize(sent, self._api_key, self._timeout), mapping))
 
     def _audio(self, source: Source, tmp: Path) -> Path:
         audio = tmp / "audio.wav"

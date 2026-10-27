@@ -77,10 +77,9 @@ def probe_source(path: str | Path) -> ProbedSource:
             "trim it and upload it again."
         )
 
-    if not any(s.get("codec_type") == "audio" for s in streams):
-        # A dialogue editor has nothing to work with: no audio means no speech
-        # to transcribe, no voice to clone, and no line to change.
-        raise IngestError("That video has no audio track, so there is no dialogue to edit. Upload a version that has its sound.")
+    # Run 5 item 4: a video with no audio track is taken (it used to be
+    # refused). It has no lines to change, but a voice-over can be placed on
+    # it; `add_silent_audio` gives it a silent track before it is stored.
 
     return ProbedSource(
         duration=duration,
@@ -89,3 +88,29 @@ def probe_source(path: str | Path) -> ProbedSource:
         fps=_fps(video.get("avg_frame_rate")),
         has_audio=any(s.get("codec_type") == "audio" for s in streams),
     )
+
+
+# The audio codec each container takes; AVI stays on plain PCM.
+_SILENT_CODEC = {"mp4": "aac", "mov": "aac", "mkv": "aac", "webm": "libopus", "avi": "pcm_s16le"}
+_MUXER = {"mp4": "mp4", "mov": "mov", "mkv": "matroska", "webm": "webm", "avi": "avi"}
+
+
+def add_silent_audio(path: str | Path, container: str, duration: float) -> Path:
+    """Run 5 item 4: a copy of a video that has no audio track, with a silent
+    one, next to it. The picture is copied untouched. With a track, every
+    later step (the player, the voice-over mix, the render) treats it like
+    any other quiet clip, with no special case."""
+    path = Path(path)
+    dest = path.with_name(f"with-sound-{path.name}")
+    try:
+        ffmpeg._run(ffmpeg.FFMPEG, [
+            "-y", "-loglevel", "error", "-i", str(path),
+            "-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo",
+            "-map", "0:v", "-map", "1:a", "-c:v", "copy", "-c:a", _SILENT_CODEC.get(container, "aac"),
+            "-t", f"{duration:.3f}", "-f", _MUXER.get(container, "mp4"), str(dest),
+        ])
+    except ffmpeg.FFmpegError as exc:
+        raise IngestError(
+            "That video has no sound, and we could not add a silent track to it. "
+            "Export it again as an MP4 and upload that.") from exc
+    return dest

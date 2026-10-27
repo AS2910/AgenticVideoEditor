@@ -6,7 +6,7 @@
 
 Voltage edits what a video **says**. You upload a clip, and an agent (Claude with tools) reads it, listens, looks at the picture, and can change the words of a spoken line, add a line or a voice-over, remove a line, move one, choose or make a voice, decide how a line is delivered, and render the result. Every change is a **proposal** you can hear before it goes into the video, unless you have told Voltage to just do it.
 
-In scope today: dialogue replacement, added lines and voice-overs (layered over the picture, or with the picture holding), removals, shifts, the speaker's own voice (cloned from the clip), stand-in and designed voices, expressive delivery (direction, dials, audio tags), the picture flexing to fit a line, a measured sound check, spend caps, consent, sign-in. English. Clips up to about three minutes with an audio track.
+In scope today: dialogue replacement, added lines and voice-overs (layered over the picture, or with the picture holding), removals, shifts, the speaker's own voice (cloned from the clip), stand-in and designed voices, expressive delivery (direction, dials, audio tags), the picture flexing to fit a line, a measured sound check, spend caps, consent, sign-in. English. Clips up to about three minutes; one with no audio track is taken with a silent one, for voice-overs.
 
 Out of scope or not built: lip-sync (Phase 17, paused), inpainting-grade speech editing (Phase 18, needs a GPU), visual edits, pacing/filler edits, non-English.
 
@@ -64,7 +64,7 @@ The stories were agreed on 2026-10-03 (`docs/superpowers/plans/2026-10-03-ux-pla
 
 ### 4.1 Projects and ingest
 
-- **Upload** a video (`POST /projects`, multipart; up to about 3 minutes; must have an audio track). The sample ad is uploaded through the same path.
+- **Upload** a video (`POST /projects`, multipart; up to about 3 minutes; a video with no audio track is given a silent one). The sample ad is uploaded through the same path.
 - **Transcription** by Whisper (`whisper-1`, `verbose_json` for word timestamps). Empty symbol slots are dropped; a transcribed segment is **dropped when it is probably invented** (Whisper's own `no_speech_prob`/`avg_logprob`/`compression_ratio`, the known invented sign-offs, or no speech energy above the noise floor). A clip that ends with no words is treated as silent: a voice-over clip.
 - **Speakers**: detected on request (`POST /speakers/detect`), named and given a voice by hand (`PUT /speakers/{label}`); an unnamed speaker shows as Speaker 1, 2, 3.
 - **Reading** (`POST /reading`): Voltage's first look — an opening line, a role per speaker, and on a silent clip what it saw in the frames (the place can be confirmed or corrected, `PUT /sight`).

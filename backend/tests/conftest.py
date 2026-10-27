@@ -149,7 +149,7 @@ def sample_video(tmp_path_factory):
 
 @pytest.fixture(scope="session")
 def sample_video_without_audio(tmp_path_factory):
-    """A real MP4 carrying no audio stream — ingest must refuse it."""
+    """A real MP4 carrying no audio stream (run 5 item 4: taken, given a silent track)."""
     from app.media import ffmpeg
     path = tmp_path_factory.mktemp("media") / "silent.mp4"
     ffmpeg.generate_solid_video(path, 1.0)

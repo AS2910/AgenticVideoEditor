@@ -190,10 +190,26 @@ def test_upload_without_a_video_track_is_rejected(client, sample_audio_only):
     assert "not a video" in resp.json()["detail"]
 
 
-def test_upload_without_an_audio_track_is_rejected(client, sample_video_without_audio):
+def test_upload_without_an_audio_track_is_taken_with_no_lines(client, sample_video_without_audio, monkeypatch):
+    """Run 5 item 4: taken (it used to be refused), given a silent track,
+    never sent to be transcribed or charged for, and left with no lines, so
+    the editor offers a voice-over to place."""
+    from app.api import main
+
+    class NeverHeard:
+        def transcribe(self, source):
+            raise AssertionError("a video with no sound is never transcribed")
+
+    monkeypatch.setattr(main, "transcriber", NeverHeard())
+    monkeypatch.setattr(main, "transcriber_label", "openai:whisper-1")
     resp = upload(client, sample_video_without_audio, name="silent.mp4")
-    assert resp.status_code == 422
-    assert "no audio track" in resp.json()["detail"]
+    assert resp.status_code == 200, resp.text
+    project = resp.json()
+    assert project["transcript"] == [] and project["statements"] == []
+    stored = repo.get(project["video_id"]).source.media.path
+    assert ingest.probe_source(stored).has_audio is True
+    with main.database.tx() as c:
+        assert c.execute("SELECT COUNT(*) AS n FROM usage WHERE vendor = 'openai'").fetchone()["n"] == 0
 
 
 def test_health_reports_which_capabilities_are_real(client):

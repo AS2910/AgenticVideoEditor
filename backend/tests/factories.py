@@ -50,3 +50,44 @@ def export_now(client, url, **kw):
                 break
             time.sleep(0.02)
         assert found and found["status"] == "done", found
+
+
+# Run 5 item 4: something speech-like for the voice activity detector to hear
+# (silence is never sent to be transcribed): a 140 Hz voice with formant-ish
+# harmonics, its loudness rising and falling four times a second like syllables.
+SPEECH_LIKE = ("0.3*(sin(2*PI*140*t)+0.5*sin(2*PI*700*t)+0.4*sin(2*PI*1400*t)+0.2*sin(2*PI*2800*t))"
+               "*pow(0.5+0.5*sin(2*PI*4*t),2)")
+
+
+def audio_clip(dest, seconds: float, expr: str, rate: int = 16000):
+    """A mono WAV made by ffmpeg from an `aevalsrc` expression of `t`."""
+    from pathlib import Path
+    from app.media import ffmpeg
+    dest = Path(dest)
+    ffmpeg._run(ffmpeg.FFMPEG, [
+        "-y", "-loglevel", "error", "-f", "lavfi", "-i", f"aevalsrc='{expr}':s={rate}:d={seconds:.3f}",
+        "-ac", "1", "-c:a", "pcm_s16le", str(dest),
+    ])
+    return dest
+
+
+def video_with(dest, audio, seconds: float):
+    """A small MP4 of a solid colour carrying `audio` as its sound (or none)."""
+    from pathlib import Path
+    from app.media import ffmpeg
+    dest = Path(dest)
+    picture, _ = ffmpeg.generate_solid_video(dest.with_name(f"picture-{dest.name}"), seconds)
+    if audio is None:
+        return picture
+    ffmpeg._run(ffmpeg.FFMPEG, [
+        "-y", "-loglevel", "error", "-i", str(picture), "-i", str(audio),
+        "-map", "0:v", "-map", "1:a", "-c:v", "copy", "-c:a", "aac", "-shortest", str(dest),
+    ])
+    return dest
+
+
+def voiced_video(dest, seconds: float):
+    """A video whose sound is speech-like from start to end."""
+    from pathlib import Path
+    dest = Path(dest)
+    return video_with(dest, audio_clip(dest.with_name(f"voice-{dest.stem}.wav"), seconds, SPEECH_LIKE), seconds)

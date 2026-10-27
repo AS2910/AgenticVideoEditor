@@ -15,10 +15,15 @@ def test_probe_reports_real_parameters(sample_video):
     assert probed.has_audio is True
 
 
-def test_a_video_without_audio_is_refused(sample_video_without_audio):
-    # Nothing to transcribe, no voice to clone, no line to change.
-    with pytest.raises(ingest.IngestError, match="no audio track"):
-        ingest.probe_source(sample_video_without_audio)
+def test_a_video_without_audio_is_taken_and_given_a_silent_track(sample_video_without_audio):
+    # Run 5 item 4: no lines to change, but a voice-over can be placed on it.
+    probed = ingest.probe_source(sample_video_without_audio)
+    assert probed.has_audio is False
+    with_sound = ingest.add_silent_audio(sample_video_without_audio, "mp4", probed.duration)
+    again = ingest.probe_source(with_sound)
+    assert again.has_audio is True
+    assert again.duration == pytest.approx(probed.duration, abs=0.1)
+    assert (again.width, again.height) == (probed.width, probed.height)
 
 
 def test_a_file_with_no_video_track_is_refused(sample_audio_only):

@@ -24,6 +24,7 @@ from app.store.db import Database
 from app.usage import SpendCeilingReached
 from tests.agent.conftest import ScriptedClient, reply, text as said
 from tests.api.test_endpoints import _agent_on, send, take, upload
+from tests.factories import voiced_video
 
 ROOT = Path(__file__).resolve().parents[2]
 needs_ffmpeg = pytest.mark.skipif(not ffmpeg.available(), reason="ffmpeg/ffprobe not installed")
@@ -181,11 +182,12 @@ def test_a_voice_vendor_failure_is_our_end_and_refunded(client, video, monkeypat
 
 @needs_ffmpeg
 @pytest.mark.parametrize("spec", ["openai=status:401", "openai=status:500", "openai=hang:1", "openai=reset"])
-def test_a_transcription_failure_at_upload_is_our_end_and_not_charged(client, sample_video, monkeypatch, spec):
+def test_a_transcription_failure_at_upload_is_our_end_and_not_charged(client, tmp_path, monkeypatch, spec):
     heard = WhisperTranscriptionAdapter("sk-test", post=_chaos(spec).openai_post(lambda *a: {"words": []}))
     monkeypatch.setattr(main, "transcriber", heard)
     monkeypatch.setattr(main, "transcriber_label", "openai:whisper-1")
-    resp = upload(client, sample_video)
+    # Run 5 item 4: a silent clip is never sent, so the vendor only fails on one with sound.
+    resp = upload(client, voiced_video(tmp_path / "voiced.mp4", 2.3))
     assert resp.status_code == 503 and resp.json()["detail"] == OUR_END
     with main.database.tx() as c:
         assert c.execute("SELECT COUNT(*) AS n FROM usage WHERE vendor = 'openai'").fetchone()["n"] == 0
