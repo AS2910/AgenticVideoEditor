@@ -51,6 +51,8 @@ AVE_CLONE_MIN_SECONDS=10                  # a speaker needs this much of their o
 AVE_VOICE_ROUTE=auto                      # tts | changer | auto: the Voice Changer rung after a weak identity match
 AVE_STEMS=1                               # keep the music and room under an edited line (needs the room extra)
 AVE_MEASURE=1                             # 0 = skip the SIM-o / UTMOS measures (needs the measure extra)
+AVE_ON_CAMERA=1                           # 0 = do not look for the speaker's face on upload (Run 5, LIPSYNC.md)
+AVE_LIPSYNC_PROVIDER=off                  # off | fake | sync_so (+ SYNC_API_KEY) | selfhosted (+ LIPSYNC_SELFHOSTED_URL)
 # sign-in (Phase 9c); off by default, everything is one local owner
 AVE_AUTH=google                           # turn the door on
 GOOGLE_CLIENT_ID=…                        # an OAuth web client in Google Cloud Console

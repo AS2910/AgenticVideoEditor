@@ -28,6 +28,8 @@ class Line:
     # hold at this speaker's rate (the pause after it included). None = unknown.
     syllables: int | None = None
     budget: int | None = None
+    # Run 5, item 10: is the speaker seen saying it? on_camera | off_camera | unsure, None = not looked at.
+    on_camera: str | None = None
 
 
 @dataclass(frozen=True)

@@ -4,6 +4,7 @@ import { AdminWaitlist } from '../AdminWaitlist'
 import { BetaFeedbackSection } from './BetaFeedbackSection'
 import { BetaSection } from './BetaSection'
 import { ConsentReviewsSection } from './ConsentReviewsSection'
+import { LipSyncSection } from './LipSyncSection'
 import { card } from './ui'
 
 /** The admin page's mount point (rehearsal item 10). Each later admin tool is one
@@ -21,6 +22,7 @@ export const ADMIN_SECTIONS: AdminSection[] = [
   { id: 'beta-cohort', label: 'Beta', render: (c) => <BetaSection card={c} /> },
   { id: 'beta', label: 'Beta feedback', render: (c) => <BetaFeedbackSection card={c} /> },
   { id: 'consent', label: 'Consent reviews', render: (c) => <ConsentReviewsSection card={c} /> },
+  { id: 'lipsync', label: 'Lip-sync review', render: (c) => <LipSyncSection card={c} /> },
   { id: 'audit', label: 'Audit trail', render: (c) => <AuditSection card={c} /> },
 ]
 

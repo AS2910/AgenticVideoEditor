@@ -43,6 +43,7 @@ from app.timefmt import iso, now_iso
 from app.agent.prose import plain
 from app.agent import suggestions as chips
 from app import understanding as understanding_mod
+from app.lipsync import on_camera as on_camera_mod, provider as lipsync_provider
 from app.media import understand as understand_mod
 from app import arrange
 from app.media import frames as frames_mod, motion, shots
@@ -307,7 +308,8 @@ def health() -> dict:
         "cloning": "on" if clones.available else "off",
         # Phase 15c: music and room kept under an edited line (needs the `room` extra).
         "room": "on" if settings.stems and stems_module.available() else "off",
-        "lipsync": "mock",
+        # Run 5, item 10: no lip-sync provider is chosen yet; "off" unless one is switched on.
+        "lipsync": lipsync_provider.status()["selected"],
         "continuity": continuity_label,
         "planner": planner_label,
         # Phase 20: Voltage as an agent with tools (AVE_AGENT=1 and an Anthropic key).
@@ -1104,6 +1106,7 @@ def _project_dict(record: ProjectRecord) -> dict:
     is in, or null (Folders)."""
     source = record.source
     folder = _folder_of(record)
+    seen = repo.settings(source.project_id).get("on_camera")
     return {
         "video_id": source.project_id,
         "project_id": folder.project_id if folder else None,
@@ -1128,7 +1131,9 @@ def _project_dict(record: ProjectRecord) -> dict:
             {"text": w.text, "start": w.start, "end": w.end} for w in record.transcript.words
         ],
         "statements": [
-            {"text": st.text, "start": st.start, "end": st.end, "speaker": st.speaker}
+            {"text": st.text, "start": st.start, "end": st.end, "speaker": st.speaker,
+             # Run 5, item 10: on_camera | off_camera | unsure, or null while it is being looked at.
+             "on_camera": on_camera_mod.state_for(seen, st.start, st.end)}
             for st in statements_of(record.transcript)
         ],
         "speakers": _speakers(source.project_id),
@@ -1389,6 +1394,8 @@ def _ingest_staged(staged: Path, filename: str, consent: bool, folder: Project |
         _record_diarization(project_id, source.duration)
     analytics.track("video_uploaded", owner, {"video_id": project_id, "seconds": round(source.duration, 1),
                                               "project_id": folder.project_id if folder else None})
+    from app import lipsync_api
+    lipsync_api.start(project_id)   # Run 5, item 10: is the speaker seen saying each line
     return _project_dict(repo.get(project_id))
 
 
@@ -6566,6 +6573,7 @@ def _plan_dict(plan: Plan | None) -> dict | None:
 
 def _lines(record: ProjectRecord) -> list[Line]:
     names = {s.label: s.name for s in repo.speakers(record.source.project_id)}
+    seen = repo.settings(record.source.project_id).get("on_camera")
     rates: dict[str | None, float] = {}
     out = []
     for i, st in enumerate(statements_of(record.transcript)):
@@ -6576,6 +6584,7 @@ def _lines(record: ProjectRecord) -> list[Line]:
             i + 1, st.start, st.end, names.get(st.speaker) if st.speaker else None, st.text,
             syllables=syllables(st.text),
             budget=syllable_budget(rates[st.speaker], st.end - st.start + min(room, 1.0)),
+            on_camera=on_camera_mod.state_for(seen, st.start, st.end),
         ))
     return out
 
@@ -9643,7 +9652,7 @@ async def _csrf_header(request: Request, call_next):
 
 def _mount_optional_routers() -> None:
     import importlib
-    for name in ("app.onboarding", "app.help", "app.tutorial", "app.workspace_api", "app.accounts_api", "app.notify_api", "app.analytics_api", "app.feedback_api", "app.billing_api", "app.safety_api", "app.landing_api", "app.emails_api", "app.admin_api", "app.beta_feedback_api", "app.beta_api"):
+    for name in ("app.onboarding", "app.help", "app.tutorial", "app.workspace_api", "app.accounts_api", "app.notify_api", "app.analytics_api", "app.feedback_api", "app.billing_api", "app.safety_api", "app.landing_api", "app.emails_api", "app.admin_api", "app.beta_feedback_api", "app.beta_api", "app.lipsync_api"):
         try:
             module = importlib.import_module(name)
         except ImportError:

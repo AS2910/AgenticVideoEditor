@@ -6,6 +6,7 @@ import type {
 } from '../types'
 import { diffWords, lineAfter, trackedChanges } from '../transcript/changes'
 import { clock } from '../transcript/format'
+import { lipsNote } from '../transcript/lips'
 import { verdict } from '../transcript/verdict'
 import { takeFacts } from '../transcript/facts'
 import { parseTime, timecode } from '../transcript/time'
@@ -1317,7 +1318,7 @@ export function LineDoc({
         </div>
         {p.moved && (
           <div className={cn(metaClass, 'text-needs')} data-testid="lips">
-            Lines move, the picture doesn't. If {label ?? 'the speaker'} is on screen here, the lips won't match.
+            Lines move, the picture doesn't. If {label ?? 'the speaker'} is on screen here, the lips won't match yet.
           </div>
         )}
       </div>
@@ -1344,6 +1345,8 @@ export function LineDoc({
     const itemStatus = own && own.status !== 'approved' && own.status !== 'dismissed' && STATUS[own.status] ? own.status : null
     const status: string | null = pending?.status ?? itemStatus ?? (removed ? 'removed' : revision ? 'kept' : null)
     const label = name(s.speaker)
+    // Run 5, item 10: the speaker is seen saying this line; a change there will not match the lips yet.
+    const lips = lipsNote(s.on_camera, label)
     const isEditing = editing?.order === order && editing.mode === 'edit'
     const isAdding = editing?.order === order && editing.mode === 'add'
     const proposed = own?.status === 'ready' && !!own.candidate
@@ -1394,9 +1397,10 @@ export function LineDoc({
           <button className={timeClass} onClick={() => onSeek(at)} aria-label={`Go to ${clock(entry.start)}`}>{clock(entry.start)}</button>
           <div className={cn('flex min-w-0 flex-col', proposed ? 'gap-2.5' : 'gap-1.5')}>
             {whoLine(label, <>{stamp}{asShot && revision && NOT_IN_VERSION}</>)}
-            {isEditing ? <div className={unfold}>{editor(s, 'edit')}</div> : inDepth ? depth(own!, own!.candidate!, s, order, 'edit') : (
+            {isEditing ? <>{lips && <div className={cn(metaClass, 'text-needs')} data-testid="lips-line">{lips}</div>}<div className={unfold}>{editor(s, 'edit')}</div></> : inDepth ? depth(own!, own!.candidate!, s, order, 'edit') : (
               <>
                 {wordsButton}
+                {lips && shown && !removed && !asShot && <div className={cn(metaClass, 'text-needs')} data-testid="lips-line">{lips}</div>}
                 {(revision || removed) && !asShot && (
                   <div className={metaClass}>
                     {removed ? "Removed. The gap is closed with the room's own sound; the picture is untouched." : `${shown && MIX_NOTE[shown.mix] ? (MIX_NOTE[shown.mix] ?? '').replace(/^./, (ch) => ch.toUpperCase()) : 'In place of the words as shot'}.`}

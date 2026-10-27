@@ -133,3 +133,8 @@ candidates 49, edits 41, jobs 11, messages 165, meta 10, plans 9, projects 2, tu
 |---|---|---|---|---|
 | 9 | Lead with many videos at once | done | review/item9 | `launch.batch_public` (on by default) brings `projects.batch` (B1, B2, B3) into the public profile; B1 first use (steps, example prompts, plain gate, one-sentence board, Hear the changes link); B3 picks every video without phase C; landing hero and steps for ad teams and agencies, one video second; rehearsal journey `batch.spec.ts` green with the other three on a fresh stack (mocked vendors). |
 
+# Run 5, item 10: lip-sync foundations (2026-10-27)
+
+| # | Item | Status | Commit | Notes |
+|---|---|---|---|---|
+| 10 | Lip-sync foundations, no provider yet | done | (this commit, branch review/item10) | Per-line on camera / off camera / unsure on upload (background, 0.18 to 0.40 s per second of video); statements carry it; Voltage's transcript tags it; changed on-camera lines say the lips won't match yet. `LipSyncProvider` with span-only processing (0.5 s handles, never across a cut) and frame-exact stitch-back; fake, sync.so and self-hosted providers, both real ones off without keys. Quality harness (SyncNet LSE-C or mouth motion) and a side-by-side review on the admin page. LIPSYNC.md recommends sync.so lipsync-2 first, fal LatentSync next. |

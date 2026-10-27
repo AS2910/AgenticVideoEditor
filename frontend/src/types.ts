@@ -1,6 +1,9 @@
 export interface Word { text: string; start: number; end: number }
 /** A sentence as spoken, with punctuation — edited from the transcript panel. */
-export interface Statement { text: string; start: number; end: number; speaker?: string | null; /** UX-5: a voice-over placed by time on a clip with no speech. */ placed?: boolean }
+/** Run 5, item 10: is the speaker seen saying the line (looked at on upload)? */
+export type OnCamera = 'on_camera' | 'off_camera' | 'unsure'
+
+export interface Statement { text: string; start: number; end: number; speaker?: string | null; /** UX-5: a voice-over placed by time on a clip with no speech. */ placed?: boolean; /** Run 5, item 10: null while it is being looked at, or on an older video. */ on_camera?: OnCamera | null }
 
 /** An approved edit as the transcript shows it: the new words over a span,
  *  as inline tracked changes. `edit_id` is what Revert names. */

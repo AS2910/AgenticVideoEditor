@@ -36,6 +36,12 @@ os.environ["AVE_VOICE_BUDGET_CHARS"] = "2000"
 # The measure extra (WavLM, UTMOS) stays off: no model downloads in the suite;
 # its tests inject fakes. tests/continuity/test_similarity_live.py opts in.
 os.environ["AVE_MEASURE"] = "0"
+# Run 5, item 10: no SyncNet download, no on-camera look on every upload, and no
+# lip-sync vendor, whatever backend/.env sets; tests/lipsync opts in where it checks them.
+os.environ["AVE_MOUTH_MEASURE"] = "0"
+os.environ["AVE_ON_CAMERA"] = "0"
+for _name in ("SYNC_API_KEY", "AVE_LIPSYNC_PROVIDER", "LIPSYNC_SELFHOSTED_URL", "LIPSYNC_SELFHOSTED_TOKEN"):
+    os.environ[_name] = ""
 # A developer's DATABASE_URL never points the suite at their Postgres.
 os.environ["DATABASE_URL"] = ""
 

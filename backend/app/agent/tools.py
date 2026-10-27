@@ -250,6 +250,16 @@ def _look_at_frames(wb: Workbench, turn: Turn, args: dict) -> ToolResult:
     return ToolResult("", blocks=blocks, step=f"Looked at {len(picked)} {'frame' if len(picked) == 1 else 'frames'}")
 
 
+# Run 5, item 10: who is seen saying each line, from the look on upload. No
+# lip-sync provider is on yet, so a new wording on a seen speaker will not
+# match their lips; off-camera lines are edited freely.
+CAMERA_TAGS = {"on_camera": "  [on camera]", "unsure": "  [maybe on camera]"}
+CAMERA_NOTE = ("[on camera]: the speaker is seen saying this line, so new words there will not match the lips yet "
+               "(lip-sync is not available). [maybe on camera]: a face is on screen but it is not clear it is speaking. "
+               "Lines without a tag are off camera and can be changed freely. When a goal can be met on an off-camera "
+               "line, prefer it. When you change an on-camera line, say once, in a few words, that the lips won't match yet.")
+
+
 def _read_transcript(wb: Workbench, turn: Turn, args: dict) -> ToolResult:
     lines = list(wb.lines(turn.record))
     if not lines:
@@ -260,7 +270,10 @@ def _read_transcript(wb: Workbench, turn: Turn, args: dict) -> ToolResult:
     for ln in lines:
         who = f" {ln.speaker}:" if ln.speaker else ""
         fits = f"  ({ln.syllables} syl now, up to {ln.budget} fit)" if ln.syllables is not None and ln.budget is not None else ""
-        out.append(f"{ln.index}. [{ln.start:.1f}–{ln.end:.1f}]{who} {ln.text}{fits}")
+        seen = CAMERA_TAGS.get(getattr(ln, "on_camera", None) or "", "")
+        out.append(f"{ln.index}. [{ln.start:.1f}–{ln.end:.1f}]{who} {ln.text}{fits}{seen}")
+    if any(getattr(ln, "on_camera", None) in ("on_camera", "unsure") for ln in lines):
+        out.append(CAMERA_NOTE)
     spk = [s for s in wb.speakers(turn.project_id)]
     if spk:
         out.append("Speakers: " + "; ".join(f"{s.name} ({s.label})" + (", own voice made" if s.clone_voice_id else "") for s in spk)

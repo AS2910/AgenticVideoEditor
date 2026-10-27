@@ -497,7 +497,7 @@ describe('LineDoc: the arrangement, the transcript in playback order (2026-10-19
     expect(rows[0]).toHaveTextContent('Start a live Bajicam session.')
     expect(rows[1]).toHaveTextContent('Hi, I want to buy groceries.')
     expect(screen.getAllByText('Start a live Bajicam session.')).toHaveLength(1)
-    expect(screen.getAllByTestId('lips')[0]).toHaveTextContent("Lines move, the picture doesn't. If the Customer is on screen here, the lips won't match.")
+    expect(screen.getAllByTestId('lips')[0]).toHaveTextContent("Lines move, the picture doesn't. If the Customer is on screen here, the lips won't match yet.")
     expect(screen.queryByText(/Moved away/)).not.toBeInTheDocument()
   })
 
@@ -754,5 +754,35 @@ describe('LineDoc: the simple view (run 5 item 5)', () => {
     expect(screen.getByTestId('counts')).toBeInTheDocument()
     expect(screen.getByTestId('arrange-bar')).toBeInTheDocument()
     expect(screen.getAllByTestId('row-chip').map((c) => c.textContent)).toEqual(['Original', 'Ready to hear', 'Original'])
+  })
+})
+
+describe('LineDoc: who is seen saying a line (Run 5, item 10)', () => {
+  const seen = (state: 'on_camera' | 'off_camera' | 'unsure') => STATEMENTS.map((s, i) => (i === 1 ? { ...s, on_camera: state } : s))
+
+  it('says the lips won\'t match yet on a changed line whose speaker is on camera', () => {
+    doc({ statements: seen('on_camera'), revisions: [{ edit_id: 'e1', start: 7.54, end: 9.02, text: 'Start a live Bhaji Cam session.', mix: 'replace' }] })
+    expect(screen.getByTestId('lips-line')).toHaveTextContent("The Customer is on screen saying this line, so the lips won't match yet.")
+  })
+
+  it('says it softly when a face is there but it is not clear it is speaking', () => {
+    doc({ statements: seen('unsure'), revisions: [{ edit_id: 'e1', start: 7.54, end: 9.02, text: 'Start a live Bhaji Cam session.', mix: 'replace' }] })
+    expect(screen.getByTestId('lips-line')).toHaveTextContent("The Customer may be on screen here. If so, the lips won't match yet.")
+  })
+
+  it('edits an off-camera line freely: no note, changed or not', () => {
+    doc({ statements: seen('off_camera'), revisions: [{ edit_id: 'e1', start: 7.54, end: 9.02, text: 'Start a live Bhaji Cam session.', mix: 'replace' }] })
+    expect(screen.queryByTestId('lips-line')).not.toBeInTheDocument()
+  })
+
+  it('says nothing on an on-camera line nobody is changing', () => {
+    doc({ statements: seen('on_camera') })
+    expect(screen.queryByTestId('lips-line')).not.toBeInTheDocument()
+  })
+
+  it('says it above the editor, before the words are changed', async () => {
+    doc({ statements: seen('on_camera') })
+    await userEvent.click(screen.getByText('Start a live Bajicam session.'))
+    expect(await screen.findByTestId('lips-line')).toHaveTextContent("the lips won't match yet")
   })
 })
