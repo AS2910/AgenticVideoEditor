@@ -206,7 +206,7 @@ export function BatchPanel({ projectId, videos, fix, onFixHandled, refresh = 0, 
                 onUndo={() => void act(`undo-${r.video_id}`, () => undoBatchAdd(projectId, showing.batch_id, r.video_id), 'Could not undo those lines.')} />
             ))}
           </ul>
-          {showing.phase === 'running' && <Tip id="first-batch" target="batch" />}
+          {showing.phase === 'running' && <Tip id="first-batch" />}
           {note && <p className="m-0 text-sm text-destructive" role="alert">{note}</p>}
           {hold && <StageWarning message={hold} busy={busy === 'add'} onCancel={() => setHold(null)} onAnyway={() => void addAll(true)} />}
           <div className="flex flex-wrap items-center justify-end gap-2 border-t border-line pt-2">

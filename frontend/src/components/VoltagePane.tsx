@@ -10,6 +10,7 @@ import { cn } from '@/lib/utils'
 import { Markdown } from './Markdown'
 import { Thumbs } from './Thumbs'
 import { Wave } from './Wordmark'
+import { TipSlot } from '../guides/TipQueue'
 
 /** One turn of the thread, as the pane reads it: what you said, the trace, what Voltage said. */
 interface Turn { user: ChatMessage | null; steps: ChatMessage[]; said: ChatMessage[]; cards: ChatMessage[] }
@@ -331,6 +332,8 @@ export function VoltagePane({
         </div>
       )}
 
+      {/* Run 5 item 3: a first-time tip shows here, above the thread, never over the transcript or the player. */}
+      <TipSlot name="pane" className="shrink-0 border-b border-pline px-5.5 pt-3.5 pb-4.5 @max-[380px]:px-4" />
       <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
         <div ref={list} onScroll={onScroll} onClick={(e) => {
           // "line 3" in Voltage's words shows that row of the transcript (2026-10-20).

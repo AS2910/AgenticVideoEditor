@@ -10,9 +10,16 @@ import json
 from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel
 
+# Run 5 item 3: every tip the front end has (frontend/src/guides/tips.ts, in its
+# order). This list had stopped at ten, so Got it on any later tip was dropped on
+# save and the tip came back after a reload; a test keeps the two lists equal.
 TIPS = (
     "first-upload", "first-silent", "first-question", "first-just-do-it", "first-voice-design",
-    "first-project-voice", "first-background", "first-undo-after-export", "first-ceiling", "first-failed-take",
+    "first-project-voice", "first-background", "first-undo-after-export", "first-ceiling", "first-credits",
+    "first-failed-take", "first-word-rule", "first-brief-changed", "first-project-check", "first-batch",
+    "first-language-sync", "first-board", "first-review-comment", "first-bin", "first-template",
+    "first-learned", "first-thumbs", "first-home-search", "first-sample", "first-members",
+    "first-notifications", "first-consent-liveness", "first-withdraw-consent", "first-batch-export",
 )
 # The last two are the beta's welcome checklist (shown to `beta.cohort` only): the
 # Known issues page opened, and feedback sent (beta_feedback_api ticks it).

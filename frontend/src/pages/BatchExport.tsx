@@ -175,7 +175,7 @@ export function BatchExport({ projectId, presets }: { projectId: string; presets
           <ul className="m-0 flex list-none flex-col p-0">
             {showing.files.map((f) => <FileRow key={f.index} projectId={projectId} exportId={showing.export_id} f={f} />)}
           </ul>
-          {!running && <Tip id="first-batch-export" target="batch-export" />}
+          {!running && <Tip id="first-batch-export" />}
           {!running && showing.counts.ready > 0 && <ShareLine projectId={projectId} run={showing} onChange={() => setTick((t) => t + 1)} />}
           <div className="flex flex-wrap items-center justify-end gap-2 border-t border-line pt-2">
             {!running && <button type="button" className="act" onClick={() => setDismissed(showing.export_id)}>Export again</button>}

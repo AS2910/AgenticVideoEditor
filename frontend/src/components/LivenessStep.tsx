@@ -69,7 +69,7 @@ export function LivenessStep({ videoId, who, onPassed }: { videoId: string; who?
       : verified && state === 'failed' ? `Did not pass. ${note ?? ''}` : note
   return (
     <div className="flex flex-col gap-2.5 rounded-lg bg-sunk p-3" data-testid="liveness" data-tour="liveness" data-state={state}>
-      <Tip id="first-consent-liveness" target="liveness" inline />
+      <Tip id="first-consent-liveness" inline />
       <span className="flex flex-wrap items-center gap-2">
         <span className="tag text-faint">Read this aloud</span>
         {attempt?.test_mode && <span className="stamp need">Test mode</span>}

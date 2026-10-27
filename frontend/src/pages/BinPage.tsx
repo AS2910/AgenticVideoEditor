@@ -156,7 +156,7 @@ export function BinPage({ me, onRestored }: { me: Me | null; onRestored?: (kind:
           </ul>
         )}
       </section>
-      {items && items.length > 0 && <Tip id="first-bin" target="bin-list" />}
+      {items && items.length > 0 && <Tip id="first-bin" />}
       {toast && (
         <div role="status" className="rise fixed bottom-6 left-1/2 z-30 flex max-w-[calc(100vw-32px)] -translate-x-1/2 flex-wrap items-center gap-3.5 rounded-xl bg-ink px-4 py-3 text-ptext shadow-volt" data-testid="bin-toast">
           <span>{toast.text}</span>

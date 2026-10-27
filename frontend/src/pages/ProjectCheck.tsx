@@ -174,7 +174,7 @@ export function ProjectCheck({ projectId, briefVersion, onFixAll }: { projectId:
                     <span className="disp text-base font-bold">{open.length} {open.length === 1 ? 'issue' : 'issues'}</span>
                     {lastAt && <span className="text-[13px] text-muted-foreground" data-testid="check-when">{`Checked ${agoLabel(lastAt)}${!running ? `, ${costWord(check.mode, check.cost_usd)}` : ''}.`}</span>}
                   </p>
-                  {!running && <Tip id="first-project-check" target="project-check" />}
+                  {!running && <Tip id="first-project-check" />}
                   <ul className="m-0 flex list-none flex-col p-0">
                     {open.map((i) => <Issue key={i.issue_id} issue={i} busy={busy} onFix={(v) => void fix(i, v)} onFixAll={() => void fixAll(i)} onIgnore={() => void ignore(i)} />)}
                   </ul>

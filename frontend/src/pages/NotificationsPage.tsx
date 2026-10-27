@@ -70,7 +70,7 @@ export function NotificationsPage({ me }: { me: Me | null }) {
             ))}
           </section>
         )}
-        {kinds && <Tip id="first-notifications" target="notification-settings" />}
+        {kinds && <Tip id="first-notifications" />}
         <p className="m-0 min-h-5 text-sm text-muted-foreground" role="status" aria-live="polite">{status}</p>
       </div>
     </Shell>

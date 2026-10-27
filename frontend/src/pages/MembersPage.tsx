@@ -158,7 +158,7 @@ export function MembersPage({ me }: { me: Me | null }) {
 
             <section className={cn(card, 'flex flex-col gap-3.5')} aria-labelledby="invite-h">
               <h2 id="invite-h" className="disp m-0 text-[22px] font-bold">Invite someone</h2>
-              <Tip id="first-members" target="invite-form" />
+              <Tip id="first-members" />
               <form className="flex flex-col gap-3" onSubmit={(e) => { e.preventDefault(); void invite() }} aria-label="Invite someone" data-testid="invite-form" data-tour="invite-form">
                 <label className="flex flex-col gap-1"><span className="text-[13px] font-semibold">Email</span>
                   <input className={field} type="email" autoComplete="off" value={email} onChange={(e) => { setEmail(e.target.value); setFormError(null) }} placeholder="name@agency.com" aria-invalid={formError ? true : undefined} />

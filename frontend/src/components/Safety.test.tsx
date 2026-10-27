@@ -194,7 +194,7 @@ describe('9e: tips for the G6 consent and withdraw flows', () => {
 
   it('points the withdraw tip at the Withdraw consent now row', async () => {
     serve(() => ({}))
-    render(<><WithdrawConsent videoId="p1" onWithdrawn={() => {}} /><Tip id="first-withdraw-consent" target="withdraw-consent" /></>)
+    render(<><WithdrawConsent videoId="p1" onWithdrawn={() => {}} /><Tip id="first-withdraw-consent" /></>)
     expect(screen.getByTestId('withdraw-consent')).toHaveAttribute('data-tour', 'withdraw-consent')
     const tip = screen.getByRole('status', { name: 'Tip: Withdraw consent' })
     expect(tip).toHaveTextContent('the voice clone is deleted at once')

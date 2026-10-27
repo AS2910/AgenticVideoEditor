@@ -9,6 +9,7 @@ import { initialOf } from './fmt'
 import { useFlags } from '../flags/useFlags'
 import { PausedBanner } from '../components/PausedBanner'
 import { NotificationBell } from '../components/NotificationBell'
+import { TipSlot } from '../guides/TipQueue'
 
 export type ShellPage = 'projects' | 'voices' | 'usage' | 'settings' | 'billing' | 'help' | 'bin'
 const NAV: { page: ShellPage; label: string }[] = [
@@ -94,6 +95,8 @@ export function Shell({ active, right, me, children, mainClassName }: ShellProps
         <NotificationBell />
         <AccountDot me={me} />
       </header>
+      {/* Run 5 item 3: a first-time tip shows here, under the top bar, in the flow. */}
+      <TipSlot name="top" className="flex justify-end px-4 pt-3 pb-2 sm:px-6 [&>*]:max-w-[560px]" />
       <main id="main" tabIndex={-1} className={cn('flex-1 outline-none', mainClassName)}>{children}</main>
     </div>
   )

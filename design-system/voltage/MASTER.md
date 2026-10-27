@@ -93,7 +93,7 @@ Header, always one line: the wave, **Voltage** (display 18), the state word (`re
 - **Project page**: the brief card has the volt offset shadow (it is the project's one primary surface); the other side cards are plain ink-bordered panels; Voltage's suggestion sits on the black pane colour inside the brief card.
 - **Move dialog**: radio rows; the chosen one is volt with ink text; the voice question is a sunk panel with an ink border.
 - **Editor crumb**: a 34 px chip with a volt folder (dashed and muted when standalone); its menu shows the brief Voltage is using. The pane shows context chips under its header (first one volt).
-- **Tour**: a dimmed backdrop of four panels (no blur), a 2 px volt ring around the target, the coach card with a volt offset shadow; the highlighted control stays usable. **Tips** are black cards with a volt offset shadow and one Got it. The **Get started** pill is ink with volt text, bottom left.
+- **Tour**: a dimmed backdrop of four panels (no blur), a 2 px volt ring around the target, the coach card with a volt offset shadow; the highlighted control stays usable. **Tips** are black cards with a volt offset shadow and one Got it, one at a time and at most two a session, in the flow at the top of Voltage's pane (editor) or under the top bar (account pages), never over the transcript or the player (run 5 item 3). The **Get started** pill is ink with volt text, bottom left.
 - **Keyboard sheet** and **Help** use `.kbd` keycaps and the article reader as a right-hand drawer.
 
 ## Interaction rules

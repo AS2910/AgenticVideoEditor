@@ -103,7 +103,7 @@ export function LearnedStyle({ projectId, onProject, tick = 0 }: {
           {note && <span className="text-[13px] text-muted-foreground" role="status">{note}</span>}
         </>
       )}
-      {pending && <Tip id="first-learned" target="learned" />}
+      {pending && <Tip id="first-learned" />}
     </div>
   )
 }

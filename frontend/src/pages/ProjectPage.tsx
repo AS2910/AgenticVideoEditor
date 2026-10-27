@@ -342,13 +342,13 @@ export function ProjectPage({ me, projectId, onUpload, uploading, error, onDelet
             {reviewOn && <button type="button" className="btn sm" onClick={() => setReviewing(true)} disabled={detail.videos.length === 0} aria-haspopup="dialog" data-testid="send-review-open">Send for review</button>}
           </div>
           {consistency && <StaleLine projectId={projectId} count={project.stale_count ?? 0} version={project.brief_version} onChanged={() => void load()} />}
-          {consistency && (project.stale_count ?? 0) > 0 && <Tip id="first-brief-changed" target="stale-line" />}
+          {consistency && (project.stale_count ?? 0) > 0 && <Tip id="first-brief-changed" />}
           {reviewOn && view === 'board' && (
             detail.videos.length === 0
               ? <p className="m-0 text-sm text-muted-foreground">No videos here yet. Upload one and it starts in Draft.</p>
               : <LazyPart><ProjectBoard videos={detail.videos} briefChips={consistency} syncChips={batchOn} onMoved={staged} /></LazyPart>
           )}
-          {reviewOn && view === 'board' && detail.videos.length > 0 && <Tip id="first-board" target="board-toggle" />}
+          {reviewOn && view === 'board' && detail.videos.length > 0 && <Tip id="first-board" />}
           <div className={cn('-mx-3 grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-2.5', reviewOn && view === 'board' && 'hidden')}>
             {detail.videos.filter((v) => !(batchOn && v.master_id && detail.videos.some((m) => m.video_id === v.master_id))).map((v, i) => {
               const state = v.state ?? 'new'
@@ -402,7 +402,7 @@ export function ProjectPage({ me, projectId, onUpload, uploading, error, onDelet
             <LazyPart quiet><LanguageDialog videoId={langFor.video_id} filename={langFor.filename} projectId={projectId} onClose={() => setLangFor(null)}
               onMade={() => { setLangFor(null); setBatchTick((t) => t + 1); void load(); document.querySelector('[data-testid="batch"]')?.scrollIntoView({ behavior: 'smooth', block: 'start' }) }} /></LazyPart>
           )}
-          {batchOn && detail.videos.some((v) => v.out_of_sync) && <Tip id="first-language-sync" target="out-of-sync" />}
+          {batchOn && detail.videos.some((v) => v.out_of_sync) && <Tip id="first-language-sync" />}
           {reviewOn && reviewing && (
             <LazyPart quiet><SendForReview
               target={{ kind: 'project', projectId, title: project.name, videos: detail.videos.map((v) => ({ video_id: v.video_id, filename: v.filename, stage_label: STAGE_LABEL[v.stage as keyof typeof STAGE_LABEL] })) }}

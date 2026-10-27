@@ -209,7 +209,7 @@ export function TemplatesPage({ me, onMade }: { me: Me | null; onMade?: () => vo
           </>
         )}
       </section>
-      {items && <Tip id="first-template" target="template-list" />}
+      {items && <Tip id="first-template" />}
     </Shell>
   )
 }

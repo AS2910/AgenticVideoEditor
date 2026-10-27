@@ -358,7 +358,7 @@ export function ProjectsPage({ me, projects, folders = [], onOpen, onUpload, onS
         <div className="mx-auto flex max-w-[1040px] flex-col gap-10">
           {banner}
           {reuseOn && <HomeSearch />}
-          {reuseOn && onHome.length > 1 && <Tip id="first-home-search" target="home-search" />}
+          {reuseOn && onHome.length > 1 && <Tip id="first-home-search" />}
           <section aria-labelledby="new-h" className="flex flex-col gap-[18px]">
             {watching ? (
               <>
@@ -429,7 +429,7 @@ export function ProjectsPage({ me, projects, folders = [], onOpen, onUpload, onS
               {destId ? `It joins ${destName} and Voltage reads that project's brief and voices from the first turn.` : 'It will be a standalone video. You can add it to a project any time.'}
             </span>
             {g1 && <LinkImport projectId={destId} disabled={uploading} onDone={onOpen} />}
-            {g1 && folders.some((f) => f.sample) && <Tip id="first-sample" target="link-import" />}
+            {g1 && folders.some((f) => f.sample) && <Tip id="first-sample" />}
             </>)}
           </section>
 

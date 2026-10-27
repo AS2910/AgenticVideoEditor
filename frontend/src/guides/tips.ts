@@ -1,5 +1,5 @@
 /** The first-time tips: each shows once, the first time its moment comes,
- *  under the control it is about. `slug` is the Help article behind it. */
+ *  through the tip queue (TipQueue.tsx). `slug` is the Help article behind it. */
 export interface TipDef { id: string; title: string; text: string; link: string; slug: string }
 
 export const TIPS: TipDef[] = [

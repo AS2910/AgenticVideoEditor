@@ -46,6 +46,22 @@ def test_onboarding_starts_empty_and_merges_what_is_seen(client):
     assert body["tour"] == {"step": 3, "finished": True, "skipped": False}
 
 
+def test_every_front_end_tip_is_kept_once_dismissed(client):
+    """Run 5 item 3: a dismissed tip never returns, so the server keeps every id the
+    front end can dismiss (it had stopped at ten of them)."""
+    import re
+    from pathlib import Path
+    from app import onboarding
+    tips_ts = Path(__file__).resolve().parents[3] / "frontend" / "src" / "guides" / "tips.ts"
+    if not tips_ts.exists():
+        pytest.skip("no front end next to this backend")
+    front = re.findall(r"\{ id: '([a-z-]+)'", tips_ts.read_text())
+    assert front and tuple(front) == onboarding.TIPS
+    r = client.put("/me/onboarding", json={"tips": ["first-batch", "first-board", "first-batch-export"]})
+    assert r.json()["tips"] == ["first-batch", "first-board", "first-batch-export"]
+    assert client.get("/me/onboarding").json()["tips"] == ["first-batch", "first-board", "first-batch-export"]
+
+
 def test_the_tutorial_replays_the_recorded_run_without_spending(client):
     made = client.post("/tutorial")
     assert made.status_code == 201, made.text

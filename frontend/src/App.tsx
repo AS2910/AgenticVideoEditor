@@ -1,4 +1,5 @@
 import { Fragment, lazy, useCallback, useEffect, useRef, useState } from 'react'
+import type { ReactNode } from 'react'
 import { LazyPage, LazyPart } from './lib/lazy'
 import { ConsentSheet } from './components/ConsentSheet'
 import { Player, timecode } from './components/Player'
@@ -48,6 +49,7 @@ import type { Tour } from './tour/types'
 import { OnboardingProvider, useOnboarding } from './guides/onboarding'
 import { Checklist } from './guides/Checklist'
 import { Tip } from './guides/Tip'
+import { TipQueueProvider } from './guides/TipQueue'
 import { useReviewComments } from './review/useReviewComments'
 import { useFlags } from './flags/useFlags'
 import { REVIEWER_NOTE, useWorkspaceRole } from './lib/useWorkspaceRole'
@@ -132,10 +134,18 @@ function ToursSaved() {
   const { setTour } = useOnboarding()
   return (
     <TourProvider onProgress={setTour}>
-      <Studio />
+      <TipsQueued>
+        <Studio />
+      </TipsQueued>
       <TourLayer />
     </TourProvider>
   )
+}
+
+/** Run 5 item 3: one queue for every tip, paused while a tour runs. */
+function TipsQueued({ children }: { children: ReactNode }) {
+  const tour = useTour()
+  return <TipQueueProvider paused={!!tour.tour}>{children}</TipQueueProvider>
 }
 
 /** The routes and the editor. */
@@ -1680,26 +1690,25 @@ function Studio() {
     flipRef.current = route.page === 'editor' && changes > 0 ? () => switchView(view === 'original' ? 'final' : 'original') : null
     const scanning = turnBusy ? strip.text : readingBusy ? 'Voltage is reading the video' : null
     const isTutorial = !!project.settings?.tutorial
-    const tipCandidates: { id: string; target: string; when: boolean }[] = [
-      { id: 'first-review-comment', target: 'scrubber', when: reviewOn && (review.comments ?? []).some((c) => c.status === 'open') },
-      { id: 'first-failed-take', target: 'transcript-row', when: planItems.some((i) => i.status === 'failed') },
-      { id: 'first-word-rule', target: 'transcript-row', when: consistency && planItems.some((i) => !!i.word_rule?.breaks?.length) },
-      { id: 'first-ceiling', target: 'spend', when: !!error && /ceiling/i.test(error) },
+    const tipCandidates: { id: string; when: boolean }[] = [
+      { id: 'first-review-comment', when: reviewOn && (review.comments ?? []).some((c) => c.status === 'open') },
+      { id: 'first-failed-take', when: planItems.some((i) => i.status === 'failed') },
+      { id: 'first-word-rule', when: consistency && planItems.some((i) => !!i.word_rule?.breaks?.length) },
+      { id: 'first-ceiling', when: !!error && /ceiling/i.test(error) },
       // G3: paid steps paused because the credits are used up.
-      { id: 'first-credits', target: 'spend', when: !!error && /credits are used up/i.test(error) },
-      { id: 'first-question', target: 'question', when: !!clarifying && !plan?.question?.gate },
-      { id: 'first-voice-design', target: 'composer', when: messages.some((m) => m.kind === 'previews') },
-      { id: 'first-undo-after-export', target: 'export', when: undoneAfterExport },
-      { id: 'first-background', target: 'transcript-row', when: approved.some((r) => r.role === 'bed') },
-      { id: 'first-just-do-it', target: 'autonomy', when: autonomy === 'draft' },
-      { id: 'first-silent', target: 'composer', when: !isTutorial && firstRead && statements.length === 0 },
-      { id: 'first-upload', target: 'composer', when: !isTutorial && firstRead && statements.length > 0 && !readingBusy },
+      { id: 'first-credits', when: !!error && /credits are used up/i.test(error) },
+      { id: 'first-question', when: !!clarifying && !plan?.question?.gate },
+      { id: 'first-voice-design', when: messages.some((m) => m.kind === 'previews') },
+      { id: 'first-undo-after-export', when: undoneAfterExport },
+      { id: 'first-background', when: approved.some((r) => r.role === 'bed') },
+      { id: 'first-just-do-it', when: autonomy === 'draft' },
+      { id: 'first-silent', when: !isTutorial && firstRead && statements.length === 0 },
+      { id: 'first-upload', when: !isTutorial && firstRead && statements.length > 0 && !readingBusy },
       // G8: thumbs on a take, once a take is there to rate.
-      { id: 'first-thumbs', target: 'transcript-row', when: feedbackOn && planItems.some((i) => i.status === 'ready' && !!i.candidate) },
+      { id: 'first-thumbs', when: feedbackOn && planItems.some((i) => i.status === 'ready' && !!i.candidate) },
       // G6 (9e): the Withdraw consent now row, once consent is on record.
-      { id: 'first-withdraw-consent', target: 'withdraw-consent', when: safetyOn && !!project.consent_granted_at && !consentAsk },
+      { id: 'first-withdraw-consent', when: safetyOn && !!project.consent_granted_at && !consentAsk },
     ]
-    const firstTip = tour.tour || !onboarding.loaded ? null : tipCandidates.find((t) => t.when && !onboarding.onboarding.tips.includes(t.id)) ?? null
     const folderOf = project.project_id ? folders.find((f) => f.project_id === project.project_id) ?? null : null
     // The pane says what project context Voltage is reading, so its choices are never a mystery.
     const contextChips = project.project_id
@@ -2018,7 +2027,8 @@ function Studio() {
         {consentAsk && (
           <ConsentSheet who={consentAsk.who} busy={consenting} livenessVideoId={safetyOn ? project.video_id : null} onConfirm={(id) => void confirmConsent(id)} onCancel={() => setConsentAsk(null)} />
         )}
-        {firstTip && <Tip key={firstTip.id} id={firstTip.id} target={firstTip.target} />}
+        {/* Each tip whose moment has come asks the queue; it shows one, in the pane. */}
+        {tipCandidates.filter((t) => t.when).map((t) => <Tip key={t.id} id={t.id} />)}
         <KeyboardSheet open={keysOpen} onClose={() => setKeysOpen(false)} />
         <ActivityDrawer open={activityOpen} onClose={() => { setActivityOpen(false); setAllJobs(null) }} onRetry={retry}
           jobs={(allJobs ?? []).reduce((all, j) => (all.some((k) => k.job_id === j.job_id) ? all : [...all, j]), activity.jobs).sort((a, b) => (a.created_at < b.created_at ? 1 : -1))} />
