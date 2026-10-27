@@ -33,15 +33,24 @@ first. From a shell: `docker compose exec app python -m app.admin audit --db /da
 
 | Vendor | Used for | How it shows | What users see |
 |---|---|---|---|
-| ElevenLabs | voicing lines, cloning, designing voices | `voice_line`, `clone`, `design_voice` jobs fail; log lines `elevenlabs` with 5xx, 429 or timeouts | The line's chip reads Failed with the vendor's reason and a Retry; Activity lists the failed job |
-| OpenAI (Whisper) | transcribing uploads, hearing takes | uploads fail at transcription; log lines `openai` / `TranscriptionError` | The upload says it could not be transcribed; nothing is charged |
-| Anthropic (Claude) | Voltage's turns, the project check | turns fail; log lines `anthropic` / `APIStatusError` | Voltage's reply says the turn failed; the user can send it again |
+| ElevenLabs | voicing lines, cloning, designing voices | `voice_line`, `clone`, `design_voice` jobs fail; log lines `elevenlabs` with 5xx, 429 or timeouts | The line's chip reads Failed: "Something went wrong on our end. Nothing was charged. Try again in a minute." and a Retry; Activity lists the failed job. A line its safety filter refuses reads "The voice service's safety filter refused the line at 0:06 (...). Nothing was charged. Reword that line and try again." |
+| OpenAI (Whisper) | transcribing uploads, hearing takes | uploads fail at transcription; log lines `openai` / `TranscriptionError` | The upload says "Something went wrong on our end. Nothing was charged. Try again in a minute."; nothing is charged |
+| Anthropic (Claude) | Voltage's turns, the project check | turns fail; log lines `anthropic` / `APIStatusError` | Voltage's reply is the same sentence (or, if the turn paid for a step before failing, says what that cost); the user can send it again |
 | Stripe / Razorpay | top-ups and plans (only when real keys are set) | `checkout failed` / `refund ... failed` warnings in the log | "We could not open the payment page. Nothing was charged; try again." Refund: "The refund did not go through. Nothing changed; try again." |
 | Resend | sign-up confirmations, password resets, invites, digests | `email (resend) failed` or `refused` in the log; rows in `notify_outbox` with provider `resend (failed)` | Nothing on screen: the email just does not arrive. Sign-up and reset wait on it |
 
 Every vendor call has a timeout and is tried three times at most (two
 retries, one Idempotency-Key), so a short blip heals itself. Nothing is
 charged for a call that failed.
+
+How you hear about it (run 5 item 1): every failure on our side (a refused or
+missing key, a quota, an outage, a timeout, a bug) is classified once
+(`backend/app/failures.py`). People never see the vendor's text. The real
+cause goes to the log (`voltage.failures`, "our side at ..."), to Admin >
+Feedback > Errors reported (source `vendor`, and Sentry when `SENTRY_DSN` is
+set), and to every admin's bell and email digest as "Failures on our side"
+(for example "Claude (Anthropic) failed: the key was refused."), at most once
+per vendor and cause every 30 minutes.
 
 What to do:
 
@@ -65,7 +74,7 @@ AVE_CHAOS="anthropic=hang:70"   ...           # Claude hangs past its 60 s timeo
 AVE_CHAOS="openai=reset@0.5"    ...           # half of the transcription calls drop
 ```
 
-(`vendor=kind[:arg][@rate]`, kinds `status`, `hang`, `slow`, `reset`; see
+(`vendor=kind[:arg][@rate]`, kinds `status`, `hang`, `slow`, `reset`, and `refuse` for ElevenLabs's safety filter; see
 `backend/app/chaos.py`.) `/api/health` shows the faults in `chaos`. Stripe,
 Razorpay and Resend are not covered by `AVE_CHAOS`; their failures are
 rehearsed by the backend tests, which mock their HTTP

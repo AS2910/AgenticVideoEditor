@@ -29,8 +29,8 @@ class BudgetExceeded(NonRetryableError):
         self.needed = needed
         self.remaining = remaining
         super().__init__(
-            f"This video's voice budget can't cover this edit: it needs {needed} "
-            f"characters and {remaining} remain. Raise AVE_VOICE_BUDGET_CHARS to continue."
+            f"This video's voice allowance can't cover this edit: it needs {needed} "
+            f"characters and {max(0, remaining)} remain. Use fewer new words, or start a variant of this video to keep going."
         )
 
 

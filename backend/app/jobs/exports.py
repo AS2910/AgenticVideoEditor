@@ -48,8 +48,9 @@ class ExportError(ValueError):
 
 
 def _reason(exc: BaseException) -> str:
-    text = " ".join(str(exc).split())
-    return (text[:240] or type(exc).__name__).rstrip(".") + "."
+    """Run 5 item 1: the classifier's sentence, never ffmpeg's or a vendor's text."""
+    from app import failures
+    return failures.say(exc, where="export", spent_usd=0.0)       # an export renders what exists: no vendor, no charge
 
 
 class ExportEngine:

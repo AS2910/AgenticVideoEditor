@@ -236,7 +236,8 @@ class BatchEngine:
             self.run_child(record, child)
         except Exception as exc:  # noqa: BLE001 - one video failing never stops the rest
             log.exception("batch %s: %s failed", batch_id, child["video_id"])
-            self.activity.fail(child["job_id"], "unknown", str(exc)[:200] or type(exc).__name__)
+            from app import failures
+            self.activity.fail(child["job_id"], "unknown", failures.say(exc, where="batch", video_id=child["video_id"]))
         job = self.activity.get(child["job_id"])
         if job is not None and not job.done:      # a runner that forgot to close its job
             self.activity.fail(child["job_id"], "unknown", "This video's turn ended without a result.")

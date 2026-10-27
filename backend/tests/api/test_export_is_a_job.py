@@ -42,7 +42,7 @@ def test_a_failed_export_render_fails_its_job_with_the_reason(client, project, m
     monkeypatch.setattr(main, "_render_now", broken)
     job = client.post("/videos/p1/export", json={"with_proposals": True}).json()["render_job"]
     failed = wait_job(client, job["job_id"])
-    assert failed["status"] == "failed" and "no room left" in failed["error_text"] and failed["detail"]["mode"] == "proposals"
+    assert failed["status"] == "failed" and failed["error_text"] == "The render failed. Something went wrong on our end. Nothing was charged. Try again in a minute." and failed["detail"]["mode"] == "proposals"
 
 
 def test_the_export_pages_export_is_an_export_job_and_its_answer_is_the_file(client, project):

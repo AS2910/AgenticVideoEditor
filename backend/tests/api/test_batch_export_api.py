@@ -148,7 +148,7 @@ def test_a_failed_render_is_tried_once_more_then_failed_with_its_reason(client, 
     rows = {f["video_id"]: f for f in body["files"]}
     assert rows["p1"]["state"] == "ready" and rows["p1"]["attempts"] == 2 and tries["p1"] == 2
     assert rows["p2"]["state"] == "failed" and rows["p2"]["attempts"] == 2 and tries["p2"] == 2
-    assert rows["p2"]["why"] == "The render failed twice. the encoder crashed."
+    assert rows["p2"]["why"] == "The render failed twice. Something went wrong on our end. Nothing was charged. Try again in a minute."   # run 5 item 1: never the encoder's words
     assert main.activity.get(rows["p2"]["job_id"]).error_text == rows["p2"]["why"]
     assert rows["p3"]["state"] == "ready" and tries["p3"] == 1
     assert body["counts"] == {"total": 3, "ready": 2, "failed": 1}

@@ -209,7 +209,7 @@ def test_a_pass_that_finds_nothing_or_fails_says_so_on_its_job(client, in_projec
         assert main._log_decision("p1", "plan1", item(n), "added") is not None   # the add still stands
     failed, nothing = learn_jobs()
     assert nothing.status == "done" and nothing.step_label == "No pattern yet"
-    assert failed.status == "failed" and failed.error_code == "learn_failed" and "unavailable" in failed.error_text
+    assert failed.status == "failed" and failed.error_code == "learn_failed" and "on our end" in failed.error_text
 
 
 def test_a_skipped_pass_makes_no_job(client, in_project, monkeypatch):

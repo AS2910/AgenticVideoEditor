@@ -290,7 +290,10 @@ class Agent:
                     continue
                 except Exception as exc:  # noqa: BLE001 — a tool that breaks is reported to the model, never raised
                     log.exception("tool %s failed", use["name"])
-                    results.append(_result_block(use["id"], ToolResult(f"{use['name']} failed: {exc}"), True))
+                    # Run 5 item 1: the model hears the person's words for it (it may repeat them), not the exception's.
+                    from app import failures
+                    said = failures.say(exc, where=f"tool {use['name']}", video_id=turn.project_id)
+                    results.append(_result_block(use["id"], ToolResult(f"{use['name']} failed. {said}"), True))
                     continue
                 results.append(_result_block(use["id"], result))
                 if result.step:

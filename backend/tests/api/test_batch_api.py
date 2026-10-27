@@ -129,7 +129,7 @@ def test_five_videos_with_one_failure_finish_the_other_four_and_usage_is_the_sum
     assert client.post(f"/projects/f1/batches/{gate['batch_id']}/go").status_code == 409   # one Go only
     done = finished(client, gate["batch_id"])
     by = {r["video_id"]: r for r in done["rows"]}
-    assert by["p3"]["state"] == "failed" and "fell over" in by["p3"]["why"]
+    assert by["p3"]["state"] == "failed" and "on our end" in by["p3"]["why"] and "fell over" not in by["p3"]["why"]   # run 5 item 1
     assert all(by[v]["state"] == "nothing" for v in ("p1", "p2", "p4", "p5"))
     assert done["status"] == "done" and done["phase"] == "finished"
     assert sorted(done["summary"]["finished"]) == ["p1", "p2", "p4", "p5"] and done["summary"]["failed"] == ["p3"]

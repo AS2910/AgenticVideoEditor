@@ -40,7 +40,7 @@ from app.adapters.base import idempotency_header, VendorError
 from app.adapters.pronounce import for_synthesis
 from app.budget import VoiceBudget
 from app.domain.models import Word, EditPlan, MediaArtifact, Source, Transcript
-from app.errors import NonRetryableError
+from app.errors import NonRetryableError, SafetyRefused
 from app.media import ffmpeg, fit
 from app.store.artifacts import ArtifactStore
 
@@ -121,6 +121,11 @@ class VoiceError(VendorError):
 
 class VoiceConfigError(NonRetryableError):
     """ElevenLabs refused the request itself: key, quota, or a bad parameter."""
+
+
+class VoiceInputError(VoiceConfigError):
+    """Run 5 item 1: the words asked for cannot be used as they are (a sample
+    text too short); the sentence says what to change."""
 
 
 def to_voice(raw: dict) -> dict:
@@ -392,10 +397,20 @@ def decode_response(content: bytes) -> tuple[bytes, tuple[Word, ...]]:
 _MISSING_PERMISSION = re.compile(r"missing the permission (\w+)")
 
 
-def _raise_for(status: int, text: str) -> None:
+# Run 5 item 1: the vendor's safety filter refusing the words themselves (as
+# opposed to our account: "detected_unusual_activity" is about the account).
+_SAFETY = re.compile(r"content[ _]polic|against (?:our|the) (?:terms|polic)|violat\w* (?:our |the )?(?:terms|polic)"
+                     r"|moderat|safety|prohibited content|harmful|not allowed to generate|blocked_content", re.IGNORECASE)
+
+
+def _raise_for(status: int, text: str, line: tuple[str | None, float | None] | None = None) -> None:
+    """The vendor's answer as one of our failures. `line` (its words, its start
+    in seconds) names the line a safety refusal was about."""
     if status == 429 or status >= 500:
         raise VoiceError(f"ElevenLabs is unavailable right now ({status}).")
     lowered = text.lower()
+    if status in (400, 403, 422) and _SAFETY.search(text):
+        raise SafetyRefused("elevenlabs", *(line or (None, None)), detail=f"({status}) {text[:200]}")
     # A key made with limited access answers 401 and names what it lacks.
     missing = _MISSING_PERMISSION.search(text)
     if missing:
@@ -628,7 +643,7 @@ class ElevenLabsVoiceAdapter:
         Billed by the sample text's characters: charged as an estimate before
         the call and trued up to the text the vendor used."""
         if text is not None and len(text) < DESIGN_TEXT_MIN:
-            raise VoiceConfigError(f"A sample text needs at least {DESIGN_TEXT_MIN} characters; "
+            raise VoiceInputError(f"A sample text needs at least {DESIGN_TEXT_MIN} characters; "
                                    "leave it out and the vendor writes one.")
         estimate = len(text) if text else DESIGN_CHARS
         with self._budget.held(project_id, estimate):
@@ -743,7 +758,7 @@ class ElevenLabsVoiceAdapter:
         with self._budget.held(project_id, cost):          # refunded on any failure, and after a crash (budget.py)
             status, content, text = self._post(voice_id, body, self._api_key, self._timeout)
             if status != 200:
-                _raise_for(status, text.replace(self._api_key, "***"))
+                _raise_for(status, text.replace(self._api_key, "***"), (plan.new_text, plan.selection.start))
         return decode_response(content)
 
     def _choose(self, project_id: str, voice_id: str, body: dict, plan: EditPlan,

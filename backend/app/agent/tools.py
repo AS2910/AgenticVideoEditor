@@ -14,7 +14,8 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Callable, Sequence
 
-from app.agent.guards import Guard, TurnBudget, WaitingForUser
+from app import failures
+from app.agent.guards import Guard, TurnBudget, TurnStopped, WaitingForUser
 from app.domain.models import ROLES, Selection, role_of
 from app.domain.plan import Plan, PlanItem
 
@@ -404,7 +405,8 @@ def _search_library(wb: Workbench, turn: Turn, args: dict) -> ToolResult:
     try:
         hits = list(wb.library(accent or "", language="en")) if accent else []
     except Exception as exc:  # noqa: BLE001
-        return ToolResult(f"The voice library could not be searched ({exc}).", step="Searched the voice library: unavailable")
+        said = failures.say(exc, where="search_voice_library", video_id=turn.project_id)
+        return ToolResult(f"The voice library could not be searched. {said}", step="Searched the voice library: unavailable")
     if gender:
         hits = [h for h in hits if (h.get("gender") or "").lower() == gender]
     hits = hits[:8]
@@ -600,7 +602,8 @@ def _search_help(wb: Workbench, turn: Turn, args: dict) -> ToolResult:
     try:
         hits = list(wb.help_search(query))[:3]
     except Exception as exc:  # noqa: BLE001 — Help that cannot be read is said, not raised
-        return ToolResult(f"Help could not be searched ({exc}).", step="Looked in Help: unavailable")
+        said = failures.say(exc, where="search_help", video_id=turn.project_id)
+        return ToolResult(f"Help could not be searched. {said}", step="Looked in Help: unavailable")
     if not hits:
         return ToolResult(f"Help has no article about “{query}”. Say so rather than guess at a feature.",
                           step=f"Looked in Help for “{query[:40]}”: nothing found")
@@ -985,7 +988,9 @@ def _synthesize_take(wb: Workbench, turn: Turn, args: dict) -> ToolResult:
                     return _ran_long(wb, turn, item, attempt, text, window, last, tried, before, voice_it, used, settings, flex_max,
                                      retried=item.item_id in turn.fit_retried, beat=beat)
             if candidate is None:
-                reason = str(exc) or type(exc).__name__
+                # Run 5 item 1: the person's words for it (the step, the row, the model): never the vendor's.
+                reason = failures.say(exc, where="synthesize_take", video_id=turn.project_id, line=(text, selection.start),
+                                      spent_usd=max(0.0, wb.ledger.spent_usd(turn.project_id) - before))
                 finish = getattr(wb.repo, "finish_attempt", None)
                 state = finish(turn.project_id, turn.plan_id, item.item_id, attempt, error=reason) if finish else "failed"
                 if not finish:
@@ -1057,7 +1062,9 @@ def _synthesize_take(wb: Workbench, turn: Turn, args: dict) -> ToolResult:
     try:
         result = voice_and_report()
     except BaseException as exc:
-        jobs.settle(job_id, ok=False, code="unknown", text=str(exc) or type(exc).__name__)
+        said = str(exc) if isinstance(exc, (WaitingForUser, TurnStopped)) or not isinstance(exc, Exception) else \
+            failures.say(exc, where="synthesize_take", video_id=turn.project_id, line=(text, selection.start))
+        jobs.settle(job_id, ok=False, code="unknown", text=said or type(exc).__name__)
         raise
     _settle_line_job(wb, turn, jobs, job_id, item.item_id, result, made=len(turn.takes) > made_before)
     return result
@@ -1322,10 +1329,10 @@ def _design_voice(wb: Workbench, turn: Turn, args: dict) -> ToolResult:
     before = wb.ledger.spent_usd(turn.project_id)
     try:
         previews = list(wb.design(turn.project_id, description, sample))
-    except Exception as exc:  # noqa: BLE001 — the model hears why
-        reason = str(exc) or type(exc).__name__
-        jobs.settle(job_id, ok=False, code="vendor_failed", text=f"The voice could not be designed: {reason}")
-        return ToolResult(f"The voice could not be designed: {reason}", step=f"Could not design a voice: {reason[:80]}")
+    except Exception as exc:  # noqa: BLE001 - the model hears why, in the person's words
+        reason = failures.say(exc, where="design_voice", video_id=turn.project_id)
+        jobs.settle(job_id, ok=False, code="vendor_failed", text=f"The voice could not be designed. {reason}")
+        return ToolResult(f"The voice could not be designed. {reason}", step=f"Could not design a voice: {reason[:80]}")
     cost = max(0.0, wb.ledger.spent_usd(turn.project_id) - before)
     if not previews:
         jobs.settle(job_id, ok=False, code="vendor_failed", text="The voice service sent no previews back.", cost=cost)
@@ -1366,8 +1373,8 @@ def _save_voice(wb: Workbench, turn: Turn, args: dict) -> ToolResult:
     try:
         voice_id = wb.save_voice(gid, name, designs[gid]["description"])
     except Exception as exc:  # noqa: BLE001
-        reason = str(exc) or type(exc).__name__
-        return ToolResult(f"The voice could not be saved: {reason}", step=f"Could not keep the voice: {reason[:80]}")
+        reason = failures.say(exc, where="save_voice", video_id=turn.project_id)
+        return ToolResult(f"The voice could not be saved. {reason}", step=f"Could not keep the voice: {reason[:80]}")
     _remember_voice(wb, turn, voice_id, name, "designed", description=designs[gid]["description"])
     n = designs[gid].get("n")
     return ToolResult(f"Saved preview {n} as “{name}” ({voice_id}); it is in the catalogue now and can speak a line.{_slots_line(wb)}",
@@ -1384,8 +1391,8 @@ def _add_from_library(wb: Workbench, turn: Turn, args: dict) -> ToolResult:
     try:
         added = wb.add_from_library(owner, vid, name)
     except Exception as exc:  # noqa: BLE001
-        reason = str(exc) or type(exc).__name__
-        return ToolResult(f"The voice could not be added: {reason}", step=f"Could not add {name}: {reason[:80]}")
+        reason = failures.say(exc, where="add_voice_from_library", video_id=turn.project_id)
+        return ToolResult(f"The voice could not be added. {reason}", step=f"Could not add {name}: {reason[:80]}")
     _remember_voice(wb, turn, added, name, "library")
     return ToolResult(f"{name} ({added}) is in the catalogue now and can speak a line.{_slots_line(wb)}",
                       step=f"Added {name} from the voice library")
@@ -1403,8 +1410,8 @@ def _delete_voice(wb: Workbench, turn: Turn, args: dict) -> ToolResult:
     try:
         wb.delete_voice(vid)
     except Exception as exc:  # noqa: BLE001
-        reason = str(exc) or type(exc).__name__
-        return ToolResult(f"The voice could not be deleted: {reason}")
+        reason = failures.say(exc, where="delete_voice", video_id=turn.project_id)
+        return ToolResult(f"The voice could not be deleted. {reason}")
     wb.repo.set_settings(turn.project_id, made_voices=[m for m in _made_voices(wb, turn) if m["voice_id"] != vid])
     return ToolResult(f"“{mine['name']}” is deleted.{_slots_line(wb)}", step=f"Deleted the voice “{mine['name']}”")
 

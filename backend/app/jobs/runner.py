@@ -13,7 +13,6 @@ from typing import Callable
 
 from app.adapters.base import VendorError, idempotency_scope
 from app.errors import NonRetryableError
-from app.media.ffmpeg import FFmpegError
 from app.jobs.store import Job, JobStore
 
 log = logging.getLogger(__name__)
@@ -99,28 +98,13 @@ class JobRunner:
                 sleep=self._sleep,
                 on_attempt=count,
             )
-        except NonRetryableError as exc:
-            # Written for the user (widen the selection, raise the budget...),
-            # so it is shown as-is rather than as a generic failure.
-            log.warning("job %s refused: %s", job_id, exc)
-            self.jobs.update(job_id, status="failed", step="Failed", error=str(exc))
-        except VendorError as exc:
-            log.warning("job %s failed: %s", job_id, exc)
-            self.jobs.update(
-                job_id, status="failed", step="Failed",
-                error="Generation failed after several attempts. Try again.",
-            )
-        except (FFmpegError, OSError) as exc:
-            # The chaos pass: a missing ffmpeg or a full disk is said plainly,
-            # not hidden behind "Something went wrong".
-            log.exception("job %s could not process media", job_id)
-            self.jobs.update(job_id, status="failed", step="Failed",
-                             error=f"Could not process the media: {exc}")
-        except Exception:  # noqa: BLE001 - a job must never kill the worker
-            log.exception("job %s crashed", job_id)
-            self.jobs.update(
-                job_id, status="failed", step="Failed", error="Something went wrong."
-            )
+        except Exception as exc:  # noqa: BLE001 - a job must never kill the worker
+            # Run 5 item 1: one classifier says it. The app's own refusals (widen
+            # the selection, raise the ceiling) are shown as written; a vendor,
+            # ffmpeg or a bug is "on our end", with the cause logged and reported.
+            log.warning("job %s failed: %s", job_id, exc, exc_info=not isinstance(exc, (NonRetryableError, VendorError)))
+            from app import failures
+            self.jobs.update(job_id, status="failed", step="Failed", error=failures.say(exc, where="job"))
         else:
             self.jobs.update(
                 job_id, status="succeeded", progress=1.0, step="Ready", result=result,

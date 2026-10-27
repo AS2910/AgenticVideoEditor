@@ -100,19 +100,25 @@ class CloneService:
             try:
                 voice_id = self._voice.create_clone(f"voltage-{project_id}-{key}", Path(reference.path))
             except NonRetryableError as exc:
-                note = f"Stock voice: could not clone {who}'s voice. {exc}"
+                # Run 5 item 1: a refused key or a full plan is ours; the person reads our words, the admins the cause.
+                from app import failures
+                note = f"Stock voice: could not clone {who}'s voice. {failures.say(exc, where='clone a speaker', video_id=project_id)}"
                 self._refused[(project_id, key)] = note
                 if track:
                     track.fail(note)
                 return VoiceChoice(requested, (note,))
-            except VendorError:
-                note = f"Stock voice: ElevenLabs was unavailable when cloning {who}'s voice; the next line will try again."
+            except VendorError as exc:
+                from app import failures
+                failures.say(exc, where="clone a speaker", video_id=project_id)
+                note = f"Stock voice: the voice service was unavailable when cloning {who}'s voice; the next line will try again."
                 if track:
                     track.fail(note)
                 return VoiceChoice(requested, (note,))
             except BaseException as exc:
                 if track:
-                    track.fail(str(exc) or type(exc).__name__)
+                    from app import failures
+                    track.fail(failures.say(exc, where="clone a speaker", video_id=project_id)
+                               if isinstance(exc, Exception) else type(exc).__name__)
                 raise
             if track:
                 track.done()

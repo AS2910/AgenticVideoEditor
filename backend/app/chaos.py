@@ -14,6 +14,8 @@ One fault per vendor, `kind[:arg][@rate]`:
 - `hang:<seconds>` the call blocks that long, then fails as a timeout
 - `slow:<seconds>` the call takes that long, then succeeds
 - `reset`          the connection drops (a transport error)
+- `refuse`         the vendor's safety filter refuses the words (ElevenLabs
+                   only; run 5 item 1)
 `@rate` is the share of calls hit (default 1.0: every call).
 
 Blast radius: this process only, and never with sign-in on (a public
@@ -32,7 +34,9 @@ from typing import Callable
 log = logging.getLogger(__name__)
 
 VENDORS = ("elevenlabs", "openai", "anthropic")
-KINDS = ("status", "hang", "slow", "reset")
+KINDS = ("status", "hang", "slow", "reset", "refuse")
+# What ElevenLabs answers when its safety filter refuses a line (a 400).
+CHAOS_REFUSAL = '{"detail": {"status": "content_against_policy", "message": "chaos: this text violates our terms of service"}}'
 
 
 @dataclass(frozen=True)
@@ -70,6 +74,8 @@ def parse(spec: str | None) -> dict[str, Fault]:
         arg = float(arg_text) if arg_text else 0.0
         if kind == "status" and not arg_text:
             raise ValueError("AVE_CHAOS status needs a code, e.g. status:429")
+        if kind == "refuse" and vendor != "elevenlabs":
+            raise ValueError("AVE_CHAOS refuse is for elevenlabs only")
         if kind in ("hang", "slow") and arg <= 0:
             raise ValueError(f"AVE_CHAOS {kind} needs seconds, e.g. {kind}:30")
         faults[vendor] = Fault(vendor, kind, arg, rate)
@@ -113,6 +119,8 @@ class Chaos:
                 return post(voice_id, body, api_key, timeout)
             if f.kind == "status":
                 return int(f.arg), b"", f'{{"detail": "chaos: injected {int(f.arg)}"}}'
+            if f.kind == "refuse":
+                return 400, b"", CHAOS_REFUSAL
             if f.kind == "hang":
                 self._sleep(f.arg)
                 from app.adapters.elevenlabs import VoiceError

@@ -100,7 +100,7 @@ def test_a_failed_vendor_call_fails_the_line_with_its_reason_and_retry_voices_it
     voiced(client, monkeypatch)
     failed = next(j for j in client.get("/videos/p1/jobs").json()["jobs"] if j["kind"] == "voice_line")
     assert failed["status"] == "failed" and failed["error_code"] == "vendor_failed"
-    assert failed["error_text"] == "The voice service did not answer." and failed["retryable"]
+    assert failed["error_text"] == "Something went wrong on our end. Nothing was charged. Try again in a minute." and failed["retryable"]   # run 5 item 1
     assert client.post("/videos/p1/jobs/J999/retry").status_code == 404
 
     monkeypatch.setattr(main, "_generate", real)

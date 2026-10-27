@@ -113,3 +113,11 @@ candidates 49, edits 41, jobs 11, messages 165, meta 10, plans 9, projects 2, tu
 - `up` on the copy ran 0001 to 0006, schema unchanged (column sets identical), every row identical.
 - `down 1` (0006) then `up`: every row identical.
 - `down 5` (0006 to 0002): counts equal, the later columns dropped (videos speakers/settings/project_id, messages kind/cost/data, usage folder_id/turn_id); `up` again restores the identical shape (values in those columns come back as their defaults, as a down must).
+
+---
+
+# Review fixes (overnight run 5, 2026-10-27)
+
+| # | Item | Status | Commit | Notes |
+|---|---|---|---|---|
+| 1 | Honest error messages | done | branch review/item1 | `backend/app/failures.py` classifies every user-facing failure: our side reads "Something went wrong on our end. Nothing was charged. Try again in a minute." (honest variant when an earlier step was paid), safety refusals name the line, user input says what to change. Routed: agent turns and tool results, Claude's own refusal, understanding/reading, voice clone/design/keep, upload transcription, diarization, line jobs and retries, clones, renders, exports, imports, checks, learned style, batches, the job runner and the global handler. Admins: error reports (and Sentry) plus a deduplicated `vendor_failure` bell and digest notice. Tests: `backend/tests/api/test_honest_errors.py` (25, each failure forced through chaos, the rehearsal voice or a scripted Claude). |

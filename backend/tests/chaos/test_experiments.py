@@ -138,7 +138,9 @@ def test_e4_a_missing_ffmpeg_fails_the_job_with_a_message_that_names_it():
                             lambda report: (_ for _ in ()).throw(FFmpegNotInstalled("'ffmpeg' is not on PATH. Install it with `brew install ffmpeg`.")))
         done = await_job(store, job.job_id)
         assert done.status == "failed"
-        assert "ffmpeg" in done.error and "brew install ffmpeg" in done.error
+        # Run 5 item 1: ours, so the person reads our sentence; the admins' notice names ffmpeg (tests/test_failures.py).
+        from app.failures import OUR_END_REPORTED
+        assert done.error == OUR_END_REPORTED and "brew" not in done.error
     finally:
         runner.shutdown()
 
@@ -151,7 +153,8 @@ def test_e4b_a_full_disk_fails_the_job_with_the_system_s_own_words():
                             lambda report: (_ for _ in ()).throw(OSError(errno.ENOSPC, "No space left on device")))
         done = await_job(store, job.job_id)
         assert done.status == "failed"
-        assert "No space left on device" in done.error
+        from app.diskroom import SHORT
+        assert done.error == SHORT                   # run 5 item 1: the disk drill's own sentence, not the OS's
     finally:
         runner.shutdown()
 

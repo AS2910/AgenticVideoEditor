@@ -53,7 +53,7 @@ def test_a_failed_add_render_fails_its_job_with_a_reason_and_the_line_stays_adde
     body = client.post(f"/videos/p1/plans/{done['plan']['plan_id']}/approve", json={}).json()
     failed = wait_job(client, body["render_job"]["job_id"])
     assert failed["status"] == "failed" and failed["error_code"] == "render_failed"
-    assert "ffmpeg ran out of room" in failed["error_text"] and failed["retryable"] is True
+    assert failed["error_text"] == "The render failed. Something went wrong on our end. Nothing was charged. Try again in a minute." and failed["retryable"] is True   # run 5 item 1
     assert [e["edit_id"] for e in client.get("/videos/p1").json()["edits"]] == ["e1"]
 
     monkeypatch.undo()

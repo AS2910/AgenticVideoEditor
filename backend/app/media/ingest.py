@@ -57,20 +57,20 @@ def probe_source(path: str | Path) -> ProbedSource:
     except ffmpeg.FFmpegNotInstalled:
         raise
     except ffmpeg.FFmpegError as exc:
-        raise IngestError("That file is not a video we can read.") from exc
+        raise IngestError("That file is not a video we can read. Export it again as an MP4 or MOV and upload that.") from exc
 
     streams = info.get("streams", [])
     video = next((s for s in streams if s.get("codec_type") == "video"), None)
     if video is None:
-        raise IngestError("That file has no video track.")
+        raise IngestError("That file has no video track. Upload the video itself, not only its sound.")
 
     try:
         duration = float(info["format"]["duration"])
     except (KeyError, TypeError, ValueError) as exc:
-        raise IngestError("That video has no readable duration.") from exc
+        raise IngestError("That video has no readable length. Export it again as an MP4 and upload that.") from exc
 
     if duration <= 0:
-        raise IngestError("That video has no readable duration.")
+        raise IngestError("That video has no readable length. Export it again as an MP4 and upload that.")
     if duration > MAX_SOURCE_SECONDS:
         raise IngestError(
             f"That video is {_length(duration)} long. Videos can be up to {_length(MAX_SOURCE_SECONDS)} for now; "
@@ -80,7 +80,7 @@ def probe_source(path: str | Path) -> ProbedSource:
     if not any(s.get("codec_type") == "audio" for s in streams):
         # A dialogue editor has nothing to work with: no audio means no speech
         # to transcribe, no voice to clone, and no line to change.
-        raise IngestError("That video has no audio track, so there is no dialogue to edit.")
+        raise IngestError("That video has no audio track, so there is no dialogue to edit. Upload a version that has its sound.")
 
     return ProbedSource(
         duration=duration,

@@ -833,7 +833,7 @@ function Studio() {
         onUpdate: (j) => { setTurnStep(j.step || 'Working…'); void pullMessages() },
       })
       await pullMessages()
-      if (finished.status === 'failed') tell(finished.error ?? "Something went wrong on my side. Say it again and I'll retry.")
+      if (finished.status === 'failed') tell(finished.error ?? 'Something went wrong on our end. Try again in a minute.')
       const result = finished.result as { type?: string; plan?: Plan; spend?: SpendSummary } | null
       if (result?.spend) setSpend(result.spend)
       let fresh: Plan | null = null

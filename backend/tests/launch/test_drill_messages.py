@@ -8,12 +8,15 @@ from app.api.main import _turn_failure_sentence, app
 
 
 def test_a_claude_timeout_or_outage_reads_as_a_sentence_without_vendor_text():
+    # Run 5 item 1: the owner's words for anything on our side; never the SDK's text or the exception's.
+    from app.failures import OUR_END, OUR_END_REPORTED
     req = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
-    timeout = _turn_failure_sentence(anthropic.APITimeoutError(request=req), "Request timed out")
-    assert timeout.startswith("I did not get an answer in time") and "anthropic.com" not in timeout
+    timeout = _turn_failure_sentence(anthropic.APITimeoutError(request=req))
+    assert timeout == OUR_END and "anthropic.com" not in timeout
     busy = anthropic.InternalServerError("x", response=httpx.Response(500, request=req), body=None)
-    assert _turn_failure_sentence(busy, "x").startswith("I am overloaded right now")
-    assert "(boom)" in _turn_failure_sentence(RuntimeError("boom"), "boom")
+    assert _turn_failure_sentence(busy) == OUR_END
+    assert _turn_failure_sentence(RuntimeError("boom")) == OUR_END_REPORTED
+    assert _turn_failure_sentence(RuntimeError("boom"), spent_usd=0.0) == OUR_END
 
 
 def test_the_database_restarting_answers_503_with_a_sentence():

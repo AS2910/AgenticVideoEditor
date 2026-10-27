@@ -448,7 +448,7 @@ def test_a_vendor_failure_fails_the_take_not_the_turn_and_commits_nothing(client
     done = turn(client, monkeypatch, [reply(take(), stop="tool_use"), reply(said("ElevenLabs is down; I'll try again when you say."))])
 
     [item] = done["plan"]["items"]
-    assert item["status"] == "failed" and "ElevenLabs is unavailable" in item["error"]
+    assert item["status"] == "failed" and item["error"] == "Something went wrong on our end. Nothing was charged. Try again in a minute."   # run 5 item 1: our words, not the vendor's
     assert done["plan"]["status"] == "done" and done["reply"].startswith("ElevenLabs is down")
     steps = [m["text"] for m in client.get("/videos/p1/messages").json() if m["kind"] == "step"]
     assert any(s.startswith("Could not voice") for s in steps)
@@ -1451,15 +1451,17 @@ def test_reading_a_silent_clip_looks_at_the_picture_instead(client, project, mon
 
 def test_reading_without_claude_says_so(client, project, monkeypatch):
     """20d: there is no offline reading. Without a planner (no key, or dry
-    run) the route says Voltage needs Claude, for a speech clip and a silent one."""
+    run) the route says it went wrong on our end (run 5 item 1: a missing key is ours, never the
+    person's to fix), for a speech clip and a silent one."""
+    from app.failures import OUR_END
     import app.api.main as main
     from app.domain.models import Transcript
     assert main.planner is None                               # the suite blanks the key
     resp = client.post("/videos/p1/reading", json={})
-    assert resp.status_code == 503 and "needs Claude" in resp.json()["detail"]
+    assert resp.status_code == 503 and resp.json()["detail"] == OUR_END
     speechless(monkeypatch, main, Transcript(words=()))
     resp = client.post("/videos/p1/reading", json={})
-    assert resp.status_code == 503 and "needs Claude" in resp.json()["detail"]
+    assert resp.status_code == 503 and resp.json()["detail"] == OUR_END
     assert client.get("/videos/p1").json()["reading"] is None
 
 
@@ -1763,7 +1765,7 @@ def test_without_the_flag_a_turn_says_voltage_needs_claude(client, project, monk
     # The flag is on by default now (20c); a key alone must not open the route with it off.
     monkeypatch.setattr(main, "settings", replace(main.settings, agent=False, anthropic_api_key="k"))
     resp = client.post("/videos/p1/turns", json={"text": "make it 30% off"})
-    assert resp.status_code == 503 and "AVE_AGENT" in resp.json()["detail"]
+    assert resp.status_code == 503 and resp.json()["detail"] == "Something went wrong on our end. Nothing was charged. Try again in a minute."   # run 5 item 1: a missing key is ours, named to admins only
 
 
 def test_a_turn_voices_a_line_through_the_tools_and_the_thread_shows_each_step(client, project, monkeypatch):

@@ -64,7 +64,7 @@ from app.orchestrator.clones import CloneService, VoiceChoice
 from app.orchestrator.pipeline import run_edit
 from app.store.db import Database, location as database_location
 from app.flags import FlagStore
-from app import analytics, dataexport, errors_report
+from app import analytics, dataexport, errors_report, failures
 from app.safety import consent as consent_mod, figures as figures_mod, liveness as liveness_mod, provenance as provenance_mod
 from app.purge import PurgeScheduler
 from app.usage import (
@@ -142,6 +142,15 @@ flags = FlagStore(database, settings.flag_owners, settings.launch_profile)
 analytics.configure(database)
 # G8: the error-reporting hook (log provider; SENTRY_DSN is read but not connected).
 error_reporter = errors_report.reporter_for(settings.sentry_dsn, database)
+
+
+def _admin_ids() -> list[str]:
+    from app.admin import admin_owner_ids
+    return admin_owner_ids(database, settings.admin_owners)
+
+
+# Run 5 item 1: every failure a person reads goes through one classifier; ours are reported and the admins told.
+failures.configure(reporter=error_reporter, database=database, admins=_admin_ids)
 # G6: trust and safety behind interfaces, all fake (SETUP_NEEDED.md): liveness
 # for consent, the public-figure check on the clone path, and an invisible
 # watermark and a C2PA-style manifest on every export.
@@ -387,7 +396,7 @@ MAX_AUDIO_UPLOAD_BYTES = 100 << 20
 def _too_big(kind: str) -> str:
     if kind == "video":
         return (f"That video is over {_size(ingest.MAX_SOURCE_BYTES)}. Videos can be up to {_size(ingest.MAX_SOURCE_BYTES)} "
-                f"and {int(ingest.MAX_SOURCE_SECONDS // 60)} minutes.")
+                f"and {int(ingest.MAX_SOURCE_SECONDS // 60)} minutes. Trim or compress it and upload it again.")
     return f"That recording is over {_size(MAX_AUDIO_UPLOAD_BYTES)}. A minute or two of clear speech is plenty."
 
 
@@ -1033,7 +1042,8 @@ def _sight(project_id: str, record: ProjectRecord) -> Sight:
     if saved:
         return _sight_of(saved)
     if planner is None:
-        raise HTTPException(status_code=503, detail=NEEDS_CLAUDE)
+        raise HTTPException(status_code=503, detail=failures.unconfigured("anthropic", "ANTHROPIC_API_KEY", where="sight",
+                                                                           owner=record.owner, video_id=project_id))
     brief = _brief_text(project_id)
 
     def look() -> Sight:
@@ -1133,7 +1143,6 @@ def _project_dict(record: ProjectRecord) -> dict:
     }
 
 
-NEEDS_CLAUDE = "Voltage needs Claude for this (set ANTHROPIC_API_KEY)."
 EFFORTS = ("medium", "high", "xhigh")
 DEFAULT_AUTONOMY = "ask"
 
@@ -1326,11 +1335,9 @@ def _ingest_staged(staged: Path, filename: str, consent: bool, folder: Project |
     except TranscriptionError as exc:
         # The upload is already stored under `project_id`, so a vendor failure
         # leaves that media orphaned. Acceptable while storage is disposable;
-        # the retry/cleanup story lands with the job model.
-        log.warning("transcription failed for %s: %s", project_id, exc)
-        raise HTTPException(
-            status_code=502, detail="Could not transcribe that video. Please try again.",
-        ) from exc
+        # the retry/cleanup story lands with the job model. Nothing is recorded
+        # as spent: transcription is charged below, only once it has worked.
+        raise failures.http(exc, where="upload: transcribe", owner=owner, video_id=project_id) from exc
 
     granted = Consent(granted_at=_now()) if consent else None
     repo.create(source, transcript, granted, owner=owner, folder_id=folder.project_id if folder else None)
@@ -1461,7 +1468,7 @@ def _run_import(job_id: str, resolved, folder: Project | None, consent: bool, ow
         analytics.track("import.failed", owner, {"source": resolved.provider})
     except Exception as exc:  # noqa: BLE001 - an import that breaks says so; the server stays up
         log.exception("import %s failed", job_id)
-        activity.fail(job_id, "import_failed", f"The import stopped: {str(exc)[:200] or type(exc).__name__}")
+        activity.fail(job_id, "import_failed", failures.say(exc, where="import", owner=owner, spent_usd=0.0))
         analytics.track("import.failed", owner, {"source": resolved.provider})
 
 
@@ -1642,8 +1649,8 @@ async def add_my_voice(
                 raise HTTPException(status_code=422, detail=f"That is {seconds:.0f} s; at least {MIN_MY_VOICE_SECONDS:.0f} s of your voice is needed to clone it.")
             try:
                 voice_id = voice.create_clone(f"voltage-mine-{label}", wav)
-            except Exception as exc:  # noqa: BLE001 — the vendor's refusal, in its own words
-                raise HTTPException(status_code=502, detail=str(exc) or "The voice could not be made.") from None
+            except Exception as exc:  # noqa: BLE001 - run 5 item 1: the classifier's words, never the vendor's
+                raise failures.http(exc, where="voices: clone a recording", owner=owner) from None
             # The recording stays with the owner, so the voices page can play it back.
             return voice_id, seconds, artifacts.put_file(_user_store(owner), wav, kind="audio", container="wav", duration=seconds)
         voice_id, seconds, sample = await run_in_threadpool(make)
@@ -1766,8 +1773,8 @@ def add_my_voice_from_speaker(req: FromSpeakerRequest, owner: str = Depends(curr
         raise HTTPException(status_code=422, detail=f"Could not cut a clean sample of {spk.name}'s voice.")
     try:
         voice_id = voice.create_clone(f"voltage-mine-{label}", Path(reference.path))
-    except Exception as exc:  # noqa: BLE001 — the vendor's refusal, in its own words
-        raise HTTPException(status_code=502, detail=str(exc) or "The voice could not be made.") from None
+    except Exception as exc:  # noqa: BLE001 - run 5 item 1: the classifier's words, never the vendor's
+        raise failures.http(exc, where="voices: clone a speaker", owner=owner, video_id=req.video_id) from None
     # The sample is kept with the owner, so it outlives the project it came from.
     sample = artifacts.put_file(_user_store(owner), reference.path, kind="audio", container="wav", duration=reference.duration)
     entry = {"voice_id": voice_id, "name": label, "seconds": round(seconds, 1), "at": _now(), "kind": "cloned", "consent_granted_at": _now(),
@@ -1798,12 +1805,8 @@ def design_my_voice(req: DesignRequest, owner: str = Depends(current_owner)) -> 
     try:
         _ensure_owner_spend(owner)
         previews = list(voice.design_voice(key, description))
-    except (SpendCeilingReached, BudgetExceeded) as exc:
-        raise HTTPException(status_code=402, detail=str(exc)) from exc
-    except NonRetryableError as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
-    except VendorError as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except (SpendCeilingReached, BudgetExceeded, NonRetryableError, VendorError) as exc:
+        raise failures.http(exc, where="voices: design", owner=owner) from exc
     designs = _designs(owner)
     out = []
     for pv in previews:
@@ -1838,8 +1841,8 @@ def add_my_voice_from_preview(req: FromPreviewRequest, owner: str = Depends(curr
     description = " ".join(req.description.split()) or designed.get("description") or ""
     try:
         voice_id = voice.save_voice(req.generated_voice_id, f"voltage-mine-{label}", description)
-    except Exception as exc:  # noqa: BLE001 — the vendor's refusal, in its own words
-        raise HTTPException(status_code=502, detail=str(exc) or "The voice could not be kept.") from None
+    except Exception as exc:  # noqa: BLE001 - run 5 item 1: the classifier's words, never the vendor's
+        raise failures.http(exc, where="voices: keep a design", owner=owner) from None
     entry = {"voice_id": voice_id, "name": label, "seconds": 0.0, "at": _now(), "kind": "designed", "consent_granted_at": _now(),
              "sample_sha": req.sha256 or designed.get("sha256"), "description": description or None}
     _set_my_voices(owner, [*_my_voices(owner), entry])
@@ -2367,8 +2370,7 @@ def detect_speakers(project_id: str, owner: str = Depends(current_owner)) -> dic
     try:
         turns = transcriber.diarize(record.source)
     except TranscriptionError as exc:
-        log.warning("diarization failed for %s: %s", project_id, exc)
-        raise HTTPException(status_code=502, detail="Could not detect speakers. Please try again.") from exc
+        raise failures.http(exc, where="diarize", owner=owner, video_id=project_id) from exc
     _record_diarization(project_id, record.source.duration)
     repo.update_transcript(project_id, assign_speakers(record.transcript, turns))
     return _project_dict(repo.get(project_id))
@@ -2518,12 +2520,8 @@ def _understand(project_id: str, record: ProjectRecord, lines: list[Line], again
             frames = _adaptive_frames(project_id, record, signals.get("frame_times") or [])
             return planner.understand(frames, signals, lines, meter=_meter(project_id, "looking"), brief=brief)
         vision = _kept_read(record, "understanding", (brief, [asdict(ln) for ln in lines]), understand, again=again)
-    except SpendCeilingReached as exc:
-        raise HTTPException(status_code=402, detail=str(exc)) from exc
-    except NonRetryableError as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
-    except VendorError as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except (NonRetryableError, VendorError) as exc:
+        raise failures.http(exc, where="understanding", owner=record.owner, video_id=project_id) from exc
     if vision is None:
         return None
     sources = _chip_sources(project_id, record)
@@ -2633,12 +2631,8 @@ def read_project(project_id: str, req: ReadRequest, owner: str = Depends(current
         try:
             _ensure_spend(project_id)
             sight = _sight(project_id, record)
-        except SpendCeilingReached as exc:
-            raise HTTPException(status_code=402, detail=str(exc)) from exc
-        except NonRetryableError as exc:
-            raise HTTPException(status_code=502, detail=str(exc)) from exc
-        except VendorError as exc:
-            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        except (NonRetryableError, VendorError) as exc:
+            raise failures.http(exc, where="reading: sight", owner=owner, video_id=project_id) from exc
         out = {"opening": plain(sight.opening), "roles": [], "sight": asdict(sight),
                "suggestions": _clean_chips(project_id, record, sight.suggestions)}
         repo.set_settings(project_id, reading=out)
@@ -2646,17 +2640,14 @@ def read_project(project_id: str, req: ReadRequest, owner: str = Depends(current
     try:
         _ensure_spend(project_id)
         if planner is None:
-            raise HTTPException(status_code=503, detail=NEEDS_CLAUDE)
+            raise HTTPException(status_code=503, detail=failures.unconfigured("anthropic", "ANTHROPIC_API_KEY", where="reading",
+                                                                               owner=owner, video_id=project_id))
         brief = _brief_text(project_id)
         reading = _kept_read(record, "reading", (brief, [asdict(ln) for ln in lines]),
                              lambda: planner.read(lines, meter=_meter(project_id, "reading"), brief=brief),
                              encode=asdict, decode=_reading_of, again=req.again)
-    except SpendCeilingReached as exc:
-        raise HTTPException(status_code=402, detail=str(exc)) from exc
-    except NonRetryableError as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
-    except VendorError as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except (NonRetryableError, VendorError) as exc:
+        raise failures.http(exc, where="reading", owner=owner, video_id=project_id) from exc
     by_name = {s.name: s.label for s in repo.speakers(project_id)}
     out = {
         "opening": plain(reading.opening),
@@ -3244,7 +3235,7 @@ def _bring_one_up_to_date(project_id: str, video_id: str, job_id: str, made: int
         activity.finish(job_id, step_label="Up to date, nothing to change", detail={"outcome": "current", "why": why, "spent_usd": 0})
         return
     if not _agent_on():
-        activity.fail(job_id, "no_agent", "Voltage needs Claude to change this video (set AVE_AGENT=1 and an Anthropic key).")
+        activity.fail(job_id, "no_agent", failures.unconfigured("anthropic", "ANTHROPIC_API_KEY or AVE_AGENT", where="video turn", owner=owner, video_id=video_id))
         return
     goal = (f"Apply brief changes v{made} to v{to}. The brief {_diff_words(runs)}. This video mentions "
             f"{', '.join(hit)}. Change only the lines the change touches and leave the rest as they are; "
@@ -3283,7 +3274,7 @@ def _bring_up_to_date_loop(project_id: str, owner: str) -> None:
                 _bring_one_up_to_date(project_id, v["video_id"], v["job_id"], int(v["from"]), int(run["to"]), owner)
             except Exception as exc:  # noqa: BLE001 - one video failing never stops the rest
                 log.exception("bringing %s up to date failed", v["video_id"])
-                activity.fail(v["job_id"], "unknown", str(exc)[:200] or type(exc).__name__)
+                activity.fail(v["job_id"], "unknown", failures.say(exc, where="brief update", owner=owner, video_id=v["video_id"]))
     finally:
         with _brief_runs_lock:
             final = _brief_run(project_id) or run
@@ -3570,9 +3561,9 @@ def _run_check(project_id: str, check_id: int, job_id: str, mode: str, owner: st
                         detail={"issues": len(live), "ignored": len(result.issues) - len(live)})
     except Exception as exc:  # noqa: BLE001 - a failed check says why; it never takes the server down
         log.exception("project check %s failed", check_id)
-        text = str(exc)[:200] or type(exc).__name__
+        text = failures.say(exc, where="project check", owner=owner, video_id=project_id)
         checks_store.fail(database, check_id, text)
-        activity.fail(job_id, "check_failed", f"The check stopped: {text}")
+        activity.fail(job_id, "check_failed", f"The check stopped. {text}")
 
 
 def _auto_check(project_id: str, owner: str) -> None:
@@ -3719,7 +3710,7 @@ def fix_check_issue(project_id: str, issue_id: int, req: FixRequest, owner: str 
         raise HTTPException(status_code=422, detail="That video is not part of this issue.")
     record = _owned(req.video_id, owner)
     if not _agent_on():
-        raise HTTPException(status_code=409, detail="Voltage needs Claude to change a video (set AVE_AGENT=1 and an Anthropic key).")
+        raise HTTPException(status_code=409, detail=failures.unconfigured("anthropic", "ANTHROPIC_API_KEY or AVE_AGENT", where="agent", owner=owner))
     started = _start_turn(req.video_id, record, _fix_goal(found, req.video_id), owner)
     with database.tx() as c:
         activity_log.record(c, "check.fix_started", user_actor(owner), video_id=req.video_id, project_id=project_id,
@@ -3741,7 +3732,7 @@ def _fix_one(video_id: str, job_id: str, goal: str, owner: str, batch_cap: float
         activity.fail(job_id, "gone", "This video was deleted.")
         return
     if not _agent_on():
-        activity.fail(job_id, "no_agent", "Voltage needs Claude to change this video (set AVE_AGENT=1 and an Anthropic key).")
+        activity.fail(job_id, "no_agent", failures.unconfigured("anthropic", "ANTHROPIC_API_KEY or AVE_AGENT", where="video turn", owner=owner, video_id=video_id))
         return
     shipped = len([e for e in repo.list_edits(video_id) if not e.reverted])
     ran = _turn_for_job(video_id, record, job_id, goal, owner, batch_cap)
@@ -3820,7 +3811,7 @@ def _fix_all_loop(project_id: str, owner: str) -> None:
                 _fix_one(v["video_id"], v["job_id"], v["goal"], owner)
             except Exception as exc:  # noqa: BLE001 - one video failing never stops the rest
                 log.exception("fixing %s failed", v["video_id"])
-                activity.fail(v["job_id"], "unknown", str(exc)[:200] or type(exc).__name__)
+                activity.fail(v["job_id"], "unknown", failures.say(exc, where="fix in all", owner=owner, video_id=v["video_id"]))
     finally:
         with _checks_lock:
             final = _fix_run(project_id) or run
@@ -3838,7 +3829,7 @@ def fix_check_issue_everywhere(project_id: str, issue_id: int, owner: str = Depe
     project = _owned_project(project_id, owner)
     found = _issue_or_404(project_id, issue_id)
     if not _agent_on():
-        raise HTTPException(status_code=409, detail="Voltage needs Claude to change a video (set AVE_AGENT=1 and an Anthropic key).")
+        raise HTTPException(status_code=409, detail=failures.unconfigured("anthropic", "ANTHROPIC_API_KEY or AVE_AGENT", where="agent", owner=owner))
     with _checks_lock:
         now = _fix_run(project_id)
         if now is not None and now["status"] == "running":
@@ -4202,7 +4193,7 @@ def plan_batch(project_id: str, req: BatchRequest, owner: str = Depends(current_
     _batch_flag(owner)
     project = _owned_project(project_id, owner)
     if not _agent_on():
-        raise HTTPException(status_code=409, detail="Voltage needs Claude to change a video (set AVE_AGENT=1 and an Anthropic key).")
+        raise HTTPException(status_code=409, detail=failures.unconfigured("anthropic", "ANTHROPIC_API_KEY or AVE_AGENT", where="agent", owner=owner))
     live = {r.source.project_id: r for r in reversed(repo.list(owner, folder=project_id))}   # oldest first
     thinking = _thinking_usd(owner)
     if req.source == "fix":
@@ -4247,7 +4238,7 @@ def go_batch(project_id: str, batch_id: str, owner: str = Depends(current_owner)
     """F4: the gate's yes. Every video is queued; three run at a time."""
     record = _owned_batch(project_id, batch_id, owner)
     if not _agent_on():
-        raise HTTPException(status_code=409, detail="Voltage needs Claude to change a video (set AVE_AGENT=1 and an Anthropic key).")
+        raise HTTPException(status_code=409, detail=failures.unconfigured("anthropic", "ANTHROPIC_API_KEY or AVE_AGENT", where="agent", owner=owner))
     started = _go_batch(record, owner)
     if record["source"] == "brief":
         _brief_run_started(started, owner)
@@ -4305,7 +4296,7 @@ def answer_batch_video(project_id: str, batch_id: str, video_id: str, req: Batch
         raise HTTPException(status_code=409, detail=(f"This video has used its {money(float(child['cap_usd']))} share of the batch. "
                                                      "Open it to carry on there."))
     if not _agent_on():
-        raise HTTPException(status_code=409, detail="Voltage needs Claude to change a video (set AVE_AGENT=1 and an Anthropic key).")
+        raise HTTPException(status_code=409, detail=failures.unconfigured("anthropic", "ANTHROPIC_API_KEY or AVE_AGENT", where="agent", owner=owner))
     video = _owned(video_id, owner)
     started = _start_turn(video_id, video, text, owner, cap_usd=left, batch=True)
     index = len(child["answers"])
@@ -4615,7 +4606,7 @@ def make_languages(video_id: str, req: LanguagesRequest, owner: str = Depends(cu
     if record.consent is None:
         raise HTTPException(status_code=403, detail=CONSENT_REQUIRED)
     if not _agent_on():
-        raise HTTPException(status_code=409, detail="Voltage needs Claude to translate a video (set AVE_AGENT=1 and an Anthropic key).")
+        raise HTTPException(status_code=409, detail=failures.unconfigured("anthropic", "ANTHROPIC_API_KEY or AVE_AGENT", where="agent", owner=owner))
     at = langs.marker(database, video_id)
     lines = _master_lines(video_id)
     keep = _keep_words(record.folder_id)
@@ -4678,7 +4669,7 @@ def sync_language(video_id: str, req: ConfirmStage | None = None, owner: str = D
             repo.set_synced_edit(video_id, to)       # changes that cancel out: in step already
         raise HTTPException(status_code=409, detail="This version is in step with its master.")
     if not _agent_on():
-        raise HTTPException(status_code=409, detail="Voltage needs Claude to change a video (set AVE_AGENT=1 and an Anthropic key).")
+        raise HTTPException(status_code=409, detail=failures.unconfigured("anthropic", "ANTHROPIC_API_KEY or AVE_AGENT", where="agent", owner=owner))
     goal = _sync_goal(record, master, lines, _keep_words(record.folder_id))
     started = _start_turn(video_id, record, goal, owner, approve=True)
     with database.tx() as c:
@@ -4986,7 +4977,8 @@ def _learn_pass(project_id: str, owner: str, at_count: int, job_id: str) -> dict
         return found
     except Exception as exc:  # noqa: BLE001 - a pass that fails suggests nothing and says why
         log.exception("learned-style pass for %s", project_id)
-        activity.fail(job_id, "learn_failed", f"Looking for a pattern stopped: {str(exc)[:200] or type(exc).__name__}",
+        activity.fail(job_id, "learn_failed", "Looking for a pattern stopped. " + failures.say(
+                          exc, where="learned style", video_id=project_id, spent_usd=sum(spent)),
                       cost_usd=round(sum(spent), 6) or None)
         return None
 
@@ -5865,7 +5857,9 @@ def _retry_line(project_id: str, job_id: str) -> None:
         return
     except Exception as exc:  # noqa: BLE001 - the row shows why; nothing stays Voicing
         log.warning("retry %s failed: %s", job_id, exc)
-        failed("vendor_failed", str(exc) or "The take could not be made.")
+        failed("vendor_failed", failures.say(exc, where="voice a line again", owner=record.owner, video_id=project_id,
+                                             line=(p["text"], selection.start),
+                                             spent_usd=max(0.0, ledger.spent_usd(project_id) - before)))
         return
     repo.finish_attempt(project_id, plan_id, item_id, attempt, candidate_id=candidate.candidate_id,
                         fit=candidate.plan.fit, note=None, fit_failure=None)
@@ -5879,7 +5873,7 @@ def _in_background(project_id: str, job_id: str, work) -> None:
             work()
         except Exception as exc:  # noqa: BLE001
             log.exception("background job %s crashed", job_id)
-            activity.fail(job_id, "unknown", str(exc) or "Something went wrong.")
+            activity.fail(job_id, "unknown", failures.say(exc, where="background job", video_id=project_id))
     work_pool.submit(run)
 
 
@@ -6341,7 +6335,8 @@ def _export(record: ProjectRecord, proposals: bool = False, request_id: int | No
                 wait("AVE_MOCK_RENDER_SECONDS", "5-20")
             out = _render_now(record, edits, previewed, proposals)
         except Exception as exc:
-            activity.fail(job_id, "render_failed", diskroom.SHORT if isinstance(exc, diskroom.DiskFull) else f"The render failed: {exc}")
+            activity.fail(job_id, "render_failed", "The render failed. " + failures.say(exc, where="render", owner=record.owner,
+                                                                                      video_id=project_id, spent_usd=0.0))
             raise
         finally:
             _rendering.pop(project_id, None)
@@ -7377,20 +7372,12 @@ def _message_dict(m) -> dict:
     return out
 
 
-def _turn_failure_sentence(exc: Exception, why: str) -> str:
-    """What Voltage says when its turn fails. Claude's own error text (a docs link, SDK wording) is for
-    the log; the person hears what happened and what to do (rehearsal item 4, the vendor drill)."""
-    try:
-        import anthropic
-        if isinstance(exc, (anthropic.APITimeoutError, anthropic.APIConnectionError)):
-            return "I did not get an answer in time, so I stopped. Nothing was charged for the step that failed. Say it again and I'll retry."
-        if isinstance(exc, (anthropic.RateLimitError, anthropic.InternalServerError)):
-            return "I am overloaded right now. Nothing was charged for the step that failed. Try again in a minute."
-        if isinstance(exc, anthropic.APIStatusError):
-            return "That request was refused on my side. It has been reported; please try again."
-    except ImportError:  # pragma: no cover - anthropic is a dependency
-        pass
-    return f"Something went wrong on my side ({why}). Say it again and I'll retry."
+def _turn_failure_sentence(exc: Exception, *, project_id: str | None = None, owner: str | None = None,
+                           spent_usd: float | None = None) -> str:
+    """What Voltage says when its turn fails (run 5 item 1): Claude's own error text (a docs link, SDK
+    wording, a refused key) is for the log and the admins; the person reads the classifier's sentence,
+    which says what the turn already spent when an earlier step of it was paid for."""
+    return failures.say(exc, where="turn", owner=owner, video_id=project_id, spent_usd=spent_usd)
 
 
 def _agent_on() -> bool:
@@ -7535,7 +7522,7 @@ def take_turn(project_id: str, req: TurnRequest, owner: str = Depends(current_ow
     if is_tutorial is not None and is_tutorial(repo, project_id):
         return replay_turn(repo, project_id, text, owner)
     if not _agent_on():
-        raise HTTPException(status_code=503, detail="Voltage needs Claude for this (set AVE_AGENT=1 and an Anthropic key).")
+        raise HTTPException(status_code=503, detail=failures.unconfigured("anthropic", "ANTHROPIC_API_KEY or AVE_AGENT", where="agent", owner=owner))
     return _start_turn(project_id, record, text, owner, approve=req.approve)
 
 
@@ -7573,7 +7560,7 @@ def allow_more(project_id: str, owner: str = Depends(current_owner)) -> dict:
     if not cap:
         raise HTTPException(status_code=409, detail="Nothing is waiting on this turn's cap.")
     if not _agent_on():
-        raise HTTPException(status_code=503, detail="Voltage needs Claude for this (set AVE_AGENT=1 and an Anthropic key).")
+        raise HTTPException(status_code=503, detail=failures.unconfigured("anthropic", "ANTHROPIC_API_KEY or AVE_AGENT", where="agent", owner=owner))
     needed = round(float(cap["needed_usd"]), 2)
     refusal = _ceiling_refusal(project_id, record, owner, needed)
     if refusal:
@@ -7730,15 +7717,18 @@ def _start_turn(project_id: str, record: ProjectRecord, text: str, owner: str, a
                                  persist=lambda role, c: repo.append_turn(project_id, role, c))
         except Exception as exc:  # noqa: BLE001 — the user hears a sentence; the log has the rest
             logging.getLogger(__name__).exception("turn failed")
-            why = str(exc)[:200] or type(exc).__name__
-            sentence = _turn_failure_sentence(exc, why)
+            spent = ledger.spent_usd_since(project_id, started_at)
+            sentence = _turn_failure_sentence(exc, project_id=project_id, owner=record.owner, spent_usd=spent)
             repo.add_message(project_id, "assistant", sentence)
             repo.update_plan(project_id, plan.plan_id, status="proposed")
             return {"type": "turn", "plan": _plan_dict(repo.get_plan(project_id, plan.plan_id)), "reply": sentence,
-                    "question": None, "spent_usd": 0.0, "calls": 0, "stopped": "error", "error": why}
+                    "question": None, "spent_usd": round(spent, 4), "calls": 0, "stopped": "error", "error": sentence}
         if outcome.stopped == agent_loop.STOPPED:
             # The user's Stop: Voltage's closing words say what finished and what did not.
             outcome = replace(outcome, reply=_stopped_words(project_id, turn_id), question=None)
+        elif outcome.stopped == "refusal":
+            # Run 5 item 1: Claude's safety filter refused what was asked; the reply says so and quotes it.
+            outcome = replace(outcome, reply=failures.request_refused(text), question=None)
         question = outcome.question
         status = "clarifying" if question else "done"
         # 2026-10-20: the closing words may end with the next chips; the user sees the words, the box the chips.
@@ -9354,7 +9344,7 @@ def start_data_export(owner: str) -> dict:
             analytics.track("data.export_ready", owner, {"rows": made["rows"], "media": made["media"]})
         except Exception as exc:  # noqa: BLE001 - a failed export says why; the server stays up
             log.exception("data export %s failed", job.job_id)
-            activity.fail(job.job_id, "export_failed", f"The export stopped: {str(exc)[:200] or type(exc).__name__}")
+            activity.fail(job.job_id, "export_failed", "The export stopped. " + failures.say(exc, where="data export", owner=owner, spent_usd=0.0))
             status = "failed"
         with database.tx() as c:
             c.execute("UPDATE data_requests SET status = ?, done_at = ? WHERE id = ?", (status, _now(), request_id))
@@ -9627,7 +9617,7 @@ _mount_optional_routers()
 
 from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
 
-SERVER_FAULT = "Something went wrong on our side. It has been reported; please try again."
+SERVER_FAULT = "Something went wrong on our end. It has been reported. Try again in a minute."
 
 
 @app.exception_handler(diskroom.DiskFull)
@@ -9645,6 +9635,13 @@ async def _no_stack_traces(request: Request, exc: Exception) -> JSONResponse:
     if isinstance(exc, OSError) and getattr(exc, "errno", None) == 28:    # ENOSPC: say so, not "something went wrong"
         log.error("disk full on %s %s", request.method, request.url.path, exc_info=exc)
         return JSONResponse(status_code=507, content={"detail": diskroom.SHORT})
+    found = failures.classify(exc)
+    if found.kind != failures.OUR_SIDE or found.vendor not in (None, "server"):
+        # Run 5 item 1: a vendor's failure nothing caught reads as the classifier says (the
+        # middleware above has reported it; the admins are told here).
+        me = acting.get()
+        refused = failures.http(exc, where=f"{request.method} {request.url.path}", owner=me.user if me else None, captured=True)
+        return JSONResponse(status_code=refused.status_code, content={"detail": refused.detail})
     log.error("unhandled error on %s %s", request.method, request.url.path, exc_info=exc)
     return JSONResponse(status_code=500, content={"detail": SERVER_FAULT})
 

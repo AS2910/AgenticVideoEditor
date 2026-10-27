@@ -84,7 +84,7 @@ after the restore).
 | `/ready` 503, `storage` | The data dir is read-only or full. |
 | Spend climbing fast | Pause paid work from the Admin page, then look at "Spend today" by vendor. |
 | Lots of 429 in the log | Rate limits doing their job; per-bucket limits can be raised with `AVE_RATE_<NAME>=hits/seconds`. |
-| A vendor is down | Jobs fail with the vendor's reason after two retries; users can Retry. Nothing else to do. |
+| A vendor is down | Jobs fail after two retries; users read "Something went wrong on our end. Nothing was charged. Try again in a minute." and can Retry. The admins get a "Failures on our side" notice with the real cause (RUNBOOK section 1). |
 
 ## Failure drills (launch rehearsal, 2026-10-23)
 

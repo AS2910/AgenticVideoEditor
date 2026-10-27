@@ -66,7 +66,9 @@ def test_a_tool_that_breaks_is_reported_as_an_error_result_not_raised(world):
     client = ScriptedClient([reply(use("list_voices", "a"), stop="tool_use"), reply(text("I could not list the voices just now."))])
     out, persisted, _ = run(world, client)
     results = persisted[2][1]
-    assert results[0]["is_error"] is True and "vendor down" in results[0]["content"]
+    # Run 5 item 1: the model hears our words for it (it may repeat them to the person), never the exception's.
+    assert results[0]["is_error"] is True and "list_voices failed. Something went wrong on our end" in results[0]["content"]
+    assert "vendor down" not in results[0]["content"]
     assert out.reply == "I could not list the voices just now."
 
 

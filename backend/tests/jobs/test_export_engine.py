@@ -6,6 +6,7 @@ import time
 
 import pytest
 
+from app.failures import OUR_END
 from app.jobs.activity import ActivityJobs
 from app.jobs.exports import ExportEngine, ExportError
 from app.store.db import Database
@@ -50,7 +51,7 @@ def test_files_render_two_at_a_time_with_one_retry(world):
     rows = {(i["video_id"], i["preset"]["name"]): i for i in record["items"]}
     assert rows[("flaky", "Feed")]["file"] and rows[("flaky", "Feed")]["attempts"] == 2
     bad = rows[("bad", "Feed")]
-    assert bad["file"] is None and bad["error"] == "The render failed twice. encoder fell over."
+    assert bad["file"] is None and bad["error"] == "The render failed twice. " + OUR_END    # run 5 item 1: never the encoder's words
     assert bad["job"]["status"] == "failed" and bad["job"]["error_code"] == "render_failed"
     assert [c for c in state["calls"] if c[0] == "bad"] == [("bad", "Feed", 1), ("bad", "Feed", 2)]
     assert sorted(state["done"]) == ["a", "flaky"]                      # once each, never "bad"

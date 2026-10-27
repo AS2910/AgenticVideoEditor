@@ -85,7 +85,7 @@ export function NotificationBell({ dark = false }: { dark?: boolean }) {
                 {items.map((n) => (
                   <li key={n.id} className="border-b border-line last:border-b-0">
                     <button type="button" className={cn('flex w-full items-start gap-2.5 px-4 py-3 text-left hover:bg-sunk', !n.read && 'bg-sunk/50')} onClick={() => openItem(n)} data-testid="bell-item">
-                      <span aria-hidden="true" className={cn('mt-1.5 size-2 flex-none rounded-full', n.read ? 'bg-transparent' : n.kind === 'job_failed' || n.kind === 'spend_alert' ? 'bg-warn' : 'bg-volt ring-1 ring-ink')} />
+                      <span aria-hidden="true" className={cn('mt-1.5 size-2 flex-none rounded-full', n.read ? 'bg-transparent' : n.kind === 'job_failed' || n.kind === 'spend_alert' || n.kind === 'vendor_failure' ? 'bg-warn' : 'bg-volt ring-1 ring-ink')} />
                       <span className="flex min-w-0 flex-1 flex-col gap-0.5">
                         <span className={cn('text-sm', !n.read && 'font-semibold')}>{n.title}</span>
                         {n.body && <span className="line-clamp-2 text-[13px] text-muted-foreground">{n.body}</span>}
