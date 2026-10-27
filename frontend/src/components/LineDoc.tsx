@@ -26,6 +26,7 @@ import { Chip, ControlRow, LinkButton } from './EditorControls'
 import { editorClass, riseClass, selectClass } from './editorStyles'
 
 import { FitBanner } from './FitBanner'
+import { QuickEditHint } from './QuickEditHint'
 import { fitReason, ranLong } from '../transcript/fit'
 import { TaggedWords } from './TaggedWords'
 import { addKeyOf, keyOf } from '../transcript/keys'
@@ -687,6 +688,7 @@ export function LineDoc({
           </div>
         )}
         <BannedWarnings words={bannedIn(draft, bannedWords)} />
+        {mode === 'edit' && <QuickEditHint before={startingPoint(s)?.new_text ?? base} after={draft} voiceChanged={voiceId !== openedSound.current.voiceId} />}
         <ControlRow label="Delivery">
           <Chip on={delivery === null && ownWords === null} onClick={() => { setDelivery(null); setOwnWords(null) }}>As spoken</Chip>
           {DELIVERIES.map((d) => (

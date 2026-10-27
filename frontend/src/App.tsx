@@ -71,10 +71,11 @@ import { cn } from '@/lib/utils'
 import { SlidersHorizontal } from 'lucide-react'
 import { clock } from './transcript/format'
 import {
-  createProject, confirmPlace, exportProject, artifactUrl, stageHold, pollJob, PollCancelled, ApiError, listVideos, listFolders, createFolder, createFolderFrom, startTutorial, getProject, deleteProject, getUsage, getSpend, listVoices, updateSpeaker, detectSpeakers, revertEdit, updateSettings, removeLine, dismissItem, easeItem, setEditRole, setCandidateRole, roleQuestion, moveCandidate, moveEdit, getArrangement, putArrangement, undoArrangement, getPlan, approvePlan, readProject, grantConsent, getMe, logout, postTurn, postAllowMore, getMessages, chipEvent, getUnderstanding, correctUnderstanding, setStyle,
+  createProject, confirmPlace, exportProject, artifactUrl, stageHold, pollJob, PollCancelled, ApiError, listVideos, listFolders, createFolder, createFolderFrom, startTutorial, getProject, deleteProject, getUsage, getSpend, listVoices, updateSpeaker, detectSpeakers, revertEdit, updateSettings, removeLine, dismissItem, easeItem, setEditRole, setCandidateRole, roleQuestion, moveCandidate, moveEdit, getArrangement, putArrangement, undoArrangement, getPlan, approvePlan, readProject, grantConsent, getMe, logout, postTurn, postAllowMore, postQuickLine, getMessages, chipEvent, getUnderstanding, correctUnderstanding, setStyle,
   retryJob, stopJobs, getLatestRender, startRender, getJobs, listRules, updateUserSettings,
 } from './api'
 import type { ArrangementView, Me, PlanApproval, RoleChange, RoleQuestion } from './api'
+import type { QuickFallback } from './transcript/fastpath'
 import type { Arrangement, Placed } from './transcript/arrange'
 import type {
   Word, Selection, Candidate, Segment, Project, ChatMessage,
@@ -580,7 +581,7 @@ function Studio() {
     if (request.editId) {
       return takeTurn(`Redo the added line at ${clock(start)} (“${request.before ?? ''}”, ${request.editId}) as ${words}${how}: voice it at ${clock(start)}–${clock(end)}, ${picture}, ship it and take ${request.editId} out`)
     }
-    if (request.mix === 'replace' && line) return takeTurn(`Replace the line at ${clock(start)} (“${line.text}”) with ${words}${how}`)
+    if (request.mix === 'replace' && line) return quickLine(request, `Replace the line at ${clock(start)} (“${line.text}”) with ${words}${how}`)
     if (request.at != null) return takeTurn(`Add ${words} at ${clock(request.at)}, ${picture}${how}`)
     if (!line || request.mix === 'layer') return takeTurn(`Add ${words} at ${clock(start)}–${clock(end)}, ${picture}${how}`)
     return takeTurn(`Add ${words} after the line at ${clock(start)}, ${picture}${how}`)
@@ -835,6 +836,37 @@ function Studio() {
     }
   }
 
+  /** Run 5 item 6: a line changed in place and sent with Enter. The server routes it: a small
+   *  change is voiced straight away as one take; a bigger one is the full turn, with the same
+   *  sentence. When the quick take does not fit, Voltage takes it from there, with a note. */
+  const quickLine = async (request: LineRequest, sentence: string, again = false): Promise<void> => {
+    if (!projectId) return
+    const goesAhead = autonomy === 'draft' || (mayDo.ask_over_usd ?? 0) > 0
+    if (goesAhead && !consentGiven.current) return withConsent(null, () => void quickLine(request, sentence, again))
+    if (!again) say({ role: 'user', text: sentence })
+    setError(null)
+    setShippedNote(null)
+    setTurnBusy(true)
+    setTurnStep('Voicing…')
+    try {
+      setTurnIdNow('pending')
+      const job = await postQuickLine(projectId, {
+        start: request.selection.start, end: request.selection.end, text: request.text, voice_id: request.voiceId,
+        delivery: request.delivery, mix: request.mix, turn_text: sentence,
+      })
+      setTurnIdNow(job.job_id)
+      const fallback = await followTurn(job.job_id)
+      if (fallback) await takeTurn(fallback.text, true)
+    } catch (e) {
+      setTurnBusy(false)
+      setTurnStep(null)
+      if (e instanceof ApiError && e.status === 403 && !consentGiven.current && !again) {
+        return withConsent(null, () => void quickLine(request, sentence, true))
+      }
+      tell(e instanceof ApiError ? e.message : "I couldn't take that in. Try saying it another way.")
+    }
+  }
+
   // One pull at a time, and nothing appended twice: a step's seq is claimed before it is shown.
   const pulling = useRef<Promise<void> | null>(null)
   const pullMessages = () => {
@@ -857,16 +889,18 @@ function Studio() {
     return pulling.current
   }
 
-  const followTurn = async (jobId: string) => {
-    if (!projectId) return
+  const followTurn = async (jobId: string): Promise<QuickFallback | null> => {
+    if (!projectId) return null
+    let fallback: QuickFallback | null = null
     try {
       const finished = await pollJob(jobId, {
         onUpdate: (j) => { setTurnStep(j.step || 'Working…'); void pullMessages() },
       })
       await pullMessages()
       if (finished.status === 'failed') tell(finished.error ?? 'Something went wrong on our end. Try again in a minute.')
-      const result = finished.result as { type?: string; plan?: Plan; spend?: SpendSummary } | null
+      const result = finished.result as { type?: string; plan?: Plan; spend?: SpendSummary; fallback?: QuickFallback | null } | null
       if (result?.spend) setSpend(result.spend)
+      fallback = result?.fallback ?? null
       let fresh: Plan | null = null
       if (result && result.type === 'turn' && result.plan) fresh = result.plan
       else {
@@ -889,6 +923,7 @@ function Studio() {
       // A turn may have made a voice (designed, or from the library): the catalogue is read again.
       listVoices().then(takeInVoices).catch(() => {})
     }
+    return fallback
   }
 
   /** An approved edit as the transcript shows it (20g: with its level; Volt: with its speaker and voice). */

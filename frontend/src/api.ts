@@ -1,4 +1,5 @@
 import { signed } from './lib/media'
+import type { QuickAnswer } from './transcript/fastpath'
 import type { Arrangement } from './transcript/arrange'
 import type {
   LanguageSet, LanguagesMade, SyncStarted, Stage, StageMoved, EventPage,
@@ -446,6 +447,14 @@ export const postTurn = (id: string, text: string, approve = false) =>
  *  exactly what the step needs and the same turn carries on. Refused (409),
  *  naming the scope, past the video's or the project's ceiling. */
 export const postAllowMore = (id: string) => post<Job>(`/videos/${id}/turns/allow-more`, {})
+
+/** Run 5 item 6: a line changed in place, routed by the server. A small change is voiced
+ *  straight away as one take (the quick way); anything else is the full turn it always was.
+ *  Either way the answer is a turn's job, followed the same way. */
+export const postQuickLine = (id: string, body: {
+  start: number; end: number; text: string; before?: string; voice_id: string | null; delivery: string | null
+  item_id?: string; mix: string; turn_text: string
+}) => post<Job & QuickAnswer>(`/videos/${id}/lines/quick`, body)
 
 /** The thread after a message (by seq): what Voltage said and did. */
 export const getMessages = (id: string, after = 0) => get<ChatMessage[]>(`/videos/${id}/messages?after=${after}`)

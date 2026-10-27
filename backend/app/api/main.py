@@ -7957,6 +7957,158 @@ def _guarded(work, on_fail):
     return run
 
 
+# ── Run 5 item 6: the fast path for small edits ───────────────────────────────
+
+class QuickLineRequest(BaseModel):
+    """A line changed in the transcript and sent with Enter (the editor's own words for it)."""
+    start: float
+    end: float
+    text: str
+    before: str | None = None          # the words the line has now (the editor opened on them)
+    voice_id: str | None = None        # the voice chosen in the editor; empty: the line's own
+    delivery: str | None = None
+    item_id: str | None = None         # the proposal on the line, when the edit is of it
+    mix: str = "replace"
+    turn_text: str | None = None       # the sentence the editor would say to Voltage; the full way says it
+
+
+def _quick_sentence(line, text: str, item_id: str | None) -> str:
+    if item_id:
+        return f"Voice {item_id} again as “{text}”"
+    return f"Replace the line at {_clock(line.start)} (“{line.text}”) with “{text}”" if line else f"Say “{text}”"
+
+
+@app.post("/videos/{project_id}/lines/quick", status_code=202)
+def quick_line(project_id: str, req: QuickLineRequest, owner: str = Depends(current_owner)) -> dict:
+    """Run 5 item 6: an edit to one line, routed. A small one (up to
+    fastpath.MAX_WORDS words, the line's own voice, under the spending limit)
+    is voiced straight away as one take, with no planning, and comes back as a
+    proposal ready to hear; anything else is the full turn it always was. The
+    job is a turn either way, so the editor follows it the same way; the
+    answer says which way it went (`route`) and why."""
+    from app.agent import fastpath
+    record = _owned(project_id, owner)
+    text = req.text.strip()
+    if not text:
+        raise HTTPException(status_code=422, detail="Say what you want.")
+    plan_now = repo.latest_plan(project_id)
+    item = plan_now.item(req.item_id) if plan_now is not None and req.item_id else None
+    sel = item.selection if item is not None else Selection(req.start, req.end)
+    line = next((ln for ln in _lines(record) if abs(ln.start - sel.start) < 0.01 and abs(ln.end - sel.end) < 0.01), None)
+    sentence = (req.turn_text or "").strip() or _quick_sentence(line, text, req.item_id)
+    statement = next((st for st in statements_of(record.transcript) if line is not None and abs(st.start - line.start) < 0.01), None)
+    speaker = next((s for s in repo.speakers(project_id) if statement is not None and s.label == statement.speaker), None)
+    # The take the editor opened on: the proposal named, else the first one on this line (as the editor finds it).
+    opened = item if item is not None else next(
+        (i for i in (plan_now.items if plan_now is not None and line is not None else ())
+         if i.kind == "planned" and i.old_text and i.status != "dismissed" and i.mix != "remove"
+         and i.selection.start < line.end and line.start < i.selection.end), None)
+    take = repo.get_candidate(project_id, opened.candidate_id) if opened is not None and opened.candidate_id else None
+    current_voice, own_voices = fastpath.line_voice(take.plan.voice_profile_id if take else None, speaker)
+    wanted = (req.voice_id or "").strip()
+    voice_changed = bool(wanted) and wanted != current_voice and not (wanted in own_voices and current_voice in own_voices | {""})
+    prefs = _settings(project_id, owner)
+    autonomy = prefs["autonomy"]
+    limit = _prefs(owner)["ask_over_usd"] if record.consent is not None else 0.0
+    usd = _workbench().estimate_usd(text)[1]
+    over = record.consent is None or (autonomy == "ask" and (limit <= 0 or usd > limit + 1e-9))
+    asked = plan_now.question if plan_now is not None and plan_now.status == "clarifying" and plan_now.question else None
+    on_line = line is not None and (item is None or (bool(item.old_text) and item.mix == "replace"))
+    tutorial = is_tutorial is not None and is_tutorial(repo, project_id)
+    before = req.before if req.before is not None else (opened.new_text if opened is not None else (line.text if line else ""))
+    routed = fastpath.route(before, text, on_line=on_line and not tutorial, new_line=req.mix != "replace",
+                            voice_changed=voice_changed, busy=_turn_running(project_id), over_limit=over,
+                            question_open=bool(asked and not asked.get("resolved")))
+    log.info("fast path route video=%s fast=%s reason=%s changed=%d", project_id, routed.fast, routed.reason, routed.changed)
+    if not routed.fast:
+        return {**take_turn(project_id, TurnRequest(text=sentence), owner), "route": "full", "reason": routed.reason}
+    return {**_start_quick(project_id, record, owner, sentence, text, line, item, wanted, current_voice, own_voices,
+                           req.delivery, prefs, limit), "route": "fast", "reason": routed.reason}
+
+
+def _start_quick(project_id: str, record: ProjectRecord, owner: str, sentence: str, text: str, line, item,
+                 wanted: str, current_voice: str, own_voices: set, delivery: str | None, prefs: dict, limit: float) -> dict:
+    """The quick job: one take on the line through the agent's own tool, then
+    the story checks. No preview render at the end (a full turn renders one):
+    the take is heard from its own audio, and the editor renders "With
+    proposals" when it is asked for."""
+    from app.agent import fastpath, story_checks
+    analytics.track("first_turn", owner, {"video_id": project_id, "batch": False, "quick": True})
+    repo.add_message(project_id, "user", sentence)
+    plan = _turn_plan(project_id, sentence)
+    repo.update_plan(project_id, plan.plan_id, status="running", question=None)
+    job = jobs.create("turn", project_id)
+    turn_id, started_at = job.job_id, _now()
+    clock_start = time.monotonic()
+    repo.set_settings(project_id, last_turn={"id": turn_id, "at": started_at})
+    _set_turn(project_id, turn_id=turn_id, status="running", step="Voicing", started_at=started_at, finished_at=None,
+              spent_usd=0.0, lines_voiced=0, render=None)
+    # The line's own voice is voiced as "" so a speaker's clone (or chosen voice) is used as the turn would.
+    use_voice = "" if not (wanted or current_voice) or (wanted or current_voice) in own_voices else (wanted or current_voice)
+
+    def work(report) -> dict:
+        token = current_turn.set(turn_id)
+
+        def told(progress: float, step: str) -> None:
+            report(progress, step)
+            _set_turn(project_id, step=step)
+        try:
+            try:
+                _ensure_spend(project_id)
+            except SpendCeilingReached as exc:
+                repo.update_plan(project_id, plan.plan_id, status="proposed")
+                repo.add_message(project_id, "assistant", str(exc))
+                _set_turn(project_id, status="done", step="Done", finished_at=_now())
+                return {"type": "turn", "quick": True, "plan": _plan_dict(repo.get_plan(project_id, plan.plan_id)),
+                        "reply": str(exc), "question": None, "ceiling": exc.scope}
+            turn = AgentTurn(project_id=project_id, record=record, plan_id=plan.plan_id, autonomy=prefs["autonomy"],
+                             said=sentence, spend_approved=prefs["autonomy"] == "draft", budget=TurnBudget(usd=prefs["turn_usd"]),
+                             started_at=started_at, report=told, ask_before=prefs["ask_before"], auto_usd=limit)
+            out = fastpath.voice(_workbench(), turn, line_no=line.index, item_id=item.item_id if item is not None else None,
+                                 text=text, voice_id=use_voice, direction=delivery)
+            if out.step:
+                repo.add_message(project_id, "assistant", plain(out.step, text), kind="step", cost=out.cost_usd or None,
+                                 data={"tool": "synthesize_take", "t": round(time.monotonic() - clock_start, 1), "quick": True})
+            story: list[str] = []
+            fallback = None
+            if out.made:
+                reply = f"Voiced line {line.index} straight away. Hear it, then add it if it sounds right."
+                repo.add_message(project_id, "assistant", reply)
+                plan_after = repo.get_plan(project_id, plan.plan_id)
+                # Story checks, after the fact and free (local heuristics): a gentle note, never a block.
+                story = story_checks.check(fastpath.lines_now(_lines(record), [e for e in repo.list_edits(project_id) if not e.reverted],
+                                                              plan_after.items if plan_after else ()), line.start, text)
+                note = story_checks.suggestion(story)
+                if note:
+                    repo.add_message(project_id, "assistant", note, data={"story": story})
+                repo.update_plan(project_id, plan.plan_id, status="done")
+            elif out.fallback:
+                reply = out.note
+                repo.add_message(project_id, "assistant", reply)
+                repo.update_plan(project_id, plan.plan_id, status="proposed")
+                fallback = {"text": f"{sentence} ({out.note})", "note": out.note}
+            else:
+                reply = out.note or "That take could not be made."
+                repo.add_message(project_id, "assistant", reply)
+                repo.update_plan(project_id, plan.plan_id, status="done")
+            took = round(time.monotonic() - clock_start, 3)
+            log.info("fast path done video=%s made=%s fallback=%s took=%.2fs", project_id, out.made, bool(fallback), took)
+            spent = round(ledger.spent_usd_since(project_id, started_at), 4)
+            _set_turn(project_id, status="done", step="Done", finished_at=_now(), spent_usd=spent,
+                      lines_voiced=1 if out.made else 0, render=None)
+            return {"type": "turn", "quick": True, "plan": _plan_dict(repo.get_plan(project_id, plan.plan_id)),
+                    "reply": reply, "question": None, "spent_usd": spent, "took_s": took, "story": story,
+                    "fallback": fallback, "spend": _spend_summary(owner, video_id=project_id)}
+        finally:
+            current_turn.reset(token)
+
+    def failed() -> None:
+        repo.update_plan(project_id, plan.plan_id, status="proposed")
+        _set_turn(project_id, status="failed", step="Failed", finished_at=_now())
+
+    return _job_dict(runner.submit(job, _guarded(work, failed)))
+
+
 @app.get("/videos/{project_id}/messages")
 @app.get("/projects/{project_id}/messages", deprecated=True)
 def list_messages(project_id: str, after: int = 0, owner: str = Depends(current_owner)) -> list[dict]:

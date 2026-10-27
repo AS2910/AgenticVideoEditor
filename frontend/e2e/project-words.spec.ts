@@ -136,5 +136,6 @@ test('in the editor: a broken word rule is marked, a banned word is warned about
   await expect(page.getByTestId('banned-warning')).toContainText('“cheap” is a banned word in this project. You can still voice it.')
   if (SHOTS) await page.screenshot({ path: `${SHOTS}/a3-warning.png` })
   await box.press('Enter')
-  await expect.poll(() => posts.some((p) => p.url === '/api/videos/p1/turns')).toBe(true)
+  // Run 5 item 6: a line edited in place goes to the quick route (which routes it, or starts the turn).
+  await expect.poll(() => posts.some((p) => p.url === '/api/videos/p1/lines/quick')).toBe(true)
 })

@@ -104,8 +104,11 @@ const JOB_TURN = {
 }
 
 const TEXTBOX = { name: /describe a change/i }
+// Run 5 item 6: a line edited in place goes to /lines/quick, which answers as a turn; its sentence is turn_text.
+const isTurn = (url: string) => url.endsWith('/turns') || url.endsWith('/lines/quick')
+const turnText = (body: unknown) => { const b = body as { text: string; turn_text?: string }; return b.turn_text ?? b.text }
 const saidTo = (calls: { url: string; body: unknown }[]) =>
-  calls.filter((c) => c.url.endsWith('/turns')).map((c) => (c.body as { text: string }).text)
+  calls.filter((c) => isTurn(c.url)).map((c) => turnText(c.body))
 
 /** Spend scopes: the summary for p1, in a project whose ceiling binds first. */
 const SPEND = {
@@ -139,7 +142,7 @@ function routeFetch(job: unknown = JOB_TURN) {
     if (url.endsWith('/settings')) return ok({ settings: JSON.parse(String(_init?.body)) })
     if (url.endsWith('/auth/me')) return ok({ mode: 'off', user: null })
     if (url.endsWith('/reading')) return ok(READING)
-    if (url.endsWith('/turns')) return ok(JOB_ACCEPTED)
+    if (isTurn(url)) return ok(JOB_ACCEPTED)
     if (url.includes('/messages?after=')) return ok([])
     if (/\/plans\/plan1$/.test(url)) return ok(PLAN)
     if (url.endsWith('/plans/plan1/approve')) {
@@ -184,8 +187,8 @@ function agent(initial: unknown = PLAN, onTurn: (text: string) => unknown = () =
       calls.push({ url, body }); current = onTurn('(allow more)')
       return ok(JOB_ACCEPTED)
     }
-    if (url.endsWith('/turns') && init?.method === 'POST') {
-      calls.push({ url, body }); current = onTurn((body as { text: string }).text)
+    if (isTurn(url) && init?.method === 'POST') {
+      calls.push({ url, body }); current = onTurn(turnText(body))
       const p = current as { summary: string; question?: { text: string } | null }
       said.push({ role: 'assistant', text: p.question ? p.question.text : p.summary, kind: 'say', seq: said.length + 2 })
       return ok(JOB_ACCEPTED)
@@ -296,7 +299,7 @@ describe('App full journey', () => {
     const f = vi.fn(async (url: string, init?: RequestInit) => {
       if (url.endsWith('/videos') && init?.method === 'POST') return ok({ ...PROJECT, consent_granted_at: null })
       if (url.endsWith('/consent')) { granted.push(url); return ok({ video_id: 'p1', consent_granted_at: '2026-10-04T10:00:00.000Z' }) }
-      if (url.endsWith('/turns') && granted.length === 0) {
+      if (isTurn(url) && granted.length === 0) {
         return { ok: false, status: 403, json: async () => ({ detail: refusal }), text: async () => JSON.stringify({ detail: refusal }) } as Response
       }
       return base(url, init)
@@ -482,6 +485,31 @@ describe('App editing at the line (Phase 10, 20c)', () => {
     await reachGoal(user)
     await hearNewWords(user)
     expect(saidTo(calls)).toEqual(['Replace the line at 0:00 (“Get 20% off today only.”) with “Get 30% off today only.”'])
+  })
+
+  it('sends a line edited in place to the quick route, and hands a take that ran long to a full turn with the note (run 5 item 6)', async () => {
+    const calls = agent(PLAN_DONE)
+    const base = fetch as unknown as (url: string, init?: RequestInit) => Promise<Response>
+    const fallback = { text: 'Replace the line at 0:00 (“Get 20% off today only.”) with “Get 30% off today only.” (The new words run long.)', note: 'The new words run long.' }
+    let quickJobs = 0
+    const f = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.endsWith('/lines/quick')) quickJobs++
+      if (url.includes('/jobs/') && quickJobs === 1 && !calls.some((c) => c.url.endsWith('/turns'))) {
+        return ok({ ...JOB_TURN, result: { type: 'turn', quick: true, plan: PLAN_DONE, reply: fallback.note, question: null, fallback } })
+      }
+      return base(url, init)
+    })
+    vi.stubGlobal('fetch', f)
+    const user = userEvent.setup()
+    render(<App />)
+    await reachGoal(user)
+    await hearNewWords(user)
+
+    await waitFor(() => expect(calls.map((c) => c.url.split('/').slice(-2).join('/'))).toEqual(['lines/quick', 'p1/turns']))
+    const quick = calls[0].body as { start: number; end: number; text: string; voice_id: string | null; mix: string; turn_text: string }
+    expect(quick).toMatchObject({ start: 0, end: 2.3, text: 'Get 30% off today only.', voice_id: null, mix: 'replace' })
+    expect(quick.turn_text).toBe('Replace the line at 0:00 (“Get 20% off today only.”) with “Get 30% off today only.”')
+    expect(turnText(calls[1].body)).toBe(fallback.text)
   })
 })
 
@@ -1118,7 +1146,7 @@ describe('App with Voltage as an agent (Phase 20a)', () => {
     const f = vi.fn(async (url: string, init?: RequestInit) => {
       const body = typeof init?.body === 'string' ? JSON.parse(init.body) : undefined
       if (url.endsWith('/videos/p1') || (url.endsWith('/videos') && init?.method === 'POST')) return ok({ ...PROJECT, edits: [], messages: [] })
-      if (url.endsWith('/turns') && init?.method === 'POST') { calls.push({ url, body }); return ok(JOB_ACCEPTED) }
+      if (isTurn(url) && init?.method === 'POST') { calls.push({ url, body }); return ok(JOB_ACCEPTED) }
       if (url.includes('/jobs/')) return ok({ ...JOB_TURN, result: { type: 'turn', plan: PLAN_DONE, reply: STEPS[3].text, question: null } })
       if (url.includes('/messages?after=')) {
         const after = Number(url.split('after=')[1])
