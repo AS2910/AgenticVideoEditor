@@ -425,7 +425,7 @@ export interface ChatMessage {
   kind?: 'say' | 'step' | 'previews'
   cost?: number
   seq?: number
-  data?: { description?: string; previews?: VoicePreview[]; /** Volt: a step message's tool and clock. */ tool?: string; t?: number; /** Help (2026-10-19): the articles a search_help step used. */ help?: HelpRef[]; /** Run 5 item 5: Voltage's words past two sentences, behind "Why?". */ why?: string }
+  data?: { description?: string; previews?: VoicePreview[]; /** Volt: a step message's tool and clock. */ tool?: string; t?: number; /** Help (2026-10-19): the articles a search_help step used. */ help?: HelpRef[]; /** Run 5 item 5: Voltage's words past two sentences, behind "Why?". */ why?: string; /** Addendum 3.3: your words came from Up next item N. */ queued?: number }
 }
 
 export interface QuestionOption {
@@ -723,9 +723,12 @@ export interface QueueItem {
   payload: Record<string, unknown>
   position: number
   created_by: string | null
-  status: 'queued' | 'running' | 'done' | 'failed' | 'removed'
+  /** Addendum 3.3: the card's state; the words for each are in lib/queueState.ts. */
+  status: 'queued' | 'running' | 'done' | 'stopped' | 'failed' | 'removed'
+  /** Why it failed or stopped, in one plain sentence. */
+  error?: string | null
 }
-export interface QueueState { items: QueueItem[]; paused: boolean }
+export interface QueueState { items: QueueItem[]; paused: boolean; recent?: QueueItem[] }
 export interface RenderRecord {
   render_id: string
   version: number

@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { GripVertical, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { QueueItem } from '../types'
+import { queueCardLabel } from '../lib/queueState'
 
 interface UpNextProps {
   items: QueueItem[]
@@ -34,6 +35,8 @@ export function UpNext({ items, paused, readOnly, onRemove, onReorder, onRunNext
         {items.map((item) => {
           const running = item.status === 'running'
           const at = waiting.findIndex((w) => w.id === item.id)
+          // Addendum 3.3: the same words as its card in the thread ("Queued 1 of 2: ...", "Running: ...").
+          const label = queueCardLabel(item, items)
           return (
             <li
               key={item.id}
@@ -51,13 +54,13 @@ export function UpNext({ items, paused, readOnly, onRemove, onReorder, onRunNext
                 className="min-w-0 truncate"
                 tabIndex={!readOnly && !running ? 0 : undefined}
                 title={item.label}
-                aria-label={running ? `Running now: ${item.label}` : `${at + 1} of ${waiting.length}: ${item.label}${readOnly ? '' : '. Alt and an arrow key moves it'}`}
+                aria-label={`${label}${running || readOnly ? '' : '. Alt and an arrow key moves it'}`}
                 onKeyDown={(e) => {
                   if (readOnly || running || !e.altKey) return
                   if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') { e.preventDefault(); move(item.id, at - 1) }
                   if (e.key === 'ArrowRight' || e.key === 'ArrowDown') { e.preventDefault(); move(item.id, at + 1) }
                 }}
-              >{running ? `Now: ${item.label}` : item.label}</span>
+              >{label}</span>
               {!readOnly && !running ? (
                 <button type="button" className="inline-flex size-6 shrink-0 items-center justify-center rounded-sm text-muted-foreground hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50 pointer-coarse:size-11"
                   aria-label={`Remove ${item.label} from Up next`} onClick={() => onRemove(item)}><X size={12} aria-hidden="true" /></button>

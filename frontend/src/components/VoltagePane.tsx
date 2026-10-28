@@ -1,6 +1,6 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
 import type { ReactNode, RefObject } from 'react'
-import type { ChatMessage, HelpRef, PlanQuestion, SpendSummary, Suggestion } from '../types'
+import type { ChatMessage, HelpRef, PlanQuestion, QueueItem, SpendSummary, Suggestion } from '../types'
 import { spendLine } from '../lib/money'
 import { artifactUrl } from '../api'
 import { ArrowUp, Check, Info, Loader2, X } from 'lucide-react'
@@ -11,6 +11,7 @@ import { Markdown } from './Markdown'
 import { Thumbs } from './Thumbs'
 import { Wave } from './Wordmark'
 import { TipSlot } from '../guides/TipQueue'
+import { QueuedCard, QueueStamp } from './QueuedCard'
 
 /** One turn of the thread, as the pane reads it: what you said, the trace, what Voltage said. */
 interface Turn { user: ChatMessage | null; steps: ChatMessage[]; said: ChatMessage[]; cards: ChatMessage[] }
@@ -270,6 +271,15 @@ interface VoltagePaneProps {
   readOnly?: string | null
   /** Run 5 item 5: the simple view: the trace leaves out the tools' internal names (read_transcript). */
   simple?: boolean
+  /** Addendum 3.3: Up next as it stands (running first, then waiting in order), and the last ones that
+   *  ended. A message typed while Working is a card at the foot of the thread until it starts; then
+   *  your words are that turn's bubble, wearing its state. */
+  queue?: QueueItem[]
+  queueRecent?: QueueItem[]
+  onEditQueued?: (item: QueueItem, text: string) => Promise<unknown> | void
+  onRemoveQueued?: (item: QueueItem) => void
+  /** Another tab's or member's work: the cards are shown, not changed. */
+  queueReadOnly?: boolean
 }
 
 /** Voltage's pane (Volt, 2026-10-18): black in both themes. The avatar and the
@@ -278,6 +288,7 @@ interface VoltagePaneProps {
 export function VoltagePane({
   messages, projectId, state, busy, need, engine, chips = [], cap, spend, question, onAnswer, turnCap, onSubmit, placeholder = 'Say what to change…', sendLabel = 'Send',
   inputRef, seed, suggestions = [], ready = true, chipRound = 0, note, onChipEvent, seeing, before, children, working, empty, onShowMe, picked, steps = [], summary, readOnly, simple,
+  queue = [], queueRecent = [], onEditQueued, onRemoveQueued, queueReadOnly,
 }: VoltagePaneProps) {
   const [prompt, setPrompt] = useState('')
   const [openTrace, setOpenTrace] = useState<number | null>(null)
@@ -292,7 +303,7 @@ export function VoltagePane({
   // otherwise a "New from Voltage" pill waits until you come down to it.
   const nearBottom = useRef(true)
   const [unseen, setUnseen] = useState(false)
-  const fresh = `${messages.length}|${question?.text ?? ''}|${working ?? ''}|${before ? 1 : 0}|${children ? 1 : 0}|${steps.map((s) => s.label + s.state).join()}|${summary?.text ?? ''}`
+  const fresh = `${messages.length}|${question?.text ?? ''}|${working ?? ''}|${before ? 1 : 0}|${children ? 1 : 0}|${steps.map((s) => s.label + s.state).join()}|${summary?.text ?? ''}|${queue.map((q) => q.id + q.status).join()}`
   useLayoutEffect(() => {
     const el = list.current
     if (!el) return
@@ -313,6 +324,10 @@ export function VoltagePane({
     setUnseen(false)
   }
   const turns = turnsOf(messages)
+  // Addendum 3.3: which queued messages already have their words in the thread (they started).
+  const queuedById = new Map<number, QueueItem>([...queueRecent, ...queue].map((q) => [q.id, q]))
+  const started = new Set(messages.map((m) => m.data?.queued).filter((n): n is number => typeof n === 'number'))
+  const waitingCards = queue.filter((q) => q.kind === 'goal' && !started.has(q.id))
   // Earlier turns fold into one chip each; the latest is shown in full.
   const [showAll, setShowAll] = useState(false)
   const shown = showAll ? turns : turns.slice(-2)
@@ -408,8 +423,10 @@ export function VoltagePane({
             const isLatest = index === turns.length - 1
             if (!isLatest && !showAll && turns.length > 1) {
               return (
-                <button key={index} type="button" className="tag pm flex gap-2.5 rounded-lg bg-psunk px-3 py-2 text-left" onClick={() => setShowAll(true)} data-testid="earlier-turn" data-money-scope="turn">
+                <button key={index} type="button" className="tag pm flex items-center gap-2.5 rounded-lg bg-psunk px-3 py-2 text-left" onClick={() => setShowAll(true)} data-testid="earlier-turn" data-money-scope="turn">
                   <span className="flex-1 truncate">Turn {index + 1}{t.user ? ` · ${t.user.text}` : ''}</span>
+                  {/* Addendum 3.3: a message that waited in Up next keeps its state when its turn folds away. */}
+                  {(() => { const q = typeof t.user?.data?.queued === 'number' ? queuedById.get(t.user.data.queued) : undefined; return q ? <QueueStamp item={q} live={queue} /> : null })()}
                   {spent > 0 && <span className="tnum">{money(spent)}</span>}
                 </button>
               )
@@ -417,7 +434,19 @@ export function VoltagePane({
             return (
               <div key={index} className="flex flex-col gap-4.5" data-testid="turn">
                 {isLatest && picked && <QuestionCard question={picked.question} picked={picked.option} turnCap={turnCap} />}
-                {t.user && <div className="bubble text-sm"><span className="sr-only">You: </span>{t.user.text}</div>}
+                {t.user && (() => {
+                  const q = typeof t.user.data?.queued === 'number' ? queuedById.get(t.user.data.queued) : undefined
+                  const bubble = <div className="bubble text-sm"><span className="sr-only">You: </span>{t.user.text}</div>
+                  if (!q) return bubble
+                  // A message that waited in Up next: its turn's bubble carries the card's state.
+                  return (
+                    <div className="flex flex-col items-end gap-1.5" data-testid="queued-turn" data-state={q.status}>
+                      <QueueStamp item={q} live={queue} />
+                      {bubble}
+                      {q.error && q.status !== 'done' && <span className="pm text-xs">{q.error}</span>}
+                    </div>
+                  )
+                })()}
                 {isLatest && steps.length > 0 && <StepList steps={steps} />}
                 {t.steps.length > 0 && (isLatest && steps.length > 0 && openTrace !== index ? (
                   <button type="button" className="tag pm self-start bg-transparent p-0 text-left hover:text-ptext" onClick={() => setOpenTrace(index)} data-testid="trace-details">
@@ -456,6 +485,12 @@ export function VoltagePane({
           {working && steps.length === 0 && (
             <div className="trace" role="status" data-testid="turn-working">
               <div className="ln"><span className="ts" /><span className="g" aria-hidden="true">└</span><span className="c inline-flex items-center gap-2">{working}<span className="blinkdot inline-block h-3.5 w-[7px] bg-volt" aria-hidden="true" /></span><span /></div>
+            </div>
+          )}
+          {/* Addendum 3.3: what you typed while Voltage was Working, in the order it will run. A question stays the newest item. */}
+          {waitingCards.length > 0 && (
+            <div className="flex flex-col gap-2.5" data-testid="queued-cards" aria-label="Messages waiting their turn">
+              {waitingCards.map((q) => <QueuedCard key={q.id} item={q} live={queue} readOnly={queueReadOnly || !!readOnly} onEdit={onEditQueued} onRemove={onRemoveQueued} />)}
             </div>
           )}
           {question && <QuestionCard question={question} onAnswer={onAnswer} turnCap={turnCap} />}

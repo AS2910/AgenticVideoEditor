@@ -10,8 +10,13 @@ pauses until the user says Run next or Clear queue.
     items(video_id) / get(item_id)                     waiting and running, in order
     edit / remove / reorder / clear
     claim_next(video_id) -> Item | None                the first waiting one, now running
-    finish(item_id, status, error)                     done | failed
+    finish(item_id, status, error)                     done | stopped | failed
     running(video_id) -> Item | None
+    recent(video_id) -> list[Item]                     the last ones that ended, for the thread's cards
+    left_running() -> list[Item]                       at startup: what a previous server was running
+
+Addendum 3.3 (2026-10-28): the card a queued message shows reads one of
+CARD_STATES (the front end's names are in `frontend/src/lib/queueState.ts`).
 """
 from __future__ import annotations
 
@@ -26,6 +31,19 @@ KINDS = ("goal", "action")
 # What a queued action can be: the controls whose change can wait its turn.
 OPS = ("add", "add_all", "discard", "revert", "remove_line")
 LIVE = ("queued", "running")
+# Addendum 3.3: what a card in the thread and in Up next shows, in this order of life.
+CARD_STATES = ("queued", "running", "done", "stopped", "failed")
+ENDED = ("done", "stopped", "failed")
+# Plain sentences for a change that can no longer be touched (edit or remove refused).
+STARTED = {"edit": "That one has already started, so it can no longer be edited.",
+           "remove": "That one has already started, so it can no longer be removed. Stop it instead."}
+ENDED_SENTENCE = {"edit": "That one already ran, so it can no longer be edited.",
+                  "remove": "That one already ran, so there is nothing to remove."}
+
+
+def refusal(item: "Item", what: str) -> str:
+    """Why a waiting change cannot be edited or removed any more: it started, or it already ran."""
+    return STARTED[what] if item.status == "running" else ENDED_SENTENCE[what]
 
 
 class QueueFull(ValueError):
@@ -77,6 +95,19 @@ class VideoQueue:
 
     def running(self, video_id: str) -> Item | None:
         return next((i for i in self.items(video_id) if i.status == "running"), None)
+
+    def recent(self, video_id: str, limit: int = 10) -> list[Item]:
+        """The last changes that ended (done, stopped, failed), oldest first: a card keeps its last state."""
+        with self.db.tx() as c:
+            rows = c.execute("SELECT * FROM video_queue WHERE video_id = ? AND status IN ('done', 'stopped', 'failed') "
+                             "ORDER BY id DESC LIMIT ?", (video_id, limit)).fetchall()
+        return [_item(r) for r in reversed(rows)]
+
+    def left_running(self) -> list[Item]:
+        """Every change marked running, on any video (at startup, a previous server's)."""
+        with self.db.tx() as c:
+            rows = c.execute("SELECT * FROM video_queue WHERE status = 'running' ORDER BY id").fetchall()
+        return [_item(r) for r in rows]
 
     def add(self, video_id: str, kind: str, label: str, payload: dict, created_by: str | None) -> Item:
         if kind not in KINDS:

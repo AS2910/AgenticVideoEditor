@@ -12,6 +12,8 @@ export interface Activity {
   lock: VideoLock | null
   queue: QueueItem[]
   queuePaused: boolean
+  /** Addendum 3.3: the last queued changes that ended (Done, Stopped, Failed), so their cards keep that state. */
+  queueRecent: QueueItem[]
   /** The outcome of the last release ("done", "failed", "stopped"), with a counter so each one is heard once. */
   released: { outcome: string | null; n: number }
   /** Read everything again (after a reconnect, or when Activity opens with `all`). */
@@ -36,6 +38,7 @@ export function useActivity(videoId: string | null, onJob?: JobListener, busy = 
   const [lock, setLock] = useState<VideoLock | null>(null)
   const [queue, setQueue] = useState<QueueItem[]>([])
   const [queuePaused, setQueuePaused] = useState(false)
+  const [queueRecent, setQueueRecent] = useState<QueueItem[]>([])
   const [released, setReleased] = useState<Activity['released']>({ outcome: null, n: 0 })
   const known = useRef(new Map<string, ActivityJob>())
   const listener = useRef(onJob)
@@ -69,6 +72,7 @@ export function useActivity(videoId: string | null, onJob?: JobListener, busy = 
       if (r.lock !== undefined) setLock(r.lock)
       if (r.queue !== undefined) setQueue(r.queue)
       if (r.queue_paused !== undefined) setQueuePaused(r.queue_paused)
+      if (r.queue_recent !== undefined) setQueueRecent(r.queue_recent)
     } catch {
       // the next event or tick reads again
     }
@@ -84,6 +88,7 @@ export function useActivity(videoId: string | null, onJob?: JobListener, busy = 
     setLock(null)
     setQueue([])
     setQueuePaused(false)
+    setQueueRecent([])
     if (!videoId) return
     void refresh()
     if (typeof EventSource === 'undefined') return
@@ -98,13 +103,15 @@ export function useActivity(videoId: string | null, onJob?: JobListener, busy = 
     source.addEventListener('job.updated', (e) => { try { take(JSON.parse((e as MessageEvent).data)) } catch { /* a bad frame is skipped */ } })
     source.addEventListener('turn.updated', (e) => { try { setTurn(JSON.parse((e as MessageEvent).data)) } catch { /* skipped */ } })
     // 2026-10-25: Ready or Working, and what is up next.
-    type LockNews = VideoLock & { queue?: QueueItem[]; queue_paused?: boolean; outcome?: string | null }
-    const queueNews = (d: { queue?: QueueItem[]; queue_paused?: boolean }) => {
+    type QueueNews = { queue?: QueueItem[]; queue_paused?: boolean; queue_recent?: QueueItem[] }
+    type LockNews = VideoLock & QueueNews & { outcome?: string | null }
+    const queueNews = (d: QueueNews) => {
       if (d.queue) setQueue(d.queue)
       if (d.queue_paused !== undefined) setQueuePaused(d.queue_paused)
+      if (d.queue_recent) setQueueRecent(d.queue_recent)
     }
     source.addEventListener('video.locked', (e) => {
-      try { const { queue: q, queue_paused: p, ...held } = JSON.parse((e as MessageEvent).data) as LockNews; setLock(held as VideoLock); queueNews({ queue: q, queue_paused: p }) } catch { /* skipped */ }
+      try { const { queue: q, queue_paused: p, queue_recent: r, ...held } = JSON.parse((e as MessageEvent).data) as LockNews; setLock(held as VideoLock); queueNews({ queue: q, queue_paused: p, queue_recent: r }) } catch { /* skipped */ }
     })
     source.addEventListener('video.unlocked', (e) => {
       try {
@@ -141,5 +148,5 @@ export function useActivity(videoId: string | null, onJob?: JobListener, busy = 
     wasLocked.current = !!lock
   }, [lock])
 
-  return { jobs, turn, renders, refresh, take, lock, queue, queuePaused, released }
+  return { jobs, turn, renders, refresh, take, lock, queue, queuePaused, queueRecent, released }
 }

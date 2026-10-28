@@ -20,11 +20,11 @@ describe('Up next', () => {
   it('lists the changes in order, each with an x, and Alt+arrow moves one', async () => {
     const h = handlers()
     render(<UpNext items={[item(1, 'Add line 3', 'running'), item(2, 'Discard line 4'), item(3, 'Make it warmer')]} paused={false} {...h} />)
-    expect(screen.getAllByTestId('up-next-chip').map((c) => c.textContent)).toEqual(['Now: Add line 3', 'Discard line 4', 'Make it warmer'])
+    expect(screen.getAllByTestId('up-next-chip').map((c) => c.textContent)).toEqual(['Running: Add line 3', 'Queued 1 of 2: Discard line 4', 'Queued 2 of 2: Make it warmer'])
     expect(screen.queryByRole('button', { name: 'Remove Add line 3 from Up next' })).toBeNull()      // running: it stays
     await userEvent.click(screen.getByRole('button', { name: 'Remove Discard line 4 from Up next' }))
     expect(h.onRemove).toHaveBeenCalledWith(expect.objectContaining({ id: 2 }))
-    screen.getByLabelText(/^2 of 2: Make it warmer/).focus()
+    screen.getByLabelText(/^Queued 2 of 2: Make it warmer/).focus()
     await userEvent.keyboard('{Alt>}{ArrowLeft}{/Alt}')
     expect(h.onReorder).toHaveBeenCalledWith([3, 2])
     expect(screen.queryByTestId('run-next')).toBeNull()

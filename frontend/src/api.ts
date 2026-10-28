@@ -729,7 +729,7 @@ export const setStyle = (id: string, line: string, accepted = true) => put<Under
 
 /** The video's jobs, newest first: `active` for what is queued or running (and the turn's own), else the last 50. */
 export const getJobs = (id: string, active = false) =>
-  get<{ jobs: ActivityJob[]; turn: TurnView | null; lock?: VideoLock | null; queue?: QueueItem[]; queue_paused?: boolean }>(`/videos/${id}/jobs${active ? '?active=1' : ''}`)
+  get<{ jobs: ActivityJob[]; turn: TurnView | null; lock?: VideoLock | null; queue?: QueueItem[]; queue_paused?: boolean; queue_recent?: QueueItem[] }>(`/videos/${id}/jobs${active ? '?active=1' : ''}`)
 /** 2026-10-25: Stop whatever holds the video. A turn ends after its step, an Add not landed yet is put back. */
 export const stopVideo = (id: string) =>
   post<{ stopped: boolean; cancelled: number; spent_usd: number; message: string | null; lock: VideoLock | null }>(`/videos/${id}/stop`)
@@ -737,6 +737,8 @@ export const stopVideo = (id: string) =>
 export interface QueueChange { kind: 'goal' | 'action'; label: string; payload: Record<string, unknown> }
 export const queueChange = (id: string, change: QueueChange) => post<QueueItem>(`/videos/${id}/queue`, change)
 export const removeQueued = (id: string, itemId: number) => del(`/videos/${id}/queue/${itemId}`)
+/** Addendum 3.3: new words for a waiting message; refused (409, one sentence) once it has started. */
+export const editQueued = (id: string, itemId: number, text: string) => patch<QueueItem>(`/videos/${id}/queue/${itemId}`, { payload: { text } })
 export const reorderQueue = (id: string, ids: number[]) => put<{ items: QueueItem[]; paused: boolean }>(`/videos/${id}/queue/order`, { ids })
 export const runNextQueued = (id: string) => post<{ items: QueueItem[]; paused: boolean }>(`/videos/${id}/queue/run-next`)
 export const clearQueue = (id: string) => post<{ items: QueueItem[]; paused: boolean }>(`/videos/${id}/queue/clear`)

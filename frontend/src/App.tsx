@@ -75,7 +75,7 @@ import { SlidersHorizontal } from 'lucide-react'
 import { clock } from './transcript/format'
 import {
   createProject, confirmPlace, exportProject, artifactUrl, stageHold, pollJob, PollCancelled, ApiError, listVideos, listFolders, createFolder, createFolderFrom, startTutorial, getProject, deleteProject, getUsage, getSpend, listVoices, updateSpeaker, detectSpeakers, revertEdit, updateSettings, removeLine, dismissItem, easeItem, setEditRole, setCandidateRole, roleQuestion, moveCandidate, moveEdit, getArrangement, putArrangement, undoArrangement, getPlan, approvePlan, readProject, grantConsent, getMe, logout, postTurn, postAllowMore, postQuickLine, getMessages, chipEvent, getUnderstanding, correctUnderstanding, setStyle,
-  retryJob, stopVideo, videoBusy, TAB_ID, queueChange, removeQueued, reorderQueue, runNextQueued, clearQueue, getLatestRender, startRender, getJobs, listRules, updateUserSettings,
+  retryJob, stopVideo, videoBusy, TAB_ID, queueChange, removeQueued, editQueued, reorderQueue, runNextQueued, clearQueue, getLatestRender, startRender, getJobs, listRules, updateUserSettings,
 } from './api'
 import type { ArrangementView, Me, PlanApproval, QueueChange, RoleChange, RoleQuestion } from './api'
 import type { QuickFallback } from './transcript/fastpath'
@@ -609,6 +609,12 @@ function Studio() {
   }
 
   const say = (message: ChatMessage) => setMessages((m) => [...m, message])
+  /** Addendum 3.3: words echoed at once that ended up waiting in Up next leave the thread: their card
+   *  stands for them, and the server writes them back when they start. */
+  const unsay = (text: string) => setMessages((m) => {
+    const k = m.map((x) => x.role === 'user' && x.seq == null && x.text === text).lastIndexOf(true)
+    return k < 0 ? m : [...m.slice(0, k), ...m.slice(k + 1)]
+  })
   /** A failure in the plan or the conversation is Voltage's reply, in the thread,
    *  where it was asked (UX-6); the strip under the player is for the engine. */
   const tell = (text: string) => say({ role: 'assistant', text })
@@ -919,7 +925,7 @@ function Studio() {
         return withConsent(null, () => void takeTurn(text, true, allowMore))
       }
       // Addendum 3: another tab or a teammate started an edit a moment before: the words wait in Up next.
-      if (videoBusy(e) && !allowMore) { setTurnIdNow(null); return queueWords(text) }
+      if (videoBusy(e) && !allowMore) { setTurnIdNow(null); if (!again) unsay(text); return queueWords(text) }
       tell(e instanceof ApiError ? e.message : "I couldn't take that in. Try saying it another way.")
     }
   }
@@ -951,7 +957,7 @@ function Studio() {
       if (e instanceof ApiError && e.status === 403 && !consentGiven.current && !again) {
         return withConsent(null, () => void quickLine(request, sentence, true))
       }
-      if (videoBusy(e)) { setTurnIdNow(null); return queueWords(sentence) }
+      if (videoBusy(e)) { setTurnIdNow(null); if (!again) unsay(sentence); return queueWords(sentence) }
       tell(e instanceof ApiError ? e.message : "I couldn't take that in. Try saying it another way.")
     }
   }
@@ -967,7 +973,8 @@ function Studio() {
         for (const m of fresh) {
           if ((m.seq ?? 0) <= seenSeq.current) continue
           seenSeq.current = m.seq ?? seenSeq.current
-          if (m.role === 'assistant') say(m)
+          // Your own words were echoed when you sent them; words that waited in Up next are the server's to show.
+          if (m.role === 'assistant' || typeof m.data?.queued === 'number') say(m)
         }
       } catch {
         // the next tick pulls again
@@ -1515,6 +1522,13 @@ function Studio() {
     void pullMessages()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activity.released.n])
+  // Addendum 3.3: a queued message started (or moved on) on the server, not from this tab's send:
+  // its words, its steps and Voltage's answer come into the thread as they happen.
+  const queueNow = `${activity.queue.map((q) => `${q.id}${q.status}`).join()}|${activity.queueRecent.map((q) => `${q.id}${q.status}`).join()}`
+  useEffect(() => {
+    if (projectId && (activity.queue.length > 0 || activity.queueRecent.length > 0)) void pullMessages()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [queueNow, activity.turn?.step, activity.turn?.status])
   const baseTitle = useRef(typeof document !== 'undefined' ? document.title : 'Voltage')
   const wasBusy = useRef(false)
   useEffect(() => {
@@ -2141,6 +2155,18 @@ function Studio() {
               readOnly={watching ? REVIEWER_NOTE : null}
               simple={simple}
               messages={messages}
+              queue={activity.queue}
+              queueRecent={activity.queueRecent}
+              queueReadOnly={othersLock || watching}
+              onEditQueued={async (q, text) => {
+                if (!projectId) return
+                try { await editQueued(projectId, q.id, text); void activity.refresh() } catch (e) {
+                  setError(e instanceof ApiError ? e.message : 'Could not change that.')
+                  void activity.refresh()
+                  throw e
+                }
+              }}
+              onRemoveQueued={(q) => { if (projectId) void removeQueued(projectId, q.id).then(() => activity.refresh()).catch((e) => { setError(e instanceof ApiError ? e.message : 'Could not remove that.'); void activity.refresh() }) }}
               projectId={project.video_id}
               state={stateWord}
               busy={turnBusy || readingBusy}

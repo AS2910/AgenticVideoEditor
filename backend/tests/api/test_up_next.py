@@ -106,7 +106,8 @@ def test_a_stop_pauses_the_queue_and_clear_empties_it(client, project, monkeypat
     assert client.post("/videos/p1/stop").json()["stopped"]
     assert _queue(client)["paused"] and [i["label"] for i in _queue(client)["items"]] == ["Add a line"]
     gate.set()
-    assert client.post("/videos/p1/queue/clear").json() == {"items": [], "paused": False}
+    cleared = client.post("/videos/p1/queue/clear").json()
+    assert (cleared["items"], cleared["paused"]) == ([], False)
     settle_renders()
     assert [e for e in client.get("/videos/p1").json()["edits"] if not e.get("reverted")] == []
 
@@ -129,7 +130,7 @@ def test_waiting_changes_can_be_reworded_removed_and_reordered(client, project):
     assert client.patch(f"/videos/p1/queue/{ids[0]}", json={"label": "First", "payload": {"text": "one, warmer"}}).json()["label"] == "First"
     assert [i["id"] for i in client.put("/videos/p1/queue/order", json={"ids": [ids[2], ids[0]]}).json()["items"]] == [ids[2], ids[0], ids[1]]
     assert [i["id"] for i in client.delete(f"/videos/p1/queue/{ids[0]}").json()["items"]] == [ids[2], ids[1]]
-    assert client.delete(f"/videos/p1/queue/{ids[0]}").status_code == 409
+    assert client.delete(f"/videos/p1/queue/{ids[0]}").status_code == 404           # removed: no longer in Up next
     assert client.post("/videos/p1/queue", json={"kind": "action", "payload": {"op": "voice_everything"}}).status_code == 422
     main.locks.release("p1", "J999", "stopped")                 # nothing ran: a Stop leaves them waiting, paused
     assert _queue(client)["paused"] and len(_queue(client)["items"]) == 2

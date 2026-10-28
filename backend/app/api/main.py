@@ -253,11 +253,9 @@ def _on_job(j) -> None:
 def _on_lock(video_id: str, lock, outcome: str | None) -> None:
     """The lock changed: the editor hears it (video.locked / video.unlocked); Part 3's queue hears a release."""
     if lock is not None:
-        events.publish(video_id, "video.locked", {**lock.to_dict(), "queue": _queue_items(video_id),
-                                                  "queue_paused": _queue_paused(video_id)})
+        events.publish(video_id, "video.locked", {**lock.to_dict(), **_queue_fields(video_id)})
         return
-    events.publish(video_id, "video.unlocked", {"video_id": video_id, "outcome": outcome, "queue": _queue_items(video_id),
-                                                "queue_paused": _queue_paused(video_id)})
+    events.publish(video_id, "video.unlocked", {"video_id": video_id, "outcome": outcome, **_queue_fields(video_id)})
     after = globals().get("_after_release")    # Part 3, defined further down
     if after is not None and outcome is not None:
         after(video_id, outcome)
@@ -817,6 +815,13 @@ def _queue_items(video_id: str) -> list[dict]:
 
 def _queue_paused(video_id: str) -> bool:
     return bool(repo.settings(video_id).get("queue_paused"))
+
+
+def _queue_fields(video_id: str) -> dict:
+    """Up next as every channel carries it (addendum 3.3): what runs and waits, whether it is
+    paused, and the last ones that ended, so a card in the thread keeps Done, Stopped or Failed."""
+    return {"queue": _queue_items(video_id), "queue_paused": _queue_paused(video_id),
+            "queue_recent": [i.to_dict() for i in up_next.recent(video_id)]}
 
 
 def _lock_alive(lock: lock_mod.Lock) -> bool:
@@ -8164,7 +8169,7 @@ def allow_more(project_id: str, owner: str = Depends(current_owner),
 
 def _start_turn(project_id: str, record: ProjectRecord, text: str, owner: str, approve: bool = False,
                 carry: dict | None = None, cap_usd: float | None = None, batch: bool = False,
-                ticket: LockTicket | None = None) -> dict:
+                ticket: LockTicket | None = None, queue_item: int | None = None) -> dict:
     """Queue one turn. `carry` continues the turn a cap question ended: the
     same turn id and start, its cap raised (`cap_usd`), the paid step approved.
     `batch` (F4): one video of a batch turn, past the batch's one gate: its paid
@@ -8172,15 +8177,18 @@ def _start_turn(project_id: str, record: ProjectRecord, text: str, owner: str, a
     lines wait as proposals for the batch board.
 
     2026-10-25: the turn holds the video's lock from here until it lands
-    (`ticket`, the route's, or one taken here for a run's turn: 409 when busy)."""
+    (`ticket`, the route's, or one taken here for a run's turn: 409 when busy).
+    `queue_item` (addendum 3.3): the Up next item this turn runs; your words in the thread carry it,
+    so the queued card becomes this turn's and shows its state."""
     if ticket is not None:
-        return _locked_turn(project_id, record, text, owner, approve, carry, cap_usd, batch, ticket)
+        return _locked_turn(project_id, record, text, owner, approve, carry, cap_usd, batch, ticket, queue_item)
     with lock_held(project_id, "Voltage is planning", over_gate=True) as own:
-        return _locked_turn(project_id, record, text, owner, approve, carry, cap_usd, batch, own)
+        return _locked_turn(project_id, record, text, owner, approve, carry, cap_usd, batch, own, queue_item)
 
 
 def _locked_turn(project_id: str, record: ProjectRecord, text: str, owner: str, approve: bool,
-                 carry: dict | None, cap_usd: float | None, batch: bool, ticket: LockTicket) -> dict:
+                 carry: dict | None, cap_usd: float | None, batch: bool, ticket: LockTicket,
+                 queue_item: int | None = None) -> dict:
     if carry is None:
         analytics.track("first_turn", owner, {"video_id": project_id, "batch": batch})
     prefs = _settings(project_id, owner)
@@ -8204,7 +8212,7 @@ def _locked_turn(project_id: str, record: ProjectRecord, text: str, owner: str, 
     # Just do it before the turn, under Check with me at the yes (and at "allow more").
     if record.consent is None and (autonomy == "draft" or approve or carry or batch):
         raise HTTPException(status_code=403, detail=CONSENT_REQUIRED)
-    repo.add_message(project_id, "user", text)
+    repo.add_message(project_id, "user", text, data={"queued": queue_item} if queue_item is not None else None)
     # The open question is answered by this turn, or superseded by it; either way it is kept, resolved.
     if asked and plan.status == "clarifying":
         answered = text.strip().lower() in {str(o.get("label") if isinstance(o, dict) else o).strip().lower() for o in asked.get("options") or []}
@@ -8813,7 +8821,7 @@ def _lock_view(project_id: str) -> dict:
     if lock is not None and lock.gate and not _gate_waits(project_id):
         locks.release(project_id, lock.holder, "done")
         lock = None
-    return {"lock": lock.to_dict() if lock else None, "queue": _queue_items(project_id), "queue_paused": _queue_paused(project_id)}
+    return {"lock": lock.to_dict() if lock else None, **_queue_fields(project_id)}
 
 
 # ── Up next (2026-10-25): the changes waiting on a busy video ────────────────
@@ -8843,12 +8851,12 @@ class QueueOrder(BaseModel):
 
 
 def _queue_view(video_id: str) -> dict:
-    return {"items": _queue_items(video_id), "paused": _queue_paused(video_id)}
+    f = _queue_fields(video_id)
+    return {"items": f["queue"], "paused": f["queue_paused"], "recent": f["queue_recent"]}
 
 
 def _tell_queue(video_id: str) -> None:
-    events.publish(video_id, "queue.updated", {"video_id": video_id, "queue": _queue_items(video_id),
-                                               "queue_paused": _queue_paused(video_id)})
+    events.publish(video_id, "queue.updated", {"video_id": video_id, **_queue_fields(video_id)})
 
 
 def _pause_queue(video_id: str, paused: bool) -> None:
@@ -8893,14 +8901,25 @@ def add_to_queue(project_id: str, req: QueueRequest, owner: str = Depends(curren
 
 @app.patch("/videos/{project_id}/queue/{item_id}")
 def edit_queued(project_id: str, item_id: int, req: QueueEdit, owner: str = Depends(current_owner)) -> dict:
-    """A waiting change reworded; one already running is not touched."""
+    """A waiting change reworded; one already running is not touched (409, one plain sentence).
+    Addendum 3.3: new words for a goal give it a new label from those words, unless one is given."""
     _owned(project_id, owner)
     found = up_next.get(item_id)
-    if found is None or found.video_id != project_id:
+    if found is None or found.video_id != project_id or found.status == "removed":
         raise HTTPException(status_code=404, detail="Not in Up next.")
-    changed = up_next.edit(item_id, label=req.label, payload=req.payload)
+    label = req.label
+    if found.kind == "goal" and req.payload is not None:
+        text = str(req.payload.get("text") or "").strip()
+        if not text:
+            raise HTTPException(status_code=422, detail="Say what you want.")
+        payload = {**found.payload, "text": text}
+        if not (label and label.strip()):
+            label = _queue_label(QueueRequest(kind="goal", payload=payload))
+    else:
+        payload = req.payload
+    changed = up_next.edit(item_id, label=label, payload=payload)
     if changed is None:
-        raise HTTPException(status_code=409, detail="That change already started.")
+        raise HTTPException(status_code=409, detail=queue_mod.refusal(up_next.get(item_id) or found, "edit"))
     _tell_queue(project_id)
     return changed.to_dict()
 
@@ -8909,10 +8928,10 @@ def edit_queued(project_id: str, item_id: int, req: QueueEdit, owner: str = Depe
 def remove_queued(project_id: str, item_id: int, owner: str = Depends(current_owner)) -> dict:
     _owned(project_id, owner)
     found = up_next.get(item_id)
-    if found is None or found.video_id != project_id:
+    if found is None or found.video_id != project_id or found.status == "removed":
         raise HTTPException(status_code=404, detail="Not in Up next.")
     if not up_next.remove(item_id):
-        raise HTTPException(status_code=409, detail="That change already started.")
+        raise HTTPException(status_code=409, detail=queue_mod.refusal(up_next.get(item_id) or found, "remove"))
     _tell_queue(project_id)
     return _queue_view(project_id)
 
@@ -8947,16 +8966,31 @@ def clear_queue(project_id: str, owner: str = Depends(current_owner)) -> dict:
     return _queue_view(project_id)
 
 
+def _question_waits(video_id: str) -> bool:
+    """Whether Voltage's question (a meaning question, or one approval over the spending limit) waits for an answer."""
+    plan = repo.latest_plan(video_id)
+    q = plan.question if plan is not None and plan.status == "clarifying" else None
+    return bool(q and not q.get("resolved"))
+
+
 def _after_release(video_id: str, outcome: str) -> None:
     """The video let go: the change the queue ran (if any) ends with it; after a
-    success the next one starts, after a failure or a Stop the queue pauses."""
+    success the next one starts, after a failure or a Stop the queue pauses.
+
+    Addendum 3.3: a queued message whose turn ended on a question (which line,
+    which voice, or the one approval over the spending limit) is still running:
+    the queue stops at that card, the rest wait, and the answer's turn ends it."""
     if repo.get(video_id) is None:
         return
     running = up_next.running(video_id)
+    if outcome == "done" and running is not None and _question_waits(video_id):
+        _tell_queue(video_id)
+        return
     if running is not None:
         why = _queue_errors.pop(running.id, None)
-        up_next.finish(running.id, "done" if outcome == "done" else "failed",
-                       None if outcome == "done" else why or {"stopped": "Stopped.", "expired": "The server stopped while it ran."}.get(outcome, "It failed."))
+        status = {"done": "done", "stopped": "stopped"}.get(outcome, "failed")
+        up_next.finish(running.id, status,
+                       None if status == "done" else why or {"stopped": "Stopped.", "expired": "The server stopped while it ran."}.get(outcome, "It failed."))
     waiting = up_next.waiting(video_id)
     if outcome != "done":
         if waiting and not _queue_paused(video_id):
@@ -8981,13 +9015,29 @@ def _run_next(video_id: str) -> None:
     token = current_actor.set(item.created_by)
     try:
         if item.kind == "goal":
+            text = str(item.payload.get("text") or "")
             try:
-                _start_turn(video_id, record, str(item.payload.get("text") or ""), record.owner)
+                with lock_held(video_id, "Voltage is planning", over_gate=True) as own:
+                    try:
+                        if not _agent_on():
+                            raise HTTPException(status_code=503, detail=failures.unconfigured(
+                                "anthropic", "ANTHROPIC_API_KEY or AVE_AGENT", where="agent", owner=record.owner))
+                        # Planned now, against the video as the change before it left it (the words are all it kept).
+                        _start_turn(video_id, record, text, record.owner, ticket=own, queue_item=item.id)
+                    except HTTPException as exc:
+                        # Refused before the turn started (consent, the agent off): the thread keeps the
+                        # words and why, so the card is not lost; letting go ends it Failed.
+                        why = str(exc.detail.get("message") if isinstance(exc.detail, dict) else exc.detail)
+                        _queue_errors[item.id] = why
+                        repo.add_message(video_id, "user", text, data={"queued": item.id})
+                        repo.add_message(video_id, "assistant", why)
+                        raise
             except HTTPException as exc:
-                # It never started (a refusal before the turn took the video): it fails here.
-                why = exc.detail.get("message") if isinstance(exc.detail, dict) else exc.detail
-                up_next.finish(item.id, "failed", str(why))
-                _after_release(video_id, "failed")
+                still = up_next.get(item.id)
+                if still is not None and still.status == "running":     # refused at the door: nothing let go to end it
+                    why = exc.detail.get("message") if isinstance(exc.detail, dict) else exc.detail
+                    up_next.finish(item.id, "failed", _queue_errors.pop(item.id, None) or str(why))
+                    _after_release(video_id, "failed")
             return
         try:
             with lock_held(video_id, item.label) as ticket:
@@ -9005,6 +9055,23 @@ def _run_next(video_id: str) -> None:
         log.exception("queued change %s on %s failed", item.id, video_id)
     finally:
         current_actor.reset(token)
+
+
+def _recover_queue() -> None:
+    """At startup (addendum 3.3): Up next is in the database, so what waited still waits. A change a
+    previous server was running ends Failed, unless it waits on the user (its go, or its question);
+    the queue then pauses and asks, as after any failure: nothing paid starts on its own after a restart."""
+    for item in up_next.left_running():
+        held = locks.get(item.video_id)
+        if (held is not None and held.gate) or _question_waits(item.video_id):
+            continue
+        up_next.finish(item.id, "failed", "The server restarted while it ran.")
+        if up_next.waiting(item.video_id) and not _queue_paused(item.video_id):
+            _pause_queue(item.video_id, True)
+            repo.add_message(item.video_id, "assistant", QUEUE_PAUSED, data={"queue_paused": True})
+
+
+_recover_queue()
 
 
 def _run_action(video_id: str, record: ProjectRecord, item, ticket: LockTicket) -> None:
@@ -9056,7 +9123,8 @@ async def video_events(project_id: str, request: Request, limit: int | None = No
             if state["turn"]:
                 opening.append(("turn.updated", state["turn"]))
             # 2026-10-25: Ready or Working, and what is up next, as it is now.
-            held, waiting = state.get("lock"), {"queue": state.get("queue") or [], "queue_paused": bool(state.get("queue_paused"))}
+            held, waiting = state.get("lock"), {"queue": state.get("queue") or [], "queue_paused": bool(state.get("queue_paused")),
+                                          "queue_recent": state.get("queue_recent") or []}
             opening.append(("video.locked", {**held, **waiting}) if held
                            else ("video.unlocked", {"video_id": project_id, "outcome": None, **waiting}))
             for event, data in opening:
