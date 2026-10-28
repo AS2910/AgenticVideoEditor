@@ -7,6 +7,7 @@ import hashlib
 import hmac
 import json
 import re
+import zlib
 
 import pytest
 from fastapi.testclient import TestClient
@@ -34,9 +35,45 @@ def _sent(kind: str) -> list[dict]:
     return email_mod.outbox(main.database, kind=kind, to=ANN)
 
 
+def _objects(data: bytes) -> dict[int, bytes]:
+    return {int(m.group(1)): m.group(2) for m in re.finditer(rb"(\d+) 0 obj\n(.*?)\nendobj\n", data, re.S)}
+
+
+def _stream_of(obj: bytes) -> bytes:
+    head, _, rest = obj.partition(b">>\nstream\n")
+    length = int(re.search(rb"/Length (\d+)", head).group(1))
+    assert rest[length:].startswith(b"\nendstream")
+    return zlib.decompress(rest[:length]) if b"/FlateDecode" in head else rest[:length]
+
+
+def pdf_lines(data: bytes) -> list[str]:
+    """The text of each text object on the page, read back through each font's ToUnicode
+    map, as a reader copying text out of the PDF gets it (pypdf is not installed here)."""
+    objs = _objects(data)
+    page = next(o for o in objs.values() if b"/Type /Page " in o)
+    cmaps = {}
+    for name, n in re.findall(rb"/(F\d+) (\d+) 0 R", page):
+        to_unicode = int(re.search(rb"/ToUnicode (\d+) 0 R", objs[int(n)]).group(1))
+        cmap = _stream_of(objs[to_unicode])
+        cmaps[name] = {int(c, 16): bytes.fromhex(u.decode()).decode("utf-16-be")
+                       for c, u in re.findall(rb"<([0-9A-F]{4})> <([0-9A-F]*)>", cmap.split(b"endcodespacerange")[1])}
+    content = _stream_of(objs[int(re.search(rb"/Contents (\d+) 0 R", page).group(1))])
+    lines = []
+    for block in re.findall(rb"BT (.*?) ET", content):
+        text, font = "", None
+        for tok in re.finditer(rb"/(F\d+) [\d.]+ Tf|<([0-9A-F]+)>", block):
+            if tok.group(1):
+                font = cmaps[tok.group(1)]
+            else:
+                hexes = tok.group(2)
+                text += "".join(font[int(hexes[i:i + 4], 16)] for i in range(0, len(hexes), 4))
+        lines.append(text)
+    return lines
+
+
 def _check_pdf(data: bytes, *must: str) -> None:
-    """A structural check (pypdf is not installed here): the header, every object the
-    xref names at its offset, the trailer, and the words drawn on the page."""
+    """A structural check: the header, every object the xref names at its offset, the
+    trailer, and the words drawn on the page, each string whole on one line."""
     assert data.startswith(b"%PDF-1.4\n") and data.rstrip().endswith(b"%%EOF")
     start = int(re.search(rb"startxref\n(\d+)\n", data).group(1))
     assert data[start:start + 4] == b"xref"
@@ -45,13 +82,9 @@ def _check_pdf(data: bytes, *must: str) -> None:
     assert len(entries) == count - 1
     for n, (offset, _gen) in enumerate(entries, start=1):
         assert data[int(offset):].startswith(b"%d 0 obj" % n), n
-    stream = re.search(rb"/Length (\d+) >>\nstream\n", data)
-    length = int(stream.group(1))
-    assert data[stream.end() + length:].startswith(b"\nendstream")
-    drawn = b" ".join(re.findall(rb"\((.*?)(?<!\\)\) Tj", data)).decode("latin-1")
-    text = re.sub(r"\\(.)", r"\1", drawn)                    # the string escapes undone
+    lines = pdf_lines(data)
     for words in must:
-        assert words in text, words
+        assert any(words in line for line in lines), (words, lines)
     try:
         import pypdf
     except ImportError:
@@ -75,7 +108,7 @@ def test_a_fake_provider_top_up_sends_a_receipt_and_an_invoice_with_its_pdf():
     assert "Taxable value" in invoice["body"] and "29ABCDE1234F1Z5" in invoice["body"]
     [attached] = invoice["attachments"]
     assert attached.filename == f"{inv['number']}.pdf" and attached.content_type == "application/pdf"
-    money = lambda v: f"INR {v:,.2f}"  # noqa: E731
+    money = lambda v: f"₹{v:,.2f}"  # noqa: E731
     _check_pdf(attached.data, "Tax invoice", inv["number"], "Ann (Studio) LLP", "Taxable value", "CGST 9%", "SGST 9%",
                money(inv["subtotal"]), money(inv["cgst"]), money(inv["total"]), "Test mode")
     assert inv["cgst"] + inv["sgst"] == pytest.approx(round(inv["subtotal"] * 0.18, 2))
@@ -89,14 +122,14 @@ def test_a_plan_says_the_plan_and_another_state_is_igst():
     [receipt], [invoice] = _sent("receipt"), _sent("invoice")
     assert "You are on the Studio plan." in receipt["body"] and "Thanks, your plan is on" in receipt["html"]
     assert "IGST 18%" in invoice["body"] and "CGST" not in invoice["body"]
-    _check_pdf(invoice["attachments"][0].data, "IGST 18%", f"INR {inv['igst']:,.2f}", "Place of supply: Maharashtra")
+    _check_pdf(invoice["attachments"][0].data, "IGST 18%", f"₹{inv['igst']:,.2f}", "Place of supply: Maharashtra")
 
 
 def test_outside_india_is_zero_rated_in_dollars():
     client = TestClient(main.app)
     inv = client.post("/billing/topup", json={"credits": 10}).json()["invoice"]
     assert inv["tax_kind"] == "export"
-    _check_pdf(_sent("invoice")[0]["attachments"][0].data, "GST 0% (export of services)", f"USD {inv['total']:,.2f}")
+    _check_pdf(_sent("invoice")[0]["attachments"][0].data, "GST 0% (export of services)", f"${inv['total']:,.2f}")
 
 
 def test_no_address_no_email_and_the_payment_still_goes_through():
@@ -137,13 +170,13 @@ def test_a_stripe_webhook_emails_once(live):
     assert "We added 10 credits" in receipt["body"] and len(_sent("invoice")) == 1
 
 
-def test_the_pdf_escapes_and_stays_latin1():
+def test_the_pdf_draws_any_name_as_typed():
     inv = {"number": "VLT-1", "issued_at": "2026-10-24T00:00:00Z", "provider": "fake", "checkout_id": "c1", "owner": "acct:1",
            "legal_name": "Ann (Studio) \\ ₹ Films", "gstin": "", "state_code": None, "country": "US", "description": "Top-up",
            "currency": "USD", "subtotal": 12.0, "cgst": 0.0, "sgst": 0.0, "igst": 0.0, "total": 12.0, "tax_kind": "export",
            "test_mode": False}
     data = pdf.invoice_pdf(inv, {"name": "Voltage", "gstin": "", "state": "29"})
-    _check_pdf(data, "Ann (Studio) \\ ? Films", "Place of supply: US", "USD 12.00")
+    _check_pdf(data, "Ann (Studio) \\ ₹ Films", "Place of supply: US", "$12.00")
     assert b"Test mode" not in data
 
 

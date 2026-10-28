@@ -1,0 +1,14 @@
+Fonts embedded (subset) in the invoice PDF, app/billing/pdf_fonts.py. Run 5 addendum 0b, 2026-10-28.
+All three are licensed under the SIL Open Font License 1.1: OFL-NotoSans.txt, OFL-NotoSansDevanagari.txt.
+The unhinted TTF files, unchanged, from the Noto project's GitHub releases.
+
+NotoSans-Regular.ttf, NotoSans-Bold.ttf: Noto Sans, Version 2.015
+  https://github.com/notofonts/latin-greek-cyrillic/releases/download/NotoSans-v2.015/NotoSans-v2.015.zip
+  zip sha256 0c34df072a3fa7efbb7cbf34950e1f971a4447cffe365d3a359e2d4089b958f5
+  NotoSans/unhinted/ttf/NotoSans-Regular.ttf sha256 f3961a9cde016d41a4879aecda1474d3a36d6bf54fa0e4643de029cc2248b0e8
+  NotoSans/unhinted/ttf/NotoSans-Bold.ttf    sha256 87cb2d84472a7d66da659ee47b6cdb9552326e8c128245231f191b6ac72529d9
+
+NotoSansDevanagari-Regular.ttf: Noto Sans Devanagari, Version 2.007
+  https://github.com/notofonts/devanagari/releases/download/NotoSansDevanagari-v2.007/NotoSansDevanagari-v2.007.zip
+  zip sha256 820c7da45b1e63562cb41c0a8cac5d9a4202312043a3a040ed1325857ef469b1 (matches the digest GitHub publishes for the asset)
+  NotoSansDevanagari/unhinted/ttf/NotoSansDevanagari-Regular.ttf sha256 9c7d935139ea6a1e6ad9dbac4f6d27ece1e04bca8123c8888d00a0f9df4724cd

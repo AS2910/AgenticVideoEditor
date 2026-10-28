@@ -2,28 +2,23 @@
 
     invoice_pdf(inv, seller) -> bytes      one A4 page, text only, PDF 1.4
 
-Written by hand (no PDF library): the standard Helvetica and Courier fonts,
-which every reader has, so nothing is embedded. Those fonts draw Latin-1
-only, so money is written "INR 1,180.00" (no rupee sign) and any other
-character in a name becomes "?"; the HTML invoice on the Billing page has
-the name as typed. The same rows as `billing.invoice_html`.
+Written by hand (no PDF library). Run 5 addendum 0b: the text is set in
+embedded, subset Noto Sans and Noto Sans Devanagari (billing.pdf_fonts), so
+money prints with the rupee sign ("₹1,180.00") and a name prints as typed,
+in Devanagari as well as Latin, Greek and Cyrillic. Every font carries a
+ToUnicode map, so copying text out of the PDF gives the same words back.
+The same rows as `billing.invoice_html`.
 """
 from __future__ import annotations
 
-from app.billing import gst
+from app.billing import gst, pdf_fonts
 
 _W, _H = 595, 842                 # A4 in points
 _LEFT, _RIGHT = 56, 539
 
 
 def _money(amount: float, currency: str) -> str:
-    return f"{'INR' if currency == 'INR' else 'USD'} {float(amount):,.2f}"
-
-
-def _pdf_text(s: object) -> str:
-    """A PDF string literal's inside: Latin-1, with ( ) and backslash escaped."""
-    raw = str(s).encode("cp1252", errors="replace").decode("latin-1")
-    return raw.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)").replace("\r", " ").replace("\n", " ")
+    return f"₹{float(amount):,.2f}" if currency == "INR" else f"${float(amount):,.2f}"   # as billing._money
 
 
 class _Page:
@@ -32,17 +27,33 @@ class _Page:
     def __init__(self) -> None:
         self.ops: list[str] = []
         self.y = _H - 64
+        self.fonts: dict[str, pdf_fonts.Embed] = {}
 
-    def text(self, s: object, *, font: str = "F1", size: float = 10.5, x: float = _LEFT, gap: float = 15) -> None:
-        self.ops.append(f"BT /{font} {size:g} Tf {x:g} {self.y:g} Td ({_pdf_text(s)}) Tj ET")
+    def _embed(self, font: pdf_fonts.Font) -> pdf_fonts.Embed:
+        if font.name not in self.fonts:
+            self.fonts[font.name] = pdf_fonts.Embed(font, f"F{len(self.fonts) + 1}")
+        return self.fonts[font.name]
+
+    def _draw(self, s: object, *, x: float, size: float, bold: bool) -> None:
+        # One text object per string: each run ends where the next begins, whatever its font.
+        ops = [f"BT {x:.2f} {self.y:g} Td"]
+        for run in pdf_fonts.runs(" ".join(str(s).split()), bold=bold):
+            e = self._embed(run.font)
+            ops.append(f"/{e.resource} {size:g} Tf {e.show(run, size)}")
+        self.ops.append(" ".join(ops + ["ET"]))
+
+    def _width(self, s: str, size: float, bold: bool) -> float:
+        return sum(r.width(size) for r in pdf_fonts.runs(s, bold=bold))
+
+    def text(self, s: object, *, bold: bool = False, size: float = 10.5, x: float = _LEFT, gap: float = 15) -> None:
+        self._draw(s, x=x, size=size, bold=bold)
         self.y -= gap
 
     def row(self, label: object, amount: str, *, bold: bool = False) -> None:
-        # Amounts in Courier (every glyph 0.6 em wide), so they line up on the right.
+        # Amounts set flush right, measured from the font's own widths.
         size = 10.5
-        self.ops.append(f"BT /{'F2' if bold else 'F1'} {size:g} Tf {_LEFT} {self.y:g} Td ({_pdf_text(label)}) Tj ET")
-        x = _RIGHT - len(amount) * 0.6 * size
-        self.ops.append(f"BT /F3 {size:g} Tf {x:.2f} {self.y:g} Td ({_pdf_text(amount)}) Tj ET")
+        self._draw(label, x=_LEFT, size=size, bold=bold)
+        self._draw(amount, x=_RIGHT - self._width(amount, size, bold), size=size, bold=bold)
         self.y -= 6
         self.rule()
         self.y -= 14
@@ -54,16 +65,21 @@ class _Page:
         self.y -= points
 
 
-def _document(content: bytes) -> bytes:
+def _document(page: _Page) -> bytes:
+    content = "\n".join(page.ops).encode("latin-1")
+    fonts, extra, n = [], [], 5
+    for e in page.fonts.values():
+        fonts.append(f"/{e.resource} {n} 0 R")
+        parts = e.pdf_objects(n)
+        extra += parts
+        n += len(parts)
     objects = [
         b"<< /Type /Catalog /Pages 2 0 R >>",
         b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
         (f"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {_W} {_H}] /Contents 4 0 R "
-         "/Resources << /Font << /F1 5 0 R /F2 6 0 R /F3 7 0 R >> >> >>").encode(),
-        b"<< /Length %d >>\nstream\n" % len(content) + content + b"\nendstream",
-        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>",
-        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>",
-        b"<< /Type /Font /Subtype /Type1 /BaseFont /Courier /Encoding /WinAnsiEncoding >>",
+         f"/Resources << /Font << {' '.join(fonts)} >> >> >>").encode(),
+        pdf_fonts._stream(content),
+        *extra,
     ]
     out = bytearray(b"%PDF-1.4\n%\xe2\xe3\xcf\xd3\n")
     offsets = []
@@ -82,15 +98,15 @@ def invoice_pdf(inv: dict, seller: dict) -> bytes:
     cur = inv["currency"]
     p = _Page()
     if inv.get("test_mode"):
-        p.text("Test mode. No money moved; this invoice is a sample of what a real one will look like.", font="F2", gap=26)
-    p.text("Tax invoice", font="F2", size=22, gap=22)
+        p.text("Test mode. No money moved; this invoice is a sample of what a real one will look like.", bold=True, gap=26)
+    p.text("Tax invoice", bold=True, size=22, gap=22)
     p.text(f"{inv['number']}, issued {str(inv['issued_at'])[:10]}, paid through {str(inv['provider']).title()} "
            f"({inv['checkout_id']})", size=9.5, gap=28)
-    p.text("From", font="F2")
+    p.text("From", bold=True)
     p.text(seller.get("name") or "Voltage (seller details not set)")
     p.text(f"GSTIN {seller.get('gstin') or 'not set yet'}")
     p.text(gst.STATES.get(seller.get("state") or "", seller.get("state") or ""), gap=24)
-    p.text("To", font="F2")
+    p.text("To", bold=True)
     p.text(inv.get("legal_name") or inv["owner"])
     p.text(f"GSTIN {inv['gstin']}" if inv.get("gstin") else "No GSTIN")
     p.text(f"Place of supply: {gst.STATES.get(inv.get('state_code') or '', inv.get('country') or 'Outside India')}", gap=28)
@@ -105,4 +121,4 @@ def invoice_pdf(inv: dict, seller: dict) -> bytes:
     else:
         p.row("GST 0% (export of services)", _money(0, cur))
     p.row("Total", _money(inv["total"], cur), bold=True)
-    return _document("\n".join(p.ops).encode("latin-1"))
+    return _document(p)
