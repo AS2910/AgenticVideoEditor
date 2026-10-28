@@ -28,9 +28,9 @@ from typing import Sequence
 
 import numpy as np
 
-from app.domain.models import Source
+from app.domain.models import Source, role_of
 from app.media import ffmpeg, loudness, room as roommod
-from app.render import mix as mixmod
+from app.render import check as checkmod, clean, mix as mixmod
 from app.media.stems import Stems
 from app.render import retime
 from app.render.renderer import RenderInsert, RenderSegment
@@ -116,6 +116,30 @@ def unity(edit) -> float:
     return 1.0
 
 
+def _join_envelope(old: np.ndarray, new: np.ndarray) -> np.ndarray:
+    """The take's weight over a replaced span (mono `old` and `new`, alike in
+    length): 0 before the snapped start join, 1 inside, 0 after the snapped end
+    join, with 10 to 30 ms sine ramps (`render.clean`)."""
+    length = len(new)
+    env = np.zeros(length, dtype=np.float32)
+    if length <= 0:
+        return env
+    limit = min(round(clean.SNAP * OUT_RATE), length // 4)
+    a = clean.snap(old, new, 0, +1, limit)
+    b = clean.snap(old, new, length - 1, -1, limit) + 1
+    if b - a < 2:
+        a, b = 0, length
+    w = round(clean.JOIN_MAX * OUT_RATE)
+    fa = min(clean.fade_length(old[a:a + w], new[a:a + w], OUT_RATE), (b - a) // 2)
+    fb = min(clean.fade_length(old[max(a, b - w):b], new[max(a, b - w):b], OUT_RATE), (b - a) // 2)
+    env[a:b] = 1.0
+    if fa:
+        env[a:a + fa] = np.sin(np.linspace(0, np.pi / 2, fa, dtype=np.float32))
+    if fb:
+        env[b - fb:b] = np.minimum(env[b - fb:b], np.sin(np.linspace(0, np.pi / 2, fb, dtype=np.float32))[::-1])
+    return env
+
+
 def splice(
     base: np.ndarray, segments: Sequence[RenderSegment], room: Room | None = None,
     layers: Sequence = (),
@@ -154,22 +178,32 @@ def splice(
         # Run 5 item 7: a take put in the room when it was made is not put there twice.
         if room is not None and edit.plan.mix != "layer" and not getattr(edit.plan, "roomed", None):
             piece = room.take(piece)
-        fade = min(round(CROSSFADE * OUT_RATE), length // 2)
-        new = np.ones(length, dtype=np.float32)
-        if fade:
-            ramp = np.sin(np.linspace(0, np.pi / 2, fade, dtype=np.float32))
-            new[:fade] = ramp
-            new[-fade:] = ramp[::-1]
         if edit.plan.mix == "layer":
             # A layer that still arrives as a segment (an older manifest): add it, never replace.
+            fade = min(round(CROSSFADE * OUT_RATE), length // 2)
+            new = np.ones(length, dtype=np.float32)
+            if fade:
+                ramp = np.sin(np.linspace(0, np.pi / 2, fade, dtype=np.float32))
+                new[:fade] = ramp
+                new[-fade:] = ramp[::-1]
             out[i0:i1] = out[i0:i1] + piece * new[:, None]
-        else:
-            old = np.sqrt(np.maximum(0.0, 1.0 - new ** 2))  # equal power
-            if room is not None:
-                bed = room.accompaniment[i0:i1]
-                out[i0:i1] = bed + (base[i0:i1] - bed) * old[:, None] + piece * new[:, None]
-            else:
-                out[i0:i1] = base[i0:i1] * old[:, None] + piece * new[:, None]
+            continue
+        # Addendum 3, item 1: the voice part of the original fades out and the
+        # take in, at joins snapped to a zero crossing or silence, with a 10 to
+        # 30 ms equal-power crossfade; the room's tone plays under any part of
+        # the take quieter than the room. With stems the bed plays throughout.
+        bed = room.accompaniment[i0:i1] if room is not None else None
+        voice_old = base[i0:i1] - bed if bed is not None else base[i0:i1]
+        new = _join_envelope(voice_old.mean(axis=1), piece.mean(axis=1))
+        old = np.sqrt(np.maximum(0.0, 1.0 - new ** 2))  # equal power
+        reach = int(clean.ROOM_READ * OUT_RATE)
+        lo, hi = max(0, i0 - reach), min(len(base), i1 + reach)
+        talk = base[lo:hi] - room.accompaniment[lo:hi] if room is not None else base[lo:hi]
+        tone = clean.tone_around(talk.mean(axis=1), i0 - lo, i1 - lo, OUT_RATE)
+        fill = clean.gap_fill(piece.mean(axis=1), tone, OUT_RATE)
+        spoken = piece + fill[:, None]
+        mixed_in = voice_old * old[:, None] + spoken * new[:, None]
+        out[i0:i1] = (bed + mixed_in) if bed is not None else mixed_in
     for edit in layers:
         i0 = min(round(edit.plan.selection.start * OUT_RATE), len(out))
         i1 = min(round(edit.plan.selection.end * OUT_RATE), len(out))
@@ -410,6 +444,42 @@ def assemble(base: np.ndarray, pieces: Sequence[retime.Piece], gain_for=None) ->
     return np.vstack(parts) if parts else base[:0]
 
 
+def placed_edits(segments: Sequence[RenderSegment], layers: Sequence, pieces: Sequence[retime.Piece] | None,
+                 audio_of) -> list[checkmod.Placed]:
+    """Every edit as the render plays it, for `render.check`: its span, its
+    take as it sounds there (mono), and how much of the take's sound its span
+    cut off. `audio_of(edit)` is the take at OUT_RATE, (samples, channels)."""
+    flexed = {p.edit.edit_id: p for p in (pieces or ()) if p.kind == "flex" and p.edit is not None}
+    out: list[checkmod.Placed] = []
+
+    def one(edit, kind: str, a: float, b: float, offset: int, length: int) -> checkmod.Placed:
+        audio = audio_of(edit).mean(axis=1)
+        peak = float(checkmod._frame_db(audio, OUT_RATE).max()) if len(audio) >= OUT_RATE // 100 else None
+        head, take, tail = audio[:max(0, offset)], audio[max(0, offset):max(0, offset) + length], audio[max(0, offset) + length:]
+        return checkmod.Placed(
+            edit.edit_id, kind, edit.plan.new_text or "", a, b, take,
+            lost_head=checkmod.sound_seconds(head, OUT_RATE, peak) if peak is not None else 0.0,
+            lost_tail=checkmod.sound_seconds(tail, OUT_RATE, peak) if peak is not None else 0.0,
+            voice=role_of(edit.plan) == "voice" and kind != "remove")
+
+    for seg in segments:
+        if seg.kind != "edited" or seg.edit is None or seg.end <= seg.start:
+            continue
+        edit = seg.edit
+        kind = "remove" if edit.plan.mix == "remove" else "layer" if edit.plan.mix == "layer" else "replace"
+        if edit.edit_id in flexed:
+            piece = flexed[edit.edit_id]
+            out.append(one(edit, kind, piece.start, piece.end, 0, round(piece.out * OUT_RATE)))
+            continue
+        offset = round((seg.start - edit.plan.selection.start) * OUT_RATE)
+        out.append(one(edit, kind, seg.start, seg.end, offset, round((seg.end - seg.start) * OUT_RATE)))
+    for edit in layers:
+        a, b = edit.plan.selection.start, edit.plan.selection.end
+        if b > a:
+            out.append(one(edit, "layer", a, b, 0, round((b - a) * OUT_RATE)))
+    return out
+
+
 def compose(
     source: Source,
     segments: Sequence[RenderSegment],
@@ -424,6 +494,7 @@ def compose(
     words: Sequence[tuple[float, float]] = (),
     lines: Sequence[tuple[float, float]] = (),
     on_mix=None,
+    on_check=None,
 ) -> Path:
     """Write the edited video to `dest` (MP4, H.264 + AAC).
 
@@ -482,6 +553,11 @@ def compose(
     if settings.export_lufs is not None:
         normalised, final_lufs = loudness.normalize(track, settings.export_lufs, settings.true_peak_db)
         track = normalised.astype(np.float32)
+    if on_check is not None:
+        # Addendum 3, item 1: the finished soundtrack, the original, and every
+        # edit as it was placed, for the check after the render (render.check).
+        out_time = (lambda t: t) if plain else (lambda t: retime.render_time(t, pieces))
+        on_check(track, original, placed_edits(segments, layers, pieces, audio_of), out_time)
     if on_mix is not None:
         on_mix({"voice_lufs": round(mixed.voice_lufs, 1), "lines": [r.as_dict() for r in mixed.reports],
                 "loudness_lufs": None if final_lufs is None else round(final_lufs, 1),

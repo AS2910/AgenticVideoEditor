@@ -406,3 +406,41 @@ def test_a_spent_budget_keeps_the_first_take_and_says_so(store):
     voice = ChangerVoice(store, converted=True, fail=BudgetExceeded(17, 3))
     candidate = run_route(store, voice, MatchEngine(0.5, 0.9), "auto")
     assert any("budget ran out" in w for w in candidate.continuity.warnings)
+
+
+# --- Run 5 addendum 3, item 1: a take never spills into the next line --------
+
+def _next_word_at(t):
+    return Transcript(words=(Word("30%", 0.4, 0.9), Word("off", 0.9, 1.3), Word("today", t, t + 0.5)), statements=())
+
+
+def test_a_long_take_runs_into_the_pause_but_not_into_the_next_line(store):
+    """1.5 s of take for a 0.9 s line, with the next word at 2.2 s: the pause holds it as it is."""
+    plan = EditPlan(Selection(0.4, 1.3), "30% off", "speaker-1", fit="start")
+    candidate = run_edit("c1", plan, SOURCE, LongVoice(store), MockLipSyncAdapter(store), ContinuityEngine(),
+                         transcript=_next_word_at(2.2))
+    assert candidate.plan.selection.end == pytest.approx(1.9, abs=0.02)
+    assert candidate.plan.selection.end <= 2.2 - 0.1
+
+
+def test_a_take_that_would_reach_the_next_line_is_fitted_by_the_ladder(store):
+    """Next word at 1.9 s: the take is fitted (pauses, the picture, tempo) to end a breath before it."""
+    plan = EditPlan(Selection(0.4, 1.3), "30% off", "speaker-1", fit="start")
+    candidate = run_edit("c1", plan, SOURCE, LongVoice(store), MockLipSyncAdapter(store), ContinuityEngine(),
+                         transcript=_next_word_at(1.9))
+    end = 1.9 - 0.15
+    assert candidate.plan.selection.end == pytest.approx(end, abs=0.01)
+    flex = candidate.plan.flex or 1.0
+    # The take plays over the stretched picture of its span: the same length, nothing past the next word.
+    assert candidate.audio.duration == pytest.approx((end - 0.4) * flex, abs=0.03)
+    assert "fitted before the next line" in candidate.fit_notes
+
+
+def test_a_take_the_ladder_cannot_hold_is_refused_so_it_is_written_shorter(store):
+    """Next word at 1.6 s: 1.5 s of speech cannot fit 1.05 s within the limits; SpanMismatch (too long)."""
+    from app.media.ffmpeg import SpanMismatch
+    plan = EditPlan(Selection(0.4, 1.3), "30% off", "speaker-1", fit="start")
+    with pytest.raises(SpanMismatch) as err:
+        run_edit("c1", plan, SOURCE, LongVoice(store), MockLipSyncAdapter(store), ContinuityEngine(),
+                 transcript=_next_word_at(1.6))
+    assert err.value.natural > err.value.target

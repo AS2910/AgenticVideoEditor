@@ -114,6 +114,18 @@ class FlagStore:
             return bool(rows[ALL])
         return self._default(flag, owner)
 
+    def turned_off(self, flag: str, owner: str) -> bool:
+        """Whether a row turns `flag` off for `owner` (their own row, else
+        everyone's). For a switch that is on unless someone turns it off and
+        is kept out of KNOWN, so the profiles and lists stay as they are (run
+        5 addendum 3, item 1: `render.hear_check`)."""
+        with self.db.tx() as c:
+            rows = {r["owner"]: r["enabled"] for r in c.execute(
+                "SELECT owner, enabled FROM feature_flags WHERE flag = ? AND owner IN (?, ?)", (flag, owner, ALL))}
+        if owner in rows:
+            return not rows[owner]
+        return ALL in rows and not rows[ALL]
+
     def set(self, flag: str, owner: str, enabled: bool) -> None:
         """Turn a flag on or off for one owner; overrides the default."""
         with self.db.tx() as c:

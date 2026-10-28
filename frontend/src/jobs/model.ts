@@ -44,11 +44,11 @@ const checking = (j: ActivityJob) => /fit|check/i.test(j.step_label)
 
 // ── Row states ───────────────────────────────────────────────────────────────
 
-export type ChipState = 'original' | 'planned' | 'waiting' | 'queued' | 'voicing' | 'ready' | 'rendering' | 'in-preview' | 'in-video' | 'removed' | 'failed'
+export type ChipState = 'original' | 'planned' | 'waiting' | 'queued' | 'voicing' | 'ready' | 'rendering' | 'in-preview' | 'in-video' | 'needs-fix' | 'removed' | 'failed'
 export interface RowChip {
   state: ChipState
   label: string
-  /** Failed: why, in a sentence. */
+  /** Failed or Needs a fix: why, in a sentence. */
   reason?: string | null
   /** Voicing: 0..1 and the step the job is on. */
   progress?: number
@@ -60,11 +60,15 @@ export interface RowChip {
 
 export const CHIP_LABEL: Record<ChipState, string> = {
   original: 'Original', planned: 'Planned', waiting: 'Waiting on you', queued: 'Queued', voicing: 'Voicing',
-  ready: 'Ready to hear', rendering: 'Rendering', 'in-preview': 'In the preview', 'in-video': 'In the video', removed: 'Removed', failed: 'Failed',
+  ready: 'Ready to hear', rendering: 'Rendering', 'in-preview': 'In the preview', 'in-video': 'In the video', 'needs-fix': 'Needs a fix', removed: 'Removed', failed: 'Failed',
 }
 
 const carries = (inc: RenderIncludes | null | undefined, ids: (string | null | undefined)[]) =>
   !!inc && ids.some((id) => !!id && (inc.candidate_ids.includes(id) || inc.edit_ids.includes(id) || inc.item_ids.includes(id)))
+
+/** Addendum 3, item 1: why the check after the render failed a line the video carries, else null. */
+const needsFix = (inc: RenderIncludes | null | undefined, ids: (string | null | undefined)[]) =>
+  ids.map((id) => (id && inc?.needs_fix?.[id]) || null).find(Boolean) ?? null
 
 export interface RowFacts {
   item?: PlanItem | null
@@ -81,7 +85,7 @@ export interface RowFacts {
   rendering?: RenderIncludes | null
 }
 
-/** Exactly one chip per line: Original · Queued · Voicing · Ready to hear · Rendering · In the preview (a proposal the playing preview carries) · In the video · Failed (reason). */
+/** Exactly one chip per line: Original · Queued · Voicing · Ready to hear · Rendering · In the preview (a proposal the playing preview carries) · In the video · Needs a fix (reason: the check after the render failed it; never In the video) · Failed (reason). */
 export function rowChip({ item, editId, candidateId, removed, jobs, video, videoUnknown, rendering }: RowFacts): RowChip {
   const chip = (state: ChipState, extra: Partial<RowChip> = {}): RowChip => ({ state, label: CHIP_LABEL[state], ...extra })
   const live = item && item.status !== 'approved' && item.status !== 'dismissed' ? item : null
@@ -98,14 +102,20 @@ export function rowChip({ item, editId, candidateId, removed, jobs, video, video
     if (live.status === 'ready' && live.candidate) {
       const ids = [live.candidate.candidate_id, live.item_id]
       // Rehearsal item 7: a proposal not yet added plays in the with-proposals preview, not in the video.
-      if (carries(video, ids)) return chip('in-preview')
+      if (carries(video, ids)) {
+        const why = needsFix(video, ids)
+        return why ? chip('needs-fix', { reason: why }) : chip('in-preview')
+      }
       if (carries(rendering, ids)) return chip('rendering')
       return chip('ready')
     }
   }
   if (editId) {
     const ids = [editId, candidateId]
-    if (carries(video, ids)) return chip(removed ? 'removed' : 'in-video')
+    if (carries(video, ids)) {
+      const why = removed ? null : needsFix(video, ids)
+      return why ? chip('needs-fix', { reason: why }) : chip(removed ? 'removed' : 'in-video')
+    }
     // Run 4, item 3: a line just added renders as a job; while it does, the row says so, even before any render is known.
     if (carries(rendering, ids)) return chip('rendering')
     if (!video && videoUnknown) return chip(removed ? 'removed' : 'in-video')

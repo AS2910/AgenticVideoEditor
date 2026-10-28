@@ -683,6 +683,18 @@ describe('LineDoc: one chip per line, read from the jobs (2026-10-20)', () => {
     expect(screen.getAllByTestId('row-chip')[1]).toHaveTextContent('Ready to hear')
   })
 
+  it('a kept line the check after the render failed says Needs a fix and why, never In the video (addendum 3, item 1)', () => {
+    const rev = { edit_id: 'e1', start: 7.54, end: 9.02, text: 'Start a live Bhaji Cam session.', mix: 'replace' as const }
+    const why = 'The last word, “session”, is not heard: it may be cut off.'
+    render(<LineDoc statements={STATEMENTS} currentTime={0} {...handlers()} revisions={[rev]} activity={{ jobs: [], video: { ...none, edit_ids: ['e1'], needs_fix: { e1: why } }, rendering: null }} />)
+    const chip = screen.getAllByTestId('row-chip')[1]
+    expect(chip).toHaveTextContent('Needs a fix')
+    expect(chip).not.toHaveTextContent('In the video')
+    const reason = screen.getByTestId('needs-fix-reason')
+    expect(reason).toHaveTextContent(why)
+    expect(chip).toHaveAttribute('aria-describedby', reason.id)
+  })
+
   it('one driver at a time: a line Voltage is voicing cannot be voiced from its form', async () => {
     const running = job({ status: 'running', line_ids: ['i1'] })
     doc({ items: [item({ status: 'planned', candidate: null })], activity: { jobs: [running], video: null, rendering: null } })

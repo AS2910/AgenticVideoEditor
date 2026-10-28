@@ -149,7 +149,8 @@ def test_a_mispronounced_term_is_caught_by_hearing_the_take_and_the_minutes_are_
     _voice_one_take(monkeypatch, main)
     send(client, "make the line about Bhaji Cam")
     item = repo.latest_plan("p1").items[0]
-    assert ears.calls == 1
+    # The take is heard once; the turn's preview render may hear the line again (addendum 3, item 1: render_check).
+    assert ears.calls >= 1
     assert item.word_rule and item.word_rule["breaks"][0].startswith("“Bhaji Cam” did not come out as written")
     assert "badge" in item.word_rule["breaks"][0]
     charged = [ln for ln in main.ledger.lines("p1") if ln.what == "take_check"]

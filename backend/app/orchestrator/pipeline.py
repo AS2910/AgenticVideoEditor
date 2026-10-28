@@ -110,6 +110,40 @@ def _revoiced(voice, continuity, source, transcript, plan, assessed: Assessment,
     return assessed
 
 
+# Addendum 3, item 1: the breath kept before the next line when a take runs into its pause.
+NEXT_LINE_BREATH = 0.15
+
+
+def room_before_next(transcript: Transcript | None, selection: Selection, duration: float) -> float:
+    """Seconds a take may run past its selection: the pause before the next
+    word, less a breath; to the end of the video when nothing is said after it
+    (or nothing is known about what is)."""
+    if transcript is None:
+        return max(0.0, duration - selection.end)
+    following = [w.start for w in transcript.words if w.start >= selection.end - 1e-6 and w.end > selection.end]
+    if not following:
+        return max(0.0, duration - selection.end)
+    return max(0.0, min(following) - selection.end - NEXT_LINE_BREATH)
+
+
+def fit_before_next(voice: VoiceAdapter, source: Source, plan: EditPlan, audio, target: float, words: tuple = ()):
+    """The take fitted by the ladder to `target` seconds: (audio, the picture's
+    flex, notes, words at their new times). Raises SpanMismatch when the ladder
+    cannot hold it, so the line is written shorter instead."""
+    import tempfile
+    from pathlib import Path
+    from app.media import ffmpeg
+    store = getattr(voice, "_store", None)
+    if store is None or target <= 0:
+        raise SpanMismatch(audio.duration, max(target, 0.0))
+    flex_max = fit.DEFAULT_MAX_FLEX if plan.flex_max is None else max(1.0, plan.flex_max)
+    with tempfile.TemporaryDirectory() as tmp:
+        raw, _ = ffmpeg.extract_segment(audio.path, Path(tmp) / "raw.wav", 0.0, audio.duration, sample_rate=48000)
+        path, duration, notes, fitted = fit.fit_elastically(raw, Path(tmp) / "fitted.wav", target, words=words, flex_max=flex_max)
+        stored = store.put_file(source.project_id, path, kind="audio", container="wav", duration=duration)
+    return stored, fit.flex_of(notes), tuple(notes), fitted
+
+
 def run_edit(
     candidate_id: str,
     plan: EditPlan,
@@ -218,12 +252,26 @@ def run_edit(
         plan = replace(plan, roomed=True)
     if plan.mix != "concatenate" and plan.flex is None:
         # A line placed at natural speed may run past the selection; the edit
-        # then covers the whole line, or its end would be cut off.
+        # then covers the whole line, or its end would be cut off. Addendum 3,
+        # item 1: only into the pause after it. A take that would run into the
+        # next line is fitted by the ladder (pauses, the picture, tempo) to its
+        # span and that pause; when even that cannot hold it, SpanMismatch: the
+        # caller writes it shorter. It never spills into the next line.
         span = plan.selection.end - plan.selection.start
         if best.audio.duration > span + 0.01:
-            plan = replace(plan, selection=Selection(
-                plan.selection.start, plan.selection.start + best.audio.duration,
-            ))
+            room = room_before_next(transcript, plan.selection, source.duration)
+            if best.audio.duration > span + room + 0.01:
+                report(0.72, "Fitting the line before the next one")
+                audio, flex, more, words = fit_before_next(voice, source, plan, best.audio, span + room, words)
+                best = replace(best, audio=audio)
+                fit_notes = (*fit_notes, *more, "fitted before the next line")
+                if abs(flex - 1.0) > 1e-6:
+                    plan = replace(plan, flex=flex)
+                plan = replace(plan, selection=Selection(plan.selection.start, plan.selection.start + span + room))
+            else:
+                plan = replace(plan, selection=Selection(
+                    plan.selection.start, plan.selection.start + best.audio.duration,
+                ))
 
     report(0.75, "Matching mouth movement")
     frames = lipsync.sync(source, plan, best.audio)

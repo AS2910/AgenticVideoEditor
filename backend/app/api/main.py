@@ -101,7 +101,7 @@ from app.store.repository import Project, ProjectRecord, ProjectRepository, LOCA
 from app.store.artifacts import ArtifactStore
 from app.render.renderer import render
 from app.render.compose import compose
-from app.render import retime
+from app.render import check as render_check, retime
 from app.jobs.store import JobStore, Job
 from app.jobs.runner import JobRunner
 from app.jobs.activity import ActivityJobs, KINDS as JOB_KINDS
@@ -6449,6 +6449,8 @@ def _export(record: ProjectRecord, proposals: bool = False, request_id: int | No
             raise
         finally:
             _rendering.pop(project_id, None)
+        # Addendum 3, item 1: a line the check failed is carried, but marked: its row says "Needs a fix".
+        includes = {**includes, "needs_fix": (out.get("check") or {}).get("needs_fix") or {}}
         at = _now()
         record_ = {"sha256": out["render"]["sha256"], "duration": out["render"]["duration"],
                    "filename": f"{Path(record.source.filename).stem}-voltage.mp4"}
@@ -6481,6 +6483,19 @@ def _render_now(record: ProjectRecord, edits: list[ApprovedEdit], previewed: lis
     # Synchronous: with nothing but copies the video is stream-copied and only
     # the audio re-encoded, so even a 3-minute source renders in seconds; a
     # flexed or living piece re-encodes the picture.
+    checked: dict = {}
+
+    def on_check(track, original, placed, out_time) -> None:
+        # Addendum 3, item 1: every rendered edit is checked where it joins the video.
+        try:
+            words = [(w.text, w.start, w.end) for w in record.transcript.words]
+            report = render_check.run(track, original, placed, words, out_time, hear=_render_hearing(project_id, record.owner))
+            checked.update(report.as_dict())
+            for f in report.findings:
+                render_log.info("render check video=%s edit=%s rule=%s value=%s: %s", project_id, f.edit_id, f.rule, f.value, f.reason)
+        except Exception:  # noqa: BLE001 - a check that breaks never fails the render; it is logged
+            log.exception("render check for %s", project_id)
+
     with tempfile.TemporaryDirectory() as tmp:
         path = compose(
             record.source, manifest.segments, Path(tmp) / "export.mp4",
@@ -6488,6 +6503,7 @@ def _render_now(record: ProjectRecord, edits: list[ApprovedEdit], previewed: lis
             stems=_stems(record, manifest), layers=manifest.layers,
             mix_settings=_mix_settings(project_id), words=_speech_spans(record, edits),
             lines=[(st.start, st.end) for st in statements_of(record.transcript)], on_mix=mixed.update,
+            on_check=on_check,
         )
         rendered = artifacts.put_file(
             project_id, path, kind="video", container="mp4",
@@ -6502,6 +6518,8 @@ def _render_now(record: ProjectRecord, edits: list[ApprovedEdit], previewed: lis
         "mix": _mix_report(mixed, previewed),
         # 20e: the proposals this render carries (none for the final).
         "proposals": [item_id for item_id, _ in previewed],
+        # Addendum 3, item 1: what the check after the render found, per line ({} when all is clean).
+        "check": _keyed_check(checked, edits, previewed),
         # Phase 16: every stretch of the output and where it came from.
         "pieces": retime.manifest(pieces),
         # The strip's view: a layered span counts as edited too (the manifest keeps layers apart so they mix).
@@ -6516,6 +6534,76 @@ def _render_now(record: ProjectRecord, edits: list[ApprovedEdit], previewed: lis
             for i in manifest.inserts
         ],
     }
+
+
+# ── Addendum 3, item 1: the check after every render ─────────────────────────
+
+RENDER_HEAR_FLAG = "render.hear_check"
+_heard_spans: dict[str, list[str]] = {}       # "<video>:<render.check.hear_key>" -> the words heard there
+_HEARD_KEPT = 500
+
+
+def _render_hearing(project_id: str, owner: str):
+    """Whisper over a rendered line's joined span, for `render.check`: None
+    (not heard, no words rule) unless the transcriber is the real one and
+    `render.hear_check` is on (it is unless a row turns it off:
+    `python -m app.flags set render.hear_check off`). Charged to the ledger by the
+    minute like every Whisper call (WHISPER_USD_PER_MINUTE, $0.006: about
+    $0.0003 for a 3 s line). A line heard before (the same edit, place and
+    take) is not sent again, so a re-render pays only for what changed."""
+    if not transcriber_label.startswith("openai") or not hasattr(transcriber, "hear"):
+        return None
+    try:
+        if flags.turned_off(RENDER_HEAR_FLAG, owner):
+            return None
+    except Exception:  # noqa: BLE001 - a flag read failing means no hearing, not a failed render
+        return None
+
+    def hear(mono, rate: int, what: str) -> list[str] | None:
+        import wave
+        import numpy as np
+        pcm = np.clip(np.round(mono * 32767), -32768, 32767).astype("<i2").tobytes()
+        key = f"{project_id}:{what}"
+        edit_id = what.split(":", 1)[0]
+        if key in _heard_spans:
+            return _heard_spans[key]
+        seconds = len(mono) / rate
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "span.wav"
+            with wave.open(str(path), "wb") as w:
+                w.setnchannels(1)
+                w.setsampwidth(2)
+                w.setframerate(rate)
+                w.writeframes(pcm)
+            media = MediaArtifact("audio", hashlib.sha256(pcm).hexdigest(), str(path), seconds, "wav")
+            try:
+                words = list(transcriber.hear(Source(project_id=project_id, filename="span.wav", duration=seconds, media=media)))
+            except Exception as exc:  # noqa: BLE001 - a failed hearing leaves the line unjudged on words
+                log.warning("render check hearing %s/%s failed: %s", project_id, edit_id, exc)
+                return None
+        minutes = seconds / 60
+        ledger.record(project_id, "openai", "render_check", minutes, "minutes", minutes * WHISPER_USD_PER_MINUTE)
+        render_log.info("render check heard video=%s edit=%s seconds=%.2f usd=%.5f", project_id, edit_id, seconds,
+                        minutes * WHISPER_USD_PER_MINUTE)
+        if len(_heard_spans) >= _HEARD_KEPT:
+            _heard_spans.pop(next(iter(_heard_spans)))
+        _heard_spans[key] = words
+        return words
+    return hear
+
+
+def _keyed_check(checked: dict, edits: Sequence[ApprovedEdit], previewed: Sequence[tuple[str, ApprovedEdit]]) -> dict:
+    """The check's findings with "Needs a fix" keyed by every id a row may know
+    its line by: the edit id, its take's candidate id (a moved line plays as
+    an `arr-` edit of the same take), and for a proposal its item id."""
+    needs = dict(checked.get("needs_fix") or {})
+    for e in edits:
+        if e.edit_id in needs and e.candidate_id and e.candidate_id != "arrangement":
+            needs.setdefault(e.candidate_id, needs[e.edit_id])
+    for item_id, e in previewed:
+        if e.edit_id in needs:
+            needs[item_id] = needs[e.edit_id]
+    return {**checked, "needs_fix": needs}
 
 
 # ── Volt: the Export page's receipt ──────────────────────────────────────────

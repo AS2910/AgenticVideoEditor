@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { Fragment, useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
 import type React from 'react'
 import type { ReactNode } from 'react'
 import type {
@@ -205,16 +205,24 @@ const actionsClass = [
 const StatusBadge = ({ status, children, role }: { status: string; children: ReactNode; role?: 'status' }) => (
   <span className={cn('stamp', TONE[status])} role={role} data-status={status}>{children}</span>
 )
-/** The row's one chip (2026-10-20): Original · Queued · Voicing · Ready to hear · Rendering · In the video · Failed. */
+/** The row's one chip (2026-10-20): Original · Queued · Voicing · Ready to hear · Rendering · In the video · Needs a fix · Failed. */
 const CHIP_TONE: Record<ChipState, string> = {
-  original: 'quiet', planned: 'in', waiting: 'need', queued: 'live', voicing: 'live', ready: '', rendering: 'live', 'in-preview': 'in', 'in-video': 'in', removed: 'in', failed: 'need',
+  original: 'quiet', planned: 'in', waiting: 'need', queued: 'live', voicing: 'live', ready: '', rendering: 'live', 'in-preview': 'in', 'in-video': 'in', 'needs-fix': 'need', removed: 'in', failed: 'need',
 }
-const RowStamp = ({ chip }: { chip: RowChip }) => (
-  <span className={cn('stamp', CHIP_TONE[chip.state])} role="status" data-status={chip.state} data-testid="row-chip" title={chip.reason ?? undefined}>
-    {(chip.state === 'voicing' || chip.state === 'rendering') && <Loader2 size={11} aria-hidden="true" className="animate-spin motion-reduce:animate-none" />}
-    {chip.state === 'in-video' && '✓ '}{chip.label}
-  </span>
-)
+function RowStamp({ chip }: { chip: RowChip }) {
+  const reasonId = useId()
+  // Addendum 3, item 1: a line the check after the render failed says why, in words beside the chip.
+  const why = chip.state === 'needs-fix' && chip.reason ? chip.reason : null
+  return (
+    <>
+      <span className={cn('stamp', CHIP_TONE[chip.state])} role="status" data-status={chip.state} data-testid="row-chip" title={why ? undefined : chip.reason ?? undefined} aria-describedby={why ? reasonId : undefined}>
+        {(chip.state === 'voicing' || chip.state === 'rendering') && <Loader2 size={11} aria-hidden="true" className="animate-spin motion-reduce:animate-none" />}
+        {chip.state === 'in-video' && '✓ '}{chip.label}
+      </span>
+      {why && <span id={reasonId} className="min-w-0 text-sm" data-testid="needs-fix-reason">{why}</span>}
+    </>
+  )
+}
 const PENDING_CHIP: Partial<Record<string, ChipState>> = { planned: 'planned', working: 'voicing', 'needs-you': 'waiting', failed: 'failed', ready: 'ready' }
 const NO_ACTIVITY: RowActivity = { jobs: [], video: null, videoUnknown: true, rendering: null }
 const KBD = ({ k }: { k: string }) => <span className="kbd ml-0.5" aria-hidden="true">{k}</span>

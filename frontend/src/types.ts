@@ -650,7 +650,11 @@ export interface HelpRef { slug: string; title: string; section: string; tour?: 
 export type ActivityKind = 'voice_line' | 'design_voice' | 'clone' | 'mix' | 'render_preview' | 'export' | 'brief_update' | 'check' | 'batch' | 'learn' | 'import' | 'data_export' | 'separate'
 export type ActivityStatus = 'queued' | 'running' | 'done' | 'failed' | 'cancelled'
 /** The takes a render carries: kept edits, proposals (items), and their candidates. */
-export interface RenderIncludes { candidate_ids: string[]; edit_ids: string[]; item_ids: string[] }
+export interface RenderIncludes {
+  candidate_ids: string[]; edit_ids: string[]; item_ids: string[]
+  /** Addendum 3, item 1: lines the render carries that the check after it failed, by edit, candidate or item id: why, in a sentence. */
+  needs_fix?: Record<string, string>
+}
 export interface ActivityJob {
   job_id: string
   video_id: string

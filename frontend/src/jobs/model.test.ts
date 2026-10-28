@@ -75,6 +75,19 @@ describe('row chip: exactly one state per line', () => {
     expect(rowChip({ editId: 'e2', jobs: [{ ...add, status: 'done' }], video: inc }).label).toBe('In the video')
     expect(stripState({ jobs: [add], turn: null, playing: null, stale: false }).text).toBe('Rendering preview v2 · about 10 s')
   })
+  it('a line the check after the render failed Needs a fix, with the reason, and is never In the video (addendum 3, item 1)', () => {
+    const why = 'There is a click where the new line starts.'
+    const video = { candidate_ids: ['c2'], edit_ids: ['e2', 'e3'], item_ids: ['i1'], needs_fix: { e2: why, i1: why } }
+    const kept = rowChip({ editId: 'e2', jobs: [], video })
+    expect(kept.state).toBe('needs-fix')
+    expect(kept.label).toBe('Needs a fix')
+    expect(kept.reason).toBe(why)
+    expect(rowChip({ editId: 'e3', jobs: [], video }).label).toBe('In the video')
+    const ready = item({ status: 'ready', candidate: take })
+    expect(rowChip({ item: ready, jobs: [], video }).label).toBe('Needs a fix')
+    // A newer render that passes clears it.
+    expect(rowChip({ editId: 'e2', jobs: [], video: { ...video, needs_fix: {} } }).label).toBe('In the video')
+  })
   it('a line nobody touched is Original', () => {
     expect(rowChip({ jobs: [] }).label).toBe('Original')
   })
