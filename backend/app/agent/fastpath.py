@@ -24,6 +24,9 @@ import re
 from dataclasses import dataclass
 
 from app.agent.guards import TurnStopped, WaitingForUser
+from app.jobs.pause import step_name
+
+STOPPED = "Stopped by you."
 
 MAX_WORDS = 8
 _WORD = re.compile(r"\S+")
@@ -105,6 +108,10 @@ def voice(wb, turn, *, line_no: int | None, item_id: str | None, text: str, voic
     args = {"text": text, "voice_id": voice_id, "direction": direction or "", "line": line_no, "item_id": item_id or "",
             "fit": "fit", "picture": "default", "model": "default", "mix": "replace"}
     taken = len(turn.takes)
+    # Addendum 3.5: pause point before the take (nothing has run yet); Stop while paused ends it unvoiced.
+    turn.pause_point(step_name(None))
+    if turn.stop_requested():
+        return Outcome(False, note=STOPPED)
     try:
         result = _synthesize_take(wb, turn, args)
     except WaitingForUser as asked:
@@ -112,6 +119,8 @@ def voice(wb, turn, *, line_no: int | None, item_id: str | None, text: str, voic
         return Outcome(False, note=f"This take needs your go-ahead{cost}, so Voltage is asking.", fallback=True)
     except TurnStopped as stopped:
         return Outcome(False, note=str(stopped))
+    # Pause point after the take: it is paid for and kept; what follows (the story checks) waits for Resume.
+    turn.pause_point(step_name("synthesize_take", {"line": line_no}))
     plan = wb.repo.get_plan(turn.project_id, turn.plan_id)
     if len(turn.takes) > taken:
         made = turn.takes[-1]

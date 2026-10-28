@@ -142,6 +142,10 @@ class Turn:
     fit_nudged: bool = False
     # 2026-10-20: the user pressed Stop; the turn ends after the step that is running.
     stop_requested: Callable[[], bool] = lambda: False
+    # Addendum 3.5: a pause point. Called between steps with the step that just finished
+    # ("voicing line 2"); while the user has paused the turn it waits there, so the step
+    # running when Pause was pressed finishes and nothing new starts until Resume or Stop.
+    pause_point: Callable[[str], None] = lambda after: None
     # A3: what the user said this turn; a banned word they typed themselves only warns.
     said: str = ""
     # F4: one video of a batch turn: its lines wait as proposals, added from the batch board.

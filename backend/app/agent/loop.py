@@ -19,6 +19,7 @@ import anthropic
 from app.agent.context import SYSTEM
 from app.agent.guards import TurnStopped, WaitingForUser
 from app.agent.tools import BY_NAME, Tool, ToolResult, Turn, Workbench, fit_followup
+from app.jobs.pause import step_name
 
 log = logging.getLogger(__name__)
 
@@ -227,8 +228,17 @@ class Agent:
             user_content = [_result_block(u["id"], ToolResult(INTERRUPTED), True) for u in left] + list(blocks)
         append("user", user_content)
         started = wb.ledger.spent_usd(turn.project_id)
+        # Addendum 3.5: the step that finished last, for "Paused after ...".
+        after = step_name(None)
         while True:
+            # Pause point: before every Claude request (a paid call). Stop pressed while
+            # paused ends the turn here, without the request.
+            turn.pause_point(after)
+            if turn.stop_requested():
+                out.stopped = STOPPED
+                break
             response = self._create(system, messages, effort)
+            after = step_name("thinking")
             usage = getattr(response, "usage", None)
             if usage is not None:
                 read = getattr(usage, "cache_read_input_tokens", 0) or 0
@@ -264,6 +274,9 @@ class Agent:
             results: list[dict] = []
             ended: WaitingForUser | TurnStopped | None = None
             for use in uses:
+                if ended is None:
+                    # Pause point: before every tool call (a take, a design, a ship...).
+                    turn.pause_point(after)
                 if ended is None and turn.stop_requested():
                     ended = TurnStopped(STOPPED)
                 if ended is not None:
@@ -295,6 +308,7 @@ class Agent:
                     said = failures.say(exc, where=f"tool {use['name']}", video_id=turn.project_id)
                     results.append(_result_block(use["id"], ToolResult(f"{use['name']} failed. {said}"), True))
                     continue
+                after = step_name(use["name"], args if isinstance(args, dict) else None)
                 results.append(_result_block(use["id"], result))
                 if result.step:
                     out.steps.append(result.step)

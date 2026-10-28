@@ -12,6 +12,7 @@ it ends (an answer to a paused video, "Add all that passed").
     open_gate(project_id, owner, source, goal, children, totals, extra) -> record
     go(batch_id, owner)        the one gate's yes: children queued, a driver runs them
     cancel(batch_id)           queued children cancelled; running ones finish (the Stop path)
+    pause(batch_id) / resume(batch_id)   addendum 3.5: no video starts while paused; running ones pause after their step
     get(batch_id) / of_project(project_id)
 
 Money: the parent's cap is the sum of its children's caps (each video's turn
@@ -36,11 +37,13 @@ import math
 import statistics
 import contextvars
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass, field
 from typing import Callable
 
 from app.jobs.activity import ActivityJobs
+from app.jobs.pause import AUTO_STOP_S
 from app.timefmt import now_iso
 
 log = logging.getLogger(__name__)
@@ -79,7 +82,9 @@ class BatchEngine:
     def __init__(self, activity: ActivityJobs, get_meta: Callable[[str], str | None], set_meta: Callable[[str, str], None],
                  run_child: Callable[[dict, dict], None], refusal: Callable[[dict, float], str | None],
                  stop_video: Callable[[str], None], on_close: Callable[[dict], None] | None = None,
-                 concurrency: int = CONCURRENCY) -> None:
+                 concurrency: int = CONCURRENCY, pause_video: Callable[[str], None] | None = None,
+                 resume_video: Callable[[str], None] | None = None, clock: Callable[[], float] = time.time,
+                 pause_tick: float = 0.2) -> None:
         self.activity = activity
         self.get_meta = get_meta
         self.set_meta = set_meta
@@ -88,6 +93,11 @@ class BatchEngine:
         self.stop_video = stop_video
         self.on_close = on_close
         self.concurrency = concurrency
+        # Addendum 3.5: Pause and Resume reach each running video's turn through these.
+        self.pause_video = pause_video
+        self.resume_video = resume_video
+        self.clock = clock
+        self.pause_tick = pause_tick
         self._lock = threading.RLock()
         self._threads: dict[str, threading.Thread] = {}
 
@@ -210,6 +220,7 @@ class BatchEngine:
 
     def _one(self, batch_id: str, index: int) -> None:
         """One child: reserve inside the parent, else stop with the reason; then its work."""
+        self._wait_while_paused(batch_id)
         with self._lock:
             record = self._load(batch_id)
             if record is None:
@@ -335,6 +346,75 @@ class BatchEngine:
             except Exception:  # noqa: BLE001 - a stop that fails leaves the turn to finish on its own
                 log.exception("batch %s: stopping %s failed", batch_id, video_id)
         return self.get(batch_id)  # type: ignore[return-value]
+
+
+    # ── pause (addendum 3.5) ─────────────────────────────────────────────
+    def pause(self, batch_id: str) -> dict:
+        """Pause a running batch: no video's turn starts after this (the pause point
+        is before each one), and each running video's turn pauses after its step."""
+        def mark(record: dict) -> None:
+            if record["phase"] != "running" or record.get("cancelled"):
+                raise BatchError("Only a running batch can be paused.")
+            record["paused"] = True
+            record["paused_at"] = now_iso()
+            record["paused_until"] = self.clock() + AUTO_STOP_S
+        with self._lock:
+            record = self.update(batch_id, mark)
+        if record is None:
+            raise KeyError(batch_id)
+        self.activity.update(batch_id, step_label="Paused")
+        for video_id in self._running_videos(record):
+            if self.pause_video is not None:
+                try:
+                    self.pause_video(video_id)
+                except Exception:  # noqa: BLE001 - a video that cannot pause finishes on its own
+                    log.exception("batch %s: pausing %s failed", batch_id, video_id)
+        return self.get(batch_id)  # type: ignore[return-value]
+
+    def resume(self, batch_id: str) -> dict:
+        """Resume: the paused videos carry on from their next step and the rest start in turn."""
+        def mark(record: dict) -> None:
+            if not record.get("paused"):
+                raise BatchError("This batch is not paused.")
+            record["paused"] = False
+            record.pop("paused_until", None)
+        with self._lock:
+            record = self.update(batch_id, mark)
+        if record is None:
+            raise KeyError(batch_id)
+        for video_id in self._running_videos(record):
+            if self.resume_video is not None:
+                try:
+                    self.resume_video(video_id)
+                except Exception:  # noqa: BLE001 - its own auto-stop still ends it
+                    log.exception("batch %s: resuming %s failed", batch_id, video_id)
+        self._progress(batch_id)
+        return self.get(batch_id)  # type: ignore[return-value]
+
+    def _running_videos(self, record: dict) -> list[str]:
+        out = []
+        for child in record["children"]:
+            job = self.activity.get(child["job_id"]) if child.get("job_id") else None
+            if job is not None and job.status == "running":
+                out.append(child["video_id"])
+        return out
+
+    def _wait_while_paused(self, batch_id: str) -> None:
+        """The batch's pause point: a video waits here while the batch is paused; a pause
+        nobody ends cancels the batch after AUTO_STOP_S, as a paused turn stops itself."""
+        while True:
+            record = self._load(batch_id)
+            if record is None or not record.get("paused") or record.get("cancelled"):
+                return
+            if self.clock() >= float(record.get("paused_until") or 0):
+                log.info("batch %s paused past its deadline; cancelled", batch_id)
+                try:
+                    self.update(batch_id, lambda r: r.update(paused=False))
+                    self.cancel(batch_id)
+                except BatchError:
+                    pass
+                return
+            threading.Event().wait(self.pause_tick)
 
 
 # ── estimates ────────────────────────────────────────────────────────────────

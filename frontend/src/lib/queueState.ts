@@ -3,14 +3,15 @@ import type { QueueItem } from '../types'
 /** Addendum 3.3: the one place a queued card's state is named. The thread's card, Up next's chip
  *  and anything after them (Pause and Stop, the one-state check) read these words from here. The
  *  server's names are `CARD_STATES` in `backend/app/jobs/queue.py`. */
-export type QueueCardState = 'queued' | 'running' | 'done' | 'stopped' | 'failed'
-export const QUEUE_CARD_STATES: readonly QueueCardState[] = ['queued', 'running', 'done', 'stopped', 'failed']
+export type QueueCardState = 'queued' | 'running' | 'paused' | 'done' | 'stopped' | 'failed'
+export const QUEUE_CARD_STATES: readonly QueueCardState[] = ['queued', 'running', 'paused', 'done', 'stopped', 'failed']
 export const QUEUE_STATE_WORD: Record<QueueCardState, string> = {
-  queued: 'Queued', running: 'Running', done: 'Done', stopped: 'Stopped', failed: 'Failed',
+  queued: 'Queued', running: 'Running', paused: 'Paused', done: 'Done', stopped: 'Stopped', failed: 'Failed',
 }
-/** The stamp each state wears (globals.css): waiting and running are live, done is in, stopped and failed need you. */
+/** The stamp each state wears (globals.css): waiting and running are live, done is in, stopped is quiet,
+ *  paused (addendum 3.5: Resume or Stop) and failed wait on you. */
 export const QUEUE_STATE_STAMP: Record<QueueCardState, string> = {
-  queued: 'live', running: 'live', done: 'in', stopped: 'quiet', failed: 'need',
+  queued: 'live', running: 'live', paused: 'need', done: 'in', stopped: 'quiet', failed: 'need',
 }
 
 export const isCardState = (s: string): s is QueueCardState => (QUEUE_CARD_STATES as readonly string[]).includes(s)

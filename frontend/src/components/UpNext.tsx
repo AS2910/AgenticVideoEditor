@@ -33,7 +33,7 @@ export function UpNext({ items, paused, readOnly, onRemove, onReorder, onRunNext
       <span className="tag shrink-0 text-faint">{paused ? 'Up next · paused' : 'Up next'}</span>
       <ol className="m-0 flex min-w-0 flex-wrap items-center gap-2 p-0" aria-label="Changes waiting, in order">
         {items.map((item) => {
-          const running = item.status === 'running'
+          const running = item.status === 'running' || item.status === 'paused'   // started: not moved, not removed
           const at = waiting.findIndex((w) => w.id === item.id)
           // Addendum 3.3: the same words as its card in the thread ("Queued 1 of 2: ...", "Running: ...").
           const label = queueCardLabel(item, items)

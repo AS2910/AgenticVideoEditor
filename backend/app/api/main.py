@@ -111,6 +111,7 @@ from app.jobs import batch as batch_mod
 from app.jobs.events import EventBus
 from app.jobs import locks as lock_mod
 from app.jobs import queue as queue_mod
+from app.jobs import pause as pause_mod
 from app.agent import loop as agent_loop
 from app.agent.guards import TurnBudget, is_go
 from app.agent.tools import Turn as AgentTurn, Workbench
@@ -253,9 +254,10 @@ def _on_job(j) -> None:
 def _on_lock(video_id: str, lock, outcome: str | None) -> None:
     """The lock changed: the editor hears it (video.locked / video.unlocked); Part 3's queue hears a release."""
     if lock is not None:
-        events.publish(video_id, "video.locked", {**lock.to_dict(), **_queue_fields(video_id)})
+        events.publish(video_id, "video.locked", {**_lock_dict(lock), "video_state": _video_state(lock), **_queue_fields(video_id)})
         return
-    events.publish(video_id, "video.unlocked", {"video_id": video_id, "outcome": outcome, **_queue_fields(video_id)})
+    events.publish(video_id, "video.unlocked", {"video_id": video_id, "outcome": outcome, "video_state": "ready",
+                                                **_queue_fields(video_id)})
     after = globals().get("_after_release")    # Part 3, defined further down
     if after is not None and outcome is not None:
         after(video_id, outcome)
@@ -2598,6 +2600,10 @@ def get_my_usage(period: Literal["week", "month", "all"] = "month", scope: str =
     for u in ledger.lines(_user_store(owner), since):
         by_vendor[u.vendor] = by_vendor.get(u.vendor, 0.0) + u.usd
     thinking = by_vendor.get("anthropic", 0.0)
+    # Addendum 3.5: the turns that were paused or stopped, newest first, each with what it really cost.
+    names = {r.source.project_id: r.source.filename for r in projects}
+    ended_early = sorted(({**e, "filename": names.get(e["video_id"], "")} for vid in live_ids for e in _turn_ends(vid, since)),
+                         key=lambda e: str(e.get("at") or ""), reverse=True)
     return {
         "period": period,
         "spent_usd": round(sum(by_vendor.values()), 4),
@@ -2610,6 +2616,7 @@ def get_my_usage(period: Literal["week", "month", "all"] = "month", scope: str =
         "by_vendor": [{"vendor": v, "label": VENDOR_LABELS.get(v, v), "usd": round(usd, 4)} for v, usd in by_vendor.items()],
         "by_video": by_video,
         "by_project": by_project,
+        "ended_early": ended_early,
         # Spend scopes: the table (projects with their videos nested, "No
         # project" last) and the chosen scope's totals (`scope` = all | none
         # | f<n> | v:p<n>).
@@ -4407,8 +4414,27 @@ def _batch_closed(record: dict) -> None:
                             payload={"source": record["source"], **{k: summary.get(k) for k in ("finished", "waiting", "failed", "cancelled", "spent_usd")}})
 
 
+def _pause_quietly(video_id: str) -> None:
+    """A batch's Pause on one of its videos: its turn pauses after its step (one between turns has none)."""
+    try:
+        _pause(video_id)
+    except HTTPException:
+        pass
+
+
+def _resume_quietly(video_id: str) -> None:
+    lock = locks.get(video_id)
+    record = repo.get(video_id)
+    if record is not None and ((lock is not None and lock.paused) or (_turn_view(video_id) or {}).get("pausing")):
+        try:
+            _resume(video_id, record.owner)
+        except HTTPException:
+            pass
+
+
 batch_engine = batch_mod.BatchEngine(activity, repo.get_meta, repo.set_meta, _run_batch_child, _batch_refusal,
-                                     lambda video_id: _stop_video(video_id), on_close=_batch_closed)
+                                     lambda video_id: _stop_video(video_id), on_close=_batch_closed,
+                                     pause_video=_pause_quietly, resume_video=_resume_quietly)
 
 
 def _open_batch(project: Project, owner: str, source: str, goal: str, children: list, extra: dict | None = None) -> dict:
@@ -4626,6 +4652,29 @@ def cancel_batch(project_id: str, batch_id: str, owner: str = Depends(current_ow
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     if record["source"] == "brief":
         _brief_run_cancelled(batch_id, project_id)
+    return _batch_view(batch_id)
+
+
+@app.post("/projects/{project_id}/batches/{batch_id}/pause")
+def pause_batch(project_id: str, batch_id: str, owner: str = Depends(current_owner)) -> dict:
+    """Addendum 3.5: no video of the batch starts while it is paused, and each running
+    video's turn pauses after the step it is on. 30 minutes untouched and it is cancelled."""
+    _owned_batch(project_id, batch_id, owner)
+    try:
+        batch_engine.pause(batch_id)
+    except batch_mod.BatchError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return _batch_view(batch_id)
+
+
+@app.post("/projects/{project_id}/batches/{batch_id}/resume")
+def resume_batch(project_id: str, batch_id: str, owner: str = Depends(current_owner)) -> dict:
+    """The paused videos carry on from their next step; the rest start in turn."""
+    _owned_batch(project_id, batch_id, owner)
+    try:
+        batch_engine.resume(batch_id)
+    except batch_mod.BatchError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     return _batch_view(batch_id)
 
 
@@ -6161,6 +6210,11 @@ def _turn_view(project_id: str) -> dict | None:
     view = repo.settings(project_id).get("turn_view")
     if view and view.get("status") in ("running", "stopping") and not _turn_running(project_id):
         view = _set_turn(project_id, status="failed", step="Interrupted", finished_at=_now())
+    elif view and view.get("status") == "paused" and not _turn_running(project_id):
+        # Addendum 3.5: a pause outlives a restart while its lock does; without the lock it is over.
+        held = locks.get(project_id)
+        if held is None or not held.paused:
+            view = _set_turn(project_id, status="failed", step="Interrupted", finished_at=_now(), paused_until=None)
     return view
 
 
@@ -6173,6 +6227,8 @@ def _set_turn(project_id: str, **changes) -> dict:
 
 # The turns the user asked to stop (by turn id); the agent loop checks between steps.
 _stops: set[str] = set()
+# Addendum 3.5: the turns asked to pause (by turn id), and the hold at their pause points.
+pauses = pause_mod.Pauses()
 
 
 def _cancel_leftovers(project_id: str, turn_id: str, why: str = "Not voiced this turn") -> int:
@@ -8226,8 +8282,9 @@ def _locked_turn(project_id: str, record: ProjectRecord, text: str, owner: str, 
         repo.set_settings(project_id, last_question=resolved)
     job = jobs.create("turn", project_id)
     holder = f"turn:{job.job_id}"
-    # The edit set before the turn, so Stop can take back whatever it added.
-    snapshot = _edit_snapshot(project_id)
+    # The edit set before the turn, so Stop can take back whatever it added (a turn
+    # resumed after a restart keeps the one from before it first started).
+    snapshot = (carry or {}).get("snapshot") or _edit_snapshot(project_id)
     ticket.hand(holder, action="Voltage is planning", snapshot=snapshot)
     started_at = _now()
     # Spend scopes: the turn's id is the job's; every charge it causes carries it.
@@ -8238,12 +8295,14 @@ def _locked_turn(project_id: str, record: ProjectRecord, text: str, owner: str, 
     repo.set_settings(project_id, last_turn={"id": turn_id, "at": since, **({"cap_usd": cap_usd} if carry else {})})
     # One processing model (2026-10-20): the turn as the editor shows it, and
     # on a Go every line it will voice queued at once.
-    hash_before = _final_hash(project_id)
+    hash_before = (carry or {}).get("hash_before") or _final_hash(project_id)
     _stops.discard(turn_id)
+    pauses.forget(turn_id)
     if approve or carry:
         _queue_lines(project_id, plan.plan_id, turn_id)
     _set_turn(project_id, turn_id=turn_id, status="running", step="Thinking", started_at=_now(), finished_at=None,
-              spent_usd=0.0, lines_voiced=0, render=None)
+              spent_usd=0.0, lines_voiced=0, render=None, pausing=False, paused_until=None, message=None,
+              hash_before=hash_before, cap_usd=cap_usd, since=since)
     kept: dict = {}
     # The words the user picked, with the sentence under the label when there was one.
     picked = ""
@@ -8257,13 +8316,15 @@ def _locked_turn(project_id: str, record: ProjectRecord, text: str, owner: str, 
 
         def told(progress: float, step: str) -> None:
             report(progress, step)
-            _set_turn(project_id, step=step)
+            # Addendum 3.5: what the turn has spent so far rides with each step (the Pause and Stop buttons show it).
+            _set_turn(project_id, step=step, spent_usd=round(ledger.spent_usd_since(project_id, since), 4))
         try:
             out = turn_work(told)
             stopped = turn_id in _stops
             if stopped:
                 # Stop: nothing this turn added stays in the video; the takes it finished stay as proposals.
                 _restore_snapshot(project_id, snapshot, plans=False)
+                _note_turn_end(project_id, turn_id, "stopped", since)
             closed = _close_turn(project_id, plan.plan_id, turn_id, since, hash_before, kept.get("turn"), out,
                                  stopped=stopped)
             if (out.get("question") or {}).get("gate") and not stopped:
@@ -8291,7 +8352,8 @@ def _locked_turn(project_id: str, record: ProjectRecord, text: str, owner: str, 
         turn = AgentTurn(project_id=project_id, record=record, plan_id=plan.plan_id, autonomy=autonomy, said=text,
                          spend_approved=approve or bool(carry) or autonomy == "draft" or batch, budget=budget_, started_at=since,
                          report=report, commit_approved=approve, ask_before=prefs["ask_before"],
-                         stop_requested=lambda: turn_id in _stops, batch=batch, auto_usd=auto_usd, picked=picked_option)
+                         stop_requested=lambda: turn_id in _stops, batch=batch, auto_usd=auto_usd, picked=picked_option,
+                         pause_point=lambda after: _pause_point(project_id, turn_id, holder, after))
         kept["turn"] = turn
         lines = _lines(record)
         names = [s.name for s in repo.speakers(project_id)]
@@ -8329,7 +8391,11 @@ def _locked_turn(project_id: str, record: ProjectRecord, text: str, owner: str, 
                        edits=[e for e in repo.list_edits(project_id) if not e.reverted], project=view,
                        understanding=understood_now, fixed_known=fixed_known, auto_usd=auto_usd)
         allowed = (f" (They allowed ${carry['needed_usd']:.2f} more for this turn: its cap is now ${cap_usd:.2f}, "
-                   "so the step that went over it may run now. Carry on with it.)") if carry else ""
+                   "so the step that went over it may run now. Carry on with it.)") if carry and carry.get("needed_usd") else ""
+        if carry and carry.get("resumed"):
+            # Addendum 3.5: a pause a restart came between; the thread above is the turn so far.
+            allowed = (" (They paused this turn and pressed Resume after the server restarted. What it already did "
+                       "stands: carry on from the next step and do not voice again a line that already has its take.)")
         content = [{"type": "text", "text": head}, {"type": "text", "text": f"The user says: {text}"
                    + (" (They are answering yes to what you asked.)" if approve else "") + allowed + picked}]
 
@@ -8361,8 +8427,11 @@ def _locked_turn(project_id: str, record: ProjectRecord, text: str, owner: str, 
             return {"type": "turn", "plan": _plan_dict(repo.get_plan(project_id, plan.plan_id)), "reply": sentence,
                     "question": None, "spent_usd": round(spent, 4), "calls": 0, "stopped": "error", "error": sentence}
         if outcome.stopped == agent_loop.STOPPED or turn_id in _stops:
-            # The user's Stop: nothing in the video changed, and what it spent.
-            outcome = replace(outcome, reply=_stopped_words(project_id, since), question=None)
+            # The user's Stop (or a pause left past its deadline): the edit set goes back now, so the
+            # words can say whether the video is as it was; what it spent is still charged.
+            _restore_snapshot(project_id, snapshot, plans=False)
+            landed = _final_hash(project_id) != hash_before
+            outcome = replace(outcome, reply=_stopped_words(project_id, since, landed), question=None)
         elif outcome.stopped == "refusal":
             # Run 5 item 1: Claude's safety filter refused what was asked; the reply says so and quotes it.
             outcome = replace(outcome, reply=failures.request_refused(text), question=None)
@@ -8440,12 +8509,221 @@ def _final_hash(project_id: str) -> str:
     return edit_set_hash(repo.get(project_id), edits, "final")
 
 
-STOPPED_WORDS = "Stopped. Nothing in your video changed. ${:.2f} spent."
+STOPPED_WORDS = pause_mod.STOPPED_WORDS
+TURN_PAUSED_WORDS = pause_mod.PAUSED_WORDS     # not usage.PAUSED_WORDS (the paid-work switch)
 
 
-def _stopped_words(project_id: str, since: str) -> str:
-    """What Voltage says after Stop (2026-10-25): the video is as it was; what the work cost so far."""
-    return STOPPED_WORDS.format(ledger.spent_usd_since(project_id, since))
+def _stopped_words(project_id: str, since: str, landed: bool = False) -> str:
+    """What Voltage says after Stop (2026-10-25; addendum 3.5): the video is as it was, and
+    what the work cost so far is still charged. `landed`: Stop could not take all of it back."""
+    return (pause_mod.STOPPED_LANDED_WORDS if landed else STOPPED_WORDS).format(ledger.spent_usd_since(project_id, since))
+
+
+# ── Addendum 3.5: Pause ──────────────────────────────────────────────────────
+# Pause lets the step running now finish, then the turn holds at its next pause
+# point (`pause_mod` lists them) with the video's lock: nothing else starts and
+# Up next waits. Resume carries on from the next step; Stop ends it as Stop
+# does; 30 minutes untouched and it stops itself, with Stop's words.
+
+RESUME_TEXT = "Carry on where you paused."
+
+
+def _pause_point(project_id: str, turn_id: str, holder: str, after: str) -> None:
+    """A pause point of a running turn (the agent loop's, the fast path's). When the
+    user pressed Pause the turn holds here until Resume, Stop or the deadline."""
+    if not pauses.asked(turn_id) or turn_id in _stops:
+        return
+    pauses.begin(turn_id)       # Resume and Stop reach this turn here from now on (never the restart path)
+    try:
+        _hold_paused(project_id, turn_id, holder, after)
+    finally:
+        pauses.end(turn_id)
+
+
+def _hold_paused(project_id: str, turn_id: str, holder: str, after: str) -> None:
+    held = locks.get(project_id)
+    paused_holder = f"{lock_mod.PAUSE}{turn_id}"
+    words = f"Paused after {after}"
+    lock = locks.hand(project_id, holder, paused_holder, action=words,
+                      lease=pause_mod.AUTO_STOP_S + pause_mod.LEASE_GRACE_S)
+    if lock is None:            # the video is no longer this turn's: nothing to hold
+        return
+    until = pauses.clock() + pause_mod.AUTO_STOP_S
+    spent = round(ledger.spent_usd_since(project_id, lock.started_at), 4)
+    view = _turn_view(project_id) or {}
+    message = TURN_PAUSED_WORDS.format(spent)
+    repo.set_settings(project_id, paused={"turn_id": turn_id, "holder": holder, "after": after, "words": words,
+                                          "at": _now(), "until": until, "since": lock.started_at, "spent_usd": spent,
+                                          "hash_before": view.get("hash_before"), "cap_usd": view.get("cap_usd")})
+    up_next.set_paused(project_id, True)
+    _note_turn_end(project_id, turn_id, "paused", lock.started_at)
+    repo.add_message(project_id, "assistant", message, data={"paused": True})
+    _set_turn(project_id, status="paused", pausing=False, step=words, spent_usd=spent, message=message,
+              paused_until=_iso_at(until))
+    _tell_queue(project_id)
+    log.info("turn %s on %s paused after %s", turn_id, project_id, after)
+    outcome = pauses.hold(turn_id, until, stopped=lambda: turn_id in _stops)
+    if outcome == "expired":
+        # Nobody came back: it stops itself, so the lock never sticks.
+        log.info("turn %s on %s paused past its deadline; stopping", turn_id, project_id)
+        _stops.add(turn_id)
+    stopping = outcome != "resumed"
+    locks.hand(project_id, paused_holder, holder, lease=lock_mod.LEASE,
+               action="Stopping" if stopping else (held.action if held is not None else "Voltage is planning"))
+    repo.set_settings(project_id, paused={})
+    up_next.set_paused(project_id, False)
+    if not stopping:
+        _drop_turn_end(project_id, turn_id)
+    _set_turn(project_id, status="stopping" if stopping else "running", paused_until=None, message=None,
+              step="Stopping after this step" if stopping else (view.get("step") or "Thinking"))
+    _tell_queue(project_id)
+
+
+def _iso_at(epoch: float) -> str:
+    return datetime.fromtimestamp(epoch, timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _note_turn_end(video_id: str, turn_id: str | None, state: str, since: str, usd: float | None = None) -> None:
+    """Usage (addendum 3.5): a turn that was paused, or stopped, is listed as one, with its real cost.
+    Kept in the video's settings (the last 50); the cost is read from the ledger when Usage asks."""
+    ends = [e for e in repo.settings(video_id).get("turn_ends") or [] if not (turn_id and e.get("turn_id") == turn_id)]
+    ends.append({"turn_id": turn_id, "state": state, "since": since, "at": _now(),
+                 "usd": round(usd if usd is not None else ledger.spent_usd_since(video_id, since), 4)})
+    repo.set_settings(video_id, turn_ends=ends[-50:])
+
+
+def _drop_turn_end(video_id: str, turn_id: str) -> None:
+    """Resumed: the turn is an ordinary one again (it ends Done, or Stopped)."""
+    ends = repo.settings(video_id).get("turn_ends") or []
+    kept = [e for e in ends if not (e.get("turn_id") == turn_id and e.get("state") == "paused")]
+    if len(kept) != len(ends):
+        repo.set_settings(video_id, turn_ends=kept)
+
+
+def _turn_ends(video_id: str, since: str | None) -> list[dict]:
+    """The video's paused and stopped turns in the period, each with what it really cost."""
+    out = []
+    for e in repo.settings(video_id).get("turn_ends") or []:
+        if since and str(e.get("at") or "") < since:
+            continue
+        usd = float(e.get("usd") or 0.0)
+        if e.get("turn_id"):
+            usd = max(usd, ledger.spent_usd_by_turn(video_id, e["turn_id"], e.get("since")))
+        out.append({"video_id": video_id, "turn_id": e.get("turn_id"), "state": e["state"],
+                    "label": "Paused" if e["state"] == "paused" else "Stopped", "spent_usd": round(usd, 4),
+                    "at": e.get("at")})
+    return out
+
+
+def _pause(project_id: str) -> dict:
+    """Pause what holds the video: a turn holds at its next pause point. Only a turn pauses:
+    an Add, an undo, a render or a go that waits is one step, so it can be stopped, not paused."""
+    lock = locks.get(project_id)
+    spent = round(ledger.spent_usd_since(project_id, lock.started_at), 4) if lock is not None else 0.0
+    if lock is not None and lock.paused:
+        return {"pausing": False, "paused": True, "spent_usd": spent, "lock": lock.to_dict()}
+    view = _turn_view(project_id)
+    if lock is None or not lock.holder.startswith("turn:") or not view or view.get("status") != "running":
+        what = lock.action if lock is not None else None
+        detail = (f"{what} is one step, so it cannot be paused. Stop it instead." if what and not (lock and lock.gate)
+                  else "Voltage is waiting for your go, so there is nothing to pause." if lock is not None
+                  else "Nothing is running, so there is nothing to pause.")
+        raise HTTPException(status_code=409, detail=detail)
+    pauses.ask(view["turn_id"])
+    _set_turn(project_id, pausing=True)
+    return {"pausing": True, "paused": False, "spent_usd": spent, "lock": lock.to_dict()}
+
+
+def _resume(project_id: str, owner: str) -> dict:
+    """Resume a paused turn: it carries on from its next step. A pause a restart left
+    behind has no turn waiting in this server; the turn carries on as a new run of the
+    same turn (same id, start and cap), with the thread it had."""
+    lock = locks.get(project_id)
+    view = _turn_view(project_id) or {}
+    if lock is None or not lock.paused:
+        if view.get("pausing") and view.get("turn_id") and pauses.resume(view["turn_id"]):
+            _set_turn(project_id, pausing=False)          # Pause pressed, not reached yet: called off
+            return {"resumed": True, "lock": lock.to_dict() if lock else None}
+        raise HTTPException(status_code=409, detail="Nothing is paused.")
+    turn_id = lock.holder[len(lock_mod.PAUSE):]
+    if pauses.holding(turn_id):
+        pauses.resume(turn_id)
+        return {"resumed": True, "lock": lock.to_dict()}
+    record = _owned(project_id, owner)
+    if not _agent_on():
+        raise HTTPException(status_code=503, detail=failures.unconfigured("anthropic", "ANTHROPIC_API_KEY or AVE_AGENT", where="agent", owner=owner))
+    paused = repo.settings(project_id).get("paused") or {}
+    carry = {"turn_id": turn_id, "since": paused.get("since") or lock.started_at, "resumed": True,
+             "snapshot": lock.snapshot, "hash_before": paused.get("hash_before")}
+    if paused.get("cap_usd"):
+        carry["cap_usd"] = paused["cap_usd"]
+    repo.set_settings(project_id, paused={})
+    up_next.set_paused(project_id, False)
+    _drop_turn_end(project_id, turn_id)
+    ticket = LockTicket(project_id, lock.holder)
+    try:
+        started = _start_turn(project_id, record, RESUME_TEXT, owner, carry=carry, ticket=ticket)
+    except BaseException:
+        if ticket.handed_to is None:
+            locks.release(project_id, lock.holder, "failed")
+        raise
+    return {"resumed": True, "turn": started, "lock": (locks.get(project_id) or lock).to_dict()}
+
+
+def _stop_left_pause(project_id: str, lock: lock_mod.Lock) -> str:
+    """Stop (or the auto-stop) for a pause no turn here waits on (a restart came between):
+    what Stop does at the end of a turn, done here. Returns the words."""
+    turn_id = lock.holder[len(lock_mod.PAUSE):]
+    paused = repo.settings(project_id).get("paused") or {}
+    if lock.snapshot:
+        _restore_snapshot(project_id, lock.snapshot, plans=False)
+    plan = repo.latest_plan(project_id)
+    if plan is not None and plan.status == "running":
+        repo.update_plan(project_id, plan.plan_id, status="proposed")
+    landed = bool(paused.get("hash_before")) and _final_hash(project_id) != paused["hash_before"]
+    message = _stopped_words(project_id, lock.started_at, landed)
+    spent = round(ledger.spent_usd_since(project_id, lock.started_at), 4)
+    repo.set_settings(project_id, paused={})
+    _note_turn_end(project_id, turn_id, "stopped", lock.started_at)
+    _set_turn(project_id, status="done", step="Stopped", finished_at=_now(), spent_usd=spent, paused_until=None,
+              pausing=False, message=None)
+    repo.add_message(project_id, "assistant", message)
+    locks.release(project_id, lock.holder, "stopped")
+    return message
+
+
+def _auto_stop_due() -> int:
+    """Paused turns past their deadline that no turn here waits on (a restart came
+    between) stop now; a turn waiting here stops itself. The sweep, the lock view
+    and a watcher every half minute call it."""
+    n = 0
+    for lock in locks.all():
+        if not lock.paused or pauses.holding(lock.holder[len(lock_mod.PAUSE):]):
+            continue
+        until = float((repo.settings(lock.video_id).get("paused") or {}).get("until") or 0)
+        if pauses.clock() >= until:
+            try:
+                _stop_left_pause(lock.video_id, lock)
+                n += 1
+            except Exception:  # noqa: BLE001 - the next tick tries again
+                log.exception("auto-stop of the paused turn on %s failed", lock.video_id)
+    return n
+
+
+@app.post("/videos/{project_id}/pause")
+def pause_video(project_id: str, owner: str = Depends(current_owner)) -> dict:
+    """Pause (addendum 3.5): the step running now finishes (its vendor call is paid
+    for), then the turn holds: nothing new starts, the video stays Working (Paused),
+    Up next waits. The answer says what was spent so far; it is not refunded."""
+    _owned(project_id, owner)
+    return _pause(project_id)
+
+
+@app.post("/videos/{project_id}/resume")
+def resume_video(project_id: str, owner: str = Depends(current_owner)) -> dict:
+    """Resume a paused turn from its next step: nothing it finished is done again."""
+    _owned(project_id, owner)
+    return _resume(project_id, owner)
 
 
 def _close_turn(project_id: str, plan_id: str, turn_id: str, since: str, hash_before: str, turn, out: dict,
@@ -8467,11 +8745,13 @@ def _close_turn(project_id: str, plan_id: str, turn_id: str, since: str, hash_be
             log.exception("the turn's preview render failed for %s", project_id)
     _cancel_leftovers(project_id, turn_id)
     _stops.discard(turn_id)
+    pauses.forget(turn_id)          # a Pause pressed after the last pause point: the turn simply ended
     turn_usd = round(ledger.spent_usd_since(project_id, since), 4)
     steps = activity.of_turn(project_id, turn_id)
     lines_voiced = sum(1 for j in steps if j.kind == "voice_line" and j.status == "done")
-    _set_turn(project_id, status="failed" if out.get("stopped") == "error" else "done", step="Done", finished_at=_now(),
-              spent_usd=turn_usd, lines_voiced=lines_voiced, render=render)
+    _set_turn(project_id, status="failed" if out.get("stopped") == "error" else "done", step="Stopped" if stopped else "Done",
+              finished_at=_now(), spent_usd=turn_usd, lines_voiced=lines_voiced, render=render, pausing=False,
+              paused_until=None, message=None)
     return {"turn_usd": turn_usd, "render": render}
 
 
@@ -8576,8 +8856,11 @@ def _start_quick(project_id: str, record: ProjectRecord, owner: str, sentence: s
     ticket.hand(holder, action="Voicing the line")
     clock_start = time.monotonic()
     repo.set_settings(project_id, last_turn={"id": turn_id, "at": started_at})
+    _stops.discard(turn_id)
+    pauses.forget(turn_id)
     _set_turn(project_id, turn_id=turn_id, status="running", step="Voicing", started_at=started_at, finished_at=None,
-              spent_usd=0.0, lines_voiced=0, render=None)
+              spent_usd=0.0, lines_voiced=0, render=None, pausing=False, paused_until=None, message=None,
+              hash_before=None, since=started_at)
     # The line's own voice is voiced as "" so a speaker's clone (or chosen voice) is used as the turn would.
     use_voice = "" if not (wanted or current_voice) or (wanted or current_voice) in own_voices else (wanted or current_voice)
 
@@ -8586,7 +8869,7 @@ def _start_quick(project_id: str, record: ProjectRecord, owner: str, sentence: s
 
         def told(progress: float, step: str) -> None:
             report(progress, step)
-            _set_turn(project_id, step=step)
+            _set_turn(project_id, step=step, spent_usd=round(ledger.spent_usd_since(project_id, started_at), 4))
         try:
             try:
                 _ensure_spend(project_id)
@@ -8598,7 +8881,9 @@ def _start_quick(project_id: str, record: ProjectRecord, owner: str, sentence: s
                         "reply": str(exc), "question": None, "ceiling": exc.scope}
             turn = AgentTurn(project_id=project_id, record=record, plan_id=plan.plan_id, autonomy=prefs["autonomy"],
                              said=sentence, spend_approved=prefs["autonomy"] == "draft", budget=TurnBudget(usd=prefs["turn_usd"]),
-                             started_at=started_at, report=told, ask_before=prefs["ask_before"], auto_usd=limit)
+                             started_at=started_at, report=told, ask_before=prefs["ask_before"], auto_usd=limit,
+                             stop_requested=lambda: turn_id in _stops,
+                             pause_point=lambda after: _pause_point(project_id, turn_id, holder, after))
             out = fastpath.voice(_workbench(), turn, line_no=line.index, item_id=item.item_id if item is not None else None,
                                  text=text, voice_id=use_voice, direction=delivery)
             if out.step:
@@ -8606,7 +8891,9 @@ def _start_quick(project_id: str, record: ProjectRecord, owner: str, sentence: s
                                  data={"tool": "synthesize_take", "t": round(time.monotonic() - clock_start, 1), "quick": True})
             story: list[str] = []
             fallback = None
-            if out.made:
+            if out.note == fastpath.STOPPED:
+                reply = None                     # stopped before the take: the Stop words below say it
+            elif out.made:
                 reply = f"Voiced line {line.index} straight away. Hear it, then add it if it sounds right."
                 repo.add_message(project_id, "assistant", reply)
                 plan_after = repo.get_plan(project_id, plan.plan_id)
@@ -8630,6 +8917,8 @@ def _start_quick(project_id: str, record: ProjectRecord, owner: str, sentence: s
                 # Stop: the take (paid for) stays a proposal; nothing was in the video yet.
                 reply = _stopped_words(project_id, started_at)
                 repo.add_message(project_id, "assistant", reply)
+                repo.update_plan(project_id, plan.plan_id, status="proposed" if not out.made else "done")
+                _note_turn_end(project_id, turn_id, "stopped", started_at)
             took = round(time.monotonic() - clock_start, 3)
             log.info("fast path done video=%s made=%s fallback=%s took=%.2fs", project_id, out.made, bool(fallback), took)
             spent = round(ledger.spent_usd_since(project_id, started_at), 4)
@@ -8651,6 +8940,7 @@ def _start_quick(project_id: str, record: ProjectRecord, owner: str, sentence: s
         finally:
             stopped = turn_id in _stops
             _stops.discard(turn_id)
+            pauses.forget(turn_id)
         locks.release(project_id, holder, "stopped" if stopped else "done")
         return out
 
@@ -8693,7 +8983,7 @@ def _recent(at: str | None) -> bool:
 
 def _jobs_view(project_id: str, active: bool) -> dict:
     view = _turn_view(project_id)
-    live = bool(view) and (view.get("status") in ("running", "stopping") or _recent(view.get("finished_at")))
+    live = bool(view) and (view.get("status") in ("running", "stopping", "paused") or _recent(view.get("finished_at")))
     if not active:
         found = activity.list(project_id, limit=50)
         return {"jobs": [j.to_dict() for j in found], "turn": view, **_lock_view(project_id)}
@@ -8762,9 +9052,11 @@ def _stop_video(project_id: str) -> int:
             activity.cancel(job.job_id, "Stopped")
             cancelled += 1
     view = _turn_view(project_id)
-    if view and view.get("status") == "running" and view.get("turn_id"):
+    if view and view.get("status") in ("running", "paused") and view.get("turn_id"):
         _stops.add(view["turn_id"])
-        _set_turn(project_id, status="stopping", step="Stopping after this step")
+        pauses.wake()               # a paused turn lets go of its hold and ends
+        if view.get("status") == "running":
+            _set_turn(project_id, status="stopping", step="Stopping after this step", pausing=False)
     return cancelled
 
 
@@ -8782,6 +9074,11 @@ def stop_video(project_id: str, owner: str = Depends(current_owner)) -> dict:
         raise HTTPException(status_code=409, detail=f"{lock.action} cannot be stopped once it starts. It is done in a moment.")
     if lock is not None and lock.holder.startswith(lock_mod.REQUEST):
         raise HTTPException(status_code=409, detail=f"{lock.action} is nearly done. It cannot be stopped now.")
+    if lock is not None and lock.paused and not pauses.holding(lock.holder[len(lock_mod.PAUSE):]):
+        # Addendum 3.5: a pause a restart left behind: no turn here waits on it, so Stop ends it here.
+        message = _stop_left_pause(project_id, lock)
+        return {"stopped": True, "cancelled": _stop_video(project_id), "message": message, "lock": lock.to_dict(),
+                "spent_usd": round(ledger.spent_usd_since(project_id, lock.started_at), 4)}
     cancelled = _stop_video(project_id)
     if lock is None:
         return {"stopped": False, "cancelled": cancelled, "spent_usd": 0.0, "message": None, "lock": None}
@@ -8794,9 +9091,15 @@ def stop_video(project_id: str, owner: str = Depends(current_owner)) -> dict:
             _resolve_question(project_id, plan.plan_id, "you stopped", by="stop")
         locks.release(project_id, lock.holder, "stopped")
         repo.add_message(project_id, "assistant", message)
-    elif lock.holder.startswith("turn:"):
-        # The turn ends after its step; it puts the edit set back and lets go then (its words say the rest).
+        _note_turn_end(project_id, None, "stopped", lock.started_at, spent)
+    elif lock.holder.startswith("turn:") or lock.paused:
+        # The turn ends after its step (a paused one at once); it puts the edit set back and lets go
+        # then (its words say the rest).
         locks.relabel(project_id, lock.holder, "Stopping")
+        if lock.paused:
+            # Addendum 3.5: nothing is running, so it ends in a moment; the answer carries its own words
+            # (they say whether anything had already gone into the video).
+            message = _words_when_let_go(project_id, lock) or message
     else:
         # A job (an Add's render, a line voiced again): the edit set goes back, the job is stopped.
         if lock.snapshot:
@@ -8806,7 +9109,21 @@ def stop_video(project_id: str, owner: str = Depends(current_owner)) -> dict:
             activity.cancel(lock.holder, "Stopped")
         locks.release(project_id, lock.holder, "stopped")
         repo.add_message(project_id, "assistant", message)
+        _note_turn_end(project_id, None, "stopped", lock.started_at, spent)
     return {"stopped": True, "cancelled": cancelled, "spent_usd": spent, "message": message, "lock": lock.to_dict()}
+
+
+def _words_when_let_go(project_id: str, lock: lock_mod.Lock, wait_s: float = 5.0) -> str | None:
+    """The Stop words a paused turn said as it ended (it ends at once: nothing runs while paused)."""
+    seen = max((m.seq for m in repo.messages(project_id)), default=0)
+    end = time.monotonic() + wait_s
+    while time.monotonic() < end:
+        held = locks.get(project_id)
+        if held is None or held.started_at != lock.started_at:
+            break
+        time.sleep(0.05)
+    said = [m.text for m in repo.messages(project_id, seen) if m.role == "assistant" and m.text.startswith("Stopped.")]
+    return said[-1] if said else None
 
 
 @app.get("/videos/{project_id}/lock")
@@ -8821,7 +9138,26 @@ def _lock_view(project_id: str) -> dict:
     if lock is not None and lock.gate and not _gate_waits(project_id):
         locks.release(project_id, lock.holder, "done")
         lock = None
-    return {"lock": lock.to_dict() if lock else None, **_queue_fields(project_id)}
+    if lock is not None and lock.paused and _auto_stop_due():
+        lock = locks.get(project_id)
+    return {"lock": _lock_dict(lock) if lock else None, "video_state": _video_state(lock), **_queue_fields(project_id)}
+
+
+def _video_state(lock: lock_mod.Lock | None) -> str:
+    """Addendum 3.5: one state per video, read by every surface: ready, working or paused (`pause_mod.VIDEO_STATES`)."""
+    return "ready" if lock is None else "paused" if lock.paused else "working"
+
+
+def _lock_dict(lock: lock_mod.Lock) -> dict:
+    """The lock as the editor reads it, with what its work has spent so far (Pause and Stop show it)
+    and, while paused, when it stops by itself."""
+    out = {**lock.to_dict(), "spent_usd": round(ledger.spent_usd_since(lock.video_id, lock.started_at), 4),
+           "state": _video_state(lock)}
+    if lock.paused:
+        paused = repo.settings(lock.video_id).get("paused") or {}
+        out["paused_until"] = _iso_at(float(paused["until"])) if paused.get("until") else None
+        out["paused_after"] = paused.get("after")
+    return out
 
 
 # ── Up next (2026-10-25): the changes waiting on a busy video ────────────────
@@ -9063,8 +9399,8 @@ def _recover_queue() -> None:
     the queue then pauses and asks, as after any failure: nothing paid starts on its own after a restart."""
     for item in up_next.left_running():
         held = locks.get(item.video_id)
-        if (held is not None and held.gate) or _question_waits(item.video_id):
-            continue
+        if (held is not None and (held.gate or held.paused)) or _question_waits(item.video_id):
+            continue              # waiting on the user (a go, a question, a pause): it still runs
         up_next.finish(item.id, "failed", "The server restarted while it ran.")
         if up_next.waiting(item.video_id) and not _queue_paused(item.video_id):
             _pause_queue(item.video_id, True)
@@ -9072,6 +9408,24 @@ def _recover_queue() -> None:
 
 
 _recover_queue()
+
+
+def _watch_pauses(every: float = 30.0) -> None:
+    """Addendum 3.5: a pause a restart left behind stops itself at its deadline even
+    while nobody has the editor open (no ping, no sweep)."""
+    def loop() -> None:
+        while True:
+            time.sleep(every)
+            try:
+                _auto_stop_due()
+            except Exception:  # noqa: BLE001 - tried again next tick
+                log.exception("the pause watcher failed")
+    threading.Thread(target=loop, name="ave-pause-watch", daemon=True).start()
+
+
+_auto_stop_due()                    # a deadline that passed while the server was down
+_watch_pauses()
+activity.after_sweep = lambda: (_auto_stop_due(), locks.sweep())
 
 
 def _run_action(video_id: str, record: ProjectRecord, item, ticket: LockTicket) -> None:

@@ -128,6 +128,21 @@ describe('UsagePage', () => {
     expect(screen.getByText('Spent · Last 7 days')).toBeInTheDocument()
   })
 
+  it('lists paused and stopped turns with their real cost (addendum 3.5)', async () => {
+    const ended = [
+      { video_id: 'p1', filename: 'goa-beach.mov', turn_id: 'j4', state: 'paused', label: 'Paused', spent_usd: 0.06, at: '2026-10-28T10:05:00Z' },
+      { video_id: 'p2', filename: 'bhaji-cam-ad.mp4', turn_id: 'j2', state: 'stopped', label: 'Stopped', spent_usd: 0.11, at: '2026-10-28T10:00:00Z' },
+    ]
+    vi.stubGlobal('fetch', vi.fn(async () => ok({ ...report('month', 'all'), ended_early: ended })))
+    render(<UsagePage me={ME} />)
+    const rows = await screen.findAllByTestId('ended-turn')
+    expect(rows.map((r) => r.textContent)).toEqual([
+      'Pausedgoa-beach.movturn waiting for Resume$0.06', 'Stoppedbhaji-cam-ad.mp4turn$0.11',
+    ])
+    expect(screen.getByRole('heading', { name: 'Paused and stopped turns' })).toBeInTheDocument()
+    expect(unlabelledMoney(document.body)).toEqual([])
+  })
+
   it('says when the report cannot be read', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 500, json: async () => ({}), text: async () => JSON.stringify({ detail: 'The ledger is away.' }) }) as Response))
     render(<UsagePage me={ME} />)

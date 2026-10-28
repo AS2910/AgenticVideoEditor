@@ -34,7 +34,7 @@ def test_stop_during_an_add_puts_the_edit_set_back_exactly(client, project, monk
     assert [a["edit_id"] for a in added["approved"]] == ["e1"] and _edit_set(main) != before
     stopped = client.post("/videos/p1/stop").json()
     assert stopped["stopped"] is True and stopped["spent_usd"] == 0.0
-    assert stopped["message"] == "Stopped. Nothing in your video changed. $0.00 spent."
+    assert stopped["message"] == "Stopped. Nothing in your video changed. $0.00 spent is still charged."
     assert _edit_set(main) == before                                  # the edit set equals the snapshot before the click
     assert client.get("/videos/p1/lock").json()["lock"] is None
     job = wait_job(client, added["render_job"]["job_id"])
@@ -72,7 +72,7 @@ def test_stop_during_a_turn_adds_nothing_keeps_the_takes_and_says_the_spend(clie
         reply(said("All done, both lines are in.")),
     ])
     out = send(client, "make it 30% off and add a line")
-    assert out["reply"].startswith("Stopped. Nothing in your video changed. $") and out["reply"].endswith(" spent.")
+    assert out["reply"].startswith("Stopped. Nothing in your video changed. $") and out["reply"].endswith(" spent is still charged.")
     assert out["turn_usd"] > 0 and f"${out['turn_usd']:.2f}" in out["reply"]
     assert client.get("/videos/p1").json()["edits"] == []
     now = _edit_set(main)
@@ -107,7 +107,7 @@ def test_stop_at_the_go_drops_the_question_and_frees_the_video(client, project, 
     out = send(client, "make it 30% off")
     assert out["question"]["gate"] and client.get("/videos/p1/lock").json()["lock"]["waiting"]
     stopped = client.post("/videos/p1/stop").json()
-    assert stopped["stopped"] and stopped["message"] == "Stopped. Nothing in your video changed. $0.00 spent."
+    assert stopped["stopped"] and stopped["message"] == "Stopped. Nothing in your video changed. $0.00 spent is still charged."
     assert client.get("/videos/p1/lock").json()["lock"] is None
     plan = client.get(f"/videos/p1/plans/{out['plan']['plan_id']}").json()
     assert plan["status"] != "clarifying" and plan["question"]["resolved"]["why"] == "you stopped"

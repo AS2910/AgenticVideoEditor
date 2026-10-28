@@ -194,7 +194,7 @@ export interface StripState {
   busy: boolean
   text: string
   /** The live, polite announcement (the same words, minus the clock). */
-  tone: 'idle' | 'busy' | 'failed' | 'ready'
+  tone: 'idle' | 'busy' | 'failed' | 'ready' | 'paused'
 }
 
 export interface StripFacts {
@@ -237,6 +237,13 @@ export const editingWho = (lock: VideoLock) => (lock.started_by_name && lock.sta
 export function stripState({ jobs, turn, playing, stale, justReady, now, plain, lock, othersLock }: StripFacts): StripState {
   const busy = (text: string): StripState => ({ busy: true, tone: 'busy', text: othersLock && lock ? `${editingWho(lock)} · ${text}` : text })
   if (lock?.waiting) return busy(othersLock ? 'Waiting for a go' : 'Waiting for your go')
+  // Addendum 3.5: Paused holds the video and runs nothing: "Paused after voicing line 2", no wave.
+  const pausedLock = lock && (lock.paused || lock.holder.startsWith('pause:')) ? lock : null
+  if (pausedLock || turn?.status === 'paused') {
+    const words = pausedLock?.action ?? turn?.step ?? 'Paused'
+    return { busy: false, tone: 'paused', text: othersLock && lock ? `${editingWho(lock)} · ${words}` : words }
+  }
+  if (turn?.status === 'running' && turn.pausing) return busy('Pausing after this step')
   const active = jobs.filter(isActive)
   const render = active.find(isRender)
   const voice = active.find((j) => isVoice(j) && j.status === 'running') ?? active.find(isVoice)

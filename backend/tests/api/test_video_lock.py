@@ -33,6 +33,7 @@ INSIDE = {
 # Write routes on a video that leave its edit set as it is, so they stay open while it works.
 OPEN = {
     "stop_jobs": "Stop", "stop_video": "Stop",
+    "pause_video": "Pause (addendum 3.5): it acts on the lock the running turn holds", "resume_video": "Resume: the same",
     "add_to_queue": "Up next: it is how a change waits", "edit_queued": "Up next", "remove_queued": "Up next",
     "reorder_queue": "Up next", "run_next_queued": "Up next: what runs next takes the lock itself", "clear_queue": "Up next",
     "grant_consent": "consent", "start_liveness": "consent", "check_liveness": "consent", "withdraw_consent": "consent",
@@ -68,7 +69,7 @@ NO_VIDEO = {
 # Project folder routes: they change the folder's own record (its brief, rules, files, shares), no one video's edit set.
 FOLDER = {
     "accept_learned", "accept_suggestion", "add_export_preset", "add_folder_file", "add_project_rule", "add_word_audio",
-    "archive_project", "cancel_batch", "change_export_preset", "change_project_rule", "create_share", "delete_folder",
+    "archive_project", "cancel_batch", "pause_batch", "resume_batch", "change_export_preset", "change_project_rule", "create_share", "delete_folder",
     "delete_folder_file", "delete_project_rule", "delete_word_audio", "dismiss_learned", "dismiss_suggestion",
     "ignore_check_issue", "plan_batch", "remove_export_preset", "remove_learned", "revoke_share", "save_template",
     "share_batch_export", "share_voice", "start_batch_export", "start_project_check", "unarchive_project",

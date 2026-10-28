@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import type { ActivityJob, PlanItem, TurnView } from '../types'
+import type { ActivityJob, PlanItem, TurnView, VideoLock } from '../types'
 import { aboutEta, ago, coalesce, mergeJob, rowChip, stripState, turnSteps, turnSummary } from './model'
+import { VIDEO_STATES, VIDEO_STATE_WORD, pausedWords, spentSoFar, stoppedWords, videoState } from '../lib/videoState'
 
 let n = 0
 const job = (over: Partial<ActivityJob> = {}): ActivityJob => ({
@@ -137,6 +138,35 @@ describe('the status strip', () => {
     expect(stripState({ jobs: [], turn: null, playing, stale: false, justReady: true }).text).toBe('Ready. v4 is playing')
     expect(stripState({ jobs: [], turn: null, playing, stale: false, now: Date.parse('2026-10-20T10:02:00Z') }).text).toBe('Up to date · v4 · 2 min ago')
     expect(stripState({ jobs: [], turn: null, playing, stale: true }).text).toBe('Changes not in preview yet')
+  })
+})
+
+describe('the status strip, paused (addendum 3.5)', () => {
+  const held = (over: Partial<VideoLock> = {}): VideoLock => ({
+    video_id: 'p1', holder: 'pause:t1', action: 'Paused after voicing line 2', started_by: 'u1', started_by_name: 'Asha', tab: 'tab-a',
+    started_at: '2026-10-28T10:00:00Z', stoppable: true, waiting: false, lease_expires_at: '2026-10-28T16:00:00Z', paused: true, ...over,
+  })
+  it('says Pausing while the step finishes, then Paused after it, with no wave', () => {
+    const voicing = [job({ status: 'running', line_ids: ['i2'] })]
+    expect(stripState({ jobs: voicing, turn: turn({ pausing: true }), playing: null, stale: false }).text).toBe('Pausing after this step')
+    const paused = stripState({ jobs: [], turn: turn({ status: 'paused', step: 'Paused after voicing line 2' }), playing: null, stale: false, lock: held() })
+    expect(paused).toEqual({ busy: false, tone: 'paused', text: 'Paused after voicing line 2' })
+  })
+  it('another tab sees who paused it', () => {
+    const other = stripState({ jobs: [], turn: null, playing: null, stale: false, lock: held(), othersLock: true })
+    expect(other.tone).toBe('paused')
+    expect(other.text).toMatch(/Asha.* · Paused after voicing line 2$/)
+  })
+  it('one video state from the lock: ready, working, paused', () => {
+    expect(videoState(null)).toBe('ready')
+    expect(videoState(held({ holder: 'turn:t1', paused: false, action: 'Voltage is planning' }))).toBe('working')
+    expect(videoState(held())).toBe('paused')
+    expect(VIDEO_STATES.map((s) => VIDEO_STATE_WORD[s])).toEqual(['Ready', 'Working', 'Paused'])
+  })
+  it('the cost words, exactly', () => {
+    expect(spentSoFar(0.06)).toBe('Spent so far: $0.06')
+    expect(pausedWords(0.06)).toBe('Paused. $0.06 spent so far is still charged. Resume to finish.')
+    expect(stoppedWords(0.06)).toBe('Stopped. Nothing in your video changed. $0.06 spent is still charged.')
   })
 })
 

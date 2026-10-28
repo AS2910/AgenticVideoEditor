@@ -15,7 +15,8 @@ that waits for the user's go keeps it.
 A lease is LEASE seconds and renewed every RENEW while its holder is alive in
 this process (`alive(holder)`); a server that dies stops renewing, and the
 sweep clears the row once the lease runs out. A turn waiting for the user's
-go holds a `gate:` lock with a long lease (nothing runs while it waits).
+go holds a `gate:` lock with a long lease (nothing runs while it waits); a
+paused turn (addendum 3.5) a `pause:` one, past its 30 minute auto-stop.
 """
 from __future__ import annotations
 
@@ -37,6 +38,8 @@ RENEW = 30.0
 GATE_LEASE = 7 * 24 * 3600.0       # a go waits as long as the user takes; Stop or an answer ends it
 GATE = "gate:"
 REQUEST = "req-"
+# Addendum 3.5: a paused turn holds the video as `pause:<turn id>`, its lease running to its auto-stop.
+PAUSE = "pause:"
 
 
 @dataclass(frozen=True)
@@ -56,11 +59,16 @@ class Lock:
     def gate(self) -> bool:
         return self.holder.startswith(GATE)
 
+    @property
+    def paused(self) -> bool:
+        return self.holder.startswith(PAUSE)
+
     def to_dict(self) -> dict:
         """What the editor reads (the snapshot stays on the server)."""
         return {"video_id": self.video_id, "holder": self.holder, "action": self.action,
                 "started_by": self.started_by, "started_by_name": self.started_by_name, "tab": self.tab,
                 "started_at": self.started_at, "stoppable": self.stoppable, "waiting": self.gate,
+                "paused": self.paused,
                 "lease_expires_at": datetime.fromtimestamp(self.lease_expires_at, timezone.utc).isoformat().replace("+00:00", "Z")}
 
 
@@ -231,7 +239,7 @@ class VideoLocks:
         """Every lock whose holder still runs here gets a fresh lease (a gate's is long already)."""
         n = 0
         for lock in self.all():
-            if not lock.gate and lock.lease_expires_at > self.clock() and alive(lock):
+            if not lock.gate and not lock.paused and lock.lease_expires_at > self.clock() and alive(lock):
                 n += self.renew(lock.video_id, lock.holder)
         return n
 
@@ -250,10 +258,11 @@ class VideoLocks:
 
     def clear_leftovers(self) -> list[Lock]:
         """At startup: a previous server's running work can never land now; its
-        locks go (a gate waiting for the user's go is kept: nothing was running)."""
+        locks go (a gate waiting for the user's go is kept: nothing was running; so is
+        a paused turn, until its own deadline: the auto-stop puts its edit set back)."""
         with self.db.tx() as c:
             rows = c.execute("SELECT * FROM video_locks").fetchall()
-            gone = [_row(r) for r in rows if not str(r["holder"]).startswith(GATE)]
+            gone = [_row(r) for r in rows if not str(r["holder"]).startswith((GATE, PAUSE))]
             for lock in gone:
                 c.execute("DELETE FROM video_locks WHERE video_id = ? AND holder = ?", (lock.video_id, lock.holder))
         return gone

@@ -147,6 +147,22 @@ export function UsagePage({ me, scope: routed = null }: { me: Me | null; scope?:
         )}
       </section>
 
+      {r && (r.ended_early?.length ?? 0) > 0 && (
+        <section className="flex flex-col gap-3 rounded-xl border-[1.5px] border-foreground bg-card p-[22px]" aria-labelledby="ended-h" data-testid="ended-early">
+          <div className="flex flex-wrap items-baseline gap-2.5"><h2 id="ended-h" className="disp m-0 text-[22px] font-bold">Paused and stopped turns</h2><span className="tag text-faint">what they spent is still charged</span></div>
+          <ul className="m-0 flex list-none flex-col p-0">
+            {r.ended_early!.map((e, k) => (
+              <li key={`${e.video_id}-${e.turn_id ?? k}-${e.at ?? k}`} className="flex flex-wrap items-center gap-3 border-b border-line py-2.5 last:border-b-0" data-money-scope="turn" data-testid="ended-turn">
+                <span className={e.state === 'paused' ? 'stamp need' : 'stamp quiet'}>{e.label}</span>
+                <a href={hrefFor({ page: 'editor', projectId: e.video_id })} className="min-w-0 flex-1 truncate no-underline">{e.filename || e.video_id}</a>
+                <span className="tag text-faint">{e.state === 'paused' ? 'turn waiting for Resume' : 'turn'}</span>
+                <span className="tnum text-right">{usd(e.spent_usd)}</span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
       <section className="rounded-xl border-[1.5px] border-foreground bg-card p-[22px]" aria-labelledby="table-h">
         <div className="mb-4 flex flex-wrap items-baseline gap-2.5"><h2 id="table-h" className="disp m-0 text-[22px] font-bold">By project and video</h2><span className="tag text-faint">a video's spend is counted where it was when it spent</span></div>
         <div className="overflow-x-auto">

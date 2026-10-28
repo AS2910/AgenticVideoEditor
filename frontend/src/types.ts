@@ -506,6 +506,18 @@ export interface UsageReport {
   groups?: UsageGroup[]
   /** The chosen scope's totals. */
   totals?: UsageTotals
+  /** Addendum 3.5: the turns that were paused or stopped, newest first, each at its real cost. */
+  ended_early?: UsageEndedTurn[]
+}
+
+export interface UsageEndedTurn {
+  video_id: string
+  filename: string
+  turn_id: string | null
+  state: 'paused' | 'stopped'
+  label: 'Paused' | 'Stopped'
+  spent_usd: number
+  at: string | null
 }
 
 export interface UsageGroup {
@@ -689,11 +701,17 @@ export interface ActivityJob {
 }
 export interface TurnView {
   turn_id: string
-  status: 'running' | 'stopping' | 'done' | 'failed'
+  status: 'running' | 'stopping' | 'paused' | 'done' | 'failed'
   step: string
   started_at: string
   finished_at: string | null
+  /** What the turn has spent so far (updated each step; Pause and Stop show it). */
   spent_usd?: number
+  /** Addendum 3.5: Pause pressed, the step running now still finishing. */
+  pausing?: boolean
+  /** While paused: when it stops by itself, and the words Voltage said ("Paused. $0.06 spent so far..."). */
+  paused_until?: string | null
+  message?: string | null
   lines_voiced?: number
   render?: { version: number; mode: 'final' | 'proposals'; render_id?: string } | null
 }
@@ -713,6 +731,12 @@ export interface VideoLock {
   /** A turn waiting for the user's go. */
   waiting: boolean
   lease_expires_at: string
+  /** Addendum 3.5: a paused turn holds the video ("pause:j3"); `action` reads "Paused after voicing line 2". */
+  paused?: boolean
+  /** What the work holding the video has spent so far. */
+  spent_usd?: number
+  paused_until?: string | null
+  paused_after?: string | null
 }
 /** One change waiting its turn on a busy video (Up next). */
 export interface QueueItem {
@@ -724,7 +748,7 @@ export interface QueueItem {
   position: number
   created_by: string | null
   /** Addendum 3.3: the card's state; the words for each are in lib/queueState.ts. */
-  status: 'queued' | 'running' | 'done' | 'stopped' | 'failed' | 'removed'
+  status: 'queued' | 'running' | 'paused' | 'done' | 'stopped' | 'failed' | 'removed'
   /** Why it failed or stopped, in one plain sentence. */
   error?: string | null
 }

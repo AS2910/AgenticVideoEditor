@@ -15,7 +15,7 @@ const goal = (id: number, text: string, status: QueueItem['status'] = 'queued', 
 
 describe('queue state words, in one place', () => {
   it('names the five states a card can show', () => {
-    expect(QUEUE_CARD_STATES.map((s) => QUEUE_STATE_WORD[s])).toEqual(['Queued', 'Running', 'Done', 'Stopped', 'Failed'])
+    expect(QUEUE_CARD_STATES.map((s) => QUEUE_STATE_WORD[s])).toEqual(['Queued', 'Running', 'Paused', 'Done', 'Stopped', 'Failed'])
   })
 
   it('counts a waiting message over what still waits, and keeps the first words', () => {

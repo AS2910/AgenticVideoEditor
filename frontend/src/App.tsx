@@ -75,7 +75,7 @@ import { SlidersHorizontal } from 'lucide-react'
 import { clock } from './transcript/format'
 import {
   createProject, confirmPlace, exportProject, artifactUrl, stageHold, pollJob, PollCancelled, ApiError, listVideos, listFolders, createFolder, createFolderFrom, startTutorial, getProject, deleteProject, getUsage, getSpend, listVoices, updateSpeaker, detectSpeakers, revertEdit, updateSettings, removeLine, dismissItem, easeItem, setEditRole, setCandidateRole, roleQuestion, moveCandidate, moveEdit, getArrangement, putArrangement, undoArrangement, getPlan, approvePlan, readProject, grantConsent, getMe, logout, postTurn, postAllowMore, postQuickLine, getMessages, chipEvent, getUnderstanding, correctUnderstanding, setStyle,
-  retryJob, stopVideo, videoBusy, TAB_ID, queueChange, removeQueued, editQueued, reorderQueue, runNextQueued, clearQueue, getLatestRender, startRender, getJobs, listRules, updateUserSettings,
+  retryJob, stopVideo, pauseVideo, resumeVideo, videoBusy, TAB_ID, queueChange, removeQueued, editQueued, reorderQueue, runNextQueued, clearQueue, getLatestRender, startRender, getJobs, listRules, updateUserSettings,
 } from './api'
 import type { ArrangementView, Me, PlanApproval, QueueChange, RoleChange, RoleQuestion } from './api'
 import type { QuickFallback } from './transcript/fastpath'
@@ -89,6 +89,7 @@ import type {
 import { useMediaToken } from './lib/media'
 import { askWhoIsHere, whoIsHere } from './lib/session'
 import { PausedBanner } from './components/PausedBanner'
+import { pausedWords, spentSoFar, videoState } from './lib/videoState'
 import { piecesFromInserts, renderTimeFrom, sourceTimeFrom } from './timeline/selection'
 
 // Rehearsal item 7: behind flags that are off for the public (phases B, C, D and the admin pages); loaded on first use.
@@ -362,6 +363,7 @@ function Studio() {
   const [activityOpen, setActivityOpen] = useState(false)
   const [allJobs, setAllJobs] = useState<ActivityJob[] | null>(null)
   const [stopping, setStopping] = useState(false)
+  const [pausing, setPausing] = useState(false)
   const [picked, setPicked] = useState<{ question: PlanQuestion; option: string } | null>(null)
   const [playerPlaying, setPlayerPlaying] = useState(false)
   const swapWaiting = useRef<RenderRecord | null>(null)
@@ -1439,6 +1441,32 @@ function Studio() {
     }
   }
 
+  /** Addendum 3.5: Pause: the step running now finishes (it is paid for), then the turn holds with the video. */
+  const pauseNow = async () => {
+    if (!projectId) return
+    setPausing(true)
+    try {
+      const r = await pauseVideo(projectId)
+      await activity.refresh()
+      if (r.pausing) pushToast({ id: 'pause', tone: 'ok', text: `Pausing after this step. ${spentSoFar(r.spent_usd)}.` })
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : 'Could not pause that.')
+    } finally {
+      setPausing(false)
+    }
+  }
+
+  /** Resume: the paused turn carries on from its next step; nothing it finished is done again. */
+  const resumeNow = async () => {
+    if (!projectId) return
+    try {
+      await resumeVideo(projectId)
+      await activity.refresh()
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : 'Could not resume that.')
+    }
+  }
+
   /** Retry a failed job through the same flow: the same words and voice, or the same render. */
   const retry = async (job: ActivityJob) => {
     if (!projectId) return
@@ -1505,6 +1533,12 @@ function Studio() {
     const prev = lastTurn.current
     lastTurn.current = t ? { id: t.turn_id, status: t.status } : null
     if (!t || !prev || prev.id !== t.turn_id) return
+    // Addendum 3.5: paused: the confirmation says what was spent and that it is still charged.
+    if (t.status === 'paused' && prev.status !== 'paused') {
+      pushToast({ id: `pause-${t.turn_id}`, tone: 'ok', text: t.message || pausedWords(t.spent_usd ?? 0) })
+      void pullMessages()
+    }
+    if (prev.status === 'paused' && t.status !== 'paused') void pullMessages()
     if ((prev.status === 'running' || prev.status === 'stopping') && (t.status === 'done' || t.status === 'failed')) {
       // The version is the summary's to name (it knows when the new one is playing); the toast says what finished.
       pushToast({ id: `turn-${t.turn_id}`, tone: t.status === 'failed' ? 'fail' : 'ok', text: turnSummary(t, activity.jobs, null, false) })
@@ -1847,7 +1881,11 @@ function Studio() {
       stale, justReady, plain: simple, lock: shownLock, othersLock,
     })
     // Another tab's or member's work is theirs to stop; an undo that started cannot be stopped.
-    const canStop = !othersLock && (activity.jobs.some(isActive) || ourTurn?.status === 'running' || turnBusy || !!shownLock?.stoppable)
+    const pausedNow = videoState(lockNow) === 'paused' || ourTurn?.status === 'paused'
+    const canStop = !othersLock && (activity.jobs.some(isActive) || ourTurn?.status === 'running' || turnBusy || !!shownLock?.stoppable || pausedNow)
+    // Addendum 3.5: only a turn pauses (an Add, an undo or a render is one step: Stop it instead).
+    const canPause = !othersLock && !pausedNow && ourTurn?.status === 'running' && (!lockNow || lockNow.holder.startsWith('turn:'))
+    const spentNow = canStop || canPause ? Math.max(lockNow?.spent_usd ?? 0, ourTurn?.spent_usd ?? 0) : null
     const steps = ourTurn ? turnSteps(ourTurn, activity.jobs) : []
     const turnDone = ourTurn && (ourTurn.status === 'done' || ourTurn.status === 'failed')
     const summary: TurnSummary | null = turnDone && !clarifying && steps.some((st) => st.key === 'voice' || st.key === 'render') ? {
@@ -2001,6 +2039,8 @@ function Studio() {
           <WhatVoltageMayDo open={mayDoOpen} value={mayDo} onChange={(c) => void changeMayDo(c)} onClose={() => setMayDoOpen(false)} />
         </header>
         <StatusStrip state={strip} open={activityOpen} onOpen={openActivity} onStop={canStop ? () => void stopAll() : undefined} stopping={stopping}
+          onPause={canPause ? () => void pauseNow() : undefined} pausing={pausing || !!ourTurn?.pausing}
+          onResume={pausedNow && !othersLock ? () => void resumeNow() : undefined} spentUsd={spentNow}
           extra={showChecklist ? <Checklist inline onShowMe={showMe} /> : undefined} />
         <BusyHint ask={busyAsk} onClose={() => setBusyAsk(null)}
           onQueue={busyQueue.current && activity.queue.filter((q) => q.status === 'queued').length < 3 ? () => busyQueue.current?.() : undefined}

@@ -152,7 +152,7 @@ async function serve(page: Page, world: World) {
       const lock = world.lock()
       a.status = 'cancelled'
       for (const k of a.items) world.added.delete(k)                 // the edit set as it was before the click
-      const message = 'Stopped. Nothing in your video changed. $0.00 spent.'
+      const message = 'Stopped. Nothing in your video changed. $0.00 spent is still charged.'
       world.messages.push({ role: 'assistant', text: message, kind: 'say', seq: 3 + world.messages.length })
       return json({ stopped: true, cancelled: 0, spent_usd: 0, message, lock })
     }
@@ -250,7 +250,7 @@ test.describe('one edit at a time per video', () => {
     await row(page, 0).getByRole('button', { name: /^Add it/ }).click()
     await expect(page.getByTestId('status-text')).toHaveText(/^Adding 'Fresh every morning'…/)
     await page.getByTestId('status-strip').getByTestId('stop').click()
-    await expect(page.getByTestId('toast')).toContainText('Stopped. Nothing in your video changed. $0.00 spent.')
+    await expect(page.getByTestId('toast')).toContainText('Stopped. Nothing in your video changed. $0.00 spent is still charged.')
     expect(world.edits()).toEqual([])
     await expect(row(page, 0).getByRole('button', { name: /^Add it/ })).toBeVisible()
     await expect(page.getByTestId('status-text')).not.toHaveText(/Adding/)

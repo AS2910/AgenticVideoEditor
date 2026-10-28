@@ -11,7 +11,8 @@ pauses until the user says Run next or Clear queue.
     edit / remove / reorder / clear
     claim_next(video_id) -> Item | None                the first waiting one, now running
     finish(item_id, status, error)                     done | stopped | failed
-    running(video_id) -> Item | None
+    running(video_id) -> Item | None                    the one started (running, or paused with its turn)
+    set_paused(video_id, paused)                       addendum 3.5: its card reads Paused, then Running again
     recent(video_id) -> list[Item]                     the last ones that ended, for the thread's cards
     left_running() -> list[Item]                       at startup: what a previous server was running
 
@@ -30,9 +31,11 @@ MAX = 3
 KINDS = ("goal", "action")
 # What a queued action can be: the controls whose change can wait its turn.
 OPS = ("add", "add_all", "discard", "revert", "remove_line")
-LIVE = ("queued", "running")
+LIVE = ("queued", "running", "paused")
 # Addendum 3.3: what a card in the thread and in Up next shows, in this order of life.
-CARD_STATES = ("queued", "running", "done", "stopped", "failed")
+# Addendum 3.5: "paused" is a running change whose turn was paused (Resume makes it running again).
+CARD_STATES = ("queued", "running", "paused", "done", "stopped", "failed")
+STARTED_STATES = ("running", "paused")
 ENDED = ("done", "stopped", "failed")
 # Plain sentences for a change that can no longer be touched (edit or remove refused).
 STARTED = {"edit": "That one has already started, so it can no longer be edited.",
@@ -43,7 +46,7 @@ ENDED_SENTENCE = {"edit": "That one already ran, so it can no longer be edited."
 
 def refusal(item: "Item", what: str) -> str:
     """Why a waiting change cannot be edited or removed any more: it started, or it already ran."""
-    return STARTED[what] if item.status == "running" else ENDED_SENTENCE[what]
+    return STARTED[what] if item.status in STARTED_STATES else ENDED_SENTENCE[what]
 
 
 class QueueFull(ValueError):
@@ -81,8 +84,8 @@ class VideoQueue:
     def items(self, video_id: str) -> list[Item]:
         """What is running and what waits, the running one first, then in order."""
         with self.db.tx() as c:
-            rows = c.execute("SELECT * FROM video_queue WHERE video_id = ? AND status IN ('queued', 'running') "
-                             "ORDER BY CASE status WHEN 'running' THEN 0 ELSE 1 END, position, id", (video_id,)).fetchall()
+            rows = c.execute("SELECT * FROM video_queue WHERE video_id = ? AND status IN ('queued', 'running', 'paused') "
+                             "ORDER BY CASE status WHEN 'queued' THEN 1 ELSE 0 END, position, id", (video_id,)).fetchall()
         return [_item(r) for r in rows]
 
     def waiting(self, video_id: str) -> list[Item]:
@@ -94,7 +97,15 @@ class VideoQueue:
         return _item(r) if r else None
 
     def running(self, video_id: str) -> Item | None:
-        return next((i for i in self.items(video_id) if i.status == "running"), None)
+        """The change that started and has not ended (running, or paused with its turn)."""
+        return next((i for i in self.items(video_id) if i.status in STARTED_STATES), None)
+
+    def set_paused(self, video_id: str, paused: bool) -> Item | None:
+        """Addendum 3.5: the running change's card reads Paused while its turn is paused, Running after Resume."""
+        old, new = ("running", "paused") if paused else ("paused", "running")
+        with self.db.tx() as c:
+            c.execute("UPDATE video_queue SET status = ? WHERE video_id = ? AND status = ?", (new, video_id, old))
+        return self.running(video_id)
 
     def recent(self, video_id: str, limit: int = 10) -> list[Item]:
         """The last changes that ended (done, stopped, failed), oldest first: a card keeps its last state."""
@@ -106,7 +117,7 @@ class VideoQueue:
     def left_running(self) -> list[Item]:
         """Every change marked running, on any video (at startup, a previous server's)."""
         with self.db.tx() as c:
-            rows = c.execute("SELECT * FROM video_queue WHERE status = 'running' ORDER BY id").fetchall()
+            rows = c.execute("SELECT * FROM video_queue WHERE status IN ('running', 'paused') ORDER BY id").fetchall()
         return [_item(r) for r in rows]
 
     def add(self, video_id: str, kind: str, label: str, payload: dict, created_by: str | None) -> Item:
@@ -162,7 +173,7 @@ class VideoQueue:
     def claim_next(self, video_id: str) -> Item | None:
         """The first waiting change, marked running (none while one runs)."""
         with self.db.tx() as c:
-            if c.execute("SELECT 1 FROM video_queue WHERE video_id = ? AND status = 'running'", (video_id,)).fetchone():
+            if c.execute("SELECT 1 FROM video_queue WHERE video_id = ? AND status IN ('running', 'paused')", (video_id,)).fetchone():
                 return None
             r = c.execute("SELECT * FROM video_queue WHERE video_id = ? AND status = 'queued' ORDER BY position, id LIMIT 1",
                           (video_id,)).fetchone()
@@ -174,7 +185,7 @@ class VideoQueue:
 
     def finish(self, item_id: int, status: str, error: str | None = None) -> Item | None:
         with self.db.tx() as c:
-            c.execute("UPDATE video_queue SET status = ?, error = ?, finished_at = ? WHERE id = ? AND status = 'running'",
+            c.execute("UPDATE video_queue SET status = ?, error = ?, finished_at = ? WHERE id = ? AND status IN ('running', 'paused')",
                       (status, (error or None) and error[:300], now_iso(), item_id))
             r = c.execute("SELECT * FROM video_queue WHERE id = ?", (item_id,)).fetchone()
         return _item(r) if r else None

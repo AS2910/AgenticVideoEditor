@@ -173,7 +173,7 @@ def test_stop_mid_turn_lets_the_running_line_finish_and_runs_nothing_after_it(cl
     result = send(client, "add two lines")
     assert calls == ["Hi."]
     # 2026-10-25: Stop says the video did not change and what the work cost (the take stays a proposal).
-    assert result["reply"] == f"Stopped. Nothing in your video changed. ${result['turn_usd']:.2f} spent."
+    assert result["reply"] == f"Stopped. Nothing in your video changed. ${result['turn_usd']:.2f} spent is still charged."
     turn = active(client)["turn"]
     assert turn["status"] == "done" and turn["lines_voiced"] == 1
 

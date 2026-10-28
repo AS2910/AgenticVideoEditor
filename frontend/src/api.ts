@@ -733,6 +733,10 @@ export const getJobs = (id: string, active = false) =>
 /** 2026-10-25: Stop whatever holds the video. A turn ends after its step, an Add not landed yet is put back. */
 export const stopVideo = (id: string) =>
   post<{ stopped: boolean; cancelled: number; spent_usd: number; message: string | null; lock: VideoLock | null }>(`/videos/${id}/stop`)
+/** Addendum 3.5: Pause a running turn (the step running now finishes, then it holds) and Resume it. */
+export const pauseVideo = (id: string) =>
+  post<{ pausing: boolean; paused: boolean; spent_usd: number; lock: VideoLock | null }>(`/videos/${id}/pause`)
+export const resumeVideo = (id: string) => post<{ resumed: boolean; lock: VideoLock | null }>(`/videos/${id}/resume`)
 /** Up next (2026-10-25): a change waits its turn on a busy video (at most three). */
 export interface QueueChange { kind: 'goal' | 'action'; label: string; payload: Record<string, unknown> }
 export const queueChange = (id: string, change: QueueChange) => post<QueueItem>(`/videos/${id}/queue`, change)
