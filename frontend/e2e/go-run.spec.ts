@@ -178,7 +178,11 @@ async function serve(page: Page, world: World) {
     if (/\/videos\/p1\/jobs(\?|$)/.test(url)) {
       const active = url.includes('active=1')
       const jobs = world.jobs() as { status: string }[]
-      return json({ jobs: active ? jobs : jobs, turn: world.turn() })
+      // 2026-10-25: while the turn runs it holds the video.
+      const t = world.turn()
+      const lock = t && t.status === 'running' ? { video_id: 'p1', holder: 'turn:j9', action: 'Voltage is planning', started_by: 'local', started_by_name: 'You', tab: null,
+        started_at: t.started_at, stoppable: true, waiting: false, lease_expires_at: AT } : null
+      return json({ jobs: active ? jobs : jobs, turn: t, lock, queue: [], queue_paused: false })
     }
     if (url.endsWith('/jobs/j9')) {
       const t = world.turn()
@@ -340,16 +344,15 @@ test.describe('one processing model: a 5-line Go', () => {
     await expect(chip(page, 2)).toHaveText(/Ready to hear|In the preview|In the video/, { timeout: 10_000 })
   })
 
-  test('one driver at a time: a line Voltage is voicing cannot be voiced by hand until it is done', async ({ page }) => {
+  test('one edit at a time (was one driver at a time): while Voltage works the line form says so, and frees up when it is done', async ({ page }) => {
     const world = new World('ok')
     await open(page, world)
     await page.getByRole('button', { name: /Go, voice all five/ }).click()
     await expect(chip(page, 3)).toHaveText('Queued')
     await page.getByRole('listitem', { name: /^Line at 0:15/ }).getByRole('button', { name: /A sharp jab/ }).click()
-    await expect(page.getByTestId('driven-note')).toHaveText('Voltage is voicing these lines. Wait or Stop.')
-    await expect(page.getByRole('button', { name: 'Voice it' })).toBeDisabled()
+    await expect(page.getByTestId('busy-note')).toHaveText("Busy with Voltage's turn. Voice it once it is done, queue it, or Stop.")
     await expect(page.getByTestId('turn-summary')).toBeVisible({ timeout: 20_000 })
-    await expect(page.getByTestId('driven-note')).toHaveCount(0)
+    await expect(page.getByTestId('busy-note')).toHaveCount(0)
     await page.getByRole('textbox', { name: 'New wording' }).fill('A jab, and another, and the right hand lands.')
     await expect(page.getByRole('button', { name: 'Voice it' })).toBeEnabled()
   })

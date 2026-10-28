@@ -62,6 +62,30 @@ def test_a_turn_replaces_the_chips_and_the_user_never_sees_the_block(client, pro
     assert [c["label"] for c in client.get("/videos/p1/suggestions").json()["suggestions"]] == ["Export"]
 
 
+def test_chips_are_never_saved_into_the_conversation_history(client, project, monkeypatch):
+    """One edit at a time, part 5: the `<next>` block is in neither the messages nor the stored thread."""
+    import json
+    import app.api.main as main
+    from tests.agent.conftest import reply, text as said
+    block = '<next>[{"label": "Export", "prompt": "Export the video.", "kind": "finish", "grounded_in": "time"}]</next>'
+    _agent_on(monkeypatch, main, [reply(said("Line 1 is ready to hear.\n" + block))])
+    result = send(client, "make it 30% off")
+    assert [c["label"] for c in result["suggestions"]] == ["Export"]
+    assert all("<next>" not in m["text"] and "Export the video." not in m["text"] for m in client.get("/videos/p1").json()["messages"])
+    thread = json.dumps(main.repo.turns("p1"))
+    assert "<next>" not in thread and "Export the video." not in thread
+    assert "Line 1 is ready to hear." in thread
+
+
+def test_without_next_keeps_a_word_when_only_the_block_was_said():
+    from app.agent.suggestions import without_next
+    assert without_next("<next>[]</next>") == "Done."
+    assert without_next("Ready.\n<next>[]</next>") == "Ready."
+    assert without_next("No block here.") == "No block here."
+    blocks = [{"type": "thinking", "thinking": "x", "signature": "s"}, {"type": "text", "text": "Ready. <next>[]</next>"}]
+    assert without_next(blocks) == [blocks[0], {"type": "text", "text": "Ready."}]
+
+
 def test_chip_use_is_counted_by_kind(client, project):
     for event in ({"event": "shown", "kind": "fix", "label": "Tighten"}, {"event": "clicked", "kind": "fix"},
                   {"event": "sent", "kind": "fix", "edited": True}, {"event": "sent", "kind": "finish"}):

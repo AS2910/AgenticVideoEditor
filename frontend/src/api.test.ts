@@ -31,8 +31,8 @@ describe('api client', () => {
     expect(opts.body).toBeInstanceOf(FormData)
     expect((opts.body as FormData).get('file')).toBe(file)
     // The browser must set the multipart boundary itself: no Content-Type.
-    // (Phase 9c adds the header that marks a write as Voltage's own.)
-    expect(opts.headers).toEqual({ 'X-Requested-With': 'voltage' })
+    // (Phase 9c adds the header that marks a write as Voltage's own; 2026-10-25 the tab it came from.)
+    expect(opts.headers).toEqual({ 'X-Requested-With': 'voltage', 'X-Voltage-Tab': expect.any(String) })
   })
 
   it('sends the uploader consent confirmation with the upload', async () => {

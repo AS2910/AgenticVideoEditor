@@ -10,7 +10,7 @@ from app.api.main import app, flags, jobs, repo
 from app.media import ffmpeg
 from tests.agent.conftest import reply, text
 from tests.api.test_batch_api import agent, finished
-from tests.api.test_endpoints import take
+from tests.api.test_endpoints import settle_renders, take
 from tests.api.test_folders import upload_into
 
 pytestmark = pytest.mark.skipif(not ffmpeg.available(), reason="ffmpeg/ffprobe not installed")
@@ -54,6 +54,7 @@ def test_ask_go_board_add_all_that_passed_and_undo_one_video(client, sample_vide
     by = {r["video_id"]: r for r in added.json()["rows"]}
     assert by["p1"]["state"] == "added" and len(by["p1"]["added"]["edit_ids"]) == 1
     assert len(live_edits("p1")) == 1 and live_edits("p2") == [] and live_edits("p3") == []
+    settle_renders()                                                        # the Add holds p1 until its render lands
     undone = client.post(f"/projects/f1/batches/{gate['batch_id']}/videos/p1/undo-add")
     assert undone.status_code == 200
     by = {r["video_id"]: r for r in undone.json()["rows"]}

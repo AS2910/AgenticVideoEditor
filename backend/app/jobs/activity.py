@@ -128,6 +128,11 @@ class ActivityJobs:
         self.db = db
         self.on_change = on_change
         self.clock = clock
+        # 2026-10-25: what else the stuck-job sweep clears (the video locks whose lease ran out),
+        # and what ends with a job in the same transaction (its video's lock); the latter returns
+        # what to tell once the transaction is over.
+        self.after_sweep: Callable[[], object] | None = None
+        self.on_end_in: Callable[[object, Job], Callable[[], None] | None] | None = None
 
     # ── reading ──────────────────────────────────────────────────────────
     def get(self, job_id: str) -> Job | None:
@@ -184,7 +189,10 @@ class ActivityJobs:
 
     # ── writing ──────────────────────────────────────────────────────────
     def create(self, video_id: str, kind: str, *, turn_id: str | None = None, line_ids: Iterable[str] = (),
-               step_label: str = "Queued", detail: dict | None = None, params: dict | None = None) -> Job:
+               step_label: str = "Queued", detail: dict | None = None, params: dict | None = None,
+               within: Callable | None = None) -> Job:
+        """`within(c, job_id)` runs inside the transaction that makes the job
+        (2026-10-25: the video's lock passes to the job in that same step)."""
         if kind not in KINDS:
             raise ValueError(f"unknown job kind {kind}")
         detail = dict(detail or {})
@@ -202,6 +210,8 @@ class ActivityJobs:
             job = Job(job_id=f"J{cur.lastrowid}", video_id=video_id, kind=kind, turn_id=turn_id, step_label=step_label,
                       line_ids=tuple(line_ids), created_at=now_iso(), detail=detail, estimate_s=est, params=params)
             c.execute("UPDATE jobs SET job_id = ?, body = ? WHERE seq = ?", (job.job_id, _dump(job), cur.lastrowid))
+            if within is not None:
+                within(c, job.job_id)
         self._tell(job)
         return job
 
@@ -230,7 +240,10 @@ class ActivityJobs:
             new = replace(job, **changes)
             c.execute("UPDATE jobs SET status = ?, touched = ?, body = ? WHERE job_id = ?",
                       (new.status, self.clock(), _dump(new), job_id))
+            after = self.on_end_in(c, new) if new.done and self.on_end_in is not None else None
         self._tell(new)
+        if after is not None:
+            after()
         return new
 
     def start(self, job_id: str, step_label: str | None = None) -> Job | None:
@@ -280,7 +293,10 @@ class ActivityJobs:
         with self.db.tx() as c:
             rows = c.execute("SELECT job_id, kind, touched FROM jobs WHERE status = 'running'").fetchall()
         late = [r["job_id"] for r in rows if now - r["touched"] > TIMEOUT_SECONDS.get(r["kind"], 600.0)]
-        return [j for j in (self.fail(job_id, "timeout") for job_id in late) if j is not None]
+        failed = [j for j in (self.fail(job_id, "timeout") for job_id in late) if j is not None]
+        if self.after_sweep is not None:
+            self.after_sweep()
+        return failed
 
     def interrupt_leftovers(self) -> list[Job]:
         """At startup: whatever a previous server left queued or running can

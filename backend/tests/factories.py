@@ -40,6 +40,11 @@ def export_now(client, url, **kw):
     deadline = time.time() + 180
     while True:
         resp = client.post(url, **kw)
+        busy = resp.status_code == 409 and isinstance(resp.json().get("detail"), dict) and resp.json()["detail"].get("code") == "video_busy"
+        if busy and time.time() < deadline:
+            # Addendum 3: an export that has to render waits for the video to be Ready (an Add's render still holds it).
+            time.sleep(0.05)
+            continue
         if resp.status_code != 202:
             return resp
         job_id = resp.json()["render_job"]["job_id"]

@@ -291,6 +291,29 @@ describe('App full journey', () => {
     expect(screen.queryByTestId('turn-working')).not.toBeInTheDocument()
   })
 
+  it('queues the words in Up next when another tab started an edit a moment before (addendum 3)', async () => {
+    const base = routeFetch()
+    const queued: unknown[] = []
+    const busy = { code: 'video_busy', message: 'Voltage is working on this video. Queue this change, or Stop.', holder: 'turn:j9',
+      action: 'Voltage is planning', started_by: 'You', queue: [], lock: null }
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.endsWith('/turns') && init?.method === 'POST') {
+        return { ok: false, status: 409, json: async () => ({ detail: busy }), text: async () => JSON.stringify({ detail: busy }) } as Response
+      }
+      if (url.endsWith('/queue') && init?.method === 'POST') { queued.push(JSON.parse(String(init.body))); return ok({ id: 1 }) }
+      return base(url, init)
+    }))
+    const user = userEvent.setup()
+    render(<App />)
+    await reachGoal(user)
+
+    await user.type(screen.getByRole('textbox', TEXTBOX), 'make it 30% off{Enter}')
+
+    await waitFor(() => expect(queued).toEqual([{ kind: 'goal', label: 'make it 30% off', payload: { text: 'make it 30% off' } }]))
+    expect(await screen.findByText('Queued: make it 30% off')).toBeInTheDocument()
+    expect(screen.queryByText(/Something went wrong/)).toBeNull()
+  })
+
   it('uploads without consent; when a paid step needs it, the sheet asks in a sentence and the same turn goes again (UX-3)', async () => {
     const refusal = 'Confirm you have the right to edit and clone this speaker before generating.'
     const calls = agent(PLAN_DONE)

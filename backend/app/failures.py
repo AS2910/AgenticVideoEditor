@@ -160,9 +160,16 @@ def classify(exc: BaseException) -> Failure:
     if isinstance(exc, SafetyRefused):
         return Failure(SAFETY, safety_sentence(exc.vendor, exc.line_text, exc.at), cause=f"{exc.vendor}: {exc.detail}"[:400],
                        vendor=exc.vendor)
+    from app.jobs.locks import VideoBusy
+    if isinstance(exc, VideoBusy):
+        # Addendum 3: another change holds the video. Not a failure of anyone's: say what it is busy with.
+        return Failure(USER_INPUT, busy_sentence(exc.lock.action), status=409)
     if isinstance(exc, HTTPException):
         if exc.status_code < 500 and isinstance(exc.detail, str):
             return Failure(USER_INPUT, exc.detail, status=exc.status_code)
+        if exc.status_code < 500 and isinstance(exc.detail, dict) and isinstance(exc.detail.get("message"), str):
+            # A structured refusal (409 video_busy, a stage hold) carries its sentence in `message`.
+            return Failure(USER_INPUT, exc.detail["message"], status=exc.status_code)
         return Failure(OUR_SIDE, OUR_END_REPORTED, cause=f"HTTP {exc.status_code}: {exc.detail}"[:400], vendor="server",
                        status=exc.status_code)
     if isinstance(exc, DiskFull) or (isinstance(exc, OSError) and getattr(exc, "errno", None) == 28):
@@ -183,6 +190,12 @@ def classify(exc: BaseException) -> Failure:
         if text:
             return Failure(USER_INPUT, text)
     return Failure(OUR_SIDE, OUR_END_REPORTED, cause=_cause(exc), vendor="server", status=_status(exc))
+
+
+def busy_sentence(action: str) -> str:
+    """Addendum 3: the plain sentence for a change refused because the video is busy with another."""
+    what = (action[:1].lower() + action[1:]) if action else "another change"
+    return f"Busy with {what}. Queue this change, or Stop."
 
 
 def charged_sentence(spent_usd: float) -> str:

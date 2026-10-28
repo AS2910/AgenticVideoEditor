@@ -1,4 +1,4 @@
-import type { ActivityJob, PlanItem, RenderIncludes, TurnView } from '../types'
+import type { ActivityJob, PlanItem, RenderIncludes, TurnView, VideoLock } from '../types'
 
 /** One processing model (2026-10-20): what every surface says, worked out
  *  from the jobs alone, so the strip, the rows, the player and the chat can
@@ -112,6 +112,9 @@ export function rowChip({ item, editId, candidateId, removed, jobs, video, video
   }
   if (editId) {
     const ids = [editId, candidateId]
+    // 2026-10-25: a line just added is Working until its render lands: the row says what it is doing.
+    const adding = jobs.find((j) => isRender(j) && isActive(j) && j.detail?.added && j.line_ids.includes(editId))
+    if (adding) return chip('rendering', { label: 'Adding…', job: adding })
     if (carries(video, ids)) {
       const why = removed ? null : needsFix(video, ids)
       return why ? chip('needs-fix', { reason: why }) : chip(removed ? 'removed' : 'in-video')
@@ -206,10 +209,34 @@ export interface StripFacts {
   now?: number
   /** Run 5 item 5: the simple view's words: no version numbers, no "render" or "preview". */
   plain?: boolean
+  /** 2026-10-25: what holds the video (once it has held it for 300 ms), and whether it is someone else's (another member or tab). */
+  lock?: VideoLock | null
+  othersLock?: boolean
 }
 
+// ── One edit at a time per video (2026-10-25) ────────────────────────────────
+
+/** A turn's lock, or a go it waits for. */
+export const isTurnLock = (lock: VideoLock) => lock.holder.startsWith('turn:') || lock.waiting
+
+/** "Adding 'Fresh every morning'" -> "adding 'Fresh every morning'", for "Busy with ...". */
+const lower = (s: string) => s.charAt(0).toLowerCase() + s.slice(1)
+
+/** What a locked control says on hover or tap: "Busy with adding 'Fresh every morning'". */
+export function busyWith(lock: VideoLock, others = false): string {
+  const who = others && lock.started_by_name && lock.started_by_name !== 'You' ? `${lock.started_by_name} is editing: ` : others ? 'Another tab is editing: ' : ''
+  if (lock.waiting) return `${who}Voltage is waiting for your go`
+  if (lock.holder.startsWith('turn:')) return `${who}Busy with Voltage's turn`
+  return `${who}Busy with ${lower(lock.action)}`
+}
+
+/** "Ann is editing", or "Another tab is editing" when it is you in another tab. */
+export const editingWho = (lock: VideoLock) => (lock.started_by_name && lock.started_by_name !== 'You' ? `${lock.started_by_name} is editing` : 'Another tab is editing')
+
 /** One line: "Voicing line 2 of 5 · Jeevan · about 12 s" -> "Checking fit" -> "Rendering preview v4" -> "Ready. v4 is playing"; idle: "Up to date · v4 · 2 min ago". */
-export function stripState({ jobs, turn, playing, stale, justReady, now, plain }: StripFacts): StripState {
+export function stripState({ jobs, turn, playing, stale, justReady, now, plain, lock, othersLock }: StripFacts): StripState {
+  const busy = (text: string): StripState => ({ busy: true, tone: 'busy', text: othersLock && lock ? `${editingWho(lock)} · ${text}` : text })
+  if (lock?.waiting) return busy(othersLock ? 'Waiting for a go' : 'Waiting for your go')
   const active = jobs.filter(isActive)
   const render = active.find(isRender)
   const voice = active.find((j) => isVoice(j) && j.status === 'running') ?? active.find(isVoice)
@@ -218,10 +245,16 @@ export function stripState({ jobs, turn, playing, stale, justReady, now, plain }
     const settledBefore = peers.filter((j) => !isActive(j)).length
     const of = peers.length > 1 ? ` ${Math.min(peers.length, settledBefore + 1)} of ${peers.length}` : ''
     const eta = aboutEta(voice.eta_s)
-    if (voice.status === 'running' && checking(voice)) return { busy: true, tone: 'busy', text: of ? `Checking fit · line${of}` : 'Checking fit' }
+    if (voice.status === 'running' && checking(voice)) return busy(of ? `Checking fit · line${of}` : 'Checking fit')
     const what = voice.status === 'queued' ? (of ? `Line${of} queued` : 'A line is queued') : of ? `Voicing line${of}` : 'Voicing the line'
     const bits = [what, voice.detail?.voice_name, eta].filter(Boolean)
-    return { busy: true, tone: 'busy', text: bits.join(' · ') }
+    return busy(bits.join(' · '))
+  }
+  // An action that holds the video (an Add, an undo) is named, with its progress: "Adding 'Fresh every morning'…".
+  if (lock && !lock.holder.startsWith('turn:')) {
+    const held = jobs.find((j) => j.job_id === lock.holder)
+    const eta = held && isActive(held) ? aboutEta(held.eta_s) : null
+    return busy([`${lock.action}…`, eta].filter(Boolean).join(' · '))
   }
   if (render) {
     const v = render.detail?.version
@@ -234,8 +267,10 @@ export function stripState({ jobs, turn, playing, stale, justReady, now, plain }
   const other = active.find((j) => !wraps(j))
   if (other) return { busy: true, tone: 'busy', text: [other.step_label || 'Working', aboutEta(other.eta_s)].filter(Boolean).join(' · ') }
   if (turn && (turn.status === 'running' || turn.status === 'stopping')) {
-    return { busy: true, tone: 'busy', text: turn.status === 'stopping' ? 'Stopping after this step' : turn.step || 'Thinking' }
+    if (turn.status === 'stopping') return busy('Stopping after this step')
+    return busy(!turn.step || /^thinking/i.test(turn.step) ? 'Voltage is planning…' : turn.step)
   }
+  if (lock) return busy(lock.action === 'Stopping' ? 'Stopping after this step' : 'Voltage is planning…')
   const update = active.find(wraps)
   if (update) return { busy: true, tone: 'busy', text: update.step_label || (update.kind === 'check' ? 'Fixing an issue from the project check' : update.kind === 'batch' ? 'Working on it as part of a batch' : 'Bringing it up to date with the brief') }
   if (stale) return { busy: false, tone: 'idle', text: plain ? 'Your changes are not in the player yet' : 'Changes not in preview yet' }

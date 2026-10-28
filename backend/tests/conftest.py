@@ -66,6 +66,7 @@ if _PG_SERVER:
 
 def pytest_configure(config):
     config.addinivalue_line("markers", "sqlite_only: reads or writes the SQLite file directly; skipped on the Postgres run")
+    config.addinivalue_line("markers", "landing: a short change's render holds the video's lock (addendum 3), on for this test")
 
 
 def pytest_collection_modifyitems(config, items):
@@ -173,6 +174,19 @@ def sample_audio_only(tmp_path_factory):
     path = tmp_path_factory.mktemp("media") / "audio-only.wav"
     ffmpeg.generate_silence(path, 1.0)
     return path
+
+
+@pytest.fixture(autouse=True)
+def _landing_renders_off_unless_asked(monkeypatch, request):
+    """Run 5 addendum 3: a short change (an undo, a move, the mix) holds the video's
+    lock until its render is in the video. The suites written before it click one
+    change straight after another, so they run with that render off; a test that
+    proves it asks with `@pytest.mark.landing` (test_never_edit_in_an_edit.py)."""
+    import sys
+    main = sys.modules.get("app.api.main")
+    if main is not None and request.node.get_closest_marker("landing") is None:
+        monkeypatch.setattr(main, "LAND_RENDERS", False)
+    yield
 
 
 @pytest.fixture(autouse=True)

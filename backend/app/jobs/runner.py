@@ -29,15 +29,17 @@ def with_retries(
     sleep: Callable[[float], None] = time.sleep,
     on_attempt: Callable[[int], None] | None = None,
     retry_on: tuple[type[BaseException], ...] = (VendorError,),
+    stopped: Callable[[], bool] | None = None,
 ):
     """Call `work`, retrying transient vendor failures with exponential backoff.
     Every attempt runs in one idempotency scope, so a retried vendor call
-    sends the key its first attempt sent (launch item 4)."""
+    sends the key its first attempt sent (launch item 4). Once `stopped()`
+    says the user pressed Stop, a failure is not tried again (2026-10-25)."""
     with idempotency_scope():
-        return _attempts(work, attempts, base_delay, sleep, on_attempt, retry_on)
+        return _attempts(work, attempts, base_delay, sleep, on_attempt, retry_on, stopped)
 
 
-def _attempts(work, attempts, base_delay, sleep, on_attempt, retry_on):
+def _attempts(work, attempts, base_delay, sleep, on_attempt, retry_on, stopped=None):
     last: BaseException | None = None
     for attempt in range(1, attempts + 1):
         if on_attempt:
@@ -46,6 +48,8 @@ def _attempts(work, attempts, base_delay, sleep, on_attempt, retry_on):
             return work()
         except retry_on as exc:
             last = exc
+            if stopped is not None and stopped():
+                break
             if attempt < attempts:
                 delay = base_delay * (2 ** (attempt - 1))
                 log.warning("attempt %d/%d failed (%s); retrying in %.1fs",
@@ -72,17 +76,18 @@ class JobRunner:
         self._base_delay = base_delay
         self._sleep = sleep
 
-    def submit(self, job: Job, work: Callable[[Callable[[float, str], None]], dict]) -> Job:
+    def submit(self, job: Job, work: Callable[[Callable[[float, str], None]], dict],
+               stopped: Callable[[], bool] | None = None) -> Job:
         """Run `work` in the background.
 
         `work` receives a `report(progress, step)` callback and returns the
-        payload to store on the job.
+        payload to store on the job. `stopped()`: no retry once it is true.
         """
         # G2: the work carries the request's context (who caused its charges).
-        self._pool.submit(contextvars.copy_context().run, self._run, job.job_id, work)
+        self._pool.submit(contextvars.copy_context().run, self._run, job.job_id, work, stopped)
         return job
 
-    def _run(self, job_id: str, work) -> None:
+    def _run(self, job_id: str, work, stopped=None) -> None:
         def report(progress: float, step: str) -> None:
             self.jobs.update(job_id, status="running", progress=progress, step=step)
 
@@ -97,6 +102,7 @@ class JobRunner:
                 base_delay=self._base_delay,
                 sleep=self._sleep,
                 on_attempt=count,
+                stopped=stopped,
             )
         except Exception as exc:  # noqa: BLE001 - a job must never kill the worker
             # Run 5 item 1: one classifier says it. The app's own refusals (widen

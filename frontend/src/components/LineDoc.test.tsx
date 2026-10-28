@@ -695,12 +695,18 @@ describe('LineDoc: one chip per line, read from the jobs (2026-10-20)', () => {
     expect(chip).toHaveAttribute('aria-describedby', reason.id)
   })
 
-  it('one driver at a time: a line Voltage is voicing cannot be voiced from its form', async () => {
+  it('one edit at a time (2026-10-25, was one driver at a time): while the video is Working, Voice it says so and stays live', async () => {
     const running = job({ status: 'running', line_ids: ['i1'] })
-    doc({ items: [item({ status: 'planned', candidate: null })], activity: { jobs: [running], video: null, rendering: null } })
+    const h = doc({ items: [item({ status: 'planned', candidate: null })], activity: { jobs: [running], video: null, rendering: null }, busy: "Busy with Voltage's turn" })
     await userEvent.click(screen.getByText('Start a live Bajicam session.'))
-    expect(screen.getByTestId('driven-note')).toHaveTextContent('Voltage is voicing these lines. Wait or Stop.')
-    expect(screen.getByRole('button', { name: 'Voice it' })).toBeDisabled()
+    expect(screen.getByTestId('busy-note')).toHaveTextContent("Busy with Voltage's turn. Voice it once it is done, queue it, or Stop.")
+    await userEvent.clear(screen.getByRole('textbox', { name: 'New wording' }))
+    await userEvent.type(screen.getByRole('textbox', { name: 'New wording' }), 'Start a live session now.')
+    const voiceIt = screen.getByRole('button', { name: 'Voice it' })
+    expect(voiceIt).toBeEnabled()
+    expect(voiceIt).toHaveAttribute('title', "Busy with Voltage's turn")
+    await userEvent.click(voiceIt)
+    expect(h.onHear).toHaveBeenCalled()          // the editor's guard turns it into the busy card (or Up next)
   })
 
   it('counts the words live and hides the estimate until there are any; the time only when one was measured', async () => {

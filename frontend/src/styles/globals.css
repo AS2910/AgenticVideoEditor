@@ -340,6 +340,9 @@
   .pane-root :where(pre, code) { white-space: pre-wrap; }
   .pane-root :where(img, video, audio, table) { max-width: 100%; }
   .pane-root .sugg { white-space: normal; height: auto; min-height: 32px; padding-block: 6px; text-align: left; max-width: 100%; }
+  /* One edit at a time, part 5: the chips are one line inside the composer; the row scrolls sideways, a chip never wraps. */
+  .pane-root .chip-row .sugg { white-space: nowrap; height: 30px; min-height: 30px; padding-block: 0; max-width: 16rem; overflow: hidden; text-overflow: ellipsis; }
+  @media (pointer: coarse) { .pane-root .chip-row .sugg { height: 44px; min-height: 44px; } }
   /* The thread scrolls under a fixed header and composer; its top fades out instead of cutting a line in half. */
   .pane-thread { overflow-x: hidden; overscroll-behavior: contain; mask-image: linear-gradient(to bottom, transparent 0, black 22px); }
   /* An option on a question or gate card: its words wrap, the button grows to fit them. */

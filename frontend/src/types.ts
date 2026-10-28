@@ -697,6 +697,35 @@ export interface TurnView {
   lines_voiced?: number
   render?: { version: number; mode: 'final' | 'proposals'; render_id?: string } | null
 }
+/** One edit at a time per video (2026-10-25): what holds the video while it is Working (null when Ready). */
+export interface VideoLock {
+  video_id: string
+  /** A turn ("turn:j3"), a job ("J12"), a request ("req-..."), or a go Voltage waits for ("gate:j3"). */
+  holder: string
+  /** In words: "Adding 'Fresh every morning'", "Voltage is planning", "Undoing". */
+  action: string
+  started_by: string | null
+  started_by_name: string | null
+  /** The browser tab it came from. */
+  tab: string | null
+  started_at: string
+  stoppable: boolean
+  /** A turn waiting for the user's go. */
+  waiting: boolean
+  lease_expires_at: string
+}
+/** One change waiting its turn on a busy video (Up next). */
+export interface QueueItem {
+  id: number
+  video_id: string
+  kind: 'goal' | 'action'
+  label: string
+  payload: Record<string, unknown>
+  position: number
+  created_by: string | null
+  status: 'queued' | 'running' | 'done' | 'failed' | 'removed'
+}
+export interface QueueState { items: QueueItem[]; paused: boolean }
 export interface RenderRecord {
   render_id: string
   version: number
