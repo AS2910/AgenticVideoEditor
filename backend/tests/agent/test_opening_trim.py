@@ -1,4 +1,4 @@
-"""Cost 1e: the opening view says each thing once."""
+"""Cost 1e: the opening view says each thing once (AVE_OPENING_TRIM=1; off by default since run 5)."""
 from app import understanding as U
 from app.agent.context import UNCHANGED, opening
 from tests.agent.conftest import reply, text as said
@@ -10,7 +10,7 @@ def test_a_motion_peak_on_a_named_beat_is_not_said_twice():
                         {"at": 2.9, "kind": "visual", "label": "highlight jumps", "confidence": 0.7, "source": "vision"},
                         {"at": 7.0, "kind": "motion", "label": "motion peak", "confidence": 0.8}],
               "read": {}, "signals": {}}
-    beats = next(line for line in U.context_lines(record) if line.startswith("Beats:"))
+    beats = next(line for line in U.context_lines(record, trim=True) if line.startswith("Beats:"))
     assert beats == "Beats: 2.9 s highlight jumps; 7.0 s motion peak."
 
 
@@ -25,8 +25,10 @@ def test_known_blocks_become_one_line():
 
 
 def test_the_second_turn_points_back_to_the_first(client, project, monkeypatch):
+    from dataclasses import replace
     import app.api.main as main
     scripted = _agent_on(monkeypatch, main, [reply(said("Ready.")), reply(said("Still ready.")), reply(said("Yes."))])
+    monkeypatch.setattr(main, "settings", replace(main.settings, opening_trim=True))   # AVE_OPENING_TRIM=1
     send(client, "make it 30% off")
     assert UNCHANGED not in scripted.calls[0]["messages"][-1]["content"][0]["text"]   # nothing fixed to point to yet
     main.repo.set_settings("p1", understanding=U.build({"beats": []}, {"format": "ad"}, ""))

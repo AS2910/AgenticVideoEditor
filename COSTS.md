@@ -194,6 +194,10 @@ The target (40% lower with no score more than 5% worse) was not reached. What th
 - Only the question turn moved for certain. The other levers either do not touch a single-turn edit (d and e help re-uploads and later turns) or saved nothing on these lines (c).
 - One turn is not a measurement. The same one-line fix, same words, same voice, same single take, cost $0.051 to $0.151 in agent spend over three runs, and its SIM-o moved 0.63 to 0.52 on a take made the same way. Agent spend is mostly output (thinking), and how long Voltage thinks and how often it re-voices varies run to run. Every flag a 5% threshold raised in these runs is inside that spread, and none comes from a changed lever: the re-check ran the baseline's system prompt and tools, and no kept lever acts on a fresh single-line edit (c only when a second take fits, which it did not). The evals need three or more runs per scenario before a 5% bar means anything; that is about $4.50 a full pass at today's prices ($1.50 a pass with setup).
 
+### Run 5 re-check of the scores (2026-10-28)
+
+Three runs each, mean (lowest to highest). The 5-line rewrite's WER 0.24 above was two scoring artifacts (a line scored against a try that did not fit, and a "[excited]" tag counted as a word); rescored it is 0. One-line fix, all run-4 levers on vs off: WER 0 / 0, SIM-o 0.560 (0.550 to 0.570) vs 0.544 (0.537 to 0.556), UTMOS 4.35 vs 4.35, turn $0.115 vs $0.080 raw. 5-line rewrite, all on: WER 0.17 (0 to 0.25), SIM-o 0.72 (0.68 to 0.80), UTMOS 3.83 (3.46 to 4.17), turn $0.64 ($0.57 to $0.71). No lever is shown to hurt a score; 1c (takes) and 1e (opening view) are off by default anyway, as the owner keeps only 1b and 1d (DECISIONS.md, run 5 addendum 0a).
+
 ### What would move the cost (for you to decide, not changed)
 
 | Lever | Effect, from these runs |

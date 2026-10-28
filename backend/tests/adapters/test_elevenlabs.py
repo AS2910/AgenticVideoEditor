@@ -337,11 +337,11 @@ def test_a_take_that_misses_gets_more_takes_and_the_nearest_wins(store):
 
 @needs_ffmpeg
 def test_takes_stop_at_the_first_close_enough_for_the_ladder(store):
-    # Cost 1c: against a 0.9 s slot, 1.3 s misses, 0.95 s (5.6% long) is close enough at a 10% accept.
+    # Cost 1c (on with AVE_TAKE_EARLY_STOP=1): against a 0.9 s slot, 1.3 s misses, 0.95 s (5.6% long) is close enough at a 10% accept.
     post = Takes([1.3, 0.95, 0.9])
     budget = VoiceBudget(ceiling=1000)
     voice = adapter(store, post=post, budget=budget)
-    voice._takes, voice._accept = 3, 0.10
+    voice._takes, voice._accept, voice._early_stop = 3, 0.10, True
     artifact = voice.synthesize(SOURCE, PLAN, TRANSCRIPT)
     assert len(post.calls) == 2
     assert budget.spent("p1") == 2 * billed_characters("30% off", "eleven_multilingual_v2")
@@ -349,13 +349,13 @@ def test_takes_stop_at_the_first_close_enough_for_the_ladder(store):
     # With no band set, the search stops at the first take within the tolerance.
     within = Takes([1.3, 0.92, 0.9])
     voice = adapter(store, post=within)
-    voice._takes = 3
+    voice._takes, voice._early_stop = 3, True
     voice.synthesize(SOURCE, PLAN, TRANSCRIPT)
     assert len(within.calls) == 2
     # A first take inside the accept band is the only one paid for.
     one = Takes([0.97])
     voice = adapter(store, post=one)
-    voice._takes, voice._accept = 3, 0.10
+    voice._takes, voice._accept, voice._early_stop = 3, 0.10, True
     voice.synthesize(SOURCE, PLAN, TRANSCRIPT)
     assert len(one.calls) == 1
 

@@ -1023,8 +1023,11 @@ def _kept_read(record: ProjectRecord, kind: str, parts: tuple, read: Callable[[]
     """Cost 1d: a paid read of this clip's bytes (a look, an understanding, a
     reading), made once per owner and inputs and reused when the same file
     comes again. `parts` is what else the read depends on (the brief, the lines);
-    `again` (the user asked for a fresh read) reads anew and keeps that."""
-    key = content_cache.key_of(planner_label, *parts)
+    `again` (the user asked for a fresh read) reads anew and keeps that.
+    AVE_CONTENT_CACHE=0 reads every time and keeps nothing."""
+    if not settings.content_cache:
+        return read()
+    key = content_cache.key_of(planner_label, content_cache.VERSION, *parts)
     sha = record.source.media.sha256
     hit = None if again else content_cache.get(database, record.owner, sha, kind, key)
     if hit is not None:
@@ -1367,9 +1370,10 @@ def _ingest_staged(staged: Path, filename: str, consent: bool, folder: Project |
     source = Source(
         project_id=project_id, filename=filename, duration=probed.duration, media=media,
     )
-    # Cost 1d: the same file from the same owner is transcribed once.
-    heard_key = content_cache.key_of(transcriber_label)
-    kept = content_cache.get(database, owner, media.sha256, "transcript", heard_key)
+    # Cost 1d: the same file from the same owner is transcribed once
+    # (AVE_CONTENT_CACHE=0: every upload is heard afresh and nothing is kept).
+    heard_key = content_cache.key_of(transcriber_label, content_cache.VERSION)
+    kept = content_cache.get(database, owner, media.sha256, "transcript", heard_key) if settings.content_cache else None
     if not probed.has_audio:
         # Run 5 item 4: nothing to hear, so no lines, no call and no charge;
         # held as if it were kept, so nothing below records or caches it.
@@ -1386,7 +1390,7 @@ def _ingest_staged(staged: Path, filename: str, consent: bool, folder: Project |
     granted = Consent(granted_at=_now()) if consent else None
     repo.create(source, transcript, granted, owner=owner, folder_id=folder.project_id if folder else None)
     repo.set_settings(project_id, **_starting_settings(owner, folder))
-    if kept is None:
+    if kept is None and settings.content_cache:
         content_cache.put(database, owner, media.sha256, "transcript", heard_key, asdict(transcript), project_id)
     if transcriber_label.startswith("openai") and kept is None:
         minutes = source.duration / 60
@@ -7794,13 +7798,16 @@ def _start_turn(project_id: str, record: ProjectRecord, text: str, owner: str, a
         from app.agent.context import fixed_lines
         from app.agent.routing import has_compaction
         sight_now = _sight_text(project_id) if not lines else ""
-        understood_now = understanding_mod.context_lines(repo.settings(project_id).get("understanding"))
+        understood_now = understanding_mod.context_lines(repo.settings(project_id).get("understanding"),
+                                                         trim=settings.opening_trim)
         history = repo.turns(project_id)
         # Cost 1e: the brief, rules and understanding go once; a later turn that
-        # finds them unchanged (and the thread not compacted) points back to them.
+        # finds them unchanged (and the thread not compacted) points back to them
+        # (AVE_OPENING_TRIM, off by default since run 5: they go in full every turn).
         blocks = fixed_lines(view, sight_now, understood_now)
         fixed = content_cache.key_of(blocks)
-        fixed_known = bool(history and blocks) and repo.settings(project_id).get("opening_fixed") == fixed and not has_compaction(history)
+        fixed_known = (settings.opening_trim and bool(history and blocks)
+                       and repo.settings(project_id).get("opening_fixed") == fixed and not has_compaction(history))
         head = opening(repo.get_plan(project_id, plan.plan_id), duration=record.source.duration,
                        filename=record.source.filename, speakers=names, lines=len(lines), autonomy=autonomy,
                        spent_usd=ledger.spent_usd(project_id), ceiling_usd=ledger.ceiling_usd,

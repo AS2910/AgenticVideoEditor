@@ -9,6 +9,8 @@ def test_wer_normalises_case_punctuation_and_percent():
     assert metrics.wer("Get thirty percent off", "Get 30% off") == 0.0
     assert metrics.wer("a b c d", "a x c") == 0.5
     assert metrics.wer("आज ही लो।", "आज ही लो") == 0.0
+    # A delivery tag steers the voice; nobody says it (run 5 addendum 0a).
+    assert metrics.wer("[excited] And the sweets too?", "And the sweets too?") == 0.0
 
 
 LINES = [{"start": 0.0, "end": 2.0, "text": "one"}, {"start": 2.5, "end": 4.0, "text": "two"}]
@@ -63,5 +65,30 @@ def test_compare_counts_a_cold_shared_prefix_as_read(tmp_path):
     p = tmp_path / "r.json"
     p.write_text(json.dumps({"runs": [warm, cold]}))
     runs = compare.load(p)
-    assert runs["w"]["cost"]["warm_usd"] == 0.05
-    assert runs["c"]["cost"]["warm_usd"] == round(0.12 - 10000 * 5e-6 * 1.15, 5)
+    assert runs["w"][0]["cost"]["warm_usd"] == 0.05
+    assert runs["c"][0]["cost"]["warm_usd"] == round(0.12 - 10000 * 5e-6 * 1.15, 5)
+
+
+def _runs(*rows):
+    return {"runs": [{"scenario": "s", "status": "succeeded", "cost": {"turn_usd": c}, "requests": [],
+                      "scores": {"utmos": u, "wer": w, "plan_quality": 1.0}} for c, u, w in rows]}
+
+
+def test_compare_uses_the_mean_and_flags_only_outside_the_spread(tmp_path):
+    a, b = tmp_path / "a.json", tmp_path / "b.json"
+    # Three runs each: B's UTMOS mean is 7% lower but inside A's spread, so it is noise.
+    a.write_text(json.dumps(_runs((0.10, 4.4, 0.0), (0.12, 3.7, 0.0), (0.08, 4.2, 0.0))))
+    b.write_text(json.dumps(_runs((0.10, 3.8, 0.0), (0.10, 3.9, 0.0), (0.10, 3.8, 0.0))))
+    text, flags = compare.table(a, b)
+    assert flags == [] and "| s | 3 / 3 |" in text and "4.100 (3.700-4.400)" in text
+    # Past the spread as well: flagged.
+    b.write_text(json.dumps(_runs((0.10, 3.5, 0.0), (0.10, 3.6, 0.0), (0.10, 3.5, 0.0))))
+    assert compare.table(a, b)[1] == ["s: utmos 4.100 (3.700-4.400) -> 3.533 (3.500-3.600)"]
+
+
+def test_the_runner_summarises_each_scenario_with_mean_and_spread():
+    from evals import runner
+    rows = _runs((0.10, 4.0, 0.0), (0.20, 3.0, 0.2))["runs"] + [{"scenario": "s", "status": "error"}]
+    out = runner.summary(rows)["s"]
+    assert out["n"] == 2 and out["utmos"] == {"mean": 3.5, "min": 3.0, "max": 4.0}
+    assert out["turn_usd"]["mean"] == 0.15 and runner.RUNS == 3

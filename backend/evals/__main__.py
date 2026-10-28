@@ -2,7 +2,7 @@
 
     python -m evals clips                         # rebuild the clips (macOS `say`)
     python -m evals run --base http://127.0.0.1:8101 --db <copy>/ave.db --log <backend log> \\
-        --label baseline --budget 2.00 [--only one_line_fix question]
+        --label baseline --budget 2.00 [--only one_line_fix question] [--runs 3]
     python -m evals compare results/a.json results/b.json
     python -m evals voice-tone --clip <video> --transcript <words.json> --voice <clone id> \\
         [--stems <dir>] [--only 1 3] --budget-chars 2000     # run 5 item 7, real speech only
@@ -26,6 +26,7 @@ def main() -> int:
     r.add_argument("--label", default="")
     r.add_argument("--only", nargs="*")
     r.add_argument("--cap", type=float, default=1.00, help="each turn's cap, USD")
+    r.add_argument("--runs", type=int, default=3, help="runs of each scenario (mean and spread are reported)")
     r.add_argument("--budget", type=float, required=True, help="stop before a scenario that could pass this, USD")
     c = sub.add_parser("compare", help="before and after, per scenario")
     c.add_argument("a")
@@ -54,7 +55,7 @@ def main() -> int:
         from evals.compare import main as compare
         return compare(args.a, args.b)
     from evals.runner import run
-    run(args.base, Path(args.db), Path(args.log), args.label, args.only, args.cap, args.budget)
+    run(args.base, Path(args.db), Path(args.log), args.label, args.only, args.cap, args.budget, runs_each=args.runs)
     return 0
 
 

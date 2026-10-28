@@ -45,8 +45,8 @@ DEFAULT_USER_BUDGET_USD = 10.0
 # all and keep the nearest; and how far off the slot counts as a miss.
 DEFAULT_TAKES_PER_LINE = 3
 DEFAULT_FIT_TOLERANCE = 0.05
-# Cost 1c: takes are voiced one at a time and the first within the fit
-# tolerance ends the search. AVE_TAKE_ACCEPT widens that to a band the fit
+# Cost 1c (AVE_TAKE_EARLY_STOP, off by default since run 5): takes are voiced one
+# at a time and the first within the fit tolerance ends the search. AVE_TAKE_ACCEPT widens that to a band the fit
 # ladder closes (0.10 saved takes but measured worse duration error in the
 # evals, so it is off: 0 keeps the tolerance).
 DEFAULT_TAKE_ACCEPT = 0.0
@@ -64,6 +64,14 @@ DEFAULT_CLONE_MIN_SECONDS = 10.0
 DEFAULT_VOICE_ROUTE = "auto"    # Phase 15b: "tts" | "changer" | "auto"
 
 _TRUTHY = {"1", "true", "yes", "on"}
+
+
+def _switch(name: str, default: bool) -> bool:
+    """An on/off setting: empty keeps the default, 0/false/no/off turns it off."""
+    raw = (os.environ.get(name) or "").strip().lower()
+    if not raw:
+        return default
+    return raw not in {"0", "false", "no", "off"}
 
 
 @dataclass(frozen=True)
@@ -121,6 +129,15 @@ class Settings:
     # Cost 1b: a turn that only asks how the app works runs on this model with
     # the read-only tools (app/agent/routing.py); empty keeps every turn on agent_model.
     question_model: str = "claude-haiku-5-5"
+    # Run 5 addendum 0a: each run-4 cost lever has its own switch, so the evals
+    # can measure it alone (AVE_PLANNER_CACHE 1a, AVE_TAKE_EARLY_STOP 1c,
+    # AVE_CONTENT_CACHE 1d, AVE_OPENING_TRIM 1e; 1b is AVE_QUESTION_MODEL).
+    # 1c and 1e are off by default: the owner keeps only 1b and 1d of the
+    # quality-facing levers (1a cannot change an output). DECISIONS.md, run 5 addendum 0a.
+    planner_cache: bool = True
+    take_early_stop: bool = False
+    content_cache: bool = True
+    opening_trim: bool = False
     # Phase 15c: keep the original's music and room under an edited line, by
     # separating the voice from the bed (needs the optional `room` extra).
     stems: bool = True
@@ -276,6 +293,10 @@ def load_settings() -> Settings:
         agent_effort=os.environ.get("AVE_AGENT_EFFORT", "high").strip() or "high",
         check_model=os.environ.get("AVE_CHECK_MODEL", "claude-haiku-5-5").strip() or "claude-haiku-5-5",
         question_model=os.environ.get("AVE_QUESTION_MODEL", "claude-haiku-5-5").strip(),
+        planner_cache=_switch("AVE_PLANNER_CACHE", True),
+        take_early_stop=_switch("AVE_TAKE_EARLY_STOP", False),
+        content_cache=_switch("AVE_CONTENT_CACHE", True),
+        opening_trim=_switch("AVE_OPENING_TRIM", False),
         clone_min_seconds=_amount("AVE_CLONE_MIN_SECONDS", DEFAULT_CLONE_MIN_SECONDS),
         voice_route=_voice_route(),
         auth_mode=_auth_mode(),

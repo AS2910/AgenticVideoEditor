@@ -554,6 +554,7 @@ class ElevenLabsVoiceAdapter:
         fit_tolerance: float = fit.DEFAULT_TOLERANCE,
         flex_max: float = 1.0,
         take_accept: float = 0.0,
+        early_stop: bool = False,
     ) -> None:
         self._api_key = api_key
         self._store = store
@@ -582,6 +583,7 @@ class ElevenLabsVoiceAdapter:
         self._takes = max(1, takes_per_line)
         self._tolerance = fit_tolerance
         self._accept = take_accept
+        self._early_stop = early_stop
         self._flex_max = flex_max
         # What was done to the last line to make it fit, in words.
         self.last_notes: list[str] = []
@@ -808,10 +810,11 @@ class ElevenLabsVoiceAdapter:
         ratio = lambda take: (len(take[0]) / 2 / SAMPLE_RATE) / target   # noqa: E731
         if abs(ratio(takes[0]) - 1) <= self._tolerance:
             return takes[0]
-        # Cost 1c: one take at a time, stopping at the first within the
-        # tolerance (or the wider `take_accept` band, when set).
+        # Cost 1c, when on (AVE_TAKE_EARLY_STOP=1): one take at a time, stopping at
+        # the first within the tolerance (or the wider `take_accept` band, when set).
+        # Off (the default): every take is voiced and the nearest kept.
         near = max(self._tolerance, self._accept)
-        while len(takes) < self._takes and abs(ratio(takes[-1]) - 1) > near:
+        while len(takes) < self._takes and (not self._early_stop or abs(ratio(takes[-1]) - 1) > near):
             takes.append(self._take(project_id, voice_id, body, plan))
         best = min(takes, key=lambda take: abs(ratio(take) - 1))
         if len(takes) > 1:

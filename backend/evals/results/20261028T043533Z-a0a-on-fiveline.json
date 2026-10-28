@@ -1,0 +1,1192 @@
+{
+ "label": "a0a-on-fiveline",
+ "stamp": "20261028T043533Z",
+ "spent_usd": 1.98482,
+ "runs": [
+  {
+   "scenario": "five_line_rewrite",
+   "video_id": "p7",
+   "status": "succeeded",
+   "error": null,
+   "seconds": 253.4,
+   "say": "Rewrite all five lines as a Diwali offer: chai and sweets at 20% off. Same speakers, same length, each line replacing the one it rewrites.",
+   "statements": [
+    {
+     "text": "Is the masala chai fresh today?",
+     "start": 0.0,
+     "end": 2.180000066757202,
+     "speaker": "A",
+     "on_camera": "off_camera"
+    },
+    {
+     "text": "Fresh every morning made with ginger.",
+     "start": 3.059999942779541,
+     "end": 4.559999942779541,
+     "speaker": "B",
+     "on_camera": "off_camera"
+    },
+    {
+     "text": "How much for two cups?",
+     "start": 5.360000133514404,
+     "end": 6.380000114440918,
+     "speaker": "A",
+     "on_camera": "off_camera"
+    },
+    {
+     "text": "40 rupees and the biscuits are free.",
+     "start": 7.179999828338623,
+     "end": 9.140000343322754,
+     "speaker": "B",
+     "on_camera": "off_camera"
+    },
+    {
+     "text": "Perfect.",
+     "start": 9.920000076293945,
+     "end": 10.199999809265137,
+     "speaker": "A",
+     "on_camera": "off_camera"
+    },
+    {
+     "text": "I will take two.",
+     "start": 10.380000114440918,
+     "end": 11.300000190734863,
+     "speaker": "A",
+     "on_camera": "off_camera"
+    }
+   ],
+   "reply": "All six lines now tell the Diwali story: Diwali sweets fresh today, made fresh at dawn, any Diwali deal, twenty percent off, great, chai and sweets please. They're in stand-in voices for now, though, because I couldn't copy either speaker's own voice, so I haven't added anything to the video yet. Do you want to keep these stand-ins, or should I make two voices that sound closer to your speakers?\n\nWhy: the clip has six lines, not five (\"Perfect.\" and \"I will take two.\" are separate), so each one got its own rewrite. To fit the gaps I had to cut \"today only\" from line 4 (the card on screen still shows it). Most lines stayed close to their old length; line 3 runs a syllable longer and line 5 shrank to one word. The first speaker is Sarah and the second is Varsha. Every line except 1 and 3 failed the sound check, mostly on pitch or on not sounding enough like the speaker. 0:00 to 0:11 · six lines · $0.53 this turn, $0.59 on this video so far.",
+   "question": null,
+   "stopped": null,
+   "calls": 20,
+   "steps": [
+    {
+     "text": "Style for this video: Ad voice: keep the brand tone, warm and brisk, state the 20% off today only offer clearly once, land the last word near 0:11.",
+     "cost": null,
+     "tool": "style"
+    },
+    {
+     "text": "Read all 6 lines",
+     "cost": null,
+     "tool": "read_transcript"
+    },
+    {
+     "text": "Voiced “Are the Diwali sweets fresh today?” with Sarah · warm, curious customer, festive lift",
+     "cost": 0.0204,
+     "tool": "synthesize_take"
+    },
+    {
+     "text": "Checked “Made fresh this morning, with ginger cha…” before voicing: about 2.1 s for 1.5 s, too long",
+     "cost": null,
+     "tool": "synthesize_take"
+    },
+    {
+     "text": "Too long for its gap: “Fresh at dawn, with ginger chai.”, 2.2 s for 1.5 s",
+     "cost": 0.0288,
+     "tool": "synthesize_take"
+    },
+    {
+     "text": "Voiced “Any Diwali deal?” with Sarah · bright, hopeful question",
+     "cost": 0.0144,
+     "tool": "synthesize_take"
+    },
+    {
+     "text": "Checked “Chai and sweets, 20% off, today only.” before voicing: about 2.7 s for 2.0 s, too long",
+     "cost": null,
+     "tool": "synthesize_take"
+    },
+    {
+     "text": "Checked “Lovely.” before voicing: about 0.6 s for 0.3 s, too long",
+     "cost": null,
+     "tool": "synthesize_take"
+    },
+    {
+     "text": "Voiced “I'll take a box.” with Sarah · warm, decided, festive",
+     "cost": 0.0144,
+     "tool": "synthesize_take"
+    },
+    {
+     "text": "Could not clone Speaker A's voice",
+     "cost": null,
+     "tool": "clone_speaker"
+    },
+    {
+     "text": "Could not clone Speaker B's voice",
+     "cost": null,
+     "tool": "clone_speaker"
+    },
+    {
+     "text": "Looked through 25 voices",
+     "cost": null,
+     "tool": "list_voices"
+    },
+    {
+     "text": "Listened to 0.0–4.6 s",
+     "cost": null,
+     "tool": "hear"
+    },
+    {
+     "text": "Voiced “Made fresh at dawn.” with Jeevan · warm, proud shopkeeper, brisk",
+     "cost": 0.0057,
+     "tool": "synthesize_take"
+    },
+    {
+     "text": "Checked “All twenty percent off today.” before voicing: about 3.0 s for 2.0 s, too long",
+     "cost": null,
+     "tool": "synthesize_take"
+    },
+    {
+     "text": "Voiced “Great.” with Sarah · pleased, quick",
+     "cost": 0.0072,
+     "tool": "synthesize_take"
+    },
+    {
+     "text": "Voiced “Chai and sweets, please.” with Sarah · warm, decided, festive",
+     "cost": 0.0288,
+     "tool": "synthesize_take"
+    },
+    {
+     "text": "Voiced “Made fresh at dawn.” with Varsha · warm, proud shopkeeper, brisk",
+     "cost": 0.0171,
+     "tool": "synthesize_take"
+    },
+    {
+     "text": "Voiced “Twenty percent off!” with Varsha · warm and brisk, the offer stated clearly with a smile",
+     "cost": 0.0171,
+     "tool": "synthesize_take"
+    },
+    {
+     "text": "Thinking",
+     "cost": 0.4166,
+     "tool": "thinking"
+    }
+   ],
+   "takes": [
+    {
+     "item_id": "i1",
+     "status": "ready",
+     "old_text": "Is the masala chai fresh today?",
+     "new_text": "Are the Diwali sweets fresh today?",
+     "item_text": "Are the Diwali sweets fresh today?",
+     "text_matches_item": true,
+     "start": 0.0,
+     "end": 2.180000066757202,
+     "mix": "replace",
+     "fit_notes": [
+      "nearest of 2 takes"
+     ],
+     "passed": true,
+     "heard": "Are the Diwali sweets fresh today?",
+     "wer": 0.0,
+     "sim_o": 0.5498252115945153,
+     "utmos": 4.4610209465026855,
+     "duration_error_s": 0.12
+    },
+    {
+     "item_id": "i2",
+     "status": "ready",
+     "old_text": "Fresh every morning made with ginger.",
+     "new_text": "Made fresh at dawn.",
+     "item_text": "Made fresh at dawn.",
+     "text_matches_item": true,
+     "start": 3.059999942779541,
+     "end": 4.559999942779541,
+     "mix": "replace",
+     "fit_notes": [
+      "nearest of 3 takes",
+      "the picture at 1.05×"
+     ],
+     "passed": false,
+     "heard": "Made fresh at dawn",
+     "wer": 0.0,
+     "sim_o": 0.7661037193136153,
+     "utmos": 3.869331121444702,
+     "duration_error_s": 0.46
+    },
+    {
+     "item_id": "i3",
+     "status": "ready",
+     "old_text": "How much for two cups?",
+     "new_text": "Any Diwali deal?",
+     "item_text": "Any Diwali deal?",
+     "text_matches_item": true,
+     "start": 5.360000133514404,
+     "end": 6.380000114440918,
+     "mix": "replace",
+     "fit_notes": [
+      "nearest of 3 takes",
+      "the picture at 1.12×"
+     ],
+     "passed": true,
+     "heard": "Any Diwali deal?",
+     "wer": 0.0,
+     "sim_o": 0.6707470524260402,
+     "utmos": 4.224245071411133,
+     "duration_error_s": 0.14
+    },
+    {
+     "item_id": "i4",
+     "status": "ready",
+     "old_text": "I will take two.",
+     "new_text": "Chai and sweets, please.",
+     "item_text": "Chai and sweets, please.",
+     "text_matches_item": true,
+     "start": 10.380000114440918,
+     "end": 11.300000190734863,
+     "mix": "replace",
+     "fit_notes": [
+      "nearest of 3 takes",
+      "spoken at 1.15× by the model",
+      "the picture at 1.12×",
+      "speech at 1.08× speed"
+     ],
+     "passed": false,
+     "heard": "Giant sweets, please",
+     "wer": 0.5,
+     "sim_o": 0.6813848495062379,
+     "utmos": 4.262044906616211,
+     "duration_error_s": 0.05
+    },
+    {
+     "item_id": "i5",
+     "status": "ready",
+     "old_text": "Perfect.",
+     "new_text": "Great.",
+     "item_text": "Great.",
+     "text_matches_item": true,
+     "start": 9.920000076293945,
+     "end": 10.199999809265137,
+     "mix": "replace",
+     "fit_notes": [
+      "nearest of 3 takes",
+      "the picture at 1.12×",
+      "speech at 1.18× speed"
+     ],
+     "passed": false,
+     "heard": "",
+     "wer": 1.0,
+     "sim_o": null,
+     "utmos": null,
+     "duration_error_s": 0.01
+    },
+    {
+     "item_id": "i6",
+     "status": "ready",
+     "old_text": "40 rupees and the biscuits are free.",
+     "new_text": "Twenty percent off!",
+     "item_text": "Twenty percent off!",
+     "text_matches_item": true,
+     "start": 7.179999828338623,
+     "end": 9.140000343322754,
+     "mix": "replace",
+     "fit_notes": [
+      "nearest of 3 takes",
+      "opened the pauses by 90 ms"
+     ],
+     "passed": false,
+     "heard": "20% off",
+     "wer": 0.0,
+     "sim_o": 0.7577550410087955,
+     "utmos": 4.044915199279785,
+     "duration_error_s": 0.69
+    }
+   ],
+   "requests": [
+    {
+     "input": 4,
+     "cache_read": 10603,
+     "cache_write": 622,
+     "output": 81
+    },
+    {
+     "input": 2,
+     "cache_read": 11225,
+     "cache_write": 573,
+     "output": 1653
+    },
+    {
+     "input": 2,
+     "cache_read": 11798,
+     "cache_write": 1906,
+     "output": 2446
+    },
+    {
+     "input": 2,
+     "cache_read": 13704,
+     "cache_write": 3271,
+     "output": 862
+    },
+    {
+     "input": 2,
+     "cache_read": 16975,
+     "cache_write": 972,
+     "output": 278
+    },
+    {
+     "input": 2,
+     "cache_read": 17947,
+     "cache_write": 1602,
+     "output": 2631
+    },
+    {
+     "input": 2,
+     "cache_read": 19549,
+     "cache_write": 3396,
+     "output": 1115
+    },
+    {
+     "input": 2,
+     "cache_read": 22945,
+     "cache_write": 1567,
+     "output": 91
+    },
+    {
+     "input": 2,
+     "cache_read": 24512,
+     "cache_write": 379,
+     "output": 944
+    }
+   ],
+   "scores": {
+    "wer": 0.25,
+    "wer_vs_asked": null,
+    "sim_o": 0.6852,
+    "utmos": 4.1723,
+    "duration_error_s": 0.245,
+    "text_mismatch": 0,
+    "plan_quality": 1.0,
+    "help_used": null
+   },
+   "plan_quality": {
+    "score": 1.0,
+    "items": 6,
+    "outside": 0,
+    "missed": 0
+   },
+   "cost": {
+    "turn_usd": 0.57045,
+    "turn_by": {
+     "agent": 0.41655,
+     "speech": 0.1539
+    },
+    "setup_usd": 0.06145,
+    "scoring_usd": 0.00091,
+    "tokens": {
+     "input": 20,
+     "cache_read": 149258,
+     "cache_write": 14288,
+     "output": 10101
+    },
+    "requests": 9
+   }
+  },
+  {
+   "scenario": "five_line_rewrite",
+   "video_id": "p8",
+   "status": "succeeded",
+   "error": null,
+   "seconds": 318.1,
+   "say": "Rewrite all five lines as a Diwali offer: chai and sweets at 20% off. Same speakers, same length, each line replacing the one it rewrites.",
+   "statements": [
+    {
+     "text": "Is the masala chai fresh today?",
+     "start": 0.0,
+     "end": 2.180000066757202,
+     "speaker": "A",
+     "on_camera": null
+    },
+    {
+     "text": "Fresh every morning made with ginger.",
+     "start": 3.059999942779541,
+     "end": 4.559999942779541,
+     "speaker": "B",
+     "on_camera": null
+    },
+    {
+     "text": "How much for two cups?",
+     "start": 5.360000133514404,
+     "end": 6.380000114440918,
+     "speaker": "A",
+     "on_camera": null
+    },
+    {
+     "text": "40 rupees and the biscuits are free.",
+     "start": 7.179999828338623,
+     "end": 9.140000343322754,
+     "speaker": "B",
+     "on_camera": null
+    },
+    {
+     "text": "Perfect.",
+     "start": 9.920000076293945,
+     "end": 10.199999809265137,
+     "speaker": "A",
+     "on_camera": null
+    },
+    {
+     "text": "I will take two.",
+     "start": 10.380000114440918,
+     "end": 11.300000190734863,
+     "speaker": "A",
+     "on_camera": null
+    }
+   ],
+   "reply": "This turn has used its 25 steps. Say what to do next and I'll carry on.",
+   "question": {
+    "text": "1 line needs a shorter version, about $0.01. Go ahead?",
+    "options": [
+     "Go ahead",
+     "Leave them for now"
+    ],
+    "guess": "Go ahead",
+    "gate": true,
+    "cost_usd": 0.01,
+    "details": [
+     "Rewrite it to fit its gap and voice it once.",
+     "They stay as they are; shorten, ease or discard them from their rows."
+    ],
+    "left_usd": 0.29,
+    "cap_usd": 1.0
+   },
+   "stopped": "This turn has used its 25 steps. Say what to do next and I'll carry on.",
+   "calls": 25,
+   "steps": [
+    {
+     "text": "Style for this video: Ad voice: keep the brand tone, warm and brisk, state the 20% off today only offer clearly once, land the last word near 0:11.",
+     "cost": null,
+     "tool": "style"
+    },
+    {
+     "text": "Read all 6 lines",
+     "cost": null,
+     "tool": "read_transcript"
+    },
+    {
+     "text": "Voiced “Is the Diwali chai and sweets offer on?” with Sarah · warm, curious, brisk customer",
+     "cost": 0.0351,
+     "tool": "synthesize_take"
+    },
+    {
+     "text": "Checked “Yes, twenty percent off, today only.” before voicing: about 2.4 s for 1.5 s, too long",
+     "cost": null,
+     "tool": "synthesize_take"
+    },
+    {
+     "text": "Voiced “Twenty percent off!” with Sarah · warm, bright shopkeeper, proud of the offer",
+     "cost": 0.0057,
+     "tool": "synthesize_take"
+    },
+    {
+     "text": "Too long for its gap: “Chai and sweets both?”, 1.6 s for 1.0 s",
+     "cost": 0.0189,
+     "tool": "synthesize_take"
+    },
+    {
+     "text": "Voiced “Both, today only, cups and sweets.” with Sarah · warm and brisk, a smile, stressing today only",
+     "cost": 0.0306,
+     "tool": "synthesize_take"
+    },
+    {
+     "text": "Checked “Lovely.” before voicing: about 0.7 s for 0.3 s, too long",
+     "cost": null,
+     "tool": "synthesize_take"
+    },
+    {
+     "text": "Voiced “Two of each!” with Sarah · happy, festive, decisive",
+     "cost": 0.0108,
+     "tool": "synthesize_take"
+    },
+    {
+     "text": "Could not clone Speaker A's voice",
+     "cost": null,
+     "tool": "clone_speaker"
+    },
+    {
+     "text": "Could not clone Speaker B's voice",
+     "cost": null,
+     "tool": "clone_speaker"
+    },
+    {
+     "text": "Looked through 25 voices",
+     "cost": null,
+     "tool": "list_voices"
+    },
+    {
+     "text": "Listened to 0.0–13.0 s",
+     "cost": null,
+     "tool": "hear"
+    },
+    {
+     "text": "Too long for its gap: “Is the Diwali chai and sweets offer on?”, 3.5 s for 2.2 s",
+     "cost": 0.0351,
+     "tool": "synthesize_take"
+    },
+    {
+     "text": "Checked “Twenty percent off!” before voicing: about 1.9 s for 1.5 s, too long",
+     "cost": null,
+     "tool": "synthesize_take"
+    },
+    {
+     "text": "Too long for its gap: “Sweets too?”, 1.5 s for 1.0 s",
+     "cost": 0.0099,
+     "tool": "synthesize_take"
+    },
+    {
+     "text": "Checked “Both, today only, cups and sweets.” before voicing: about 3.2 s for 2.0 s, too long",
+     "cost": null,
+     "tool": "synthesize_take"
+    },
+    {
+     "text": "Too long for its gap: “Great.”, 1.3 s for 0.3 s",
+     "cost": 0.0054,
+     "tool": "synthesize_take"
+    },
+    {
+     "text": "Voiced “Two of each!” with Viraj · happy, festive, decisive",
+     "cost": 0.0108,
+     "tool": "synthesize_take"
+    },
+    {
+     "text": "Checked “Is the Diwali chai and sweets offer on?” before voicing: about 3.8 s for 2.2 s, too long",
+     "cost": null,
+     "tool": "synthesize_take"
+    },
+    {
+     "text": "Voiced “Twenty percent off!” with Jeevan · warm, bright shopkeeper, proud of the offer",
+     "cost": 0.0057,
+     "tool": "synthesize_take"
+    },
+    {
+     "text": "Voiced “Both, today only!” with Jeevan · warm and brisk, a smile, weight on today only",
+     "cost": 0.0153,
+     "tool": "synthesize_take"
+    },
+    {
+     "text": "Voiced “Two of each!” with Varsha · happy, festive, decisive",
+     "cost": 0.0108,
+     "tool": "synthesize_take"
+    },
+    {
+     "text": "Voiced “Diwali deal on chai?” with Varsha · warm, curious, brisk customer",
+     "cost": 0.024,
+     "tool": "synthesize_take"
+    },
+    {
+     "text": "Voiced “Sweets too?” with Varsha · pleasantly surprised, quick",
+     "cost": 0.0066,
+     "tool": "synthesize_take"
+    },
+    {
+     "text": "Thinking",
+     "cost": 0.4848,
+     "tool": "thinking"
+    }
+   ],
+   "takes": [
+    {
+     "item_id": "i1",
+     "status": "ready",
+     "old_text": "Is the masala chai fresh today?",
+     "new_text": "Diwali deal on chai?",
+     "item_text": "Diwali deal on chai?",
+     "text_matches_item": true,
+     "start": 0.0,
+     "end": 2.180000066757202,
+     "mix": "replace",
+     "fit_notes": [
+      "nearest of 3 takes",
+      "spoken at 0.70× by the model",
+      "the picture at 0.89×"
+     ],
+     "passed": true,
+     "heard": "चाय वाली डील ऑन चाय",
+     "wer": 1.25,
+     "sim_o": 0.7316386812295511,
+     "utmos": 3.40037202835083,
+     "duration_error_s": 0.65
+    },
+    {
+     "item_id": "i2",
+     "status": "ready",
+     "old_text": "Fresh every morning made with ginger.",
+     "new_text": "Twenty percent off!",
+     "item_text": "Twenty percent off!",
+     "text_matches_item": true,
+     "start": 3.059999942779541,
+     "end": 4.559999942779541,
+     "mix": "replace",
+     "fit_notes": [],
+     "passed": true,
+     "heard": "20% off",
+     "wer": 0.0,
+     "sim_o": 0.9071076503430798,
+     "utmos": 3.166740894317627,
+     "duration_error_s": 0.51
+    },
+    {
+     "item_id": "i3",
+     "status": "ready",
+     "old_text": "How much for two cups?",
+     "new_text": "Sweets too?",
+     "item_text": "Sweets too?",
+     "text_matches_item": true,
+     "start": 5.360000133514404,
+     "end": 6.380000114440918,
+     "mix": "replace",
+     "fit_notes": [
+      "nearest of 2 takes"
+     ],
+     "passed": true,
+     "heard": "sweets too?",
+     "wer": 0.0,
+     "sim_o": 0.6483918153299831,
+     "utmos": 3.800363540649414,
+     "duration_error_s": 0.45
+    },
+    {
+     "item_id": "i4",
+     "status": "ready",
+     "old_text": "40 rupees and the biscuits are free.",
+     "new_text": "Both, today only!",
+     "item_text": "Both, today only!",
+     "text_matches_item": true,
+     "start": 7.179999828338623,
+     "end": 9.140000343322754,
+     "mix": "replace",
+     "fit_notes": [
+      "nearest of 3 takes"
+     ],
+     "passed": true,
+     "heard": "Both today only",
+     "wer": 0.0,
+     "sim_o": 0.9474236420292724,
+     "utmos": 3.727961778640747,
+     "duration_error_s": 0.61
+    },
+    {
+     "item_id": "i5",
+     "status": "ready",
+     "old_text": "I will take two.",
+     "new_text": "Two of each!",
+     "item_text": "Two of each!",
+     "text_matches_item": true,
+     "start": 10.380000114440918,
+     "end": 11.300000190734863,
+     "mix": "replace",
+     "fit_notes": [
+      "nearest of 3 takes",
+      "the picture at 1.06×"
+     ],
+     "passed": false,
+     "heard": "Two of each",
+     "wer": 0.0,
+     "sim_o": 0.7676647136464835,
+     "utmos": 3.194941520690918,
+     "duration_error_s": 0.31
+    }
+   ],
+   "requests": [
+    {
+     "input": 4,
+     "cache_read": 10603,
+     "cache_write": 622,
+     "output": 84
+    },
+    {
+     "input": 2,
+     "cache_read": 11225,
+     "cache_write": 576,
+     "output": 1762
+    },
+    {
+     "input": 2,
+     "cache_read": 11801,
+     "cache_write": 2025,
+     "output": 2677
+    },
+    {
+     "input": 2,
+     "cache_read": 13826,
+     "cache_write": 3710,
+     "output": 194
+    },
+    {
+     "input": 2,
+     "cache_read": 17536,
+     "cache_write": 304,
+     "output": 203
+    },
+    {
+     "input": 2,
+     "cache_read": 17840,
+     "cache_write": 1555,
+     "output": 3357
+    },
+    {
+     "input": 2,
+     "cache_read": 19395,
+     "cache_write": 4392,
+     "output": 3163
+    },
+    {
+     "input": 2,
+     "cache_read": 23787,
+     "cache_write": 3793,
+     "output": 1185
+    }
+   ],
+   "scores": {
+    "wer": 0.25,
+    "wer_vs_asked": null,
+    "sim_o": 0.8004,
+    "utmos": 3.4581,
+    "duration_error_s": 0.506,
+    "text_mismatch": 0,
+    "plan_quality": 1.0,
+    "help_used": null
+   },
+   "plan_quality": {
+    "score": 1.0,
+    "items": 6,
+    "outside": 0,
+    "missed": 0
+   },
+   "cost": {
+    "turn_usd": 0.70953,
+    "turn_by": {
+     "agent": 0.48483,
+     "speech": 0.2247
+    },
+    "setup_usd": 0.0,
+    "scoring_usd": 0.00082,
+    "tokens": {
+     "input": 18,
+     "cache_read": 126013,
+     "cache_write": 16977,
+     "output": 12625
+    },
+    "requests": 8
+   }
+  },
+  {
+   "scenario": "five_line_rewrite",
+   "video_id": "p9",
+   "status": "succeeded",
+   "error": null,
+   "seconds": 184.0,
+   "say": "Rewrite all five lines as a Diwali offer: chai and sweets at 20% off. Same speakers, same length, each line replacing the one it rewrites.",
+   "statements": [
+    {
+     "text": "Is the masala chai fresh today?",
+     "start": 0.0,
+     "end": 2.180000066757202,
+     "speaker": "A",
+     "on_camera": null
+    },
+    {
+     "text": "Fresh every morning made with ginger.",
+     "start": 3.059999942779541,
+     "end": 4.559999942779541,
+     "speaker": "B",
+     "on_camera": null
+    },
+    {
+     "text": "How much for two cups?",
+     "start": 5.360000133514404,
+     "end": 6.380000114440918,
+     "speaker": "A",
+     "on_camera": null
+    },
+    {
+     "text": "40 rupees and the biscuits are free.",
+     "start": 7.179999828338623,
+     "end": 9.140000343322754,
+     "speaker": "B",
+     "on_camera": null
+    },
+    {
+     "text": "Perfect.",
+     "start": 9.920000076293945,
+     "end": 10.199999809265137,
+     "speaker": "A",
+     "on_camera": null
+    },
+    {
+     "text": "I will take two.",
+     "start": 10.380000114440918,
+     "end": 11.300000190734863,
+     "speaker": "A",
+     "on_camera": null
+    }
+   ],
+   "reply": "This turn has used its 25 steps. Say what to do next and I'll carry on.",
+   "question": null,
+   "stopped": "This turn has used its 25 steps. Say what to do next and I'll carry on.",
+   "calls": 25,
+   "steps": [
+    {
+     "text": "Style for this video: Ad voice: keep the brand tone, warm and brisk, state the 20% off today only offer clearly once, land the last word near 0:11.",
+     "cost": null,
+     "tool": "style"
+    },
+    {
+     "text": "Read all 6 lines",
+     "cost": null,
+     "tool": "read_transcript"
+    },
+    {
+     "text": "Looked for sister videos: none",
+     "cost": null,
+     "tool": "list_project_videos"
+    },
+    {
+     "text": "Voiced “Are the Diwali sweets fresh today?” with Sarah · curious, warm, festive customer",
+     "cost": 0.0306,
+     "tool": "synthesize_take"
+    },
+    {
+     "text": "Checked “Made this morning, with fresh masala cha…” before voicing: about 2.4 s for 1.5 s, too long",
+     "cost": null,
+     "tool": "synthesize_take"
+    },
+    {
+     "text": "Voiced “Made fresh this morning!” with Sarah · proud, warm shopkeeper, brisk",
+     "cost": 0.0216,
+     "tool": "synthesize_take"
+    },
+    {
+     "text": "Checked “Any Diwali deal?” before voicing: about 1.4 s for 1.0 s, too long",
+     "cost": null,
+     "tool": "synthesize_take"
+    },
+    {
+     "text": "Checked “Chai and sweets, twenty percent off toda…” before voicing: about 2.4 s for 2.0 s, too long",
+     "cost": null,
+     "tool": "synthesize_take"
+    },
+    {
+     "text": "Checked “Lovely.” before voicing: about 0.7 s for 0.3 s, too long",
+     "cost": null,
+     "tool": "synthesize_take"
+    },
+    {
+     "text": "Voiced “Two of each, please.” with Sarah · happy, decisive",
+     "cost": 0.018,
+     "tool": "synthesize_take"
+    },
+    {
+     "text": "Could not clone Speaker A's voice",
+     "cost": null,
+     "tool": "clone_speaker"
+    },
+    {
+     "text": "Could not clone Speaker B's voice",
+     "cost": null,
+     "tool": "clone_speaker"
+    },
+    {
+     "text": "Looked through 25 voices",
+     "cost": null,
+     "tool": "list_voices"
+    },
+    {
+     "text": "Listened to 0.0–13.0 s",
+     "cost": null,
+     "tool": "hear"
+    },
+    {
+     "text": "Checked “Are the Diwali sweets fresh today?” before voicing: about 3.0 s for 2.2 s, too long",
+     "cost": null,
+     "tool": "synthesize_take"
+    },
+    {
+     "text": "Voiced “Made fresh this morning!” with Varsha · proud, warm shopkeeper, brisk",
+     "cost": 0.0072,
+     "tool": "synthesize_take"
+    },
+    {
+     "text": "Checked “Diwali deal?” before voicing: about 1.3 s for 1.0 s, too long",
+     "cost": null,
+     "tool": "synthesize_take"
+    },
+    {
+     "text": "Checked “Twenty percent off chai and sweets!” before voicing: about 2.5 s for 2.0 s, too long",
+     "cost": null,
+     "tool": "synthesize_take"
+    },
+    {
+     "text": "Too long for its gap: “Great!”, 1.0 s for 0.3 s",
+     "cost": 0.0054,
+     "tool": "synthesize_take"
+    },
+    {
+     "text": "Voiced “Two each, please.” with Viraj · happy, decisive",
+     "cost": 0.0204,
+     "tool": "synthesize_take"
+    },
+    {
+     "text": "Voiced “Diwali sweets ready?” with Riya Rao · curious, warm, festive customer",
+     "cost": 0.018,
+     "tool": "synthesize_take"
+    },
+    {
+     "text": "Voiced “Fresh chai and sweets!” with Varsha · proud, warm shopkeeper, brisk",
+     "cost": 0.0132,
+     "tool": "synthesize_take"
+    },
+    {
+     "text": "Voiced “Any deal?” with Riya Rao · hopeful, a little playful",
+     "cost": 0.0081,
+     "tool": "synthesize_take"
+    },
+    {
+     "text": "Voiced “Twenty percent off both!” with Varsha · warm and clear, the offer stated plainly, a smile in it",
+     "cost": 0.0144,
+     "tool": "synthesize_take"
+    },
+    {
+     "text": "Too long for its gap: “Yes!”, 0.9 s for 0.3 s",
+     "cost": 0.0036,
+     "tool": "synthesize_take"
+    },
+    {
+     "text": "Checked “Two each, please.” before voicing: about 1.2 s for 0.9 s, too long",
+     "cost": null,
+     "tool": "synthesize_take"
+    },
+    {
+     "text": "Thinking",
+     "cost": 0.4803,
+     "tool": "thinking"
+    }
+   ],
+   "takes": [
+    {
+     "item_id": "i1",
+     "status": "ready",
+     "old_text": "Is the masala chai fresh today?",
+     "new_text": "Diwali sweets ready?",
+     "item_text": "Diwali sweets ready?",
+     "text_matches_item": true,
+     "start": 0.0,
+     "end": 2.180000066757202,
+     "mix": "replace",
+     "fit_notes": [
+      "nearest of 3 takes"
+     ],
+     "passed": true,
+     "heard": "Diwali sweets ready?",
+     "wer": 0.0,
+     "sim_o": 0.8762776881685839,
+     "utmos": 4.270044326782227,
+     "duration_error_s": 0.02
+    },
+    {
+     "item_id": "i2",
+     "status": "ready",
+     "old_text": "Fresh every morning made with ginger.",
+     "new_text": "Fresh chai and sweets!",
+     "item_text": "Fresh chai and sweets!",
+     "text_matches_item": true,
+     "start": 3.059999942779541,
+     "end": 4.559999942779541,
+     "mix": "replace",
+     "fit_notes": [
+      "nearest of 2 takes"
+     ],
+     "passed": false,
+     "heard": "Fresh chai and sweets",
+     "wer": 0.0,
+     "sim_o": 0.7437483644732809,
+     "utmos": 4.0174479484558105,
+     "duration_error_s": 0.4
+    },
+    {
+     "item_id": "i3",
+     "status": "ready",
+     "old_text": "I will take two.",
+     "new_text": "Two each, please.",
+     "item_text": "Two each, please.",
+     "text_matches_item": true,
+     "start": 10.380000114440918,
+     "end": 11.300000190734863,
+     "mix": "replace",
+     "fit_notes": [
+      "nearest of 3 takes",
+      "spoken at 1.15× by the model",
+      "the picture at 1.12×",
+      "speech at 1.08× speed"
+     ],
+     "passed": false,
+     "heard": "Two each, please",
+     "wer": 0.0,
+     "sim_o": 0.4658190311464085,
+     "utmos": 3.4809184074401855,
+     "duration_error_s": 0.18
+    },
+    {
+     "item_id": "i5",
+     "status": "ready",
+     "old_text": "How much for two cups?",
+     "new_text": "Any deal?",
+     "item_text": "Any deal?",
+     "text_matches_item": true,
+     "start": 5.360000133514404,
+     "end": 6.380000114440918,
+     "mix": "replace",
+     "fit_notes": [
+      "nearest of 3 takes"
+     ],
+     "passed": true,
+     "heard": "Any deal?",
+     "wer": 0.0,
+     "sim_o": 0.5896931883349626,
+     "utmos": 3.4884719848632812,
+     "duration_error_s": 0.53
+    },
+    {
+     "item_id": "i6",
+     "status": "ready",
+     "old_text": "40 rupees and the biscuits are free.",
+     "new_text": "Twenty percent off both!",
+     "item_text": "Twenty percent off both!",
+     "text_matches_item": true,
+     "start": 7.179999828338623,
+     "end": 9.140000343322754,
+     "mix": "replace",
+     "fit_notes": [
+      "nearest of 2 takes"
+     ],
+     "passed": false,
+     "heard": "20% off both",
+     "wer": 0.0,
+     "sim_o": 0.7126226303112662,
+     "utmos": 4.083441734313965,
+     "duration_error_s": 0.57
+    }
+   ],
+   "requests": [
+    {
+     "input": 4,
+     "cache_read": 11225,
+     "cache_write": 0,
+     "output": 87
+    },
+    {
+     "input": 2,
+     "cache_read": 11225,
+     "cache_write": 512,
+     "output": 1581
+    },
+    {
+     "input": 2,
+     "cache_read": 11737,
+     "cache_write": 1834,
+     "output": 2393
+    },
+    {
+     "input": 2,
+     "cache_read": 13571,
+     "cache_write": 3143,
+     "output": 185
+    },
+    {
+     "input": 2,
+     "cache_read": 16714,
+     "cache_write": 295,
+     "output": 197
+    },
+    {
+     "input": 2,
+     "cache_read": 17009,
+     "cache_write": 1549,
+     "output": 3408
+    },
+    {
+     "input": 2,
+     "cache_read": 18558,
+     "cache_write": 4410,
+     "output": 4113
+    },
+    {
+     "input": 2,
+     "cache_read": 22968,
+     "cache_write": 5136,
+     "output": 565
+    }
+   ],
+   "scores": {
+    "wer": 0.0,
+    "wer_vs_asked": null,
+    "sim_o": 0.6776,
+    "utmos": 3.8681,
+    "duration_error_s": 0.34,
+    "text_mismatch": 0,
+    "plan_quality": 1.0,
+    "help_used": null
+   },
+   "plan_quality": {
+    "score": 1.0,
+    "items": 6,
+    "outside": 0,
+    "missed": 0
+   },
+   "cost": {
+    "turn_usd": 0.64081,
+    "turn_by": {
+     "agent": 0.48031,
+     "speech": 0.1605
+    },
+    "setup_usd": 0.0,
+    "scoring_usd": 0.00085,
+    "tokens": {
+     "input": 18,
+     "cache_read": 123007,
+     "cache_write": 16879,
+     "output": 12529
+    },
+    "requests": 8
+   }
+  }
+ ],
+ "summary": {
+  "five_line_rewrite": {
+   "n": 3,
+   "wer": {
+    "mean": 0.1667,
+    "min": 0.0,
+    "max": 0.25
+   },
+   "wer_vs_asked": null,
+   "sim_o": {
+    "mean": 0.7211,
+    "min": 0.6776,
+    "max": 0.8004
+   },
+   "utmos": {
+    "mean": 3.8328,
+    "min": 3.4581,
+    "max": 4.1723
+   },
+   "duration_error_s": {
+    "mean": 0.3637,
+    "min": 0.245,
+    "max": 0.506
+   },
+   "plan_quality": {
+    "mean": 1.0,
+    "min": 1.0,
+    "max": 1.0
+   },
+   "text_mismatch": {
+    "mean": 0.0,
+    "min": 0,
+    "max": 0
+   },
+   "turn_usd": {
+    "mean": 0.64026,
+    "min": 0.57045,
+    "max": 0.70953
+   }
+  }
+ }
+}

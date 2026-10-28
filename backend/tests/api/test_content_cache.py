@@ -45,9 +45,9 @@ def test_a_changed_brief_reads_again_and_a_deleted_video_takes_its_reads(client,
     assert len(looker.calls) == 2
     sha = main.repo.get(first["video_id"]).source.media.sha256
     owner = main.repo.get(first["video_id"]).owner
-    assert content_cache.get(main.database, owner, sha, "transcript", content_cache.key_of(main.transcriber_label))
+    assert content_cache.get(main.database, owner, sha, "transcript", content_cache.key_of(main.transcriber_label, content_cache.VERSION))
     main._delete_project(first["video_id"])
-    assert content_cache.get(main.database, owner, sha, "transcript", content_cache.key_of(main.transcriber_label)) is None
+    assert content_cache.get(main.database, owner, sha, "transcript", content_cache.key_of(main.transcriber_label, content_cache.VERSION)) is None
 
 
 def test_the_migration_goes_up_and_down():
@@ -59,3 +59,20 @@ def test_the_migration_goes_up_and_down():
     assert "content_cache" in tables(conn)
     m38.down(conn)
     assert "content_cache" not in tables(conn)
+
+
+def test_a_read_made_the_old_way_is_not_served(client, sample_video, monkeypatch):
+    """Run 5 addendum 0a: a transcript kept before how clips are heard changed
+    (run 5 item 4's voice activity detection) is not handed to a re-upload."""
+    import app.api.main as main
+    from app.store import content_cache
+    heard = Counting(main.transcriber)
+    monkeypatch.setattr(main, "transcriber", heard)
+    first = upload(client, sample_video).json()
+    sha = main.repo.get(first["video_id"]).source.media.sha256
+    owner = main.repo.get(first["video_id"]).owner
+    old = content_cache.key_of(main.transcriber_label)            # the key before VERSION
+    content_cache.put(main.database, owner, sha, "transcript", old, {"words": [], "statements": []})
+    monkeypatch.setattr(content_cache, "VERSION", "next")
+    upload(client, sample_video)
+    assert heard.calls == 2

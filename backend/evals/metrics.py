@@ -25,9 +25,13 @@ _NUMBERS = {"zero": "0", "one": "1", "two": "2", "three": "3", "four": "4", "fiv
             "eight": "8", "nine": "9", "ten": "10", "twenty": "20", "thirty": "30", "forty": "40", "fifty": "50"}
 
 
+_TAG = re.compile(r"\[[^\]]*\]")
+
+
 def words(text: str) -> list[str]:
-    """Lower case, % said as a word, punctuation (any script) dropped."""
-    text = unicodedata.normalize("NFC", (text or "").lower().replace("%", " percent "))
+    """Lower case, % said as a word, punctuation (any script) dropped, and
+    delivery tags ("[excited]") dropped: they steer the voice, nobody says them."""
+    text = unicodedata.normalize("NFC", _TAG.sub(" ", text or "").lower().replace("%", " percent "))
     out = []
     for token in text.split():
         kept = "".join(ch for ch in token if not unicodedata.category(ch).startswith(("P", "S")))

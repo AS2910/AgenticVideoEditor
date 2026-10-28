@@ -289,18 +289,20 @@ class ClaudePlanner:
 
     def __init__(
         self, api_key: str, workspace_id: str | None, *, model: str = MODEL,
-        client: anthropic.Anthropic | None = None,
+        client: anthropic.Anthropic | None = None, cache: bool = True,
     ) -> None:
         headers = {"anthropic-workspace-id": workspace_id} if workspace_id else None
         self._client = client or anthropic.Anthropic(api_key=api_key, default_headers=headers)
         self._model = model
+        self._cache = cache
 
     def _parse(self, system: str, content, output_format, effort: str, meter: Meter | None):
         try:
             response = self._client.messages.parse(
                 model=self._model, max_tokens=MAX_TOKENS, output_config={"effort": effort},
-                # Cost 1a: the instructions are the same for every clip, so they are cached.
-                system=[{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}],
+                # Cost 1a: the instructions are the same for every clip, so they are cached
+                # (AVE_PLANNER_CACHE=0 sends them plain).
+                system=[{"type": "text", "text": system, **({"cache_control": {"type": "ephemeral"}} if self._cache else {})}],
                 messages=[{"role": "user", "content": content}],
                 output_format=output_format,
             )

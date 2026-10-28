@@ -21,6 +21,8 @@ from evals import clips, metrics
 from evals.scenarios import SCENARIOS, Scenario
 
 RESULTS = Path(__file__).resolve().parent / "results"
+# Runs per scenario (owner's rule from run 5: every comparison on 3 runs, mean and spread).
+RUNS = 3
 # What one scenario has cost at most (setup and turn), from the runs so far; the budget guard uses it.
 ESTIMATE_USD = {"one_line_fix": 0.20, "five_line_rewrite": 0.70, "new_voiceover": 0.35, "hinglish_line": 0.25,
                 "hindi_version": 0.90, "question": 0.15}
@@ -75,8 +77,12 @@ def _score_takes(sc: Scenario, items: list[dict], statements: list[dict], clip: 
     for n, item in enumerate(i for i in items if i.get("candidate") and i.get("status") != "dismissed"):
         cand = item["candidate"]
         audio = metrics.candidate_audio(db, pid, cand["candidate_id"])
+        # The words the take was voiced from: a line whose later, longer try did not
+        # fit keeps its earlier take, and the item may show the try (run 5 addendum 0a).
+        said = (cand.get("plan") or {}).get("new_text") or item["new_text"]
         row = {"item_id": item["item_id"], "status": item["status"], "old_text": item.get("old_text"),
-               "new_text": item["new_text"], "start": item["selection"]["start"], "end": item["selection"]["end"],
+               "new_text": said, "item_text": item["new_text"], "text_matches_item": said == item["new_text"],
+               "start": item["selection"]["start"], "end": item["selection"]["end"],
                "mix": item.get("mix"), "fit_notes": cand.get("fit_notes"), "passed": (cand.get("continuity") or {}).get("passed")}
         if audio is None:
             takes.append({**row, "error": "no audio"})
@@ -89,7 +95,7 @@ def _score_takes(sc: Scenario, items: list[dict], statements: list[dict], clip: 
             except Exception as exc:  # noqa: BLE001 - a take Whisper could not hear is reported, not fatal
                 row["whisper_error"] = str(exc)[:200]
         row["heard"] = heard
-        row["wer"] = round(metrics.wer(item["new_text"], heard), 3) if heard is not None else None
+        row["wer"] = round(metrics.wer(said, heard), 3) if heard is not None else None
         if heard is not None and n < len(expected):
             row["wer_vs_asked"] = round(metrics.wer(expected[n], heard), 3)
         # The speaker the take replaces, from the original clip (an added line has none).
@@ -160,6 +166,7 @@ def run_one(api: Api, sc: Scenario, db: Path, log: Path, cap: float, keys: dict)
             "sim_o": _mean(t.get("sim_o") for t in takes),
             "utmos": _mean(t.get("utmos") for t in takes),
             "duration_error_s": _mean(t.get("duration_error_s") for t in takes),
+            "text_mismatch": sum(1 for t in takes if t.get("text_matches_item") is False),
             "plan_quality": quality["score"],
             "help_used": any((s.get("data") or {}).get("tool") == "search_help" for s in steps) if sc.question else None,
         },
@@ -170,8 +177,26 @@ def run_one(api: Api, sc: Scenario, db: Path, log: Path, cap: float, keys: dict)
     }
 
 
+def summary(runs: list[dict]) -> dict[str, dict]:
+    """Per scenario: how many runs, and each score's and the turn cost's mean
+    and spread (lowest and highest). One run is not a measurement (owner's rule,
+    run 5): every comparison is made on these."""
+    from evals.compare import SCORES
+    out: dict[str, dict] = {}
+    for name in dict.fromkeys(r["scenario"] for r in runs if r.get("status") != "error"):
+        rs = [r for r in runs if r["scenario"] == name and r.get("status") != "error"]
+        row = {"n": len(rs)}
+        for key in (*SCORES, "text_mismatch"):
+            vals = [r["scores"].get(key) for r in rs if r["scores"].get(key) is not None]
+            row[key] = {"mean": round(sum(vals) / len(vals), 4), "min": min(vals), "max": max(vals)} if vals else None
+        costs = [r["cost"]["turn_usd"] for r in rs]
+        row["turn_usd"] = {"mean": round(sum(costs) / len(costs), 5), "min": min(costs), "max": max(costs)}
+        out[name] = row
+    return out
+
+
 def run(base: str, db: Path, log: Path, label: str, only: list[str] | None, cap: float, budget: float,
-        out_dir: Path = RESULTS) -> Path:
+        out_dir: Path = RESULTS, runs_each: int = RUNS) -> Path:
     api = Api(base)
     # AVE_EVAL_STT=openai|elevenlabs picks the scorer that hears the takes (ElevenLabs by default).
     use = os.environ.get("AVE_EVAL_STT", "elevenlabs")
@@ -179,7 +204,7 @@ def run(base: str, db: Path, log: Path, label: str, only: list[str] | None, cap:
     keys = {k: v for k, v in keys.items() if v}
     if not keys:
         print("No speech to text key: WER is not scored.", flush=True)
-    chosen = [s for s in SCENARIOS if not only or s.name in only]
+    chosen = [s for s in SCENARIOS if not only or s.name in only for _ in range(max(1, runs_each))]
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     out_dir.mkdir(parents=True, exist_ok=True)
     out = out_dir / f"{stamp}-{label or 'run'}.json"
@@ -204,9 +229,9 @@ def run(base: str, db: Path, log: Path, label: str, only: list[str] | None, cap:
               f"scoring ${c['scoring_usd']:.4f}) · WER {s['wer']} · SIM-o {s['sim_o']} · UTMOS {s['utmos']} · "
               f"dur {s['duration_error_s']} · plan {s['plan_quality']}", flush=True)
         runs.append(rec)
-        out.write_text(json.dumps({"label": label, "stamp": stamp, "spent_usd": round(spent, 5), "runs": runs},
-                                  ensure_ascii=False, indent=1))
-    out.write_text(json.dumps({"label": label, "stamp": stamp, "spent_usd": round(spent, 5), "runs": runs},
-                              ensure_ascii=False, indent=1))
+        out.write_text(json.dumps({"label": label, "stamp": stamp, "spent_usd": round(spent, 5), "runs": runs,
+                                   "summary": summary(runs)}, ensure_ascii=False, indent=1))
+    out.write_text(json.dumps({"label": label, "stamp": stamp, "spent_usd": round(spent, 5), "runs": runs,
+                               "summary": summary(runs)}, ensure_ascii=False, indent=1))
     print(f"\n${spent:.4f} spent in all → {out}")
     return out

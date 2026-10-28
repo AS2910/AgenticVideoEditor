@@ -104,9 +104,10 @@ def view(record: dict) -> dict:
     return {**record, "beats": beats}
 
 
-def context_lines(record: dict | None) -> list[str]:
+def context_lines(record: dict | None, trim: bool = False) -> list[str]:
     """The understanding as Voltage reads it at the top of a turn. The user's
-    corrections come first and are said to win."""
+    corrections come first and are said to win. `trim` (cost 1e,
+    AVE_OPENING_TRIM, off by default) drops a motion peak a named beat already marks."""
     if not record:
         return []
     v = view(record)
@@ -124,7 +125,7 @@ def context_lines(record: dict | None) -> list[str]:
     if read.get("on_screen_text"):
         out.append("On screen: " + "; ".join(f"“{t}”" for t in read["on_screen_text"]))
     # Cost 1e: a motion peak at the moment a named beat already marks says nothing more.
-    named = [b["at"] for b in v.get("beats", []) if b.get("kind") == "visual" or b.get("source") == "user"]
+    named = [b["at"] for b in v.get("beats", []) if b.get("kind") == "visual" or b.get("source") == "user"] if trim else []
     beats = [f"{b['at']:.1f} s {b['label']}" + (" (user)" if b.get("source") == "user" else "" if b.get("confidence", 0) >= 0.6 else " (unsure)")
              for b in v.get("beats", []) if b.get("kind") != "cut"
              and not (b.get("kind") == "motion" and any(abs(b["at"] - t) <= SAME_MOMENT_S for t in named))]

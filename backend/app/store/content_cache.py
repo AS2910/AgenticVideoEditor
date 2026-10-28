@@ -18,6 +18,12 @@ from typing import Any
 from app.store.db import Database
 from app.timefmt import now_iso
 
+# Part of every read's key: raise it whenever how a clip is heard or read
+# changes, so a read made the old way is never served again. "run5": voice
+# activity detection and the new screens before transcription (run 5 item 4);
+# before it, a re-upload got its pre-VAD transcript back (run 5 addendum 0a).
+VERSION = "run5"
+
 
 def key_of(*parts: Any) -> str:
     raw = json.dumps(parts, ensure_ascii=False, sort_keys=True, default=str)

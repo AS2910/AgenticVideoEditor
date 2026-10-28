@@ -54,6 +54,7 @@ def select_voice(settings: Settings, store: ArtifactStore, budget: VoiceBudget, 
             settings.elevenlabs_api_key, store, budget,
             model=settings.elevenlabs_model, voice_id=settings.elevenlabs_voice_id,
             takes_per_line=settings.takes_per_line, fit_tolerance=settings.fit_tolerance, take_accept=settings.take_accept,
+            early_stop=settings.take_early_stop,
             flex_max=settings.max_flex, post=post,
         )
         return adapter, f"elevenlabs:{settings.elevenlabs_model}:{adapter.identity}"
@@ -98,6 +99,6 @@ def select_planner(settings: Settings, chaos: Chaos | None = None):
     need it say so (20d: no non-agentic behaviour)."""
     if settings.has_anthropic and not settings.dry_run:
         planner = ClaudePlanner(settings.anthropic_api_key or "mock", settings.anthropic_workspace_id,
-                                client=anthropic_client(settings, chaos))
+                                client=anthropic_client(settings, chaos), cache=settings.planner_cache)
         return planner, "mock:rehearsal" if settings.mock_vendors else f"anthropic:{CLAUDE_MODEL}"
     return None, "none"
