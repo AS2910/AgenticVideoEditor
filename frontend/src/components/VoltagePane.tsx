@@ -5,6 +5,8 @@ import { spendLine } from '../lib/money'
 import { artifactUrl } from '../api'
 import { ArrowUp, Check, Info, Loader2, X } from 'lucide-react'
 import { QuestionCard } from './QuestionCard'
+import { useConsent } from '../consent/context'
+import { AttestationCard, RefusalNote } from '../consent/LineRefusal'
 import type { Step } from '../jobs/model'
 import { cn } from '@/lib/utils'
 import { Markdown } from './Markdown'
@@ -290,6 +292,7 @@ export function VoltagePane({
   inputRef, seed, suggestions = [], ready = true, chipRound = 0, note, onChipEvent, seeing, before, children, working, empty, onShowMe, picked, steps = [], summary, readOnly, simple,
   queue = [], queueRecent = [], onEditQueued, onRemoveQueued, queueReadOnly,
 }: VoltagePaneProps) {
+  const consent = useConsent()
   const [prompt, setPrompt] = useState('')
   const [openTrace, setOpenTrace] = useState<number | null>(null)
   const [contextOpen, setContextOpen] = useState(false)
@@ -454,6 +457,8 @@ export function VoltagePane({
                   </button>
                 ) : <Trace steps={t.steps} open={openTrace === index} onToggle={() => setOpenTrace((o) => (o === index ? null : index))} spend={isLatest && t.user ? spend : null} simple={simple} />)}
                 {t.cards.map((c) => <Previews key={c.seq} projectId={projectId} m={c} />)}
+                {/* Voice consent V1 step 6: a line the guard refused, its sentence whole, with Edit the line. */}
+                {consent.on && t.steps.filter((m) => m.data?.refusal).map((m, k) => <RefusalNote key={m.seq ?? `r${k}`} refusal={m.data!.refusal!} videoId={projectId} />)}
                 {t.said.length > 0 && (
                   <div className="flex flex-col gap-2.5 text-[15px] leading-relaxed [&_strong]:font-medium [&_strong]:text-volt">
                     {t.said.map((m, k) => (
@@ -493,7 +498,9 @@ export function VoltagePane({
               {waitingCards.map((q) => <QueuedCard key={q.id} item={q} live={queue} readOnly={queueReadOnly || !!readOnly} onEdit={onEditQueued} onRemove={onRemoveQueued} />)}
             </div>
           )}
-          {question && <QuestionCard question={question} onAnswer={onAnswer} turnCap={turnCap} />}
+          {question && (consent.on && question.kind === 'attestation_required' && question.attestation && !question.resolved
+            ? <AttestationCard key={`${question.attestation.voice}-${question.attestation.statement_version}`} facts={question.attestation} onAnswer={(o) => onAnswer?.(o)} />
+            : <QuestionCard question={question} onAnswer={onAnswer} turnCap={turnCap} />)}
         </div>
         {unseen && (
           <button type="button" className="tag absolute bottom-3 left-1/2 z-10 -translate-x-1/2 whitespace-nowrap rounded-full border-[1.5px] border-ink bg-volt px-3 py-1.5 text-ink pointer-coarse:py-3" onClick={toBottom} data-testid="new-from-voltage">

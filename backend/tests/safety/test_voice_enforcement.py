@@ -227,6 +227,31 @@ def test_the_fast_path_hands_an_attestation_to_the_full_turn(videos):
     assert not out.made
 
 
+def test_the_fast_path_route_asks_for_the_attestation_before_any_job_then_voices(client, videos, monkeypatch):
+    """Step 6: the quick route answers 409 attestation_required itself (the editor opens
+    the modal), so no job starts and no full turn is planned; after attesting, the same
+    request is voiced straight away as one take."""
+    from tests.api.test_endpoints import _agent_on, await_job
+    voice = _clone()
+    scripted = _agent_on(monkeypatch, main, [])                 # any planning call would find no answer
+    line = main._lines(repo.get("p1"))[0]
+    body = {"start": line.start, "end": line.end, "text": "Get 30% off this weekend only.", "before": line.text}
+    asked = client.post("/videos/p1/lines/quick", json=body, headers={"X-Requested-With": "voltage"})
+    assert asked.status_code == 409, asked.text
+    detail = asked.json()["detail"]
+    assert detail["code"] == "attestation_required" and detail["voice"] == voice
+    assert detail["statement_version"] == vg.STATEMENT_VERSION and detail["speaker_name"] == "Asha"
+    assert client.get("/videos/p1/messages").json() == []        # no job, no turn: nothing was said or planned
+    attested = client.post(f"/videos/p1/voices/{voice}/attest", json={"choice": "my_voice", "statement_version": vg.STATEMENT_VERSION},
+                           headers={"X-Requested-With": "voltage"})
+    assert attested.status_code == 201, attested.text
+    again = client.post("/videos/p1/lines/quick", json=body, headers={"X-Requested-With": "voltage"})
+    assert again.status_code == 202 and again.json()["route"] == "fast", again.text
+    result = await_job(client, again.json()["job_id"])["result"]
+    assert result["fallback"] is None and result["plan"]["items"][0]["status"] == "ready"
+    assert scripted.calls == []                                  # never a planning call
+
+
 def test_a_video_voice_on_another_video_is_out_of_scope_everywhere(client, videos):
     voice = _clone()
     _attest(voice)
@@ -358,3 +383,48 @@ def test_with_the_flag_off_nothing_is_asked(videos):
     with database.tx() as c:
         assert c.execute("SELECT COUNT(*) FROM line_checks").fetchone()[0] == 0
         assert c.execute("SELECT COUNT(*) FROM synthesis_log").fetchone()[0] == 0
+
+
+def test_a_batch_row_keeps_the_attestation_card_and_its_facts():
+    """Step 6: the batch board opens the same card from the row (kind and facts kept); other questions are as before."""
+    facts = {"voice": "v-clone", "video_id": "p1", "speaker_name": "Asha", "statement_version": vg.STATEMENT_VERSION}
+    card = main._question_of({"question": {"text": "Use Asha's voice?", "options": ["Use this voice", "Cancel"],
+                                           "kind": "attestation_required", "attestation": facts}})
+    assert card == {"text": "Use Asha's voice?", "options": ["Use this voice", "Cancel"], "kind": "attestation_required",
+                    "attestation": facts}
+    assert main._question_of({"question": {"text": "Which line?", "options": ["One", "Two"]}}) == {"text": "Which line?", "options": ["One", "Two"]}
+
+
+def test_retrying_a_take_in_a_clone_asks_for_the_attestation_before_the_job(client, videos):
+    """Step 6: Retry on a failed line answers 409 attestation_required itself, so the editor's modal opens; then it retries."""
+    voice = _clone()
+    job = main.activity.create("p1", "voice_line", line_ids=["i1"],
+                               params={"plan_id": "x", "selection": [0.0, 1.0], "text": "Get 30% off.", "voice_id": voice})
+    main.activity.fail(job.job_id, "vendor_failed", "Something went wrong on our end.")
+    H = {"X-Requested-With": "voltage"}
+    asked = client.post(f"/videos/p1/jobs/{job.job_id}/retry", headers=H)
+    assert asked.status_code == 409 and asked.json()["detail"]["code"] == "attestation_required", asked.text
+    _attest(voice)
+    assert client.post(f"/videos/p1/jobs/{job.job_id}/retry", headers=H).status_code == 202
+
+
+def test_language_versions_in_the_masters_clone_ask_for_the_attestation_first(client, videos, monkeypatch):
+    """Step 6: Make language versions answers 409 attestation_required before any version is made (the editor's modal)."""
+    from tests.api.test_batch_api import agent, finished
+    voice = _clone()
+    flags.set("projects.batch", "local", True)
+    agent(monkeypatch, {})
+    H = {"X-Requested-With": "voltage"}
+    before = len(repo.language_children("p1"))
+    try:
+        asked = client.post("/videos/p1/languages", json={"languages": ["ta"]}, headers=H)
+        assert asked.status_code == 409 and asked.json()["detail"]["voice"] == voice, asked.text
+        assert len(repo.language_children("p1")) == before                     # nothing made
+        _attest(voice)
+        made = client.post("/videos/p1/languages", json={"languages": ["ta"]}, headers=H)
+        assert made.status_code == 201, made.text
+        finished(client, made.json()["batch_id"])
+        designed = client.post("/videos/p1/languages", json={"languages": ["mr"], "voice": "designed", "dry_run": True}, headers=H)
+        assert designed.status_code == 201
+    finally:
+        flags.clear("projects.batch", "local")

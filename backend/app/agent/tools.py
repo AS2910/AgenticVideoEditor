@@ -30,6 +30,10 @@ class ToolResult:
     data: dict | None = None                    # facts the step message carries (search_help: the articles found)
 
 
+# Voice consent V1 step 6: the guard's refusals of a line the thread shows with their sentence whole.
+REFUSAL_CODES = ("line_blocked", "line_in_review", "voice_unavailable")
+
+
 @dataclass
 class Workbench:
     """The seams into the app a tool may use. Built once by the API from its
@@ -1064,7 +1068,13 @@ def _synthesize_take(wb: Workbench, turn: Turn, args: dict) -> ToolResult:
                 pause = guard_pause(exc)
                 if pause is not None:
                     raise pause          # voice consent V1: the attestation is a card the turn waits on, never prose
-                return ToolResult(f"The take could not be made: {reason}{kept}", step=f"Could not voice “{text[:40]}”: {reason[:80]}")
+                # Voice consent V1 step 6: a blocked, held or paused line carries the guard's code and sentence,
+                # so the thread shows it whole with [Edit the line] (the step's own words are cut to fit).
+                refusal = ({"refusal": {"code": exc.code, "message": exc.message, "item_id": item.item_id,
+                                        "start": selection.start, "end": selection.end}}
+                           if getattr(exc, "code", None) in REFUSAL_CODES else None)
+                return ToolResult(f"The take could not be made: {reason}{kept}", step=f"Could not voice “{text[:40]}”: {reason[:80]}",
+                                  data=refusal)
         cost = max(0.0, wb.ledger.spent_usd(turn.project_id) - before)
         # A3: after the sound and fit checks, the take's own words against the project's words.
         words_check = _word_check(wb, turn, text, candidate, item)

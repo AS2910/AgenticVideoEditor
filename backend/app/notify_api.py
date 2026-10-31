@@ -62,10 +62,15 @@ def _admin(user: str) -> bool:
     return is_admin(user)
 
 
+def _consent(user: str) -> bool:
+    """Voice consent V1 step 6: the held-line kinds are listed for someone with the flag on."""
+    return _api().flags.enabled("voices.cloning_verified", user)
+
+
 @router.get("/me/notifications/settings")
 def get_settings(request: Request) -> dict:
     user = _user(request)
-    return {"kinds": inbox.settings(_api().database, user, _admin(user))}
+    return {"kinds": inbox.settings(_api().database, user, _admin(user), _consent(user))}
 
 
 @router.put("/me/notifications/settings")
@@ -73,6 +78,6 @@ def put_settings(changes: dict[str, dict], request: Request) -> dict:
     """{kind: {in_app?, email?}} for any kinds; the whole list comes back."""
     user = _user(request)
     try:
-        return {"kinds": inbox.set_settings(_api().database, user, changes, _admin(user))}
+        return {"kinds": inbox.set_settings(_api().database, user, changes, _admin(user), _consent(user))}
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from None

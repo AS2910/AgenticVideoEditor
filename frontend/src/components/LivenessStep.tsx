@@ -14,7 +14,7 @@ type State = 'idle' | 'recording' | 'checking' | ConsentStatus
  *  the speaker in the video. The result is one of passed, sent for review (a person listens),
  *  or did not pass, with the reason and what to try. Without the flag the check is the
  *  stand-in of G6 (test mode). */
-export function LivenessStep({ videoId, who, onPassed }: { videoId: string; who?: string | null; onPassed: (attemptId: string | null) => void }) {
+export function LivenessStep({ videoId, who, speaker, onPassed, onSettled }: { videoId: string; who?: string | null; /** The speaker the check is for, when it differs from the name shown (voice consent V1 step 6). */ speaker?: string | null; onPassed: (attemptId: string | null) => void; /** Every answer of the check: passed, review or failed, with its reason. */ onSettled?: (status: ConsentStatus, reason: string) => void }) {
   const [attempt, setAttempt] = useState<ConsentAttempt | null>(null)
   const [state, setState] = useState<State>('idle')
   const [note, setNote] = useState<string | null>(null)
@@ -28,11 +28,12 @@ export function LivenessStep({ videoId, who, onPassed }: { videoId: string; who?
     setNote(a.reason || null)
     setTip(a.tip || null)
     onPassed(a.status === 'passed' ? a.attempt_id : null)
+    if (a.status && a.status !== 'waiting') onSettled?.(a.status, a.reason || '')
   }
   const fresh = async (anew = false) => {
     setState('idle'); setNote(null); setTip(null); onPassed(null)
     try {
-      const a = await startLiveness(videoId, who, anew)
+      const a = await startLiveness(videoId, speaker ?? who, anew)
       setAttempt(a)
       if (a.status && a.status !== 'waiting') settle(a)     // a check of this video already passed, or is with a reviewer
     } catch (e) { setNote(said(e, 'A phrase could not be made. Try again.')) }

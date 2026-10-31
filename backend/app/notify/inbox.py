@@ -16,8 +16,8 @@ the server failed people on our side, once per cause per half hour);
 consent_decided tells an owner what a reviewer decided on their consent
 recording (run 4 item 2). Voice consent V1 step 4: line_review tells admins a
 line is held for a check, line_decided tells its owner what was decided. Those
-two are not in the settings list yet (`UNLISTED`, on by default): step 6 shows
-them with the rest of the voice consent screens.
+two are listed in the settings only for someone with `voices.cloning_verified`
+on (`UNLISTED` otherwise, on by default either way; step 6).
 """
 from __future__ import annotations
 
@@ -93,23 +93,23 @@ def _settings_in(c: sqlite3.Connection, user: str) -> dict[str, tuple[bool, bool
 
 # Kinds only the people who run Voltage get (decision 0: hidden from everyone else).
 ADMIN_KINDS = ("abuse_report", "consent_review", "vendor_failure", "line_review")
-# Sent, but not listed in the settings yet (voice consent V1 step 6 lists them).
+# Sent, but listed in the settings only under voice consent V1 (step 6: `consent=True`).
 UNLISTED = ("line_review", "line_decided")
 
 
-def kinds_for(admin: bool) -> tuple[str, ...]:
-    return tuple(k for k in KINDS if k not in UNLISTED and (admin or k not in ADMIN_KINDS))
+def kinds_for(admin: bool, consent: bool = False) -> tuple[str, ...]:
+    return tuple(k for k in KINDS if (consent or k not in UNLISTED) and (admin or k not in ADMIN_KINDS))
 
 
-def settings(db: Database, user: str, admin: bool = True) -> list[dict]:
+def settings(db: Database, user: str, admin: bool = True, consent: bool = False) -> list[dict]:
     with db.tx() as c:
         found = _settings_in(c, user)
     return [{"kind": k, "label": LABELS[k], "help": HELP[k], "in_app": found[k][0], "email": found[k][1]}
-            for k in kinds_for(admin)]
+            for k in kinds_for(admin, consent)]
 
 
-def set_settings(db: Database, user: str, changes: dict[str, dict], admin: bool = True) -> list[dict]:
-    unknown = [k for k in changes if k not in kinds_for(admin)]
+def set_settings(db: Database, user: str, changes: dict[str, dict], admin: bool = True, consent: bool = False) -> list[dict]:
+    unknown = [k for k in changes if k not in kinds_for(admin, consent)]
     if unknown:
         raise ValueError(f"Unknown kind: {', '.join(unknown)}.")
     with db.tx() as c:
@@ -121,7 +121,7 @@ def set_settings(db: Database, user: str, changes: dict[str, dict], admin: bool 
                       "ON CONFLICT (recipient, kind) DO UPDATE SET in_app = excluded.in_app, email = excluded.email",
                       (user, kind, int(in_app), int(email)))
         analytics.safe_in(c, "notification.settings_changed", user, {"kinds": sorted(changes)})
-    return settings(db, user, admin)
+    return settings(db, user, admin, consent)
 
 
 def add_in(c: sqlite3.Connection, user: str, kind: str, title: str, *, body: str = "", link: str | None = None,

@@ -55,6 +55,7 @@ import { Tip } from './guides/Tip'
 import { TipQueueProvider } from './guides/TipQueue'
 import { useReviewComments } from './review/useReviewComments'
 import { useFlags } from './flags/useFlags'
+import { ConsentHost } from './consent/ConsentHost'
 import { REVIEWER_NOTE, useWorkspaceRole } from './lib/useWorkspaceRole'
 import { MembersPage } from './pages/MembersPage'
 import { InvitePage } from './pages/InvitePage'
@@ -2122,6 +2123,8 @@ function Studio() {
                 </div>
               )}
               <LineDoc
+                videoId={project.video_id}
+                family={[project.video_id, project.master_id, (project as { variant_of?: string | null }).variant_of].filter((v): v is string => !!v)}
                 statements={statements}
                 words={transcript}
                 speakers={speakers}
@@ -2316,11 +2319,11 @@ function Studio() {
     )
   })()
   return (
-    <>
+    <ConsentHost>
       {page}
       {showChecklist && !editorShown && <Checklist onShowMe={showMe} />}
       {me !== null && !(me.mode !== 'off' && (!me.user || signedOut)) && <FeedbackHost />}
       {me !== null && !(me.mode !== 'off' && (!me.user || signedOut)) && <BetaSurveyHost />}
-    </>
+    </ConsentHost>
   )
 }

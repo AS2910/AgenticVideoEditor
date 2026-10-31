@@ -1,6 +1,7 @@
 import { signed } from './lib/media'
 import type { QuickAnswer } from './transcript/fastpath'
 import type { Arrangement } from './transcript/arrange'
+import type { AttestationFacts, ConsentAsk, ExportFacts, VoiceScope } from './consent/types'
 import type {
   LanguageSet, LanguagesMade, SyncStarted, Stage, StageMoved, EventPage,
   Suggestion, SuggestionKind, Understanding,
@@ -51,8 +52,43 @@ async function failure(res: Response): Promise<never> {
   throw new ApiError(res.status, message, parsed)
 }
 
+// ── Voice consent V1 step 6: the guard's two questions, asked wherever they come up ──
+/** Shows the attestation modal or the export reminder for a guard's 409 and
+ *  says whether the person confirmed (installed by ConsentHost while
+ *  `voices.cloning_verified` is on; with none installed a 409 is a plain refusal). */
+export type ConsentAsker = (ask: ConsentAsk) => Promise<boolean>
+let consentAsker: ConsentAsker | null = null
+export function setConsentAsker(asker: ConsentAsker | null): void { consentAsker = asker }
+
+/** The guard's question in a 409, if that is what it is. */
+async function consentAskOf(res: Response): Promise<ConsentAsk | null> {
+  try {
+    const detail = ((await res.clone().json()) as { detail?: { code?: string } } | null)?.detail
+    if (detail?.code === 'attestation_required') return { kind: 'attestation', facts: detail as AttestationFacts }
+    if (detail?.code === 'export_confirm_required') return { kind: 'export', facts: detail as ExportFacts }
+  } catch {
+    // Not JSON: not the guard's.
+  }
+  return null
+}
+
+// Each confirmation tries the request again once; a few in a row (two speakers, then the export) at most.
+const MAX_CONSENT_ASKS = 4
+
+/** fetch, and when the guard asks first (409 attestation_required or
+ *  export_confirm_required) ask the person, then send the same request again. */
+async function send(path: string, init: RequestInit): Promise<Response> {
+  let res = await fetch(`${BASE}${path}`, init)
+  for (let asked = 0; asked < MAX_CONSENT_ASKS && res.status === 409 && consentAsker; asked++) {
+    const ask = await consentAskOf(res)
+    if (!ask || !(await consentAsker(ask))) break
+    res = await fetch(`${BASE}${path}`, init)
+  }
+  return res
+}
+
 async function post<T>(path: string, body?: unknown): Promise<T> {
-  const res = await fetch(`${BASE}${path}`, {
+  const res = await send(path, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...FROM_VOLTAGE },
     body: body === undefined ? undefined : JSON.stringify(body),
@@ -388,7 +424,7 @@ export const removeLine = (id: string, span: { start: number; end: number }) =>
   post<{ item_id: string; candidate_id: string; selection: Selection; mix: Mix; plan: Plan }>(`/videos/${id}/lines/remove`, span)
 
 async function patch<T>(path: string, body: unknown): Promise<T> {
-  const res = await fetch(`${BASE}${path}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json', ...FROM_VOLTAGE }, body: JSON.stringify(body) })
+  const res = await send(path, { method: 'PATCH', headers: { 'Content-Type': 'application/json', ...FROM_VOLTAGE }, body: JSON.stringify(body) })
   if (!res.ok) return failure(res)
   return (await res.json()) as T
 }
@@ -400,13 +436,13 @@ async function del(path: string): Promise<void> {
 
 /** A multipart request (a file goes up); the browser sets the boundary. */
 async function request<T>(path: string, init: RequestInit): Promise<T> {
-  const res = await fetch(`${BASE}${path}`, { ...init, headers: { ...FROM_VOLTAGE, ...(init.headers ?? {}) } })
+  const res = await send(path, { ...init, headers: { ...FROM_VOLTAGE, ...(init.headers ?? {}) } })
   if (!res.ok) return failure(res)
   return (await res.json()) as T
 }
 
 async function put<T>(path: string, body: unknown): Promise<T> {
-  const res = await fetch(`${BASE}${path}`, {
+  const res = await send(path, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json', ...FROM_VOLTAGE },
     body: JSON.stringify(body),
@@ -830,3 +866,15 @@ export const joinWaitlist = (r: { email: string; name?: string; use_case?: strin
 export interface WaitlistRow { id: number; email: string; name: string | null; use_case: string | null; created_at: string; invited_at: string | null; invited_by: string | null; status: 'waiting' | 'invited'; beta?: boolean }
 export const getAdminWaitlist = () => get<{ rows: WaitlistRow[]; invite_only: boolean }>('/admin/waitlist')
 export const sendWaitlistInvite = (id: number, beta = false) => post<{ row: WaitlistRow }>(`/admin/waitlist/${id}/invite`, beta ? { beta: true } : undefined)
+
+// ── Voice consent V1 step 6 (routes of app/voice_guard_api.py; 404 with the flag off) ──
+/** The attestation modal's answer for a voice (or a speaker before their clone). */
+export const attestVoice = (videoId: string, voice: string, choice: 'my_voice' | 'have_permission', statementVersion: string) =>
+  post<{ id: string }>(`/videos/${encodeURIComponent(videoId)}/voices/${encodeURIComponent(voice)}/attest`, { choice, statement_version: statementVersion })
+/** The export reminder's answer: one for the whole export or batch. */
+export const confirmExport = (exportRef: string, labelOn: boolean) =>
+  post<{ id: string; label_on: boolean }>(`/exports/${encodeURIComponent(exportRef)}/confirm`, { label_on: labelOn })
+/** Your voices' scopes, for the chips' "This video only". */
+export const getVoiceScopes = async () => (await get<{ voices: VoiceScope[] }>('/voices/scopes')).voices
+/** Save to My voices: a video-only voice becomes yours to use anywhere, after a passed own-voice check. */
+export const promoteVoice = (voiceId: string) => post<VoiceScope>(`/voices/${encodeURIComponent(voiceId)}/promote`, {})

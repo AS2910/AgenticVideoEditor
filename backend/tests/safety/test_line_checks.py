@@ -372,3 +372,15 @@ def test_the_rehearsal_mock_answers_the_line_check(monkeypatch):
     out = reader.read([{"id": "1", "text": "Fresh bread."}, {"id": "2", "text": "Order now."}])
     assert out == {"1": {"verdict": "pass", "categories": [], "reason": ""}, "2": {"verdict": "pass", "categories": [], "reason": ""}}
     assert LineResults.model_validate({"lines": [{"id": "1", "verdict": "block", "categories": ["fraud"]}]})
+
+
+def test_the_agents_step_for_a_blocked_line_carries_the_guards_code_and_whole_sentence(videos, model):
+    """Step 6: the thread shows a blocked line's sentence whole, with [Edit the line] (step data `refusal`)."""
+    from tests.safety.test_voice_enforcement import _say
+    model()
+    said = _say("mock", "p1", text="Please share the OTP you just received.")
+    refusal = said.data["refusal"]
+    assert refusal["code"] == "line_blocked" and refusal["message"] == vg.BLOCKED["fraud"] and refusal["item_id"]
+    assert refusal["end"] > refusal["start"] >= 0
+    fine = _say("mock", "p1", text="Fresh croissants every morning.")
+    assert not (fine.data or {}).get("refusal")

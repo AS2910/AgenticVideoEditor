@@ -85,6 +85,7 @@ class Outcome:
     step: str | None = None         # the step line the thread shows
     note: str | None = None         # why it goes the full way instead (when not made)
     fallback: bool = False          # not made, and the full turn should take it (fit, a yes); a vendor failure stays failed
+    data: dict | None = None        # what the step message carries (voice consent V1 step 6: a guard's `refusal`)
 
 
 _ESTIMATE = re.compile(r"about (\d+(?:\.\d+)?) s for (\d+(?:\.\d+)?) s")
@@ -139,7 +140,7 @@ def voice(wb, turn, *, line_no: int | None, item_id: str | None, text: str, voic
                        note="That one needs Voltage, so it is taking it from here.")
     # The vendor failed: the row says why; a full turn would only fail again.
     return Outcome(False, item.item_id if item else None, cost_usd=result.cost_usd, step=result.step,
-                   note=getattr(item, "error", None) if item is not None else None)
+                   note=getattr(item, "error", None) if item is not None else None, data=result.data)
 
 
 def lines_now(lines, edits, items) -> list:

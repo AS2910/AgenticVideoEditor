@@ -4300,7 +4300,13 @@ def _question_of(out: dict) -> dict | None:
     q = out.get("question")
     if not q:
         return None
-    return {"text": q.get("text"), "options": [o.get("label") if isinstance(o, dict) else o for o in q.get("options") or []]}
+    return {"text": q.get("text"), "options": [o.get("label") if isinstance(o, dict) else o for o in q.get("options") or []],
+            **_guard_card(q)}
+
+
+def _guard_card(q: dict) -> dict:
+    """Voice consent V1 step 6: a guard's card (the attestation) keeps its kind and facts on a batch row."""
+    return {"kind": q["kind"], "attestation": q.get("attestation")} if q.get("kind") == "attestation_required" else {}
 
 
 def _await_turn(turn_job_id: str, wait_s: float = None) -> Job | None:
@@ -4673,7 +4679,8 @@ def _batch_row(child: dict) -> dict:
         elif open_q:
             state = "waiting"
             row["question"] = {"text": open_q.get("text"),
-                               "options": [o.get("label") if isinstance(o, dict) else o for o in open_q.get("options") or []]}
+                               "options": [o.get("label") if isinstance(o, dict) else o for o in open_q.get("options") or []],
+                               **_guard_card(open_q)}
         elif ready:
             state = "ready"
             row["why"] = f"{ready} {'line is' if ready == 1 else 'lines are'} ready to hear."
@@ -5199,6 +5206,11 @@ def make_languages(video_id: str, req: LanguagesRequest, owner: str = Depends(cu
         raise HTTPException(status_code=403, detail=CONSENT_REQUIRED)
     if not _agent_on():
         raise HTTPException(status_code=409, detail=failures.unconfigured("anthropic", "ANTHROPIC_API_KEY or AVE_AGENT", where="agent", owner=owner))
+    if req.voice == "same":
+        # Voice consent V1 step 6: the versions speak in the master's clones; each is attested here (409, the
+        # editor's modal, then the same press again), before any version is made, not in every version's turn.
+        for clone in dict.fromkeys(v for v in repo.clones(video_id).values() if v):
+            voice_guard.require_attestation(owner, video_id, voice_id=clone)
     at = langs.marker(database, video_id)
     lines = _master_lines(video_id)
     # Voice consent V1: the master's lines checked in one call; translations of lines that all passed take the rules.
@@ -9018,8 +9030,33 @@ def quick_line(project_id: str, req: QuickLineRequest, owner: str = Depends(curr
     log.info("fast path route video=%s fast=%s reason=%s changed=%d", project_id, routed.fast, routed.reason, routed.changed)
     if not routed.fast:
         return {**take_turn(project_id, TurnRequest(text=sentence), owner, ticket=ticket), "route": "full", "reason": routed.reason}
+    _quick_attestation(owner, project_id, wanted, current_voice, own_voices, speaker)
     return {**_start_quick(project_id, record, owner, sentence, text, line, item, wanted, current_voice, own_voices,
                            req.delivery, prefs, limit, ticket), "route": "fast", "reason": routed.reason}
+
+
+def _quick_attestation(owner: str, project_id: str, wanted: str, current_voice: str, own_voices: set, speaker) -> None:
+    """Voice consent V1 step 6: the fast path asks for the attestation before its
+    job starts (409 attestation_required), so the editor opens the modal and sends
+    the same edit again, instead of the quick job handing the line to a full turn
+    (which costs a planning call) only to pause on the card. The voice is the one
+    the take would use: the chosen one, else the speaker's picked voice, else
+    their clone (made, or about to be made for them)."""
+    if not voice_guard.enabled(owner):
+        return
+    chosen = wanted or current_voice
+    if chosen and chosen not in own_voices:
+        voice_guard.require_attestation(owner, project_id, voice_id=chosen)
+        return
+    if speaker is not None and getattr(speaker, "voice_id", None):
+        voice_guard.require_attestation(owner, project_id, voice_id=speaker.voice_id)
+        return
+    key = speaker.label if speaker is not None else ProjectRepository.WHOLE_CLIP
+    made = repo.clones(project_id).get(key)
+    if made:
+        voice_guard.require_attestation(owner, project_id, voice_id=made)
+    elif clones.available:
+        voice_guard.require_attestation(owner, project_id, speaker_label=key)
 
 
 def _start_quick(project_id: str, record: ProjectRecord, owner: str, sentence: str, text: str, line, item,
@@ -9072,7 +9109,8 @@ def _start_quick(project_id: str, record: ProjectRecord, owner: str, sentence: s
                                  text=text, voice_id=use_voice, direction=delivery)
             if out.step:
                 repo.add_message(project_id, "assistant", plain(out.step, text), kind="step", cost=out.cost_usd or None,
-                                 data={"tool": "synthesize_take", "t": round(time.monotonic() - clock_start, 1), "quick": True})
+                                 data={"tool": "synthesize_take", "t": round(time.monotonic() - clock_start, 1), "quick": True,
+                                       **(out.data or {})})
             story: list[str] = []
             fallback = None
             if out.note == fastpath.STOPPED:
@@ -9205,6 +9243,9 @@ def retry_job(project_id: str, job_id: str, owner: str = Depends(current_owner),
             raise HTTPException(status_code=409, detail="This line was never started, so there is nothing to try again. Ask Voltage for it.")
         if activity.active_for_line(project_id, job.line_ids[0]) is not None:
             raise HTTPException(status_code=409, detail="This line is already being voiced.")
+        # Voice consent V1 step 6: a clone with no attestation is asked for here (409, the editor's modal), not in the job.
+        if job.params.get("voice_id"):
+            voice_guard.require_attestation(owner, project_id, voice_id=job.params["voice_id"])
         fresh = activity.create(project_id, "voice_line", line_ids=job.line_ids,
                                 detail={**job.detail, "manual": True, "retry_of": job.job_id}, params=job.params,
                                 within=ticket.within("Voicing the line again"))

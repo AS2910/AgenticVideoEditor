@@ -68,3 +68,17 @@ def test_migration_0025_up_and_down(tmp_path):
     assert not (mine & tabs()) and "workspace_members" in tabs()
     migrate.up(conn)
     assert mine <= tabs()
+
+
+def test_the_held_line_kinds_are_listed_only_under_voice_consent(db):
+    """Voice consent V1 step 6: line_review (admins) and line_decided are in the settings list with the flag on."""
+    off = [k["kind"] for k in inbox.settings(db, "u", admin=True)]
+    assert "line_review" not in off and "line_decided" not in off
+    on = [k["kind"] for k in inbox.settings(db, "u", admin=True, consent=True)]
+    assert on[-2:] == ["line_review", "line_decided"]
+    mine = [k["kind"] for k in inbox.settings(db, "u", admin=False, consent=True)]
+    assert "line_decided" in mine and "line_review" not in mine
+    with pytest.raises(ValueError):
+        inbox.set_settings(db, "u", {"line_decided": {"email": False}})
+    changed = {k["kind"]: k["email"] for k in inbox.set_settings(db, "u", {"line_decided": {"email": False}}, admin=False, consent=True)}
+    assert changed["line_decided"] is False

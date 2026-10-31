@@ -9,6 +9,8 @@ import { cn } from '@/lib/utils'
 import { said, usd } from './fmt'
 import { Tip } from '../guides/Tip'
 import { BatchGate } from './BatchGate'
+import { useConsent } from '../consent/context'
+import { AttestationCard } from '../consent/LineRefusal'
 import { EXAMPLES, boardSummary } from '../lib/batch'
 
 /** What a Fix in all from the project check asks for: that issue, in the videos it names. */
@@ -27,6 +29,7 @@ const running = (b: Batch | null) => !!b && (b.phase === 'running' || b.rows.som
  *  options and an answer box; Undo for lines the batch added. */
 function Row({ row, busy, onAnswer, onUndo }: { row: BatchRow; busy: string | null; onAnswer: (text: string) => void; onUndo: () => void }) {
   const [text, setText] = useState('')
+  const consent = useConsent()
   const undone = row.added?.undone_at
   return (
     <li className="flex flex-col gap-1.5 border-t border-line py-2.5 first:border-t-0" data-testid="batch-row" data-state={row.state}>
@@ -39,7 +42,11 @@ function Row({ row, busy, onAnswer, onUndo }: { row: BatchRow; busy: string | nu
       {row.state === 'ready' && (
         <a className="act self-start" href={hrefFor({ page: 'editor', projectId: row.video_id })} data-testid="batch-review">Hear the changes in {row.filename}</a>
       )}
-      {row.state === 'waiting' && row.question && (
+      {row.state === 'waiting' && row.question && consent.on && row.question.kind === 'attestation_required' && row.question.attestation && (
+        // Voice consent V1 step 6: the paused video's attestation, answered here as in the editor.
+        <AttestationCard tone="sheet" facts={row.question.attestation} onAnswer={onAnswer} />
+      )}
+      {row.state === 'waiting' && row.question && !(consent.on && row.question.kind === 'attestation_required' && row.question.attestation) && (
         <div className="flex flex-col gap-2 rounded-lg border-[1.5px] border-dashed border-ink bg-sunk p-2.5" data-testid="batch-question">
           <span className="text-sm">{row.question.text}</span>
           {row.question.options.length > 0 && (

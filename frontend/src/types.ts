@@ -1,3 +1,5 @@
+import type { AttestationFacts, LineRefusalFacts } from './consent/types'
+export type { AttestationFacts, LineRefusalFacts } from './consent/types'
 export interface Word { text: string; start: number; end: number }
 /** A sentence as spoken, with punctuation — edited from the transcript panel. */
 /** Run 5, item 10: is the speaker seen saying the line (looked at on upload)? */
@@ -113,6 +115,9 @@ export interface PlanQuestion {
   turn_cap?: { needed_usd: number; cap_usd: number } | null
   /** 2026-10-20: settled outside the chat (an item it was about was added, discarded or redone): why, and where. */
   resolved?: { why: string; by: 'editor' | 'chat'; at: string; answer?: string } | null
+  /** Voice consent V1 step 6: a card of the voice guard's (the attestation modal's content), with its facts. */
+  kind?: 'attestation_required'
+  attestation?: AttestationFacts | null
 }
 
 export interface PlanLogEntry { at: string; text: string; detail: string }
@@ -425,7 +430,7 @@ export interface ChatMessage {
   kind?: 'say' | 'step' | 'previews'
   cost?: number
   seq?: number
-  data?: { description?: string; previews?: VoicePreview[]; /** Volt: a step message's tool and clock. */ tool?: string; t?: number; /** Help (2026-10-19): the articles a search_help step used. */ help?: HelpRef[]; /** Run 5 item 5: Voltage's words past two sentences, behind "Why?". */ why?: string; /** Addendum 3.3: your words came from Up next item N. */ queued?: number }
+  data?: { description?: string; previews?: VoicePreview[]; /** Volt: a step message's tool and clock. */ tool?: string; t?: number; /** Help (2026-10-19): the articles a search_help step used. */ help?: HelpRef[]; /** Run 5 item 5: Voltage's words past two sentences, behind "Why?". */ why?: string; /** Addendum 3.3: your words came from Up next item N. */ queued?: number; /** Voice consent V1 step 6: a line the guard refused (blocked, held, paused). */ refusal?: LineRefusalFacts }
 }
 
 export interface QuestionOption {
@@ -782,7 +787,7 @@ export interface BatchRow {
   /** Lines the goal names in this video; null when Voltage decides. */
   lines: number | null; est_usd: number | null; cap_usd: number; job_id: string | null
   state: BatchRowState; label: string; why: string | null
-  question: { text: string; options: string[] } | null
+  question: { text: string; options: string[]; /** Voice consent V1 step 6: the guard's card. */ kind?: 'attestation_required'; attestation?: AttestationFacts | null } | null
   ready: number; spent_usd: number
   added: { edit_ids: string[]; at: string; undone_at: string | null } | null
   answers: { text: string; turn_job_id: string; at: string; spent_usd: number; status?: string }[]

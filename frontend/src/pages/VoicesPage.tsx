@@ -10,6 +10,10 @@ import { cn } from '@/lib/utils'
 import { useOnboarding } from '../guides/onboarding'
 import { useTour } from '../tour/engine'
 import { useFlags } from '../flags/useFlags'
+import { useConsent } from '../consent/context'
+import { ProveVoice } from '../consent/ProveVoice'
+import { VOICES, keptWhy, type ProveOutcome } from '../consent/copy'
+import type { VoiceScope } from '../consent/types'
 import { hrefFor } from '../lib/route'
 import { Bolt, PlayGlyph, Shell, StopGlyph } from './Shell'
 import { barsFor, firstName, said, whenLabel } from './fmt'
@@ -127,6 +131,21 @@ export function VoicesPage({ me }: VoicesPageProps) {
   const kept = (v: MyVoice) => {
     setMine((m) => [v, ...m.filter((x) => x.voice_id !== v.voice_id)])
     setSlots((s) => (s ? { ...s, used: s.used + 1 } : s))
+  }
+  // Voice consent V1 step 6: Save to My voices on a video-only voice, and why one stayed video-only.
+  const scopes = useConsent()
+  const [proving, setProving] = useState<{ name: string; scope: VoiceScope } | null>(null)
+  const [keptNote, setKeptNote] = useState<Record<string, string>>({})
+  const proved = (outcome: ProveOutcome | null) => {
+    const was = proving
+    setProving(null)
+    if (!was || !outcome) return
+    if (outcome.saved) {
+      setMade((all) => all.map((x) => (x.voice_id === was.scope.voice_id ? { ...x, kept: true } : x)))
+      setKeptNote((n) => { const { [was.scope.voice_id]: _gone, ...rest } = n; return rest })
+      scopes.refreshScopes()
+      listVoices().then((v) => { if (v.mine) setMine(v.mine) }, () => {})
+    } else setKeptNote((n) => ({ ...n, [was.scope.voice_id]: keptWhy(outcome) }))
   }
   const keep = async (mv: MadeVoice) => {
     setBusyVoice(mv.voice_id); setListError(null)
@@ -355,9 +374,20 @@ export function VoicesPage({ me }: VoicesPageProps) {
                         <span className="disp text-base font-semibold">{mv.name} <span className="tag font-normal text-faint">· {mv.filename}</span></span>
                         {mv.description && <span className="text-[13px] text-muted-foreground">{mv.description}</span>}
                       </div>
-                      {mv.kept
+                      {(() => {
+                        // Voice consent V1 step 6: a voice cloned from a video works only there until you prove it is yours.
+                        const scope = scopes.scopeOf(mv.voice_id)
+                        if (!scope?.video_only || mv.kept) return null
+                        return (
+                          <div className="col-span-2 flex flex-col items-start gap-1.5 sm:col-span-1 sm:items-end">
+                            <span className="tag text-faint" data-testid="video-only">{VOICES.videoOnly}</span>
+                            <button type="button" className="btn volt sm" onClick={() => setProving({ name: mv.name, scope })} data-testid="save-to-my-voices">{VOICES.save}</button>
+                            {keptNote[mv.voice_id] && <span className="max-w-[40ch] text-[13px] text-needs sm:text-right" role="status" data-testid="kept-why">{keptNote[mv.voice_id]}</span>}
+                          </div>
+                        )
+                      })() ?? (mv.kept
                         ? <button type="button" className="btn sm col-span-2 justify-self-start sm:col-span-1" disabled aria-disabled="true">✓ Kept in yours</button>
-                        : <button type="button" className="btn volt sm col-span-2 justify-self-start sm:col-span-1" data-tour={mi === made.findIndex((x) => !x.kept) ? 'keep-voice' : undefined} onClick={() => void keep(mv)} disabled={busyVoice === mv.voice_id}>{busyVoice === mv.voice_id ? 'Keeping…' : 'Keep in my voices'}</button>}
+                        : <button type="button" className="btn volt sm col-span-2 justify-self-start sm:col-span-1" data-tour={mi === made.findIndex((x) => !x.kept) ? 'keep-voice' : undefined} onClick={() => void keep(mv)} disabled={busyVoice === mv.voice_id}>{busyVoice === mv.voice_id ? 'Keeping…' : 'Keep in my voices'}</button>)}
                     </div>
                   ))}
                 </section>
@@ -496,6 +526,7 @@ export function VoicesPage({ me }: VoicesPageProps) {
           <span className="tnum text-[13px] text-pmuted">{cta.cost}</span>
         </div>
       </aside>
+      {proving && <ProveVoice name={proving.name} scope={proving.scope} onClose={proved} />}
     </Shell>
   )
 }

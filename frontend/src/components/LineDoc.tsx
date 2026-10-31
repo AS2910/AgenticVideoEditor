@@ -36,6 +36,9 @@ import { track } from '../lib/analytics'
 import { Thumbs } from './Thumbs'
 import { CHIP_LABEL, aboutEta, rowChip } from '../jobs/model'
 import type { ChipState, RowChip } from '../jobs/model'
+import { useConsent } from '../consent/context'
+import { LineRefusal } from '../consent/LineRefusal'
+import { LINE, refusalKind, VOICES } from '../consent/copy'
 
 /** What the editor asks for a line: the words and the choices. App says it
  *  to Voltage in one sentence; nothing is voiced outside a turn. */
@@ -94,6 +97,10 @@ interface LineDocProps {
   usdPerChar?: number | null
   /** The take playing in the video right now, if any. */
   playing?: string | null
+  /** The video, for a held line's notification (voice consent V1 step 6). */
+  videoId?: string | null
+  /** This video and its parents (variant of, language version of): a video-only voice from elsewhere is out of scope here. */
+  family?: string[]
   onSeek: (statement: Statement) => void
   /** Hear it: what the editor asks for; App says it to Voltage as one turn. */
   onHear: (key: LineKey, request: LineRequest) => void
@@ -276,7 +283,7 @@ const Spinner = () => <Loader2 size={16} aria-hidden="true" className="shrink-0 
 export function LineDoc({
   statements, words = [], speakers = [], voices = [], revisions = [], selection, currentTime,
   pendingLines = [], items = [], disabled, busy = null, usdPerChar, playing,
-  onSeek, onHear, onAdd, onDiscard, onAddAll, onUndo, onRemove, onHearTake, onRole, mixLines = [], bedUnderDb = 15, onDelivery, onRetry,
+  videoId = null, family = [], onSeek, onHear, onAdd, onDiscard, onAddAll, onUndo, onRemove, onHearTake, onRole, mixLines = [], bedUnderDb = 15, onDelivery, onRetry,
   onShorten, onShortenAll, onEase,
   onEditingChange, onMove, onMoveKept, placing, onPlacing, duration, version = 'edited',
   arranged, onArrange, onArrangeUndo, onPreview, activity = NO_ACTIVITY, bannedWords = [], simple = false,
@@ -286,6 +293,9 @@ export function LineDoc({
   const [at, setAt] = useState<string>('')          // the add editor's "starts at", as typed
   const [placeText, setPlaceText] = useState('')     // the placing control's time, as typed
   const [editing, setEditing] = useState<{ order: number; mode: 'edit' | 'add' | 'layer' } | null>(null)
+  const consent = useConsent()
+  // The latest open(), for the chat's [Edit the line] (voice consent V1 step 6).
+  const openRef = useRef<(order: number, mode: 'edit' | 'add' | 'layer') => void>(() => {})
   const [draft, setDraft] = useState('')
   const [voiceId, setVoiceId] = useState('')
   const [delivery, setDelivery] = useState<string | null>(null)
@@ -450,6 +460,19 @@ export function LineDoc({
     window.addEventListener('voltage:goto-line', go)
     return () => window.removeEventListener('voltage:goto-line', go)
   })
+  // Voice consent V1 step 6: [Edit the line] in the chat opens that line's editor on its current words.
+  useEffect(() => {
+    const edit = (e: Event) => {
+      const at = (e as CustomEvent<{ start: number; end?: number }>).detail?.start
+      if (typeof at !== 'number') return
+      const order = rowsRef.current.findIndex((r) => Math.abs(rowStatement(r).start - at) < 0.05)
+      if (order < 0) return
+      openRef.current(order, 'edit')
+      showRow(document.getElementById(`line-${order}`))
+    }
+    window.addEventListener('voltage:edit-line', edit)
+    return () => window.removeEventListener('voltage:edit-line', edit)
+  }, [])   // eslint-disable-line react-hooks/exhaustive-deps
   // After a move, focus stays on the line that moved.
   const refocus = useRef<string | null>(null)
   useEffect(() => {
@@ -579,6 +602,7 @@ export function LineDoc({
     setMix(last?.mix === 'concatenate' ? 'concatenate' : 'over')
     setAt('')
   }
+  openRef.current = open
   const close = () => {
     if (editing) returnTo.current = editing.order
     setEditing(null)
@@ -713,8 +737,14 @@ export function LineDoc({
           <ControlRow label="Voice">
             <select className={selectClass} aria-label="Voice" value={voiceId} onChange={(e) => setVoiceId(e.target.value)}>
               <option value="">Default voice</option>
-              {voices.map((v) => <option key={v.voice_id} value={v.voice_id}>{voiceLabel(v)}</option>)}
+              {voices.map((v) => <option key={v.voice_id} value={v.voice_id}>{voiceLabel(v)}{consent.scopeOf(v.voice_id)?.video_only ? ` · ${VOICES.videoOnly}` : ''}</option>)}
             </select>
+            {(() => {
+              // Voice consent V1 step 6: a video-only voice picked for another video says so before anything is voiced.
+              const scope = consent.scopeOf(voiceId)
+              return scope?.video_only && scope.source_video_id && family.length > 0 && !family.includes(scope.source_video_id)
+                ? <span className="text-needs" role="status" data-testid="voice-out-of-scope">{LINE.outOfScope}</span> : null
+            })()}
           </ControlRow>
         )}
         {mode === 'add' && (
@@ -910,7 +940,7 @@ export function LineDoc({
   }
 
   /** What stands under a line while Voltage is on it. */
-  const lineBlock = (item: PlanItem | null, speaker: string | null | undefined, chip?: RowChip) => {
+  const lineBlock = (item: PlanItem | null, speaker: string | null | undefined, chip?: RowChip, order?: number) => {
     if (!item) return null
     if (chip?.state === 'queued') {
       return <div className="text-sm text-muted-foreground" data-testid="line-queued">Waiting its turn{chip.eta ? `, ${chip.eta} once it starts` : ''}.</div>
@@ -951,6 +981,16 @@ export function LineDoc({
       // Failed (reason) with Retry inline: the same words and voice through the same job flow; Voltage only when there is no job to retry.
       const reason = chip?.reason ?? item.error
       const job = chip?.job?.retryable ? chip.job : null
+      const retry = job && activity.onRetryJob ? () => void run(`retry-${item.item_id}`, () => activity.onRetryJob!(job)) : onRetry ? () => onRetry(item) : undefined
+      // Voice consent V1 step 6: a line the guard blocked, held or paused says so in the plan's words, with Edit the line.
+      if (consent.on && refusalKind(reason)) {
+        return (
+          <div className="flex flex-col gap-1.5" data-testid="failed">
+            <LineRefusal reason={reason} videoId={videoId} words={item.new_text} onRetry={retry}
+              onEdit={order !== undefined ? () => open(order, 'edit') : undefined} />
+          </div>
+        )
+      }
       return (
         <div className="flex flex-col gap-1.5" data-testid="failed">
           {reason && <div className={cn(metaClass, 'text-needs')} data-testid="failed-reason">{reason}</div>}
@@ -1250,7 +1290,7 @@ export function LineDoc({
                   </div>
                 )}
                 {item.note && !(item.status === 'ready' && c) && <div className={cn(metaClass, 'text-needs')}>{item.note}</div>}
-                <div className={unfold}>{lineBlock(item, item.speaker, chip)}</div>
+                <div className={unfold}>{lineBlock(item, item.speaker, chip, order)}</div>
                 {item.status === 'ready' && c && verbs(item, c, order, 'layer')}
                 {(item.status === 'needs-you' || (item.status === 'failed' && !ranLong(item)) || item.status === 'planned') && (
                   <span className="-ml-2 flex"><button type="button" className="act" onClick={() => void run(`discard-${item.item_id}`, () => onDiscard(item))} disabled={disabled || (pending !== null && !busy)} title={busy ?? undefined}>Discard</button></span>
@@ -1422,7 +1462,7 @@ export function LineDoc({
                 {own?.mix === 'remove' && own.status === 'ready' && (
                   <div className={cn(metaClass, 'text-needs')}>Proposed: these words go, and the room's own sound stays in their place.</div>
                 )}
-                <div className={unfold}>{lineBlock(own, s.speaker, chip)}</div>
+                <div className={unfold}>{lineBlock(own, s.speaker, chip, order)}</div>
                 {proposed && !isAdding && verbs(own!, own!.candidate!, order, 'edit')}
                 {revision && !removed && revision.edit_id && !isAdding && keptActs(s, revision.edit_id, order, 'edit', s.start)}
                 {removed && revision?.edit_id && !isAdding && (
