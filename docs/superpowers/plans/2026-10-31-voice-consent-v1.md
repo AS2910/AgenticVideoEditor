@@ -115,3 +115,29 @@ Not a voice-vendor path: lip-sync (it moves the picture to a take already voiced
 - Every other guard refusal reaches Voltage as the guard's sentence (`voice_out_of_scope`: "This voice can only be used in the video it came from."), and a job or line row shows the same sentence (`failures.say`).
 
 Tests: `backend/tests/safety/test_voice_enforcement.py` (15: the structural four, then no attestation then attested, the agent's pause, the fast path, out of scope from another video, the agent and a batch child and a hand-picked speaker voice, variants and language versions, export and batch export and links, Save to My voices, withdraw, a new statement version, the clone path's order, flag off).
+
+## Step 5: the public-figure block on clone, the no-go list admin
+
+Code: `backend/app/safety/no_go.py` (`VoiceListNoGo`, the guard's `no_go`), `backend/app/no_go_api.py` (routes), migration `backend/app/store/migrations/m0055_no_go_matches.py`, `similarity.speaker_embedding` and `similarity.cosine` (`app/continuity/similarity.py`), wired in `backend/app/api/main.py` (`no_go`). Front end: `frontend/src/pages/admin/VoiceSafetySection.tsx` (a minimal Voice safety tab) holding `NoGoHoldsQueue.tsx` and `NoGoVoicesList.tsx`, calls in `noGoApi.ts`.
+
+| Plan item | Code | Adaptation |
+| --- | --- | --- |
+| On clone, the speaker embedding (same WavLM as consent) against `no_go_voices` | `VoiceListNoGo.check`, from `VoiceGuard.can_clone` (the speaker clone: `CloneService` now hands the cut reference to `guard.before_clone`) and `VoiceGuard.check_no_go` (the two My voices routes, once they have the audio) | `similarity.speaker_embedding` is the same model and cosine as SIM-o, so the score is the consent check's number. An entry stores its unit vector (JSON) and the model it came from; an entry from another model is not compared (unmeasured) |
+| 0.92 or more: block | `clone_not_allowed`, reason `no_go`, "This voice is on the list of voices Voltage does not clone. Pick a voice from the catalogue, or design one from words." | The entry is never named to the user (the name list still names the figure, as before) |
+| 0.84 to 0.92: hold for admin review | `clone_not_allowed`, reason `no_go_review` (the step 2 copy), with `hold_id`; a `no_go_holds` row, the admins told (bell, `consent_review`) | The clone waits: nothing is cut or paid. Approve: the next try of the same clone (this video's speaker, or this exact uploaded audio) goes through. Reject: it is blocked as above. The person is told either way (`consent_decided`). A retry while waiting reuses the hold. Each borderline entry needs its own approval |
+| Below 0.84: continue | pass | |
+| Same bands as consent, logged | `BLOCK_AT = consent.PASS_AT`, `REVIEW_FROM = consent.REVIEW_FROM`; one `no_go_checks` row per check that compared anything (verdict, how, the closest entry, every score) | An empty list compares nothing and writes nothing |
+| Keep the name list | `VoiceListNoGo.names` (`NameListNoGo` over `app/safety/figures.py`) runs first | |
+| No speaker model | List empty: nothing to compare, the clone continues. List not empty: the clone is held for a person (`how` unmeasured), like the consent check's unmeasured voice | |
+| Interface for a vendor check in V2 | `VoiceListNoGo.vendor`, a `VendorVoiceCheck` (`check(reference) -> NoGoVerdict or None`); its block or review counts like the list's | None today |
+| The list starts empty, admin managed | no seed; `GET/POST/DELETE /admin/no-go-voices` | |
+| Add from an uploaded clip or a reported export | `POST /admin/no-go-voices` (multipart): `name`, `reason`, and `file`, or `mark` (a provenance mark), or `abuse_report_id` (the report's text names a mark), optional `start`/`end` | The clip is read into a 16 kHz WAV in a temporary folder, embedded, and deleted with the folder in the same request; at least 3 s of voice; 503 without the speaker model |
+| Remove with a reason | `DELETE /admin/no-go-voices/{id}` `{reason}` | Clones still waiting on it are closed and their clips deleted |
+| The borderline queue, Approve or Reject with a required reason | `GET /admin/no-go-holds?status=waiting or decided`, `GET /admin/no-go-holds/{id}/audio`, `POST /admin/no-go-holds/{id}` `{decision, reason}`; `GET /admin/no-go-checks` (the log) | A held clip is copied to `data/no-go-holds/` only while it waits and deleted once decided. An admin cannot decide a clone of their own (allowed with sign-in off, where one person is everyone) |
+| Audit trail for every action | `no_go_add`, `no_go_remove`, `no_go_approve`, `no_go_reject` | |
+
+Migration 0055 adds `model`, `source`, `source_ref`, `seconds` to `no_go_voices` and the tables `no_go_checks` and `no_go_holds` (both with `workspace_id` and 0034's RLS policy on Postgres). 0049 to 0054 are left for the other steps of this run (`RESERVED` in `tests/store/test_migrate.py`). `down` refuses while any of the three holds rows.
+
+With the flag off, `can_clone` and `check_no_go` return at once: nothing is embedded, compared or written.
+
+Tests: `backend/tests/safety/test_no_go.py` (14), `frontend/src/pages/admin/VoiceSafetySection.test.tsx` (7).

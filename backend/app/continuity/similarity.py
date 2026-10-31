@@ -128,6 +128,35 @@ def speaker_similarity(reference: Path, candidate: Path, *, embed: Embed | None 
         return None
 
 
+def speaker_embedding(path: Path, *, start: float | None = None, end: float | None = None,
+                      embed: Embed | None = None) -> list[float] | None:
+    """The speaker vector of `path` (or a span of it), unit length, with the
+    same model as SIM-o, so `cosine` of two of these is SIM-o (Voice consent
+    V1, step 5: the no-go list keeps these, never the audio)."""
+    try:
+        embed = embed or _load_embedder()
+        if embed is None:
+            return None
+        x = signals.load(path, start, end) if start is not None else signals.load(path)
+        if x.size < MIN_SECONDS * signals.RATE:
+            return None
+        v = np.asarray(embed(x[: int(MAX_SECONDS * signals.RATE)]), dtype=np.float64)
+        norm = float(np.linalg.norm(v))
+        return None if norm == 0.0 else [float(n) for n in v / norm]
+    except Exception as exc:  # noqa: BLE001
+        log.warning("speaker embedding failed: %s", exc)
+        return None
+
+
+def cosine(a, b) -> float | None:
+    """SIM-o of two speaker vectors, in [0, 1] like `speaker_similarity`; None when they cannot be compared."""
+    x, y = np.asarray(a, dtype=np.float64), np.asarray(b, dtype=np.float64)
+    if x.shape != y.shape or x.size == 0:
+        return None
+    norm = float(np.linalg.norm(x) * np.linalg.norm(y))
+    return None if norm == 0.0 else max(0.0, min(1.0, float(x @ y) / norm))
+
+
 def naturalness(candidate: Path, *, predict: Predict | None = None) -> float | None:
     """UTMOS-style mean opinion score (1-5) of `candidate`."""
     try:

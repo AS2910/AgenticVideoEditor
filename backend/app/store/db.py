@@ -34,7 +34,9 @@ EXTRA_TABLES = ("project_briefs", "project_rules", "project_events", "purged_ite
                 "member_shares", "accounts", "auth_tokens", "content_cache", "video_locks", "video_queue",
                 # Voice consent V1 (0048).
                 "voice_records", "voice_attestations", "export_attestations", "line_checks", "synthesis_log",
-                "no_go_voices")
+                "no_go_voices",
+                # Voice consent V1, step 5 (0055).
+                "no_go_checks", "no_go_holds")
 
 
 def location(default: str | Path) -> str | Path:

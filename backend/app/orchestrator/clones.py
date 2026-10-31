@@ -53,7 +53,8 @@ class CloneService:
         self._refused: dict[tuple[str, str], str] = {}
         # (video_id, who) -> an object with done() and fail(text): the clone's Job. None: untracked.
         self.tracker = None
-        # Voice consent V1: before_clone(video_id, key, name) raises the guard's refusal, clone_pass(video_id)
+        # Voice consent V1: before_clone(video_id, key, name, reference) raises the guard's refusal (the
+        # reference is the clip about to be cloned: step 5 compares it with the no-go list), clone_pass(video_id)
         # opens the vendor for the one call, after_clone(video_id, key, voice_id, name) writes its record. None: no guard.
         self.guard = None
 
@@ -101,7 +102,7 @@ class CloneService:
                 return VoiceChoice(requested, (f"Stock voice: could not cut a clean sample of {who}'s voice.",))
             name = chosen.name if chosen is not None else None
             if self.guard is not None:
-                self.guard.before_clone(project_id, key, name)      # the guard's refusal, before anything is paid
+                self.guard.before_clone(project_id, key, name, Path(reference.path))   # the guard's refusal, before anything is paid
             # One processing model (2026-10-20): the clone is a Job the editor shows.
             track = self.tracker(project_id, who) if self.tracker else None
             try:

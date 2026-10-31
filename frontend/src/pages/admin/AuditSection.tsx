@@ -8,6 +8,8 @@ import { field } from './ui'
 const WORDS: Record<string, string> = {
   grant: 'Granted credits', refund: 'Refund', suspend: 'Suspended', unsuspend: 'Unsuspended', pause: 'Paused paid work',
   resume: 'Resumed paid work', flag: 'Changed a feature', share_revoke: 'Took a link down',
+  no_go_add: 'Added a no-go voice', no_go_remove: 'Removed a no-go voice', no_go_approve: 'Approved a clone close to a no-go voice',
+  no_go_reject: 'Rejected a clone close to a no-go voice',
 }
 
 function detail(e: AdminAuditEntry): string {
@@ -16,6 +18,7 @@ function detail(e: AdminAuditEntry): string {
   if (e.action === 'refund') return d.invoice ? `${d.invoice}` : `${d.credit_reversal} credits taken back`
   if (e.action === 'flag') return `${d.flag} ${d.enabled === null ? 'reset' : d.enabled ? 'on' : 'off'}`
   if (e.action === 'share_revoke') return `${d.share_id}`
+  if (e.action === 'no_go_add' || e.action === 'no_go_remove') return `${d.name}`
   return ''
 }
 

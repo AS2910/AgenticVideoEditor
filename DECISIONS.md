@@ -572,3 +572,17 @@ Each: what, why, how to undo. Built on 3.2's lock and Stop, 3.3's queue. No migr
 - Save to My voices from a speaker (`/voices/mine/from-speaker`) is opened by a passed own-voice check under `voices.cloning_verified` alone (before, it needed the admin's `voices.cloning`). Why: that check is the plan's proof for reuse. Uploading a recording of your own voice still needs `voices.cloning`, as today.
 - Exports: the Export page's file, batch export, a share link people can watch (video or project scope; a reviewer link only when it offers Download) and a review link with Download ask for the reminder. A preview render never does. A link to a batch export shares what was confirmed when the export was made.
 - Not wired, by design: lip-sync (it moves the picture to an existing take, whose own checks stand) and voice design (not a clone). Owner to confirm.
+
+## Voice consent V1, step 5: the public-figure block and the no-go list (2026-10-31)
+
+- The comparison is the consent check's own number: `similarity.speaker_embedding` uses the same WavLM model, unit vectors, and `cosine` clamps to [0, 1] like SIM-o. Entries keep the model name; a vector from another model is never compared (the clone is held instead), so changing the model cannot silently pass a listed voice.
+- What the user sees when held: the step 2 copy, "This voice is held for a quick check before it can be cloned. You'll get a notification when it's cleared." The line falls back as any refused clone does. Approve lets the next try of that clone through (the user voices the line again; the notification says so); it does not resume the job by itself. Reject blocks that clone for good with the no-go sentence. Owner to confirm: auto-resume could come with step 6's card.
+- An approval covers one entry and one subject: the video's speaker (`video:<id>:<label>`), or for an uploaded recording its exact audio (sha256). A new entry later is compared afresh.
+- A voice match never names the entry or its score to the user (that would leak the list and help tune around it); the name list still names the figure, as before.
+- No speaker model: an empty list needs none and the clone continues; a non-empty list holds every clone for a person (fail closed, but not a hard block), as the consent check does with an unmeasured voice. Tests fake the model.
+- Audio kept: an entry keeps only its vector. The admin's clip or the reported export is read into a temporary folder and deleted in the same request. A held clone's clip is copied aside so the admin can listen, and deleted when decided or when its entry is removed.
+- An admin cannot decide a clone of their own, like the plan's rule for held lines; with sign-in off (one local person) they can, or nothing could ever be decided.
+- Logging: one `no_go_checks` row per clone check that compared anything (all scores in it), not one per entry. An empty list writes nothing.
+- Migration numbered 0055, leaving 0049 to 0054 for the other steps built the same night (reserved in the migration test).
+- Admin UI: there was no Voice safety tab in this tree, so a minimal one (`VoiceSafetySection`, one admin section) holds the queue and the list as their own components; step 4's held-lines queue merges in beside them.
+- "From a reported export": by the export's provenance mark, or an abuse report number whose text names one. An export with several voices takes an optional start and end.

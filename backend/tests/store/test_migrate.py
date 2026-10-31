@@ -128,8 +128,9 @@ def _rows(conn) -> dict:
 
 
 # Numbers held for steps on other branches (0032 accounts, 0033 search index; 0038 to 0041 overnight run 4;
-# 0043 to 0046 the other items of overnight run 5, built beside item 7's 0047).
-RESERVED = {32, 33, 38, 39, 40, 41, 43, 44, 45, 46}
+# 0043 to 0046 the other items of overnight run 5, built beside item 7's 0047; 0049 to 0054 the other steps
+# of voice consent V1, built beside step 5's 0055).
+RESERVED = {32, 33, 38, 39, 40, 41, 43, 44, 45, 46, 49, 50, 51, 52, 53, 54}
 
 
 def test_versions_are_numbered_from_one_without_gaps():

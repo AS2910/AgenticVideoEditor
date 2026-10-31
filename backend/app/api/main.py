@@ -71,6 +71,7 @@ from app.flags import FlagStore
 from app import analytics, dataexport, errors_report, failures
 from app.safety import consent as consent_mod, figures as figures_mod, liveness as liveness_mod, provenance as provenance_mod
 from app.safety import voice_guard as voice_guard_mod
+from app.safety import no_go as no_go_mod
 from app.purge import PurgeScheduler
 from app.usage import (
     Ledger, SpendCeilingReached, WHISPER_USD_PER_MINUTE, claude_usd, current_actor, current_turn, money, month_name, month_start,
@@ -203,9 +204,32 @@ def _voice_guard_alert(what: str, exc: BaseException) -> None:
                                      vendor="server"), exc, where=f"voice guard: {what}")
 
 
+def _no_go_embed(path: Path) -> list[float] | None:
+    """The speaker vector the no-go list compares (the consent check's WavLM); None without the model."""
+    from app.continuity import similarity
+    return similarity.speaker_embedding(path) if similarity.available() else None
+
+
+def _no_go_held(hold: dict) -> None:
+    """Step 5: a clone close to a no-go voice waits; the admins are told (the bell)."""
+    with database.tx() as c:
+        for who in _admin_ids():
+            inbox.add_in(c, who, "consent_review", "A clone is close to a voice on the no-go list.",
+                         body=f"{hold['speaker_name'] or 'A speaker'} ({hold['owner']}). Listen and decide.", link="#admin")
+
+
+def _no_go_speaker_model() -> str:
+    from app.continuity import similarity
+    return similarity.SPEAKER_MODEL
+
+
+# Voice consent V1, step 5: the public-figure block (the name list, then the voice against `no_go_voices`).
+no_go = no_go_mod.VoiceListNoGo(database, _no_go_embed, model=_no_go_speaker_model(),
+                                names=voice_guard_mod.NameListNoGo(public_figures),
+                                hold_dir=settings.data_dir / "no-go-holds", on_hold=_no_go_held)
 voice_guard = voice_guard_mod.VoiceGuard(
     database, repo, lambda owner: flags.enabled("voices.cloning_verified", owner),
-    no_go=voice_guard_mod.NameListNoGo(public_figures),
+    no_go=no_go,
     vendor_delete=lambda voice_id: getattr(voice, "delete_voice", lambda v: None)(voice_id),
     export_content=lambda video_id: _export_content(video_id),
     account_verified=_account_verified, alert=_voice_guard_alert,
@@ -222,9 +246,9 @@ class _CloneGuard:
     """Voice consent V1: the speaker clone's checks (CloneService.guard): can_clone,
     then the attestation, before anything is paid; the record after."""
 
-    def before_clone(self, video_id: str, key: str, name: str | None) -> None:
+    def before_clone(self, video_id: str, key: str, name: str | None, reference: Path | None = None) -> None:
         owner = repo.get(video_id).owner
-        voice_guard.can_clone(owner, video_id, key, name)
+        voice_guard.can_clone(owner, video_id, key, name, reference)
         voice_guard.require_attestation(owner, video_id, None, key)
 
     def clone_pass(self, video_id: str):
@@ -2060,6 +2084,7 @@ async def add_my_voice(
                 raise HTTPException(status_code=422, detail="That file has no audio I can read. A WAV, MP3, M4A or a video with sound works.") from None
             if seconds < MIN_MY_VOICE_SECONDS:
                 raise HTTPException(status_code=422, detail=f"That is {seconds:.0f} s; at least {MIN_MY_VOICE_SECONDS:.0f} s of your voice is needed to clone it.")
+            voice_guard.check_no_go(owner, None, None, label, Path(wav))      # step 5: the recording against the no-go list
             try:
                 with voice_guard_mod.vendor_pass(voice_guard_mod.clone_key(owner)):
                     voice_id = voice.create_clone(f"voltage-mine-{label}", wav)
@@ -2198,6 +2223,7 @@ def add_my_voice_from_speaker(req: FromSpeakerRequest, owner: str = Depends(curr
     reference = extract_reference_audio(record.source, record.transcript, artifacts, speaker=spk.label, min_seconds=MIN_MY_VOICE_SECONDS)
     if reference is None:
         raise HTTPException(status_code=422, detail=f"Could not cut a clean sample of {spk.name}'s voice.")
+    voice_guard.check_no_go(owner, req.video_id, spk.label, spk.name, Path(reference.path))   # step 5: the voice itself
     try:
         with voice_guard_mod.vendor_pass(voice_guard_mod.clone_key(owner)):
             voice_id = voice.create_clone(f"voltage-mine-{label}", Path(reference.path))
@@ -11269,7 +11295,7 @@ async def _csrf_header(request: Request, call_next):
 
 def _mount_optional_routers() -> None:
     import importlib
-    for name in ("app.onboarding", "app.help", "app.tutorial", "app.workspace_api", "app.accounts_api", "app.notify_api", "app.analytics_api", "app.feedback_api", "app.billing_api", "app.safety_api", "app.landing_api", "app.emails_api", "app.admin_api", "app.beta_feedback_api", "app.beta_api", "app.lipsync_api", "app.voice_guard_api"):
+    for name in ("app.onboarding", "app.help", "app.tutorial", "app.workspace_api", "app.accounts_api", "app.notify_api", "app.analytics_api", "app.feedback_api", "app.billing_api", "app.safety_api", "app.landing_api", "app.emails_api", "app.admin_api", "app.beta_feedback_api", "app.beta_api", "app.lipsync_api", "app.voice_guard_api", "app.no_go_api"):
         try:
             module = importlib.import_module(name)
         except ImportError:

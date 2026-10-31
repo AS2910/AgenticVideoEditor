@@ -24,7 +24,8 @@ The seams later steps fill:
     LineChecker   step 4: the rules and the check model (`PassThroughLines` today:
                   every line passes, and is still written to line_checks)
     NoGoCheck     step 5: the speaker embedding against `no_go_voices`
-                  (`NameListNoGo` today: the built-in public-figure name list)
+                  (`app.safety.no_go.VoiceListNoGo`, which also keeps the
+                  built-in public-figure name list, `NameListNoGo`)
     export_label  step 7: whether the export carries the "AI voice" label
 """
 from __future__ import annotations
@@ -108,6 +109,9 @@ REASONS = {
     "daily_limit": "You have cloned {n} voices today, the most for one day. Try again tomorrow.",
     "monthly_limit": "You have cloned {n} voices in the last 30 days, the most for a month. Contact support if you need more.",
     "no_go_review": "This voice is held for a quick check before it can be cloned. You'll get a notification when it's cleared.",
+    # Step 5: a voice that matches (or an admin matched) an entry of the no-go list. The entry is never named.
+    "no_go_voice": ("This voice is on the list of voices Voltage does not clone. Pick a voice from the catalogue, "
+                    "or design one from words."),
 }
 
 
@@ -166,23 +170,26 @@ class NoGoVerdict:
     match: str | None = None
     score: float | None = None
     how: str = ""
+    hold_id: str | None = None                    # step 5: the borderline queue item a review waits on
 
 
 class NoGoCheck(Protocol):
-    """Step 5: the speaker's embedding against `no_go_voices` (block at 0.92, review from 0.84)."""
+    """Step 5: the speaker's embedding against `no_go_voices` (block at 0.92, review from 0.84).
+    `reference` None: the caller has no audio yet (it asks again with it, `check_no_go`).
+    `context` is who and what is cloned: owner, video_id, speaker_label, speaker_name."""
     name: str
 
-    def check(self, *, name: str | None, reference: Path | None) -> NoGoVerdict: ...
+    def check(self, *, name: str | None, reference: Path | None, **context) -> NoGoVerdict: ...
 
 
 class NameListNoGo:
-    """Today's check: the built-in public-figure name list (app.safety.figures)."""
+    """The built-in public-figure name list (app.safety.figures)."""
     name = "name list"
 
     def __init__(self, figures) -> None:
         self.figures = figures
 
-    def check(self, *, name: str | None, reference: Path | None) -> NoGoVerdict:
+    def check(self, *, name: str | None, reference: Path | None, **context) -> NoGoVerdict:
         found = self.figures.match(name or "") if name else None
         return NoGoVerdict("block", found, None, self.name) if found else NoGoVerdict("pass", how=self.name)
 
@@ -408,14 +415,29 @@ class VoiceGuard:
             raise refuse("daily_limit", REASONS["daily_limit"].format(n=day), limit=day)
         if self._made_since(owner, self._since(24 * 30)) >= month:
             raise refuse("monthly_limit", REASONS["monthly_limit"].format(n=month), limit=month)
-        if self.no_go is not None:
-            name = speaker_name or (self._speaker_name(video_id, speaker_label) if speaker_label else None)
-            verdict = self.no_go.check(name=name, reference=reference)
-            if verdict.verdict == "block":
+        self.check_no_go(owner, video_id, speaker_label, speaker_name, reference)
+
+    def check_no_go(self, owner: str, video_id: str | None, speaker_label: str | None = None,
+                    speaker_name: str | None = None, reference: Path | None = None) -> None:
+        """The no-go part of can_clone, for a path that has the audio only after
+        the account's checks (an uploaded recording). Raises clone_not_allowed:
+        reason no_go (blocked), or no_go_review (the clone waits for an admin).
+        The name list says which figure matched; a voice match never names the entry."""
+        if not self.enabled(owner) or self.no_go is None:
+            return
+        name = speaker_name or (self._speaker_name(video_id, speaker_label) if speaker_label else None)
+        verdict = self.no_go.check(name=name, reference=reference, owner=owner, video_id=video_id,
+                                   speaker_label=speaker_label, speaker_name=name)
+
+        def refuse(reason: str, message: str | None = None, **data) -> VoiceGuardError:
+            return VoiceGuardError(CLONE_NOT_ALLOWED, message or REASONS[reason], 403, reason=reason, video_id=video_id, **data)
+        if verdict.verdict == "block":
+            if verdict.how == NameListNoGo.name:
                 from app.safety.figures import REFUSAL
                 raise refuse("no_go", REFUSAL, match=verdict.match, score=verdict.score)
-            if verdict.verdict == "review":
-                raise refuse("no_go_review", match=verdict.match, score=verdict.score)
+            raise refuse("no_go", REASONS["no_go_voice"])
+        if verdict.verdict == "review":
+            raise refuse("no_go_review", hold_id=verdict.hold_id)
 
     # ── attestation ──
 
