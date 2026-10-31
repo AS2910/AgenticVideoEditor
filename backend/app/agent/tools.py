@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any, Callable, Sequence
 
 from app import failures
-from app.agent.guards import Guard, TurnBudget, TurnStopped, WaitingForUser
+from app.agent.guards import guard_pause, Guard, TurnBudget, TurnStopped, WaitingForUser
 from app.domain.models import ROLES, Selection, role_of
 from app.domain.plan import Plan, PlanItem
 
@@ -98,6 +98,9 @@ class Workbench:
     # 9a: what the take was heard to say (Whisper on the take itself), for
     # the A3 word check; None, or a call returning None, keeps the vendor's words.
     hear_take: Callable[[str, Any], Sequence[str] | None] | None = None
+    # Voice consent V1: (owner, video_id, voice_id) -> why this voice may not speak here
+    # (another video's clone, withdrawn, paused), or None; None here: every voice may.
+    voice_refusal: Callable[[str, str, str], str | None] | None = None
 
 
 class NoJobs:
@@ -411,13 +414,21 @@ def _hear(wb: Workbench, turn: Turn, args: dict) -> ToolResult:
     return ToolResult(text, step=f"Listened to {start:.1f}–{end:.1f} s")
 
 
+def _usable(wb: Workbench, turn: Turn, voices) -> list[dict]:
+    """Voice consent V1: only the voices that may speak in this video (no other video's clone)."""
+    if wb.voice_refusal is None:
+        return list(voices)
+    owner = getattr(turn.record, "owner", "")
+    return [v for v in voices if wb.voice_refusal(owner, turn.project_id, v["voice_id"]) is None]
+
+
 def _list_voices(wb: Workbench, turn: Turn, args: dict) -> ToolResult:
-    voices = list(wb.voices())
+    voices = _usable(wb, turn, wb.voices())
     if not voices:
         return ToolResult("No voices are available.", step="Looked for voices: none")
     made = {m["voice_id"]: m for m in _made_voices(wb, turn)}
     out = ["Voices that can speak a line (voice_id · name · who · how they sound):"]
-    shared = _project_voices(wb, turn)
+    shared = _usable(wb, turn, _project_voices(wb, turn))
     for v in shared:
         # Folders: the project's voices first; one that carries consent needs no new consent here.
         out.append(f"- {v['voice_id']} · {v['name']} · in this project" + (f" · {v['description']}" if v.get("description") else "")
@@ -429,7 +440,7 @@ def _list_voices(wb: Workbench, turn: Turn, args: dict) -> ToolResult:
             tag = " · designed for this clip" if made[v["voice_id"]].get("kind") == "designed" else " · added from the library for this clip"
         out.append(f"- {v['voice_id']} · {v['name']}" + (f" · {who}" if who else "")
                    + (f" · {v['description']}" if v.get("description") else "") + tag)
-    mine = list(wb.mine(getattr(turn.record, "owner", "")))
+    mine = _usable(wb, turn, wb.mine(getattr(turn.record, "owner", "")))
     if mine:
         out.append("The user's own voices (uploaded by them; \"my voice\" means one of these):")
         for v in mine:
@@ -787,6 +798,12 @@ def _synthesize_take(wb: Workbench, turn: Turn, args: dict) -> ToolResult:
     if not own and voice_id != wb.default_voice() and not any(v["voice_id"] == voice_id for v in known):
         return ToolResult(f"{voice_id} is not a voice in the catalogue. Use list_voices and pick one of its ids, "
                           "or leave it empty for the speaker's own voice.")
+    refused = wb.voice_refusal(getattr(turn.record, "owner", ""), turn.project_id, voice_id) \
+        if not own and wb.voice_refusal is not None else None
+    if refused:
+        # Voice consent V1: another video's clone (or a withdrawn or paused voice) is refused before anything is paid.
+        return ToolResult(f"{refused} Pick another voice from list_voices, or leave voice_id empty for the speaker's own voice.",
+                          step="Could not use that voice here")
     duration = turn.record.source.duration
     record = turn.record
     lines = list(wb.lines(record))
@@ -1044,6 +1061,9 @@ def _synthesize_take(wb: Workbench, turn: Turn, args: dict) -> ToolResult:
                     wb.repo.update_item(turn.project_id, turn.plan_id, item.item_id, status="failed", error=reason, progress=None)
                 kept = (f" {item.item_id} keeps its earlier take {wb.repo.get_plan(turn.project_id, turn.plan_id).item(item.item_id).candidate_id}, ready to hear."
                         if state == "ready" else f" {item.item_id} has no take.")
+                pause = guard_pause(exc)
+                if pause is not None:
+                    raise pause          # voice consent V1: the attestation is a card the turn waits on, never prose
                 return ToolResult(f"The take could not be made: {reason}{kept}", step=f"Could not voice “{text[:40]}”: {reason[:80]}")
         cost = max(0.0, wb.ledger.spent_usd(turn.project_id) - before)
         # A3: after the sound and fit checks, the take's own words against the project's words.

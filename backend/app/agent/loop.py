@@ -158,6 +158,9 @@ def _question_of(w: WaitingForUser) -> dict:
     question = {"text": w.question, "options": list(w.options), "guess": w.guess, "gate": w.gate, "cost_usd": w.cost_usd}
     if w.details:
         question["details"] = list(w.details)
+    if getattr(w, "kind", None):
+        # Voice consent V1: a card the front end opens as the attestation modal (`attestation` holds what it shows).
+        question.update(kind=w.kind, attestation=w.data)
     return question
 
 
@@ -302,6 +305,13 @@ class Agent:
                     results.append(_result_block(use["id"], ToolResult(str(s))))
                     continue
                 except Exception as exc:  # noqa: BLE001 — a tool that breaks is reported to the model, never raised
+                    from app.agent.guards import guard_pause
+                    pause = guard_pause(exc)
+                    if pause is not None:
+                        # Voice consent V1: the attestation is a card the turn waits on, never prose.
+                        ended = pause
+                        results.append(_result_block(use["id"], ToolResult(f"Waiting for the user: {pause.question}")))
+                        continue
                     log.exception("tool %s failed", use["name"])
                     # Run 5 item 1: the model hears the person's words for it (it may repeat them), not the exception's.
                     from app import failures

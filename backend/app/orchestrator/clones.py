@@ -11,6 +11,7 @@ sentence, rather than failing the edit.
 from __future__ import annotations
 
 import threading
+from contextlib import nullcontext
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Collection
@@ -52,6 +53,9 @@ class CloneService:
         self._refused: dict[tuple[str, str], str] = {}
         # (video_id, who) -> an object with done() and fail(text): the clone's Job. None: untracked.
         self.tracker = None
+        # Voice consent V1: before_clone(video_id, key, name) raises the guard's refusal, clone_pass(video_id)
+        # opens the vendor for the one call, after_clone(video_id, key, voice_id, name) writes its record. None: no guard.
+        self.guard = None
 
     @property
     def available(self) -> bool:
@@ -95,10 +99,14 @@ class CloneService:
             )
             if reference is None:
                 return VoiceChoice(requested, (f"Stock voice: could not cut a clean sample of {who}'s voice.",))
+            name = chosen.name if chosen is not None else None
+            if self.guard is not None:
+                self.guard.before_clone(project_id, key, name)      # the guard's refusal, before anything is paid
             # One processing model (2026-10-20): the clone is a Job the editor shows.
             track = self.tracker(project_id, who) if self.tracker else None
             try:
-                voice_id = self._voice.create_clone(f"voltage-{project_id}-{key}", Path(reference.path))
+                with self.guard.clone_pass(project_id) if self.guard is not None else nullcontext():
+                    voice_id = self._voice.create_clone(f"voltage-{project_id}-{key}", Path(reference.path))
             except NonRetryableError as exc:
                 # Run 5 item 1: a refused key or a full plan is ours; the person reads our words, the admins the cause.
                 from app import failures
@@ -123,6 +131,8 @@ class CloneService:
             if track:
                 track.done()
             self._repo.set_clone(project_id, key, voice_id)
+            if self.guard is not None:
+                self.guard.after_clone(project_id, key, voice_id, name)
             return VoiceChoice(voice_id, cloned=True)
 
     def purge(self, project_id: str, keep: Collection[str] = ()) -> list[str]:

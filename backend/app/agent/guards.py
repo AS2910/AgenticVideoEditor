@@ -47,6 +47,25 @@ class WaitingForUser(Exception):
         self.cost_usd = cost_usd
 
 
+class GuardPause(WaitingForUser):
+    """Voice consent V1: a refusal of the voice guard the person answers on a card
+    (the attestation modal, step 6), so the turn waits on it instead of the model
+    saying it. The card carries `kind` (the guard's code) and the guard's facts."""
+
+    def __init__(self, kind: str, data: dict, question: str, options: tuple[str, ...]) -> None:
+        super().__init__(question, options, options[0], gate=False)
+        self.kind, self.data = kind, data
+
+
+def guard_pause(exc: BaseException) -> GuardPause | None:
+    """The card for a guard refusal that pauses the turn (attestation_required), or None."""
+    if not getattr(exc, "pauses", False):
+        return None
+    data = exc.to_dict()
+    who = data.get("speaker_name") or "this speaker"
+    return GuardPause(exc.code, data, f"Use {who}'s voice?", ("Use this voice", "Cancel"))
+
+
 class TurnStopped(Exception):
     """A cap of the turn was reached; the agent is told, and the turn ends."""
 

@@ -89,3 +89,29 @@ Code: `backend/app/safety/voice_guard.py` (the rules, `VoiceGuard`; the vendor s
 Seams for later steps: `LineChecker` (step 4: replace `voice_guard.lines`), `NoGoCheck` (step 5: replace `voice_guard.no_go`, it gets `reference` audio), `export_label(owner, video_id)` (step 7: the label choice), `describe` and `GET /voices/scopes` (step 6's badges).
 
 Tests: `backend/tests/safety/test_voice_guard.py` (33: every function, the flag off, the vendor seam, the routes).
+
+## Step 3: every enforcement point
+
+| Plan path | Where | Checks |
+| --- | --- | --- |
+| Clone a speaker: agent `clone_speaker`, the own voice of a line, a batch child | `CloneService.resolve` (`app/orchestrator/clones.py`) through `CloneService.guard` (`_CloneGuard` in main.py) | `can_clone`, then `require_attestation` for the speaker, before the reference is cut or anything paid; the vendor call inside `clone_pass`; `record_voice` (video scope) after |
+| Clone from the UI: your own recording | `POST /voices/mine` | `can_clone` (limits), the vendor inside `vendor_pass(clone_key)`; recorded as library (origin upload). Still needs `voices.cloning` (the admin-opened path) |
+| Save to My voices from a speaker | `POST /voices/mine/from-speaker` | a passed own-voice check (`own_voice_check_required` without one), which also opens it under `voices.cloning_verified` alone; `can_clone`; library, linked to the check |
+| Save to My voices a clone made in a video | `POST /voices/mine/keep`, `POST /voices/{id}/promote` | `promote`: a passed own-voice check |
+| Any synthesis: `synthesize_take`, Voice it (retry), fast path, language versions, Sync, speech to speech, the Voice Changer | `main._generate`, the only caller of the pipeline (`run_edit`) | `before_synthesis` (scope, attestation for cloned voices, the line), the vendor inside `vendor_pass(synth_key(video))`, then `log_synthesis` with the take id and cost |
+| A voice picked by hand for a speaker | `PUT /videos/{id}/speakers/{label}` | `check_scope` |
+| Export, batch export, share link, review link with download | `POST /videos/{id}/export` (purpose export), `POST /projects/{id}/exports`, `POST /projects/{id}/shares` (video or project scope; a reviewer link only with Download), `POST /videos/{id}/review-links` (with Download) | `require_export_attestation`, one for all the videos a batch or link covers. A link to a batch export (`scope: export`) shares what was confirmed when it was made. Labels and metadata are step 7 (`export_label`) |
+| Agent planning | `list_voices` and `synthesize_take` (`app/agent/tools.py`) through `Workbench.voice_refusal` | `list_voices` lists only voices `check_scope` allows here; `synthesize_take` refuses another video's clone (or a withdrawn or paused one) with the guard's sentence, before anything is paid |
+| Consent withdrawn now (G6) | `withdraw_consent_now` | the video's clones' records follow (`mark_withdrawn`) |
+
+Not a voice-vendor path: lip-sync (it moves the picture to a take already voiced, so the take's own checks stand) and voice design (a designed voice is not a clone; it has no record). Both noted for the owner.
+
+**The vendor behind the guard.** `main.voice` is `GuardedVoice(adapter, voice_guard)`, and the CloneService holds the same object. A structural test reads every Python file under `backend/app` (but the adapters, offline benches and tools): every `synthesize`, `speak_like`, `revoice` and `create_clone` call must be one of six known places, each inside a guard pass, and the pipeline must be reached only from `_generate`. A new call or route without the guard fails it.
+
+**The contract for the front end (step 6).**
+
+- A route refusal: HTTP status and `{"detail": {"code": "<code>", "message": "<plain sentence>", ...facts}}`. `attestation_required` is 409 with `voice`, `voice_id`, `video_id`, `source_video_id`, `speaker_label`, `speaker_name`, `statement_version`: the modal posts `{choice, statement_version}` to `/videos/{video_id}/voices/{voice}/attest`, then the action is tried again. `export_confirm_required` is 409 with `export_ref`, `voices`, `videos`, `label_default`, `statement`: the reminder posts `{label_on}` to `/exports/{export_ref}/confirm`, then exports again.
+- An agent turn: the turn ends on a question (the card), never on Voltage's words about it. `question.kind == "attestation_required"`, `question.attestation` the same facts as above, `question.text` "Use <speaker>'s voice?", `options` ["Use this voice", "Cancel"], `gate` false (so a typed "go" is not an attestation). The editor opens the modal from it; after the attest call it answers "Use this voice" and the next turn voices the line. In a batch the card waits on that video like any other question. The fast path hands it to a full turn, which then pauses on the card.
+- Every other guard refusal reaches Voltage as the guard's sentence (`voice_out_of_scope`: "This voice can only be used in the video it came from."), and a job or line row shows the same sentence (`failures.say`).
+
+Tests: `backend/tests/safety/test_voice_enforcement.py` (15: the structural four, then no attestation then attested, the agent's pause, the fast path, out of scope from another video, the agent and a batch child and a hand-picked speaker voice, variants and language versions, export and batch export and links, Save to My voices, withdraw, a new statement version, the clone path's order, flag off).

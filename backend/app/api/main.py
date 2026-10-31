@@ -218,6 +218,26 @@ clones = CloneService(repo, artifacts, voice, enabled=settings.clone and not set
                       min_seconds=settings.clone_min_seconds)
 
 
+class _CloneGuard:
+    """Voice consent V1: the speaker clone's checks (CloneService.guard): can_clone,
+    then the attestation, before anything is paid; the record after."""
+
+    def before_clone(self, video_id: str, key: str, name: str | None) -> None:
+        owner = repo.get(video_id).owner
+        voice_guard.can_clone(owner, video_id, key, name)
+        voice_guard.require_attestation(owner, video_id, None, key)
+
+    def clone_pass(self, video_id: str):
+        return voice_guard_mod.vendor_pass(voice_guard_mod.clone_key(repo.get(video_id).owner))
+
+    def after_clone(self, video_id: str, key: str, voice_id: str, name: str | None) -> None:
+        voice_guard.record_voice(repo.get(video_id).owner, voice_id, kind="cloned", scope="video", origin="clone",
+                                 source_video_id=video_id, speaker_label=key, speaker_name=name)
+
+
+clones.guard = _CloneGuard()
+
+
 # Run 4 item 2: the real consent gate (`voices.cloning_verified`): Whisper
 # hears the phrase, WavLM compares the voice with the clone's source audio.
 def _consent_heard(path: Path, video_id: str) -> str | None:
@@ -2027,6 +2047,7 @@ async def add_my_voice(
     _voices_can_be_made(owner=owner)
     label = _voice_name_or_422(name)
     _no_voice_called(owner, label)
+    voice_guard.can_clone(owner, None, None, label)         # voice consent V1: the account's limits
     filename = safe_filename(file.filename, "voice.wav")
     with tempfile.TemporaryDirectory() as tmp:
         staged = Path(tmp) / filename
@@ -2040,9 +2061,11 @@ async def add_my_voice(
             if seconds < MIN_MY_VOICE_SECONDS:
                 raise HTTPException(status_code=422, detail=f"That is {seconds:.0f} s; at least {MIN_MY_VOICE_SECONDS:.0f} s of your voice is needed to clone it.")
             try:
-                voice_id = voice.create_clone(f"voltage-mine-{label}", wav)
+                with voice_guard_mod.vendor_pass(voice_guard_mod.clone_key(owner)):
+                    voice_id = voice.create_clone(f"voltage-mine-{label}", wav)
             except Exception as exc:  # noqa: BLE001 - run 5 item 1: the classifier's words, never the vendor's
                 raise failures.http(exc, where="voices: clone a recording", owner=owner) from None
+            voice_guard.record_voice(owner, voice_id, kind="recorded", scope="library", origin="upload")
             # The recording stays with the owner, so the voices page can play it back.
             return voice_id, seconds, artifacts.put_file(_user_store(owner), wav, kind="audio", container="wav", duration=seconds)
         voice_id, seconds, sample = await run_in_threadpool(make)
@@ -2108,6 +2131,11 @@ def keep_made_voice(req: KeepRequest, owner: str = Depends(current_owner)) -> di
     found = next((m for m in _made_voices_of(owner) if m["voice_id"] == req.voice_id), None)
     if found is None:
         raise HTTPException(status_code=404, detail="No such voice was made in your projects.")
+    if found["kind"] == "cloned" and voice_guard.enabled(owner):
+        # Voice consent V1: Save to My voices is the promote: a passed own-voice check first.
+        if voice_guard.record(req.voice_id) is None:
+            voice_guard.backfill()
+        voice_guard.promote(owner, req.voice_id)
     label = _voice_name_or_422(req.name or found["name"])
     _no_voice_called(owner, label)
     pid = found["video_id"]
@@ -2151,12 +2179,19 @@ def add_my_voice_from_speaker(req: FromSpeakerRequest, owner: str = Depends(curr
     record = _owned(req.video_id, owner)        # someone else's video is not found, before anything else is said
     if not req.consent:
         raise HTTPException(status_code=403, detail="Say it is your voice, or one you have the right to use.")
-    _voices_can_be_made(owner=owner)
+    spk = next((s for s in repo.speakers(req.video_id) if s.label == req.label), None)
+    # Voice consent V1: My voices takes a speaker's voice only with a passed own-voice check
+    # ("Prove it's your voice"); that check is what opens this with `voices.cloning_verified`.
+    check = voice_guard.own_voice_check(owner, req.video_id, req.label, spk.name if spk else None)
+    if voice_guard.enabled(owner) and spk is not None and check is None:
+        raise voice_guard_mod.VoiceGuardError(voice_guard_mod.OWN_VOICE_CHECK_REQUIRED, voice_guard_mod.PROVE_IT, 403,
+                                              video_id=req.video_id, speaker_label=req.label)
+    _voices_can_be_made(owner=None if voice_guard.enabled(owner) and check else owner)
     label = _voice_name_or_422(req.name)
     _no_voice_called(owner, label)
-    spk = next((s for s in repo.speakers(req.video_id) if s.label == req.label), None)
     if spk is None:
         raise HTTPException(status_code=404, detail="speaker not found")
+    voice_guard.can_clone(owner, req.video_id, spk.label, spk.name)
     seconds = speech_seconds(record.transcript, spk.label)
     if seconds < MIN_MY_VOICE_SECONDS:
         raise HTTPException(status_code=422, detail=f"{spk.name} speaks for {seconds:.0f} s; at least {MIN_MY_VOICE_SECONDS:.0f} s is needed to clone a voice.")
@@ -2164,9 +2199,13 @@ def add_my_voice_from_speaker(req: FromSpeakerRequest, owner: str = Depends(curr
     if reference is None:
         raise HTTPException(status_code=422, detail=f"Could not cut a clean sample of {spk.name}'s voice.")
     try:
-        voice_id = voice.create_clone(f"voltage-mine-{label}", Path(reference.path))
+        with voice_guard_mod.vendor_pass(voice_guard_mod.clone_key(owner)):
+            voice_id = voice.create_clone(f"voltage-mine-{label}", Path(reference.path))
     except Exception as exc:  # noqa: BLE001 - run 5 item 1: the classifier's words, never the vendor's
         raise failures.http(exc, where="voices: clone a speaker", owner=owner, video_id=req.video_id) from None
+    voice_guard.record_voice(owner, voice_id, kind="cloned", scope="library" if check else "video", origin="clone",
+                             source_video_id=req.video_id, speaker_label=spk.label, speaker_name=spk.name,
+                             verified_consent_id=check)
     # The sample is kept with the owner, so it outlives the project it came from.
     sample = artifacts.put_file(_user_store(owner), reference.path, kind="audio", container="wav", duration=reference.duration)
     entry = {"voice_id": voice_id, "name": label, "seconds": round(seconds, 1), "at": _now(), "kind": "cloned", "consent_granted_at": _now(),
@@ -2752,6 +2791,8 @@ def update_speaker(
     _owned(project_id, owner)
     if label not in {s.label for s in repo.speakers(project_id)}:
         raise HTTPException(status_code=404, detail="speaker not found")
+    if req.voice_id:
+        voice_guard.check_scope(req.voice_id, project_id, owner)     # voice consent V1: not another video's voice
     name = req.name.strip() if req.name is not None else None
     repo.set_speaker(project_id, label, name=name or None, voice_id=req.voice_id,
                      clear_voice=req.clear_voice)
@@ -6072,6 +6113,8 @@ def _generate(
         return _generate(project_id, record, candidate_id, selection, text, voice_id,
                          fit, "concatenate", report, delivery, voice_notes, voice_settings, model, flex_max,
                          max_regenerations, role, offset_db)
+    # Voice consent V1: scope, the attestation (cloned voices), the line; the vendor only inside the guard's pass.
+    ticket = voice_guard.before_synthesis(record.owner, project_id, voice_id, text)
     plan = EditPlan(selection, text, voice_id, fit=fit, mix=mix, delivery=delivery,
                     voice_settings=voice_settings or None, model=model or None, flex_max=flex_max,
                     role=role if role in ROLES and role != "voice" else None, offset_db=offset_db or None)
@@ -6092,8 +6135,12 @@ def _generate(
     # A3: the project's respellings go to the vendor; the plan keeps the words as written.
     # 9b: a language version's transcript is the master's English; it goes to the vendor as context only when set.
     master_context = not (record.master_id and record.language) or settings.lang_master_context
-    with pronounce.respelling(_respellings(project_id)), vendor_context(master_context):
+    spent_before = ledger.spent_usd(project_id)
+    with pronounce.respelling(_respellings(project_id)), vendor_context(master_context), \
+            voice_guard_mod.vendor_pass(voice_guard_mod.synth_key(project_id)):
         candidate = generate(plan)
+    voice_guard.log_synthesis(ticket, take_id=candidate.candidate_id,
+                              cost_usd=round(max(0.0, ledger.spent_usd(project_id) - spent_before), 6))
     # Retained so approval commits this exact candidate rather than re-running
     # generation, which real vendors would not reproduce byte-for-byte.
     repo.save_candidate(project_id, candidate)
@@ -6491,6 +6538,8 @@ def export_project(project_id: str, response: Response, request: Request, req: E
     record = _owned(project_id, owner)
     proposals, purpose = bool(req and req.with_proposals), req.purpose if req else "preview"
     request_id = req.request_id if req else None
+    if purpose == "export" and not proposals:
+        voice_guard.require_export_attestation(owner, [project_id])     # voice consent V1: the export reminder
     out = _made_render(record, proposals)
     if out is None:
         response.status_code = 202
@@ -8151,8 +8200,17 @@ def _workbench() -> Workbench:
         project=_project_view, suggest=_suggest_brief, help_search=lambda query: search_help_articles(query, limit=3),
         spend=lambda pid: _spend_summary(repo.get(pid).owner if repo.get(pid) else LOCAL_OWNER, video_id=pid),
         measured=lambda: getattr(voice, "last_measure", None), held_take=_held_take, jobs=line_jobs,
-        hear_take=_hear_take,
+        hear_take=_hear_take, voice_refusal=_voice_refusal,
     )
+
+
+def _voice_refusal(owner: str, video_id: str, voice_id: str) -> str | None:
+    """Voice consent V1: why Voltage may not pick this voice here (the guard's words), or None."""
+    try:
+        voice_guard.check_scope(voice_id, video_id, owner)
+    except voice_guard_mod.VoiceGuardError as exc:
+        return exc.message
+    return None
 
 
 def _hear_take(video_id: str, candidate) -> list[str] | None:
@@ -9657,6 +9715,9 @@ def create_share(project_id: str, req: ShareRequest, owner: str = Depends(curren
     project = _owned_project(project_id, owner)
     target = req.target or project_id
     _check_share_target(project, req.scope, target)
+    if req.scope in ("video", "project") and (req.role != "reviewer" or req.allow_download):
+        # Voice consent V1: a link people watch or download from is an export (one reminder for all its videos).
+        voice_guard.require_export_attestation(owner, [target] if req.scope == "video" else review_videos(project, req.scope, target))
     if req.role != "reviewer":
         reviewing: list[str] = []
         data = None
@@ -10280,6 +10341,8 @@ def create_review_link(video_id: str, req: ReviewLinkRequest, owner: str = Depen
     """Send for review from the editor: a reviewer link to this video (in a project or not); it moves In review."""
     _review_flag(owner)
     record = _owned(video_id, owner)
+    if req.allow_download:
+        voice_guard.require_export_attestation(owner, [video_id])      # voice consent V1: Download is an export
     data = _review_data(req, [video_id], project_scope=False)
     try:
         with database.tx() as c:
@@ -10558,6 +10621,8 @@ def start_batch_export(project_id: str, req: ExportBatchRequest, owner: str = De
         chosen.append(preset)
     if not videos or not chosen:
         raise HTTPException(status_code=422, detail="Pick at least one video and one preset.")
+    # Voice consent V1: one export reminder for the whole batch.
+    voice_guard.require_export_attestation(owner, [r.source.project_id for r in videos])
     try:
         warnings = project_check_warnings(project_id)
     except Exception:  # noqa: BLE001
@@ -10909,6 +10974,9 @@ def withdraw_consent_now(video_id: str, owner: str) -> dict:
     before = repo.clones(video_id)
     kept = _kept_voice_ids()
     failed = clones.purge(video_id, keep=kept)
+    for v in before.values():
+        if v and v not in kept:
+            voice_guard.mark_withdrawn(v, owner, deleted=v not in failed)     # voice consent V1
     deleted = len([v for v in before.values() if v and v not in kept and v not in failed])
     had = repo.withdraw_consent(video_id)
     from app.safety_api import withdraw_checks
