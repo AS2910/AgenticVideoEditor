@@ -70,6 +70,7 @@ from app.store.db import Database, location as database_location
 from app.flags import FlagStore
 from app import analytics, dataexport, errors_report, failures
 from app.safety import consent as consent_mod, figures as figures_mod, liveness as liveness_mod, provenance as provenance_mod
+from app.safety import voice_guard as voice_guard_mod
 from app.purge import PurgeScheduler
 from app.usage import (
     Ledger, SpendCeilingReached, WHISPER_USD_PER_MINUTE, claude_usd, current_actor, current_turn, money, month_name, month_start,
@@ -183,6 +184,33 @@ budget = VoiceBudget(
 chaos = chaos_module.from_settings(settings.chaos, settings.auth_mode, settings.chaos_force)
 transcriber, transcriber_label = select_transcriber(settings, chaos)
 voice, voice_label = select_voice(settings, artifacts, budget, chaos)
+
+
+# Voice consent V1 (app.safety.voice_guard): every rule about cloned voices,
+# behind `voices.cloning_verified`. The adapter is wrapped so the vendor is
+# reached only inside a pass the guard opened (for an owner with the flag on).
+def _account_verified(owner: str) -> bool:
+    """An email account must be verified to clone; other sign-ins (and sign-in off) carry their own identity."""
+    if not owner.startswith("acct:"):
+        return True
+    from app.store import accounts as accounts_store
+    account = accounts_store.by_id(database, owner[len("acct:"):])
+    return bool(account and account.verified)
+
+
+def _voice_guard_alert(what: str, exc: BaseException) -> None:
+    failures.report(failures.Failure(failures.OUR_SIDE, failures.OUR_END_REPORTED, cause=f"voice guard {what}: {exc}"[:400],
+                                     vendor="server"), exc, where=f"voice guard: {what}")
+
+
+voice_guard = voice_guard_mod.VoiceGuard(
+    database, repo, lambda owner: flags.enabled("voices.cloning_verified", owner),
+    no_go=voice_guard_mod.NameListNoGo(public_figures),
+    vendor_delete=lambda voice_id: getattr(voice, "delete_voice", lambda v: None)(voice_id),
+    export_content=lambda video_id: _export_content(video_id),
+    account_verified=_account_verified, alert=_voice_guard_alert,
+)
+voice = voice_guard_mod.GuardedVoice(voice, voice_guard)
 lipsync = MockLipSyncAdapter(artifacts)
 continuity, continuity_label = select_continuity(voice.identity, artifacts)
 # Phase 15a: each speaker's own voice, made once and reused (never under dry-run).
@@ -10008,6 +10036,20 @@ async def _lifespan_with_lease(a):
 
 app.router.lifespan_context = _lifespan_with_lease
 
+# Voice consent V1: at start, a record for any voice without one, then the vendor
+# deletes the migration queued (owners with the flag on), off the start-up path.
+_lifespan_before_voice_guard = app.router.lifespan_context
+
+
+@contextlib.asynccontextmanager
+async def _lifespan_with_voice_guard(a):
+    threading.Thread(target=lambda: voice_guard.at_start(), name="voice-guard-start", daemon=True).start()
+    async with _lifespan_before_voice_guard(a) as state:
+        yield state
+
+
+app.router.lifespan_context = _lifespan_with_voice_guard
+
 
 # The reviewer's side (no account; the link is the key).
 
@@ -10819,6 +10861,45 @@ ledger.on_record = _after_charge
 # ── G6: trust and safety ────────────────────────────────────────────────────
 # Routes in app/safety_api.py; these are the pieces that need the app.
 
+def _export_content(video_id: str) -> tuple[str, set[str]]:
+    """Voice consent V1: what the video's export holds now (its final render's
+    edit-set hash) and the voices its live edits speak in."""
+    record = repo.get(video_id)
+    if record is None:
+        return "", set()
+    edits, _ = _render_edits(video_id, False)
+    return edit_set_hash(record, edits, "final"), {e.plan.voice_profile_id for e in edits if e.plan.voice_profile_id}
+
+
+def keep_promoted_voice(owner: str, record: dict) -> None:
+    """Voice consent V1: a voice promoted to library is one of the owner's own (My voices), if it is not yet."""
+    mine = _my_voices(owner)
+    if any(v["voice_id"] == record["voice_id"] for v in mine):
+        return
+    found = next((m for m in _made_voices_of(owner) if m["voice_id"] == record["voice_id"]), None) or {}
+    name = (found.get("name") or record.get("speaker_name") or "My voice")[:40]
+    taken = {v["name"].lower() for v in mine}
+    label, n = name, 2
+    while label.lower() in taken:
+        label, n = f"{name[:36]} ({n})", n + 1
+    source = record.get("source_video_id")
+    src = repo.get(source, include_deleted=True) if source else None
+    entry = {"voice_id": record["voice_id"], "name": label, "seconds": float(found.get("seconds") or 0.0), "at": _now(),
+             "kind": record["kind"], "sample_sha": None,
+             "description": found.get("description"), "consent_granted_at": _now(),
+             "verified_consent_id": record.get("verified_consent_id"),
+             "source": {"video_id": source, "filename": src.source.filename if src else "", "label": record.get("speaker_label")}}
+    _set_my_voices(owner, [*mine, entry])
+    getattr(voice, "register_clone", lambda vid: None)(record["voice_id"])
+
+
+def forget_withdrawn_voice(record: dict) -> None:
+    """Voice consent V1: a withdrawn clone is no longer its speaker's, so a new
+    clone (with its own checks) can be made for them."""
+    source, label = record.get("source_video_id"), record.get("speaker_label")
+    if source and label and repo.get(source) is not None and repo.clones(source).get(label) == record["voice_id"]:
+        repo.set_clone(source, label, None)
+
 def withdraw_consent_now(video_id: str, owner: str) -> dict:
     """Consent withdrawn now (the owed D3 item): the video's clones are deleted
     at the voice service at once (a kept voice of the owner's is only
@@ -11120,7 +11201,7 @@ async def _csrf_header(request: Request, call_next):
 
 def _mount_optional_routers() -> None:
     import importlib
-    for name in ("app.onboarding", "app.help", "app.tutorial", "app.workspace_api", "app.accounts_api", "app.notify_api", "app.analytics_api", "app.feedback_api", "app.billing_api", "app.safety_api", "app.landing_api", "app.emails_api", "app.admin_api", "app.beta_feedback_api", "app.beta_api", "app.lipsync_api"):
+    for name in ("app.onboarding", "app.help", "app.tutorial", "app.workspace_api", "app.accounts_api", "app.notify_api", "app.analytics_api", "app.feedback_api", "app.billing_api", "app.safety_api", "app.landing_api", "app.emails_api", "app.admin_api", "app.beta_feedback_api", "app.beta_api", "app.lipsync_api", "app.voice_guard_api"):
         try:
             module = importlib.import_module(name)
         except ImportError:
@@ -11148,6 +11229,12 @@ SERVER_FAULT = "Something went wrong on our end. It has been reported. Try again
 @app.exception_handler(diskroom.DiskFull)
 async def _disk_full(request: Request, exc: diskroom.DiskFull) -> JSONResponse:
     return JSONResponse(status_code=507, content={"detail": diskroom.SHORT})
+
+
+@app.exception_handler(voice_guard_mod.VoiceGuardError)
+async def _voice_guard_refused(request: Request, exc: voice_guard_mod.VoiceGuardError) -> JSONResponse:
+    """Voice consent V1: `{"detail": {"code", "message", ...}}` with the refusal's status (the front end's contract)."""
+    return JSONResponse(status_code=exc.status, content={"detail": exc.to_dict()})
 
 
 @app.exception_handler(Exception)

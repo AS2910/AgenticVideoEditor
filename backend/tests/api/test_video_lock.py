@@ -50,6 +50,7 @@ OPEN = {
     "correct_understanding": "a correction to what Voltage understood, not the edit set",
     "look_again": "which lines are on camera, a fact about the source kept under its own settings key; never the edit set",
     "admin_trial": "an admin's lip-sync trial in a scratch folder; the video and its edit set are only read",
+    "attest_voice": "voice consent V1: the user's word on whose voice it is, never the edit set",
 }
 
 # Write routes with no video in their path (addendum 3): each says why no video's edit set changes,
@@ -64,6 +65,7 @@ NO_VIDEO = {
     "review_comment": "a reviewer's comment: comments only, never the edit set",
     "join": "the waitlist", "client_event": "analytics", "report_error": "an error report",
     "send_feedback": "beta feedback", "report_abuse": "an abuse report", "delete_account": "the account, everything at once",
+    "confirm_export": "voice consent V1: the export reminder confirmed; the export itself takes the lock",
 }
 
 # Project folder routes: they change the folder's own record (its brief, rules, files, shares), no one video's edit set.

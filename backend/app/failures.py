@@ -160,6 +160,13 @@ def classify(exc: BaseException) -> Failure:
     if isinstance(exc, SafetyRefused):
         return Failure(SAFETY, safety_sentence(exc.vendor, exc.line_text, exc.at), cause=f"{exc.vendor}: {exc.detail}"[:400],
                        vendor=exc.vendor)
+    from app.safety.voice_guard import GUARD_BYPASSED, VoiceGuardError
+    if isinstance(exc, VoiceGuardError):
+        # Voice consent V1: the guard's refusal is written for the person; one that should never happen is ours.
+        if exc.code == GUARD_BYPASSED:
+            return Failure(OUR_SIDE, OUR_END_REPORTED, cause=f"voice guard bypassed: {exc.data}"[:400], vendor="server",
+                           status=exc.status)
+        return Failure(USER_INPUT, exc.message, status=exc.status)
     from app.jobs.locks import VideoBusy
     if isinstance(exc, VideoBusy):
         # Addendum 3: another change holds the video. Not a failure of anyone's: say what it is busy with.
@@ -239,6 +246,10 @@ def http(exc: BaseException, *, where: str, owner: str | None = None, video_id: 
     from app.budget import BudgetExceeded
     from app.usage import SpendCeilingReached
     text = say(exc, where=where, owner=owner, video_id=video_id, line=line, captured=captured)
+    from app.safety.voice_guard import VoiceGuardError
+    if isinstance(exc, VoiceGuardError):
+        # Voice consent V1: the front end reads the code (the attestation modal, the export reminder).
+        return HTTPException(status_code=exc.status, detail=exc.to_dict())
     kind = classify(exc).kind
     if isinstance(exc, (BudgetExceeded, SpendCeilingReached)):
         status = 402

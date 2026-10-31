@@ -55,3 +55,37 @@ Run on a copy of the live database (main checkout's `backend/var/ave.db`, 2026-1
 Nothing lost; down restores the copy. The live database's four passed consent checks are all stand-in checks (method empty), so none links a voice.
 
 Tests: `backend/tests/store/test_m0048_voice_consent.py` (every row of the table, nothing lost, down restores, down refuses over evidence, the dry run counts on a copy and leaves the original), plus the runner's own per-step down/up test.
+
+## Step 2: the voice guard
+
+Code: `backend/app/safety/voice_guard.py` (the rules, `VoiceGuard`; the vendor seam, `GuardedVoice`), `backend/app/voice_guard_api.py` (routes), wired in `backend/app/api/main.py` (`voice_guard`, built right after the voice adapter is chosen, which it then wraps). Errors are `VoiceGuardError(code, message, status, **data)`; `failures.classify` reads them as the person's input (their `message`), `failures.http` turns one into an HTTP answer with the structured detail, and the app's handler answers any that reaches it as `{"detail": {"code", "message", ...}}` with its status. Everything is a no-op unless `voices.cloning_verified` is on for the owner (`VoiceGuard.enabled`).
+
+| Plan function | Code | Fails with (status) | Adaptation |
+| --- | --- | --- | --- |
+| `can_clone(user, video, speaker)` | `can_clone(owner, video_id, speaker_label, speaker_name, reference=None)` | `clone_not_allowed` (403), `data.reason`: email_unverified, suspended, daily_limit, monthly_limit, no_go, no_go_review | Verified email: an `acct:` owner needs `accounts.verified_at`; other sign-ins (Google, sign-in off) carry their own identity. Limits 5 a day, 30 in 30 days, counted from `voice_records` with origin clone or upload; `set_limits` (admin) raises them, kept in `meta` `voice_clone_limits:<owner>`. No-go: `NoGoCheck` interface, today `NameListNoGo` over `app/safety/figures.py` |
+| `require_attestation(user, video, voice)` | `require_attestation(owner, video_id, voice_id=None, speaker_label=None)` | `attestation_required` (409) with `voice` (what to post to), `voice_id`, `video_id`, `source_video_id`, `speaker_label`, `speaker_name`, `statement_version` | Cloned voices only. A voice proven to be the user's own (library with a passed check) needs none. Before a clone exists the attestation is for the speaker (`voice` is the speaker's label); it then covers the clone made for them. Matches the current `STATEMENT_VERSION` only, so bumping it asks everyone again |
+| `check_scope(voice, video)` | `check_scope(voice_id, video_id, owner=None)`, `usable(...)` | `voice_out_of_scope` (403); `voice_unavailable` (403, `reason` withdrawn, suspended, account_suspended) | The family is the video, its variants (`settings.variant_of`) and language versions (`master_id`): two videos are one family when they share the same first video. A voice with no record (stock) passes; someone else's voice is out of scope |
+| `check_line(user, voice, text)` | `check_line(owner, video_id, voice_id, text)` | `line_blocked` (422, `category`), `line_in_review` (409) | `LineChecker` interface; today `PassThroughLines` (every line passes and is still written, its text hash only). Runs for every voice, cloned or not (open decision 7) |
+| `log_synthesis(...)` | `before_synthesis(owner, video_id, voice_id, text) -> Ticket`, then `log_synthesis(ticket, take_id, cost_usd)` | never fails; a write error goes to `failures.report` (admins told) | `before_synthesis` runs scope, attestation, line in the plan's order and carries their ids to the log |
+| `require_export_attestation(user, export)` | `require_export_attestation(owner, video_ids)`, `confirm_export(owner, export_ref, label_on, ip)` | `export_confirm_required` (409) with `export_ref`, `voices` (voice, video, speaker), `videos`, `label_default` true, `statement` | There is no export id before an export is made, so the refusal hands back `export_ref` (a hash of what it covers, its details kept in `meta` until confirmed). A confirmation covers each video's content (`video_id:edit-set hash`), so the same edits never ask twice and changed ones do; one confirmation covers a whole batch |
+| `strike(user, category)` | `strike(owner, category)`, `suspend(owner, reason, by)`, `restore(owner, by)`, `suspended(owner)` | n/a | 3 blocked lines in 24 h suspend: no new clones, every cloned voice `suspended` (reason `account`), until an admin restores. The suspension is a `meta` row (`voice_suspension:<owner>`), not a sixth table |
+| (routes) | `attest`, `promote`, `withdraw`, `own_voice_check`, `record_voice`, `backfill`, `drain_vendor_deletes`, `at_start`, `describe`, `export_label` | | `promote` needs a passed check of the real gate (`liveness_attempts`, method verified) for the voice's source video and speaker: `own_voice_check_required` (403) without one. `withdraw` marks it withdrawn at once and deletes it at the vendor (left `delete_queued` if that fails; `drain_vendor_deletes` retries at app start, only for owners with the flag on). `record_voice` is written by every clone path whatever the flag; `backfill` (at start) adds a record for any voice the lists hold without one |
+
+`GuardedVoice` wraps the adapter: `synthesize`, `speak_like`, `revoice` and `create_clone` reach the vendor only inside `vendor_pass(synth_key(video))` or `vendor_pass(clone_key(owner))`, for an owner with the flag on; otherwise `guard_bypassed` (500, our side). Every other attribute, read or written, is the adapter's, and a method the adapter lacks is missing on the wrapper too.
+
+**Routes** (`app/voice_guard_api.py`; 404 with the flag off, admin routes admins only and audited):
+
+| Method | Route | Notes |
+| --- | --- | --- |
+| GET | `/voices/attestation/statement` | `{version, title, body, choices, confirm, warning, cancel, accept, export: {...}}`, the plan's copy word for word |
+| POST | `/videos/{id}/voices/{voice}/attest` | `{choice: my_voice or have_permission, statement_version}`; 409 `statement_changed` with the new statement when it moved on |
+| POST | `/exports/{export_ref}/confirm` | `{label_on}` (default true) |
+| GET | `/voices/scopes` | the owner's voices with scope, status, `video_only` (for step 6's chips) |
+| POST | `/voices/{id}/promote` | library after a passed check, and kept in My voices |
+| POST | `/voices/{id}/withdraw` | withdrawn, deleted at the vendor, and the speaker's clone forgotten so a new one can be made with new checks |
+| POST | `/admin/users/{id}/suspend-cloning`, `/restore-cloning` | `{reason}`; audited `voice_suspend`, `voice_restore` |
+| POST | `/admin/users/{id}/clone-limits` | `{day, month, reason}`; audited `voice_clone_limits` (not in the plan: open decision 2 says admins raise it) |
+
+Seams for later steps: `LineChecker` (step 4: replace `voice_guard.lines`), `NoGoCheck` (step 5: replace `voice_guard.no_go`, it gets `reference` audio), `export_label(owner, video_id)` (step 7: the label choice), `describe` and `GET /voices/scopes` (step 6's badges).
+
+Tests: `backend/tests/safety/test_voice_guard.py` (33: every function, the flag off, the vendor seam, the routes).
