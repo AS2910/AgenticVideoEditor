@@ -235,6 +235,70 @@ voice_guard = voice_guard_mod.VoiceGuard(
     account_verified=_account_verified, alert=_voice_guard_alert,
 )
 voice = voice_guard_mod.GuardedVoice(voice, voice_guard)
+
+
+# Voice consent V1 step 4: the line checks (app.safety.line_checks): the rules, then
+# the check model (Haiku 5.5) on what they let through; rules alone with no key.
+def _line_reader():
+    from app.adapters.claude_lines import ClaudeLineReader
+    if settings.mock_vendors:
+        from app.adapters.mock_claude import MockAnthropic
+        return ClaudeLineReader(None, None, model=settings.check_model, client=MockAnthropic())
+    if settings.anthropic_api_key and not settings.dry_run:
+        return ClaudeLineReader(settings.anthropic_api_key, settings.anthropic_workspace_id, model=settings.check_model)
+    return None
+
+
+def _line_context(video_id: str) -> dict:
+    """What the check model reads around a line: the brief and what the video says now."""
+    record = repo.get(video_id)
+    if record is None:
+        return {}
+    said = [st.text.strip()[:160] for st in statements_of(record.transcript) if st.text.strip()][:12]
+    return {"brief": _brief_text(video_id)[:600], "neighbours": said}
+
+
+def _pending_lines(video_id: str) -> list[str]:
+    """The planned lines of the video's latest plan not voiced yet: checked along with the first one."""
+    plan = repo.latest_plan(video_id)
+    return [i.new_text for i in (plan.items if plan else ()) if i.kind == "planned" and i.enabled
+            and i.status == "planned" and (i.new_text or "").strip()]
+
+
+def _language_master_of(video_id: str) -> str | None:
+    record = repo.get(video_id)
+    return record.master_id if record is not None and record.master_id and record.language else None
+
+
+def _line_news(event: str, facts: dict) -> None:
+    """Who hears about a line check: admins of a held line and of a blocked sexual line about a
+    child (also an abuse report), the owner of a held line once it is decided."""
+    from app.admin import admin_owner_ids
+    owner, video_id = facts.get("owner"), facts.get("video_id")
+    with database.tx() as c:
+        if event == "held":
+            for who in admin_owner_ids(database, settings.admin_owners):
+                if who != owner:
+                    inbox.add_in(c, who, "line_review", "A line is held for a quick check.",
+                                 body=f"Video {video_id}: {facts.get('text', '')}"[:300], link="#admin")
+        elif event == "minor":
+            c.execute("INSERT INTO abuse_reports (location, kind, details, contact, reporter, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+                      (f"line check {facts.get('line_check_id')} on video {video_id}", "minor_sexual_line",
+                       f"{owner}: {facts.get('text', '')}"[:2000], "", "line check", now_iso()))
+            for who in admin_owner_ids(database, settings.admin_owners):
+                inbox.add_in(c, who, "abuse_report", "A line with sexual content about a child was blocked and reported.",
+                             body=f"Video {video_id}, {owner}", link="#admin")
+        elif event == "decided" and owner:
+            inbox.add_in(c, owner, "line_decided", facts.get("title") or "Your held line was checked.",
+                         body=(facts.get("text") or "")[:300], link=f"#v/{video_id}" if video_id else None,
+                         video_id=video_id)
+
+
+from app.safety.line_checks import LineChecks  # noqa: E402
+
+voice_guard.lines = LineChecks(_line_reader(), context=lambda vid: _line_context(vid), pending=lambda vid: _pending_lines(vid),
+                               master_of=lambda vid: _language_master_of(vid), meter=lambda vid: _meter(vid, "line check"))
+voice_guard.tell = _line_news
 lipsync = MockLipSyncAdapter(artifacts)
 continuity, continuity_label = select_continuity(voice.identity, artifacts)
 # Phase 15a: each speaker's own voice, made once and reused (never under dry-run).
@@ -5136,6 +5200,8 @@ def make_languages(video_id: str, req: LanguagesRequest, owner: str = Depends(cu
         raise HTTPException(status_code=409, detail=failures.unconfigured("anthropic", "ANTHROPIC_API_KEY or AVE_AGENT", where="agent", owner=owner))
     at = langs.marker(database, video_id)
     lines = _master_lines(video_id)
+    # Voice consent V1: the master's lines checked in one call; translations of lines that all passed take the rules.
+    voice_guard.prepare_lines(owner, video_id, [ln["text"] for ln in lines])
     keep = _keep_words(record.folder_id)
     thinking = _thinking_usd(owner)
     children, made_ids = [], []
@@ -5198,6 +5264,7 @@ def sync_language(video_id: str, req: ConfirmStage | None = None, owner: str = D
         raise HTTPException(status_code=409, detail="This version is in step with its master.")
     if not _agent_on():
         raise HTTPException(status_code=409, detail=failures.unconfigured("anthropic", "ANTHROPIC_API_KEY or AVE_AGENT", where="agent", owner=owner))
+    voice_guard.prepare_lines(owner, record.master_id, [ln["text"] for ln in lines])
     goal = _sync_goal(record, master, lines, _keep_words(record.folder_id))
     started = _start_turn(video_id, record, goal, owner, approve=True, ticket=ticket)
     with database.tx() as c:
@@ -6345,6 +6412,10 @@ def _queue_lines(project_id: str, plan_id: str, turn_id: str) -> list[str]:
     """The user's Go: every planned line not voiced yet is queued at once, so
     each row says Queued before the first take starts."""
     plan = repo.get_plan(project_id, plan_id)
+    record = repo.get(project_id)
+    if plan is not None and record is not None:        # voice consent V1: every planned line checked in one call
+        voice_guard.prepare_lines(record.owner, project_id, [i.new_text for i in plan.items if i.kind == "planned"
+                                                             and i.enabled and i.status == "planned"])
     out = []
     for item in (plan.items if plan else ()):
         if item.kind != "planned" or not item.enabled or item.status != "planned":
@@ -10128,9 +10199,20 @@ app.router.lifespan_context = _lifespan_with_lease
 _lifespan_before_voice_guard = app.router.lifespan_context
 
 
+def _expire_held_lines() -> None:
+    """Voice consent V1 step 4: every 10 minutes, held lines nobody checked in 48 hours are rejected."""
+    while True:
+        time.sleep(600)
+        try:
+            voice_guard.expire_reviews()
+        except Exception:  # noqa: BLE001 - tried again in 10 minutes
+            log.warning("could not expire held lines", exc_info=True)
+
+
 @contextlib.asynccontextmanager
 async def _lifespan_with_voice_guard(a):
     threading.Thread(target=lambda: voice_guard.at_start(), name="voice-guard-start", daemon=True).start()
+    threading.Thread(target=_expire_held_lines, name="voice-guard-held-lines", daemon=True).start()
     async with _lifespan_before_voice_guard(a) as state:
         yield state
 

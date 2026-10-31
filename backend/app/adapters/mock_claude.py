@@ -76,8 +76,20 @@ def span_for(messages: list) -> tuple[float, float]:
     return (start, round(max(start + 0.5, min(duration - 0.1, start + 2.0)), 2))
 
 
+LINE_IDS = re.compile(r'"id":\s*"([^"]+)"')
+
+
 class _Messages:
     def parse(self, **params):
+        fmt = params.get("output_format")
+        if getattr(fmt, "__name__", "") == "LineResults":
+            # Voice consent V1 step 4: the line check passes every line (the rules still run first).
+            wait("AVE_MOCK_LINE_CHECK_SECONDS", "0.2-0.6")
+            text = json.dumps(params.get("messages") or [], ensure_ascii=False)
+            ids = LINE_IDS.findall(text.replace('\\"', '"'))
+            parsed = fmt.model_validate({"lines": [{"id": i, "verdict": "pass"} for i in dict.fromkeys(ids)]})
+            return SimpleNamespace(parsed_output=parsed, stop_reason="end_turn",
+                                   usage=SimpleNamespace(input_tokens=700, output_tokens=40 * max(1, len(ids))))
         wait("AVE_MOCK_CLAUDE_SECONDS", "1-3")
         return SimpleNamespace(parsed_output=None, stop_reason="end_turn",
                                usage=SimpleNamespace(input_tokens=2400, output_tokens=0))

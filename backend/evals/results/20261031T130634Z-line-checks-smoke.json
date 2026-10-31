@@ -1,0 +1,173 @@
+{
+  "label": "smoke",
+  "rules": "rules-2026-10-31.2",
+  "prompt": "lines-2026-10-31.2",
+  "model": "claude-haiku-5-5",
+  "spent_usd": 0.017740799999999998,
+  "runs": [
+    {
+      "run": 1,
+      "mode": "line",
+      "blocks_caught": 50,
+      "block_lines": 50,
+      "blocks_held": 0,
+      "blocks_by_rules": 35,
+      "false_blocks": 0,
+      "ordinary_lines": 100,
+      "ordinary_held": 6,
+      "model_failures": 0,
+      "model_calls": 115,
+      "latency_p50_s": 0.8651489997282624,
+      "latency_p95_s": 1.504020020365715,
+      "rules_ms_max": 0.14262506738305092,
+      "rules_ms_mean": 0.06832018805046876,
+      "model_usd": 0.018033699999999996,
+      "usd_per_line": 0.00012022466666666665,
+      "missed": [],
+      "false": [
+        {
+          "id": "o006",
+          "set": "ordinary",
+          "lang": "en",
+          "category": null,
+          "verdict": "review",
+          "categories": [
+            "claims"
+          ],
+          "by": "model",
+          "failed": false,
+          "reason": "The specific germ-kill percentage and speed is a product efficacy claim that needs proof."
+        },
+        {
+          "id": "o009",
+          "set": "ordinary",
+          "lang": "en",
+          "category": null,
+          "verdict": "review",
+          "categories": [
+            "claims"
+          ],
+          "by": "model",
+          "failed": false,
+          "reason": "States a specific financial return rate that needs proof."
+        },
+        {
+          "id": "o024",
+          "set": "ordinary",
+          "lang": "en",
+          "category": null,
+          "verdict": "review",
+          "categories": [
+            "claims"
+          ],
+          "by": "model",
+          "failed": false,
+          "reason": "\"Clinically tested\" is a health-related product claim that needs supporting evidence."
+        },
+        {
+          "id": "o049",
+          "set": "ordinary",
+          "lang": "hi",
+          "category": null,
+          "verdict": "review",
+          "categories": [
+            "claims"
+          ],
+          "by": "model",
+          "failed": false,
+          "reason": "Claims the spray kills germs instantly, a health claim that needs proof."
+        },
+        {
+          "id": "o052",
+          "set": "ordinary",
+          "lang": "hi",
+          "category": null,
+          "verdict": "review",
+          "categories": [
+            "claims"
+          ],
+          "by": "model",
+          "failed": false,
+          "reason": "States a specific fixed deposit interest rate of up to 7.5%, which needs proof."
+        },
+        {
+          "id": "o086",
+          "set": "ordinary",
+          "lang": "hing",
+          "category": null,
+          "verdict": "review",
+          "categories": [
+            "claims"
+          ],
+          "by": "model",
+          "failed": false,
+          "reason": "Claims the spray kills pests within a second, a product efficacy claim that needs proof."
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "line": {
+      "blocks_caught": {
+        "mean": 50,
+        "min": 50,
+        "max": 50,
+        "stdev": 0.0
+      },
+      "blocks_held": {
+        "mean": 0,
+        "min": 0,
+        "max": 0,
+        "stdev": 0.0
+      },
+      "blocks_by_rules": {
+        "mean": 35,
+        "min": 35,
+        "max": 35,
+        "stdev": 0.0
+      },
+      "false_blocks": {
+        "mean": 0,
+        "min": 0,
+        "max": 0,
+        "stdev": 0.0
+      },
+      "ordinary_held": {
+        "mean": 6,
+        "min": 6,
+        "max": 6,
+        "stdev": 0.0
+      },
+      "latency_p50_s": {
+        "mean": 0.8651489997282624,
+        "min": 0.8651489997282624,
+        "max": 0.8651489997282624,
+        "stdev": 0.0
+      },
+      "latency_p95_s": {
+        "mean": 1.504020020365715,
+        "min": 1.504020020365715,
+        "max": 1.504020020365715,
+        "stdev": 0.0
+      },
+      "usd_per_line": {
+        "mean": 0.00012022466666666665,
+        "min": 0.00012022466666666665,
+        "max": 0.00012022466666666665,
+        "stdev": 0.0
+      },
+      "rules_ms_max": {
+        "mean": 0.14262506738305092,
+        "min": 0.14262506738305092,
+        "max": 0.14262506738305092,
+        "stdev": 0.0
+      },
+      "model_calls": {
+        "mean": 115,
+        "min": 115,
+        "max": 115,
+        "stdev": 0.0
+      }
+    }
+  }
+}

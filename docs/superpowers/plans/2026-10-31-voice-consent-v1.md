@@ -141,3 +141,31 @@ Migration 0055 adds `model`, `source`, `source_ref`, `seconds` to `no_go_voices`
 With the flag off, `can_clone` and `check_no_go` return at once: nothing is embedded, compared or written.
 
 Tests: `backend/tests/safety/test_no_go.py` (14), `frontend/src/pages/admin/VoiceSafetySection.test.tsx` (7).
+
+## Step 4: line checks
+
+| Plan item | Code |
+| --- | --- |
+| Rules: keyword and pattern lists per category, English, Hindi, Hinglish, versioned | `app/safety/line_rules.py`: `check(text) -> RuleResult(verdict, categories, hits)`, `VERSION`; rule ids with the version go to `line_checks.rule_hits` |
+| Model: Haiku 5.5 reads the line, neighbours and brief, returns `{verdict, categories, reason}` | `app/adapters/claude_lines.py` `ClaudeLineReader.read(lines, context)`: one structured-output call for a list of lines by id; context is the project's brief and what the video says (`main._line_context`) |
+| Only rule-passing lines reach the model | `LineChecks.check`: a rule block returns before the model; a rule review still goes to it |
+| Verdict | `LineChecks.combine`: block if either blocks; review on a rule claim, a model review, or a line the model left out (`unclear`); else pass |
+| Batch and language versions in one call | `VoiceGuard.prepare_lines(owner, video_id, texts)` from `_queue_lines` (a Go), `make_languages` (the master's lines), `sync_language` (the changed lines); a single check also takes the video's pending planned lines (`main._pending_lines`). Translations of a fully passed master take the rules only (`master_of`) |
+| Model call fails | `LineVerdict.model_failed`; `VoiceGuard._model_failed`: held (`unclear`) for a cloned voice, pass with a log warning otherwise |
+| Line text only for block or review | unchanged from step 2; `reason` and `model_ms` added |
+| Blocked line never reaches the vendor | `check_line` raises before `_generate` opens the vendor pass (tested with the adapter's `synthesize` patched) |
+| Block copy names the category | `voice_guard.BLOCKED` (fraud is the plan's sentence), `block_copy` picks by `BLOCK_ORDER` (minors first) |
+| Minors also reported | the guard's `tell("minor")`: an `abuse_reports` row and an `abuse_report` notice to admins (`main._line_news`) |
+| Strikes: 3 blocks in 24 h suspend cloned-voice synthesis | step 2's `strike`, now fed by real verdicts |
+| Review queue `GET /admin/line-checks?verdict=review` | `app/voice_guard_api.py`: `state=waiting` (oldest first, with `due_at`) or `decided`; `POST /admin/line-checks/{id}` `{decision, reason}` |
+| Owners can't approve their own; audit; notify on clear; auto-reject at 48 h | `VoiceGuard.decide_review` (`own_line` 403), `admin.audit` `line_approve`/`line_reject`, notice `line_decided`; `expire_reviews` (every 10 minutes, at start, on reading the queue) |
+| A held line, once approved, voiced without a re-check | `check_line` finds the approved row by owner, video and text hash and writes a pass with `model = approved:<id>` |
+| Admin UI: Voice safety tab | `frontend/src/pages/admin/VoiceSafetySection.tsx` (`VOICE_SAFETY_QUEUES`, one entry per queue; step 5 adds its own), `voiceSafetyApi.ts`, registered in `admin/sections.tsx` |
+
+Migration 0050 (`m0050_line_review.py`): `line_checks.reason`, `review_state`, `reviewed_by`, `reviewed_at`, `review_reason`, `model_ms`, index on `(review_state, created_at)`; down drops them and refuses while any line was held. 0049 is left for step 5.
+
+Notification kinds `line_review` (admins) and `line_decided` (owners), on by default, not yet in the settings list (`inbox.UNLISTED`; step 6).
+
+Acceptance eval: `python -m evals.line_checks` over `backend/evals/line_checks/lines.json` (50 block lines, 10 per category, English, Hindi, Hinglish; 100 ordinary ad lines). Results of the shipped configuration: `backend/evals/results/20261031T130736Z-line-checks-tuned.json`.
+
+Tests: `backend/tests/safety/test_line_checks.py` (29: each category by rules in three languages and by the model with its copy, ordinary lines and warnings pass, rules under 5 ms, minors reported, review, model failure defaults, stock voices checked, blocked line never at the vendor, one call per batch and per plan, language translations, the queue, approve, reject, 48 h, strikes and restore, flag off, the mock), `frontend/src/pages/admin/VoiceSafetySection.test.tsx` (5).

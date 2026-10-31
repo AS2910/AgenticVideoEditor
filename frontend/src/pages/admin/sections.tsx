@@ -24,8 +24,8 @@ export const ADMIN_SECTIONS: AdminSection[] = [
   { id: 'beta-cohort', label: 'Beta', render: (c) => <BetaSection card={c} /> },
   { id: 'beta', label: 'Beta feedback', render: (c) => <BetaFeedbackSection card={c} /> },
   { id: 'consent', label: 'Consent reviews', render: (c) => <ConsentReviewsSection card={c} /> },
-  { id: 'lipsync', label: 'Lip-sync review', render: (c) => <LipSyncSection card={c} /> },
   { id: 'voice-safety', label: 'Voice safety', render: (c) => <VoiceSafetySection card={c} /> },
+  { id: 'lipsync', label: 'Lip-sync review', render: (c) => <LipSyncSection card={c} /> },
   { id: 'audit', label: 'Audit trail', render: (c) => <AuditSection card={c} /> },
 ]
 

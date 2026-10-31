@@ -35,7 +35,7 @@ WINDOW_S = 600
 REVIEW_KINDS = ("comment", "approved", "changes_asked")
 # G4: the other notifications a person chose to have emailed ride the same digest.
 KINDS = REVIEW_KINDS + ("job_done", "job_failed", "spend_alert", "abuse_report", "consent_review", "consent_decided",
-                        "vendor_failure")
+                        "vendor_failure", "line_review", "line_decided")
 
 
 def queue_in(c: sqlite3.Connection, owner: str, kind: str, *, project_id: str | None = None,

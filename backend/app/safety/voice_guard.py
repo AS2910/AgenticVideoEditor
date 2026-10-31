@@ -21,8 +21,8 @@ migration 0048's tables; `voice_records` holds each vendor voice's scope.
 
 The seams later steps fill:
 
-    LineChecker   step 4: the rules and the check model (`PassThroughLines` today:
-                  every line passes, and is still written to line_checks)
+    LineChecker   step 4: the rules and the check model (app.safety.line_checks,
+                  `LineChecks`; `PassThroughLines` is the stand-in the tests may use)
     NoGoCheck     step 5: the speaker embedding against `no_go_voices`
                   (`app.safety.no_go.VoiceListNoGo`, which also keeps the
                   built-in public-figure name list, `NameListNoGo`)
@@ -96,10 +96,25 @@ VOICE_PAUSED = "This voice is paused while we review it. Pick another voice, or 
 SUSPENDED = ("Voicing with cloned voices is paused on your account while we review recent lines. "
              "Contact support if this is a mistake.")
 HELD = "This line is held for a quick check. You'll get a notification when it's cleared."
+# Step 4: the block names the category in plain words (the plan's fraud sentence, the same shape for the rest).
 BLOCKED = {
     "fraud": "I can't voice this line. It asks for payment details, which we don't allow.",
+    "impersonation": "I can't voice this line. It pretends to be a real person or an official, which we don't allow.",
+    "political": "I can't voice this line. It's about a political party, a candidate or an election, which we don't allow.",
+    "minors": "I can't voice this line. It's sexual content involving a child, which we don't allow.",
+    "sexual": "I can't voice this line. It's sexual content, which we don't allow.",
+    "hate": "I can't voice this line. It has hate, threats or harassment, which we don't allow.",
 }
 BLOCKED_ANY = "I can't voice this line. It breaks the rules on what Voltage voices."
+# The order a block's copy is picked in when a line hits more than one category.
+BLOCK_ORDER = ("minors", "fraud", "impersonation", "hate", "sexual", "political")
+REVIEW_HOURS = 48
+CLEARED = "Your held line was cleared. You can voice it now."
+NOT_CLEARED = "Your held line was not cleared."
+EXPIRED = "Your held line was not checked within 48 hours, so it was not cleared. Edit the line and try again."
+CATEGORY_WORDS = {"fraud": "fraud or payment details", "impersonation": "impersonation", "political": "political content",
+                  "sexual": "sexual content", "minors": "a child", "hate": "hate, threats or harassment",
+                  "claims": "a medical or money claim", "unclear": "something the check was not sure about"}
 ATTEST_FIRST = "Tell us whose voice this is before Voltage makes new lines in it."
 CONFIRM_EXPORT = "Confirm the AI voice reminder before you export this video."
 PROVE_IT = "Prove it's your voice first: read the phrase on screen in your own voice."
@@ -133,8 +148,9 @@ class VoiceGuardError(Exception):
 
 
 def block_copy(categories) -> str:
-    for c in categories or ():
-        if c in BLOCKED:
+    have = set(categories or ())
+    for c in BLOCK_ORDER:
+        if c in have:
             return BLOCKED[c]
     return BLOCKED_ANY
 
@@ -148,6 +164,8 @@ class LineVerdict:
     model: str = ""
     rule_hits: tuple[str, ...] = ()
     reason: str = ""
+    model_failed: bool = False                    # the check model did not answer (the guard picks the default)
+    model_ms: int | None = None
 
 
 class LineChecker(Protocol):
@@ -261,6 +279,9 @@ class VoiceGuard:
     account_verified: Callable[[str], bool] = lambda owner: True
     alert: Callable[[str, BaseException], None] | None = None
     clock: Callable[[], datetime] = lambda: datetime.now(timezone.utc)
+    # Step 4: (event, facts) for the people to tell: "held" (admins: a line to review),
+    # "minor" (admins: a report), "decided" (the owner: their held line cleared or not).
+    tell: Callable[[str, dict], None] | None = None
 
     # ── basics ──
 
@@ -537,26 +558,146 @@ class VoiceGuard:
 
     def check_line(self, owner: str, video_id: str | None, voice_id: str | None, text: str) -> str | None:
         """Every line, with any voice, before it is voiced (open decision 7): the
-        verdict is written (the text only when blocked or held). Returns the check's id."""
+        verdict is written (the text only when blocked or held). A held line an
+        admin approved is voiced without a check again. Returns the check's id."""
         if not self.enabled(owner):
             return None
-        verdict = self.lines.check(text, owner=owner, video_id=video_id, voice_id=voice_id)
-        check_id = _id("lc")
-        keep_text = text if verdict.verdict != "pass" else None
+        h = _hash(text)
         with self.database.tx() as c:
-            c.execute("INSERT INTO line_checks (id, workspace_id, owner, video_id, voice_id, text, text_hash, verdict, categories, "
-                      f"model, rule_hits, created_at) VALUES (?, {_WORKSPACE}, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                      (check_id, owner, owner, video_id, voice_id, keep_text, _hash(text), verdict.verdict,
-                       json.dumps(list(verdict.categories)), verdict.model or getattr(self.lines, "name", ""),
-                       json.dumps(list(verdict.rule_hits)), self._now()))
+            earlier = c.execute(
+                "SELECT id, review_state, categories FROM line_checks WHERE owner = ? AND text_hash = ? AND verdict = 'review' "
+                "AND review_state IN ('approved', 'waiting') AND (video_id = ? OR video_id IS NULL) ORDER BY created_at DESC LIMIT 1",
+                (owner, h, video_id or "")).fetchone()
+        if earlier is not None and earlier["review_state"] == "approved":
+            return self._write_check(owner, video_id, voice_id, text, LineVerdict("pass", model=f"approved:{earlier['id']}"))
+        if earlier is not None:                       # the same words already wait: no second row in the queue
+            raise VoiceGuardError(LINE_IN_REVIEW, HELD, 409, categories=json.loads(earlier["categories"] or "[]"),
+                                  line_check_id=earlier["id"])
+        verdict = self.lines.check(text, owner=owner, video_id=video_id, voice_id=voice_id)
+        if verdict.model_failed:
+            verdict = self._model_failed(owner, voice_id, verdict)
+        check_id = self._write_check(owner, video_id, voice_id, text, verdict)
         if verdict.verdict == "block":
-            category = verdict.categories[0] if verdict.categories else ""
+            category = next((c for c in BLOCK_ORDER if c in verdict.categories), verdict.categories[0] if verdict.categories else "")
+            if "minors" in verdict.categories:
+                self._tell("minor", {"owner": owner, "video_id": video_id, "line_check_id": check_id, "text": text})
             self.strike(owner, category)
             raise VoiceGuardError(LINE_BLOCKED, block_copy(verdict.categories), 422, category=category,
                                   categories=list(verdict.categories), line_check_id=check_id)
         if verdict.verdict == "review":
+            self._tell("held", {"owner": owner, "video_id": video_id, "line_check_id": check_id, "text": text,
+                                "categories": list(verdict.categories)})
             raise VoiceGuardError(LINE_IN_REVIEW, HELD, 409, categories=list(verdict.categories), line_check_id=check_id)
         return check_id
+
+    def _model_failed(self, owner: str, voice_id: str | None, verdict: LineVerdict) -> LineVerdict:
+        """The check model did not answer. A cloned voice's line is held for a person;
+        any other voice's line goes on what the rules said, with a warning in the log."""
+        if verdict.verdict != "pass":
+            return verdict
+        rec = self.record(voice_id)
+        if rec is not None and rec["kind"] == "cloned":
+            return LineVerdict("review", ("unclear",), verdict.model, verdict.rule_hits,
+                               verdict.reason + " Held for a person because the voice is a clone.", model_failed=True)
+        log.warning("line check passed on the rules alone for %s (voice %s): %s", owner, voice_id, verdict.reason)
+        return verdict
+
+    def _write_check(self, owner: str, video_id: str | None, voice_id: str | None, text: str, verdict: LineVerdict) -> str:
+        check_id = _id("lc")
+        keep_text = text if verdict.verdict != "pass" else None
+        with self.database.tx() as c:
+            c.execute("INSERT INTO line_checks (id, workspace_id, owner, video_id, voice_id, text, text_hash, verdict, categories, "
+                      "model, rule_hits, created_at, reason, review_state, model_ms) "
+                      f"VALUES (?, {_WORKSPACE}, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                      (check_id, owner, owner, video_id, voice_id, keep_text, _hash(text), verdict.verdict,
+                       json.dumps(list(verdict.categories)), verdict.model or getattr(self.lines, "name", ""),
+                       json.dumps(list(verdict.rule_hits)), self._now(), (verdict.reason or "")[:300],
+                       "waiting" if verdict.verdict == "review" else "", verdict.model_ms))
+        return check_id
+
+    def _tell(self, event: str, facts: dict) -> None:
+        if self.tell is None:
+            return
+        try:
+            self.tell(event, facts)
+        except Exception as exc:  # noqa: BLE001 - telling people never fails the check
+            self._alarm(f"{event} notice", exc)
+
+    def prepare_lines(self, owner: str, video_id: str, texts) -> int:
+        """All of a video's lines checked in one model call ahead of voicing them
+        (a Go on a plan, a batch, a language version's master). Never fails the caller."""
+        if not self.enabled(owner) or not hasattr(self.lines, "prepare"):
+            return 0
+        texts = [t for t in dict.fromkeys(texts or ()) if (t or "").strip()]
+        if not texts:
+            return 0
+        try:
+            return int(self.lines.prepare(owner, video_id, texts) or 0)
+        except Exception as exc:  # noqa: BLE001 - each line is still checked on its own when voiced
+            log.warning("line check batch for %s failed: %s", video_id, exc)
+            return 0
+
+    # ── the held lines' queue (admins) ──
+
+    def _review_row(self, r) -> dict:
+        d = dict(r)
+        d["categories"] = json.loads(d.get("categories") or "[]")
+        d["rule_hits"] = json.loads(d.get("rule_hits") or "[]")
+        d["category_words"] = [CATEGORY_WORDS.get(c, c) for c in d["categories"]]
+        d["due_at"] = iso(datetime.fromisoformat(d["created_at"].replace("Z", "+00:00")) + timedelta(hours=REVIEW_HOURS))
+        return d
+
+    def review_queue(self, state: str = "waiting", limit: int = 50) -> dict:
+        """The held lines waiting (oldest first) or decided (newest first), after auto-rejecting the overdue."""
+        self.expire_reviews()
+        limit = max(1, min(int(limit), 200))
+        with self.database.tx() as c:
+            if state == "waiting":
+                rows = c.execute("SELECT * FROM line_checks WHERE verdict = 'review' AND review_state = 'waiting' "
+                                 "ORDER BY created_at LIMIT ?", (limit,)).fetchall()
+            else:
+                rows = c.execute("SELECT * FROM line_checks WHERE verdict = 'review' AND review_state IN "
+                                 "('approved', 'rejected', 'expired') ORDER BY reviewed_at DESC LIMIT ?", (limit,)).fetchall()
+            waiting = c.execute("SELECT COUNT(*) FROM line_checks WHERE verdict = 'review' AND review_state = 'waiting'").fetchone()[0]
+        return {"items": [self._review_row(r) for r in rows], "waiting": int(waiting)}
+
+    def decide_review(self, check_id: str, who: str, decision: str, reason: str) -> dict:
+        """An admin clears (approve) or refuses (reject) a held line, with a reason.
+        Nobody decides on their own line. The owner is told either way."""
+        if decision not in ("approve", "reject"):
+            raise VoiceGuardError("invalid_decision", "Approve or reject.", 422)
+        with self.database.tx() as c:
+            row = c.execute("SELECT * FROM line_checks WHERE id = ? AND verdict = 'review'", (check_id,)).fetchone()
+        if row is None:
+            raise VoiceGuardError("line_check_not_found", "No held line with that id.", 404)
+        if row["owner"] == who:
+            raise VoiceGuardError("own_line", "You can't decide on your own line. Another admin has to.", 403)
+        if row["review_state"] != "waiting":
+            raise VoiceGuardError("already_decided", "That line is not waiting for a check any more.", 409)
+        state = "approved" if decision == "approve" else "rejected"
+        with self.database.tx() as c:
+            c.execute("UPDATE line_checks SET review_state = ?, reviewed_by = ?, reviewed_at = ?, review_reason = ? "
+                      "WHERE id = ? AND review_state = 'waiting'", (state, who, self._now(), reason, check_id))
+            row = c.execute("SELECT * FROM line_checks WHERE id = ?", (check_id,)).fetchone()
+        self._tell("decided", {"owner": row["owner"], "video_id": row["video_id"], "line_check_id": check_id,
+                               "state": state, "title": CLEARED if state == "approved" else NOT_CLEARED,
+                               "text": row["text"] or ""})
+        return self._review_row(row)
+
+    def expire_reviews(self) -> int:
+        """Open decision 4: a held line nobody checked in 48 hours is rejected, and its owner told."""
+        cutoff = self._since(REVIEW_HOURS)
+        with self.database.tx() as c:
+            due = [dict(r) for r in c.execute("SELECT id, owner, video_id, text FROM line_checks WHERE verdict = 'review' "
+                                              "AND review_state = 'waiting' AND created_at < ?", (cutoff,))]
+            for r in due:
+                c.execute("UPDATE line_checks SET review_state = 'expired', reviewed_by = 'auto', reviewed_at = ?, "
+                          "review_reason = ? WHERE id = ? AND review_state = 'waiting'",
+                          (self._now(), f"Not checked within {REVIEW_HOURS} hours.", r["id"]))
+        for r in due:
+            self._tell("decided", {"owner": r["owner"], "video_id": r["video_id"], "line_check_id": r["id"],
+                                   "state": "expired", "title": EXPIRED, "text": r["text"] or ""})
+        return len(due)
 
     # ── synthesis, all together ──
 
@@ -782,6 +923,7 @@ class VoiceGuard:
         try:
             self.backfill()
             self.drain_vendor_deletes()
+            self.expire_reviews()
         except Exception as exc:  # noqa: BLE001 - never stops the server starting
             self._alarm("start-up pass", exc)
 

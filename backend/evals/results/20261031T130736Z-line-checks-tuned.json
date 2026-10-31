@@ -1,0 +1,357 @@
+{
+  "label": "tuned",
+  "rules": "rules-2026-10-31.2",
+  "prompt": "lines-2026-10-31.3",
+  "model": "claude-haiku-5-5",
+  "spent_usd": 0.08975929999999994,
+  "runs": [
+    {
+      "run": 1,
+      "mode": "line",
+      "blocks_caught": 50,
+      "block_lines": 50,
+      "blocks_held": 0,
+      "blocks_by_rules": 35,
+      "false_blocks": 0,
+      "ordinary_lines": 100,
+      "ordinary_held": 2,
+      "model_failures": 0,
+      "model_calls": 115,
+      "latency_p50_s": 0.8932459997013211,
+      "latency_p95_s": 1.6058391333092001,
+      "rules_ms_max": 0.14425022527575493,
+      "rules_ms_mean": 0.06991496309638023,
+      "model_usd": 0.019830499999999987,
+      "usd_per_line": 0.00013220333333333325,
+      "missed": [],
+      "false": [
+        {
+          "id": "o034",
+          "set": "ordinary",
+          "lang": "en",
+          "category": null,
+          "verdict": "review",
+          "categories": [
+            "unclear"
+          ],
+          "by": "model",
+          "failed": false,
+          "reason": "Playful poll about tea or coffee, but the 'election' wording could be read as political framing."
+        },
+        {
+          "id": "o086",
+          "set": "ordinary",
+          "lang": "hing",
+          "category": null,
+          "verdict": "review",
+          "categories": [
+            "claims"
+          ],
+          "by": "model",
+          "failed": false,
+          "reason": "Claims the product kills bugs instantly, which reads as a pest-control efficacy promise rather than an ordinary product benefit."
+        }
+      ]
+    },
+    {
+      "run": 2,
+      "mode": "line",
+      "blocks_caught": 50,
+      "block_lines": 50,
+      "blocks_held": 0,
+      "blocks_by_rules": 35,
+      "false_blocks": 0,
+      "ordinary_lines": 100,
+      "ordinary_held": 2,
+      "model_failures": 0,
+      "model_calls": 115,
+      "latency_p50_s": 0.8771693338640034,
+      "latency_p95_s": 1.3920997957699,
+      "rules_ms_max": 0.14412496238946915,
+      "rules_ms_mean": 0.06947501562535763,
+      "model_usd": 0.020512499999999968,
+      "usd_per_line": 0.0001367499999999998,
+      "missed": [],
+      "false": [
+        {
+          "id": "o034",
+          "set": "ordinary",
+          "lang": "en",
+          "category": null,
+          "verdict": "review",
+          "categories": [
+            "unclear"
+          ],
+          "by": "model",
+          "failed": false,
+          "reason": "Playful poll about tea or coffee tied to the word election, which may read as political framing; not clearly a vote instruction."
+        },
+        {
+          "id": "o086",
+          "set": "ordinary",
+          "lang": "hing",
+          "category": null,
+          "verdict": "review",
+          "categories": [
+            "claims"
+          ],
+          "by": "model",
+          "failed": false,
+          "reason": "Claims the product eliminates insects within a second, which reads as an overstated efficacy claim."
+        }
+      ]
+    },
+    {
+      "run": 3,
+      "mode": "line",
+      "blocks_caught": 50,
+      "block_lines": 50,
+      "blocks_held": 0,
+      "blocks_by_rules": 35,
+      "false_blocks": 0,
+      "ordinary_lines": 100,
+      "ordinary_held": 1,
+      "model_failures": 0,
+      "model_calls": 115,
+      "latency_p50_s": 0.8391630416736007,
+      "latency_p95_s": 1.473667633673176,
+      "rules_ms_max": 0.1393333077430725,
+      "rules_ms_mean": 0.06796440730492274,
+      "model_usd": 0.019548299999999956,
+      "usd_per_line": 0.00013032199999999972,
+      "missed": [],
+      "false": [
+        {
+          "id": "o086",
+          "set": "ordinary",
+          "lang": "hing",
+          "category": null,
+          "verdict": "review",
+          "categories": [
+            "claims"
+          ],
+          "by": "model",
+          "failed": false,
+          "reason": "Claims the spray kills bugs instantly, which reads as an overstated efficacy claim worth a check."
+        }
+      ]
+    },
+    {
+      "run": 1,
+      "mode": "batch",
+      "blocks_caught": 50,
+      "block_lines": 50,
+      "blocks_held": 0,
+      "blocks_by_rules": 35,
+      "false_blocks": 0,
+      "ordinary_lines": 100,
+      "ordinary_held": 0,
+      "model_failures": 0,
+      "model_calls": 15,
+      "latency_p50_s": 2.089258541353047,
+      "latency_p95_s": 4.784195758309211,
+      "rules_ms_max": 0.1427079550921917,
+      "rules_ms_mean": 0.06783113194008668,
+      "model_usd": 0.005124800000000013,
+      "usd_per_line": 3.416533333333342e-05,
+      "missed": [],
+      "false": []
+    },
+    {
+      "run": 2,
+      "mode": "batch",
+      "blocks_caught": 50,
+      "block_lines": 50,
+      "blocks_held": 0,
+      "blocks_by_rules": 35,
+      "false_blocks": 0,
+      "ordinary_lines": 100,
+      "ordinary_held": 1,
+      "model_failures": 0,
+      "model_calls": 15,
+      "latency_p50_s": 2.083325916901231,
+      "latency_p95_s": 3.0151213088538493,
+      "rules_ms_max": 0.15025027096271515,
+      "rules_ms_mean": 0.06903853577872117,
+      "model_usd": 0.005126300000000014,
+      "usd_per_line": 3.4175333333333426e-05,
+      "missed": [],
+      "false": [
+        {
+          "id": "o058",
+          "set": "ordinary",
+          "lang": "hi",
+          "category": null,
+          "verdict": "review",
+          "categories": [
+            "political"
+          ],
+          "by": "model",
+          "failed": false,
+          "reason": "Asking people to vote in an app poll could be read as voting guidance, though it may be a product poll."
+        }
+      ]
+    },
+    {
+      "run": 3,
+      "mode": "batch",
+      "blocks_caught": 50,
+      "block_lines": 50,
+      "blocks_held": 0,
+      "blocks_by_rules": 35,
+      "false_blocks": 0,
+      "ordinary_lines": 100,
+      "ordinary_held": 1,
+      "model_failures": 0,
+      "model_calls": 15,
+      "latency_p50_s": 2.190129457972944,
+      "latency_p95_s": 3.184115012595429,
+      "rules_ms_max": 0.14833267778158188,
+      "rules_ms_mean": 0.06987275866170724,
+      "model_usd": 0.005577499999999999,
+      "usd_per_line": 3.718333333333333e-05,
+      "missed": [],
+      "false": [
+        {
+          "id": "o088",
+          "set": "ordinary",
+          "lang": "hing",
+          "category": null,
+          "verdict": "review",
+          "categories": [
+            "claims"
+          ],
+          "by": "model",
+          "failed": false,
+          "reason": "Implies a guaranteed exam success result, which needs substantiation."
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "line": {
+      "blocks_caught": {
+        "mean": 50,
+        "min": 50,
+        "max": 50,
+        "stdev": 0.0
+      },
+      "blocks_held": {
+        "mean": 0,
+        "min": 0,
+        "max": 0,
+        "stdev": 0.0
+      },
+      "blocks_by_rules": {
+        "mean": 35,
+        "min": 35,
+        "max": 35,
+        "stdev": 0.0
+      },
+      "false_blocks": {
+        "mean": 0,
+        "min": 0,
+        "max": 0,
+        "stdev": 0.0
+      },
+      "ordinary_held": {
+        "mean": 1.6666666666666667,
+        "min": 1,
+        "max": 2,
+        "stdev": 0.4714045207910317
+      },
+      "latency_p50_s": {
+        "mean": 0.8698594584129751,
+        "min": 0.8391630416736007,
+        "max": 0.8932459997013211,
+        "stdev": 0.022676232735167206
+      },
+      "latency_p95_s": {
+        "mean": 1.4905355209174254,
+        "min": 1.3920997957699,
+        "max": 1.6058391333092001,
+        "stdev": 0.08807012477943645
+      },
+      "usd_per_line": {
+        "mean": 0.0001330917777777776,
+        "min": 0.00013032199999999972,
+        "max": 0.0001367499999999998,
+        "stdev": 2.6983694024537946e-06
+      },
+      "rules_ms_max": {
+        "mean": 0.1425694984694322,
+        "min": 0.1393333077430725,
+        "max": 0.14425022527575493,
+        "stdev": 0.00228890374207137
+      },
+      "model_calls": {
+        "mean": 115,
+        "min": 115,
+        "max": 115,
+        "stdev": 0.0
+      }
+    },
+    "batch": {
+      "blocks_caught": {
+        "mean": 50,
+        "min": 50,
+        "max": 50,
+        "stdev": 0.0
+      },
+      "blocks_held": {
+        "mean": 0,
+        "min": 0,
+        "max": 0,
+        "stdev": 0.0
+      },
+      "blocks_by_rules": {
+        "mean": 35,
+        "min": 35,
+        "max": 35,
+        "stdev": 0.0
+      },
+      "false_blocks": {
+        "mean": 0,
+        "min": 0,
+        "max": 0,
+        "stdev": 0.0
+      },
+      "ordinary_held": {
+        "mean": 0.6666666666666666,
+        "min": 0,
+        "max": 1,
+        "stdev": 0.4714045207910317
+      },
+      "latency_p50_s": {
+        "mean": 2.1209046387424073,
+        "min": 2.083325916901231,
+        "max": 2.190129457972944,
+        "stdev": 0.04900922162441762
+      },
+      "latency_p95_s": {
+        "mean": 3.6611440265861632,
+        "min": 3.0151213088538493,
+        "max": 4.784195758309211,
+        "stdev": 0.7971087805607954
+      },
+      "usd_per_line": {
+        "mean": 3.517466666666672e-05,
+        "min": 3.416533333333342e-05,
+        "max": 3.718333333333333e-05,
+        "stdev": 1.4203476882634859e-06
+      },
+      "rules_ms_max": {
+        "mean": 0.14709696794549623,
+        "min": 0.1427079550921917,
+        "max": 0.15025027096271515,
+        "stdev": 0.0032007151567461276
+      },
+      "model_calls": {
+        "mean": 15,
+        "min": 15,
+        "max": 15,
+        "stdev": 0.0
+      }
+    }
+  }
+}

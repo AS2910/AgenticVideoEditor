@@ -16,6 +16,9 @@ Everything but the admin routes needs `voices.cloning_verified` for the owner
     POST /admin/users/{owner}/suspend-cloning   {reason}: no new clones, every cloned voice disabled (audited)
     POST /admin/users/{owner}/restore-cloning   {reason}: the voices the suspension disabled come back (audited)
     POST /admin/users/{owner}/clone-limits      {day, month, reason}: raise a person's clone limits (audited)
+    GET  /admin/line-checks?verdict=review      step 4: the held lines (state waiting, oldest first; or decided)
+    POST /admin/line-checks/{id}                {decision: approve | reject, reason}: never on your own line (audited;
+                                                the owner is told). A line nobody checks in 48 hours is rejected.
 
 A refusal answers `{"detail": {"code", "message", ...}}` with the error's
 status (the app's VoiceGuardError handler).
@@ -147,3 +150,27 @@ def clone_limits(owner: str, req: LimitsRequest, who: str = Depends(_admin)) -> 
     day, month = api.voice_guard.set_limits(owner, req.day, req.month)
     admin.audit(api.database, who, "voice_clone_limits", owner, reason, {"day": day, "month": month})
     return {"owner": owner, "day": day, "month": month}
+
+
+# ── step 4: the held lines' queue ────────────────────────────────────────────
+
+@router.get("/admin/line-checks")
+def line_checks_queue(verdict: str = "review", state: str = "waiting", limit: int = 50, who: str = Depends(_admin)) -> dict:
+    if verdict != "review":
+        raise HTTPException(status_code=422, detail="Only held lines (verdict=review) have a queue.")
+    return _api().voice_guard.review_queue("waiting" if state == "waiting" else "decided", limit)
+
+
+class LineDecision(BaseModel):
+    decision: str
+    reason: str = Field(default="", max_length=500)
+
+
+@router.post("/admin/line-checks/{check_id}")
+def decide_line_check(check_id: str, req: LineDecision, who: str = Depends(_admin)) -> dict:
+    api = _api()
+    reason = _reason(req.reason)
+    row = api.voice_guard.decide_review(check_id, who, req.decision, reason)
+    admin.audit(api.database, who, "line_approve" if row["review_state"] == "approved" else "line_reject", row["owner"],
+                reason, {"line_check_id": check_id, "video_id": row["video_id"], "categories": row["categories"]})
+    return row

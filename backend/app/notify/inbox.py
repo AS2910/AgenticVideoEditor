@@ -14,7 +14,10 @@ ceiling, each once per ceiling and period: `spend_alerts`), and for admins
 abuse_report, consent_review and vendor_failure (run 5 item 1: a vendor or
 the server failed people on our side, once per cause per half hour);
 consent_decided tells an owner what a reviewer decided on their consent
-recording (run 4 item 2).
+recording (run 4 item 2). Voice consent V1 step 4: line_review tells admins a
+line is held for a check, line_decided tells its owner what was decided. Those
+two are not in the settings list yet (`UNLISTED`, on by default): step 6 shows
+them with the rest of the voice consent screens.
 """
 from __future__ import annotations
 
@@ -26,7 +29,7 @@ from app.store.db import Database
 from app.timefmt import now_iso
 
 KINDS = ("job_done", "job_failed", "review_comment", "approval", "changes_requested", "spend_alert", "abuse_report",
-         "consent_review", "consent_decided", "vendor_failure")
+         "consent_review", "consent_decided", "vendor_failure", "line_review", "line_decided")
 LABELS = {
     "job_done": "Long work finished",
     "job_failed": "Something failed",
@@ -38,6 +41,8 @@ LABELS = {
     "consent_review": "Consent recordings to review",
     "consent_decided": "Consent checks reviewed",
     "vendor_failure": "Failures on our side",
+    "line_review": "Held lines to check",
+    "line_decided": "Held lines checked",
 }
 HELP = {
     "job_done": "An export, a check, a batch or an import that took more than a minute is done.",
@@ -51,6 +56,8 @@ HELP = {
     "consent_decided": "A person listened to your consent recording and decided.",
     "vendor_failure": "A vendor or the server failed people (a refused key, a quota, an outage), with the real cause. "
                       "Only the people who run Voltage get these.",
+    "line_review": "A line was held before it was voiced and needs a person to check it. Only the people who run Voltage get these.",
+    "line_decided": "A person checked a line of yours that was held, and decided.",
 }
 # (in the app, by email): review news was emailed before G4 (C2's digest), so it stays on.
 DEFAULTS = {
@@ -64,12 +71,14 @@ DEFAULTS = {
     "consent_review": (True, True),
     "consent_decided": (True, True),
     "vendor_failure": (True, True),
+    "line_review": (True, True),
+    "line_decided": (True, True),
 }
 # The digest item each kind is emailed as.
 DIGEST_KIND = {"review_comment": "comment", "approval": "approved", "changes_requested": "changes_asked",
                "job_done": "job_done", "job_failed": "job_failed", "spend_alert": "spend_alert",
                "abuse_report": "abuse_report", "consent_review": "consent_review", "consent_decided": "consent_decided",
-               "vendor_failure": "vendor_failure"}
+               "vendor_failure": "vendor_failure", "line_review": "line_review", "line_decided": "line_decided"}
 THRESHOLDS = (50, 80, 100)
 MAX_KEPT = 200
 
@@ -83,11 +92,13 @@ def _settings_in(c: sqlite3.Connection, user: str) -> dict[str, tuple[bool, bool
 
 
 # Kinds only the people who run Voltage get (decision 0: hidden from everyone else).
-ADMIN_KINDS = ("abuse_report", "consent_review", "vendor_failure")
+ADMIN_KINDS = ("abuse_report", "consent_review", "vendor_failure", "line_review")
+# Sent, but not listed in the settings yet (voice consent V1 step 6 lists them).
+UNLISTED = ("line_review", "line_decided")
 
 
 def kinds_for(admin: bool) -> tuple[str, ...]:
-    return KINDS if admin else tuple(k for k in KINDS if k not in ADMIN_KINDS)
+    return tuple(k for k in KINDS if k not in UNLISTED and (admin or k not in ADMIN_KINDS))
 
 
 def settings(db: Database, user: str, admin: bool = True) -> list[dict]:

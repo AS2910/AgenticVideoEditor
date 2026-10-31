@@ -194,7 +194,7 @@ def test_check_line_writes_every_line_and_keeps_only_a_hash_of_a_passing_one(vid
     check = G.check_line("local", "p1", "mock", "Thirty percent off today")
     row = _checks()[-1]
     assert row["id"] == check and row["verdict"] == "pass" and row["text"] is None and len(row["text_hash"]) == 64
-    assert row["model"] == "pass-through" and row["workspace_id"]
+    assert row["model"] == G.lines.name and row["workspace_id"]          # step 4: the rules (no model key here)
 
 
 def test_check_line_blocks_and_holds_with_the_words_kept(videos, monkeypatch):

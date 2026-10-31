@@ -1,0 +1,670 @@
+{
+  "label": "thinking-off",
+  "rules": "rules-2026-10-31.2",
+  "prompt": "lines-2026-10-31.3",
+  "model": "claude-haiku-5-5",
+  "spent_usd": 0.15808729999999993,
+  "runs": [
+    {
+      "run": 1,
+      "mode": "line",
+      "blocks_caught": 50,
+      "block_lines": 50,
+      "blocks_held": 0,
+      "blocks_by_rules": 35,
+      "false_blocks": 2,
+      "ordinary_lines": 100,
+      "ordinary_held": 2,
+      "model_failures": 0,
+      "model_calls": 115,
+      "latency_p50_s": 0.8673286670818925,
+      "latency_p95_s": 1.2834570786915713,
+      "rules_ms_max": 0.15354109928011894,
+      "rules_ms_mean": 0.07313578700025876,
+      "model_usd": 0.01977370000000002,
+      "usd_per_line": 0.00013182466666666678,
+      "missed": [],
+      "false": [
+        {
+          "id": "o058",
+          "set": "ordinary",
+          "lang": "hi",
+          "category": null,
+          "verdict": "review",
+          "categories": [
+            "unclear"
+          ],
+          "by": "model",
+          "failed": false,
+          "reason": "Says 'vote' on the app, which may be a poll for a food choice, but could be read as voting language; intent is unclear."
+        },
+        {
+          "id": "o070",
+          "set": "ordinary",
+          "lang": "hi",
+          "category": null,
+          "verdict": "block",
+          "categories": [
+            "fraud"
+          ],
+          "by": "model",
+          "failed": false,
+          "reason": "Asks the listener to enter their PIN, a sensitive credential, which matches a scam pattern."
+        },
+        {
+          "id": "o080",
+          "set": "ordinary",
+          "lang": "hing",
+          "category": null,
+          "verdict": "block",
+          "categories": [
+            "political"
+          ],
+          "by": "model",
+          "failed": false,
+          "reason": "Tells people to vote, which is a political instruction and is blocked under the political rule."
+        },
+        {
+          "id": "o086",
+          "set": "ordinary",
+          "lang": "hing",
+          "category": null,
+          "verdict": "review",
+          "categories": [
+            "claims"
+          ],
+          "by": "model",
+          "failed": false,
+          "reason": "Claims the spray eliminates insects instantly, an overstated product promise that needs substantiation."
+        }
+      ]
+    },
+    {
+      "run": 2,
+      "mode": "line",
+      "blocks_caught": 50,
+      "block_lines": 50,
+      "blocks_held": 0,
+      "blocks_by_rules": 35,
+      "false_blocks": 2,
+      "ordinary_lines": 100,
+      "ordinary_held": 1,
+      "model_failures": 0,
+      "model_calls": 115,
+      "latency_p50_s": 0.8436695830896497,
+      "latency_p95_s": 1.0794888163451104,
+      "rules_ms_max": 0.29791705310344696,
+      "rules_ms_mean": 0.10823077832659085,
+      "model_usd": 0.018584299999999984,
+      "usd_per_line": 0.00012389533333333322,
+      "missed": [],
+      "false": [
+        {
+          "id": "o070",
+          "set": "ordinary",
+          "lang": "hi",
+          "category": null,
+          "verdict": "block",
+          "categories": [
+            "fraud"
+          ],
+          "by": "model",
+          "failed": false,
+          "reason": "Asks the listener to enter their PIN, a sensitive credential, which is a scam pattern."
+        },
+        {
+          "id": "o080",
+          "set": "ordinary",
+          "lang": "hing",
+          "category": null,
+          "verdict": "block",
+          "categories": [
+            "political"
+          ],
+          "by": "model",
+          "failed": false,
+          "reason": "Tells people to vote, which is a political call to action."
+        },
+        {
+          "id": "o086",
+          "set": "ordinary",
+          "lang": "hing",
+          "category": null,
+          "verdict": "review",
+          "categories": [
+            "claims"
+          ],
+          "by": "model",
+          "failed": false,
+          "reason": "Claims the spray kills pests instantly, which is a strong efficacy claim that needs substantiation."
+        }
+      ]
+    },
+    {
+      "run": 3,
+      "mode": "line",
+      "blocks_caught": 50,
+      "block_lines": 50,
+      "blocks_held": 0,
+      "blocks_by_rules": 35,
+      "false_blocks": 2,
+      "ordinary_lines": 100,
+      "ordinary_held": 2,
+      "model_failures": 0,
+      "model_calls": 115,
+      "latency_p50_s": 0.8828878328204155,
+      "latency_p95_s": 1.1030457166023553,
+      "rules_ms_max": 0.17858296632766724,
+      "rules_ms_mean": 0.0721887902667125,
+      "model_usd": 0.018433299999999958,
+      "usd_per_line": 0.00012288866666666638,
+      "missed": [],
+      "false": [
+        {
+          "id": "o070",
+          "set": "ordinary",
+          "lang": "hi",
+          "category": null,
+          "verdict": "block",
+          "categories": [
+            "fraud"
+          ],
+          "by": "model",
+          "failed": false,
+          "reason": "Asks the listener to enter their PIN, a sensitive credential, which is a scam pattern."
+        },
+        {
+          "id": "o080",
+          "set": "ordinary",
+          "lang": "hing",
+          "category": null,
+          "verdict": "block",
+          "categories": [
+            "political"
+          ],
+          "by": "model",
+          "failed": false,
+          "reason": "Tells people to vote, which is political content asking for voting behaviour."
+        },
+        {
+          "id": "o086",
+          "set": "ordinary",
+          "lang": "hing",
+          "category": null,
+          "verdict": "review",
+          "categories": [
+            "claims"
+          ],
+          "by": "model",
+          "failed": false,
+          "reason": "Claims the spray eliminates insects in one second, a miracle-style efficacy claim that needs substantiation."
+        },
+        {
+          "id": "o096",
+          "set": "ordinary",
+          "lang": "hing",
+          "category": null,
+          "verdict": "review",
+          "categories": [
+            "claims"
+          ],
+          "by": "model",
+          "failed": false,
+          "reason": "Promises a financial outcome (securing family for 499 a month) that reads like a guaranteed-return style claim, so it needs review."
+        }
+      ]
+    },
+    {
+      "run": 1,
+      "mode": "batch",
+      "blocks_caught": 50,
+      "block_lines": 50,
+      "blocks_held": 0,
+      "blocks_by_rules": 35,
+      "false_blocks": 1,
+      "ordinary_lines": 100,
+      "ordinary_held": 4,
+      "model_failures": 0,
+      "model_calls": 15,
+      "latency_p50_s": 1.4639050420373678,
+      "latency_p95_s": 1.8876762462314212,
+      "rules_ms_max": 1.2360000982880592,
+      "rules_ms_mean": 0.20740941787759462,
+      "model_usd": 0.0043108000000000035,
+      "usd_per_line": 2.873866666666669e-05,
+      "missed": [],
+      "false": [
+        {
+          "id": "o020",
+          "set": "ordinary",
+          "lang": "en",
+          "category": null,
+          "verdict": "review",
+          "categories": [
+            "claims"
+          ],
+          "by": "model",
+          "failed": false,
+          "reason": "Implies a guaranteed exam success result, which is a miracle-result style claim."
+        },
+        {
+          "id": "o034",
+          "set": "ordinary",
+          "lang": "en",
+          "category": null,
+          "verdict": "block",
+          "categories": [
+            "political"
+          ],
+          "by": "model",
+          "failed": false,
+          "reason": "Asks people to take part in an election poll framed as the election of the year, which pulls in political content."
+        },
+        {
+          "id": "o053",
+          "set": "ordinary",
+          "lang": "hi",
+          "category": null,
+          "verdict": "review",
+          "categories": [
+            "claims"
+          ],
+          "by": "model",
+          "failed": false,
+          "reason": "Implies a safety or security outcome for the family that the ad cannot guarantee."
+        },
+        {
+          "id": "o084",
+          "set": "ordinary",
+          "lang": "hing",
+          "category": null,
+          "verdict": "review",
+          "categories": [
+            "fraud"
+          ],
+          "by": "model",
+          "failed": false,
+          "reason": "Pushes listeners to send money to family urgently with zero fees, which reads like a money-transfer pitch that may need a fraud check."
+        },
+        {
+          "id": "o088",
+          "set": "ordinary",
+          "lang": "hing",
+          "category": null,
+          "verdict": "review",
+          "categories": [
+            "claims"
+          ],
+          "by": "model",
+          "failed": false,
+          "reason": "Claims a guaranteed exam result (\"crack the exam\") based on past student success, which is a result promise."
+        }
+      ]
+    },
+    {
+      "run": 2,
+      "mode": "batch",
+      "blocks_caught": 50,
+      "block_lines": 50,
+      "blocks_held": 0,
+      "blocks_by_rules": 35,
+      "false_blocks": 1,
+      "ordinary_lines": 100,
+      "ordinary_held": 7,
+      "model_failures": 0,
+      "model_calls": 15,
+      "latency_p50_s": 1.5374243748374283,
+      "latency_p95_s": 1.9108701748773453,
+      "rules_ms_max": 0.8061248809099197,
+      "rules_ms_mean": 0.181203323105971,
+      "model_usd": 0.004352300000000003,
+      "usd_per_line": 2.9015333333333357e-05,
+      "missed": [],
+      "false": [
+        {
+          "id": "o020",
+          "set": "ordinary",
+          "lang": "en",
+          "category": null,
+          "verdict": "review",
+          "categories": [
+            "claims"
+          ],
+          "by": "model",
+          "failed": false,
+          "reason": "Implies a guaranteed exam result from using the service, which is a success claim that needs substantiation."
+        },
+        {
+          "id": "o034",
+          "set": "ordinary",
+          "lang": "en",
+          "category": null,
+          "verdict": "block",
+          "categories": [
+            "political"
+          ],
+          "by": "model",
+          "failed": false,
+          "reason": "Asks people to take part in an election-themed poll, which edges into electoral engagement; the line itself is a political election reference."
+        },
+        {
+          "id": "o039",
+          "set": "ordinary",
+          "lang": "en",
+          "category": null,
+          "verdict": "review",
+          "categories": [
+            "claims"
+          ],
+          "by": "model",
+          "failed": false,
+          "reason": "Implies a skincare result (glow) that could be read as a treatment claim; needs checking."
+        },
+        {
+          "id": "o053",
+          "set": "ordinary",
+          "lang": "hi",
+          "category": null,
+          "verdict": "review",
+          "categories": [
+            "claims"
+          ],
+          "by": "model",
+          "failed": false,
+          "reason": "Implies a safety or protection guarantee for family at a low price, which is a vague promise worth checking."
+        },
+        {
+          "id": "o058",
+          "set": "ordinary",
+          "lang": "hi",
+          "category": null,
+          "verdict": "review",
+          "categories": [
+            "political"
+          ],
+          "by": "model",
+          "failed": false,
+          "reason": "Asking viewers to vote in an app poll is ambiguous and could be read as political voting; the poll topic is unclear."
+        },
+        {
+          "id": "o084",
+          "set": "ordinary",
+          "lang": "hing",
+          "category": null,
+          "verdict": "review",
+          "categories": [
+            "fraud"
+          ],
+          "by": "model",
+          "failed": false,
+          "reason": "Urges sending money to family with zero fees, which could be a payment pressure script; unclear without more context."
+        },
+        {
+          "id": "o088",
+          "set": "ordinary",
+          "lang": "hing",
+          "category": null,
+          "verdict": "review",
+          "categories": [
+            "claims"
+          ],
+          "by": "model",
+          "failed": false,
+          "reason": "Implies a near-guaranteed exam success result from the product, a miracle-result style claim."
+        },
+        {
+          "id": "o099",
+          "set": "ordinary",
+          "lang": "hing",
+          "category": null,
+          "verdict": "review",
+          "categories": [
+            "claims"
+          ],
+          "by": "model",
+          "failed": false,
+          "reason": "Learning to code in twelve weeks is a bold outcome promise that may need substantiation."
+        }
+      ]
+    },
+    {
+      "run": 3,
+      "mode": "batch",
+      "blocks_caught": 50,
+      "block_lines": 50,
+      "blocks_held": 0,
+      "blocks_by_rules": 35,
+      "false_blocks": 1,
+      "ordinary_lines": 100,
+      "ordinary_held": 6,
+      "model_failures": 0,
+      "model_calls": 15,
+      "latency_p50_s": 1.447699333075434,
+      "latency_p95_s": 1.9147672874853015,
+      "rules_ms_max": 0.16504060477018356,
+      "rules_ms_mean": 0.07913412836690743,
+      "model_usd": 0.004347299999999971,
+      "usd_per_line": 2.8981999999999805e-05,
+      "missed": [],
+      "false": [
+        {
+          "id": "o020",
+          "set": "ordinary",
+          "lang": "en",
+          "category": null,
+          "verdict": "review",
+          "categories": [
+            "claims"
+          ],
+          "by": "model",
+          "failed": false,
+          "reason": "Claims a guaranteed exam success outcome, which is an unsupported result promise."
+        },
+        {
+          "id": "o034",
+          "set": "ordinary",
+          "lang": "en",
+          "category": null,
+          "verdict": "block",
+          "categories": [
+            "political"
+          ],
+          "by": "model",
+          "failed": false,
+          "reason": "Asks people to take part in an election poll, which edges into political engagement during an election."
+        },
+        {
+          "id": "o053",
+          "set": "ordinary",
+          "lang": "hi",
+          "category": null,
+          "verdict": "review",
+          "categories": [
+            "claims"
+          ],
+          "by": "model",
+          "failed": false,
+          "reason": "Vague safety promise tied to a low price could be read as an unsupported guarantee of protection."
+        },
+        {
+          "id": "o058",
+          "set": "ordinary",
+          "lang": "hi",
+          "category": null,
+          "verdict": "review",
+          "categories": [
+            "political"
+          ],
+          "by": "model",
+          "failed": false,
+          "reason": "Asks listeners to vote in an app poll, which is close to voting language; it is likely a product poll but worth confirming it is not political."
+        },
+        {
+          "id": "o084",
+          "set": "ordinary",
+          "lang": "hing",
+          "category": null,
+          "verdict": "review",
+          "categories": [
+            "claims"
+          ],
+          "by": "model",
+          "failed": false,
+          "reason": "Promises money transfers with zero fees, which may be an unverified money claim; needs confirmation of the fee terms."
+        },
+        {
+          "id": "o088",
+          "set": "ordinary",
+          "lang": "hing",
+          "category": null,
+          "verdict": "review",
+          "categories": [
+            "claims"
+          ],
+          "by": "model",
+          "failed": false,
+          "reason": "Implies a guaranteed exam success result from the product or service, a miracle outcome claim."
+        },
+        {
+          "id": "o099",
+          "set": "ordinary",
+          "lang": "hing",
+          "category": null,
+          "verdict": "review",
+          "categories": [
+            "claims"
+          ],
+          "by": "model",
+          "failed": false,
+          "reason": "Promises a specific skill outcome in twelve weeks, which may be an overstated result claim."
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "line": {
+      "blocks_caught": {
+        "mean": 50,
+        "min": 50,
+        "max": 50,
+        "stdev": 0.0
+      },
+      "blocks_held": {
+        "mean": 0,
+        "min": 0,
+        "max": 0,
+        "stdev": 0.0
+      },
+      "blocks_by_rules": {
+        "mean": 35,
+        "min": 35,
+        "max": 35,
+        "stdev": 0.0
+      },
+      "false_blocks": {
+        "mean": 2,
+        "min": 2,
+        "max": 2,
+        "stdev": 0.0
+      },
+      "ordinary_held": {
+        "mean": 1.6666666666666667,
+        "min": 1,
+        "max": 2,
+        "stdev": 0.4714045207910317
+      },
+      "latency_p50_s": {
+        "mean": 0.8646286943306526,
+        "min": 0.8436695830896497,
+        "max": 0.8828878328204155,
+        "stdev": 0.016124208872153635
+      },
+      "latency_p95_s": {
+        "mean": 1.1553305372130123,
+        "min": 1.0794888163451104,
+        "max": 1.2834570786915713,
+        "stdev": 0.09110814036398401
+      },
+      "usd_per_line": {
+        "mean": 0.0001262028888888888,
+        "min": 0.00012288866666666638,
+        "max": 0.00013182466666666678,
+        "stdev": 3.996384489467394e-06
+      },
+      "rules_ms_max": {
+        "mean": 0.2100137062370777,
+        "min": 0.15354109928011894,
+        "max": 0.29791705310344696,
+        "stdev": 0.06299218241993045
+      },
+      "model_calls": {
+        "mean": 115,
+        "min": 115,
+        "max": 115,
+        "stdev": 0.0
+      }
+    },
+    "batch": {
+      "blocks_caught": {
+        "mean": 50,
+        "min": 50,
+        "max": 50,
+        "stdev": 0.0
+      },
+      "blocks_held": {
+        "mean": 0,
+        "min": 0,
+        "max": 0,
+        "stdev": 0.0
+      },
+      "blocks_by_rules": {
+        "mean": 35,
+        "min": 35,
+        "max": 35,
+        "stdev": 0.0
+      },
+      "false_blocks": {
+        "mean": 1,
+        "min": 1,
+        "max": 1,
+        "stdev": 0.0
+      },
+      "ordinary_held": {
+        "mean": 5.666666666666667,
+        "min": 4,
+        "max": 7,
+        "stdev": 1.247219128924647
+      },
+      "latency_p50_s": {
+        "mean": 1.4830095833167434,
+        "min": 1.447699333075434,
+        "max": 1.5374243748374283,
+        "stdev": 0.039041716175730386
+      },
+      "latency_p95_s": {
+        "mean": 1.9044379028646894,
+        "min": 1.8876762462314212,
+        "max": 1.9147672874853015,
+        "stdev": 0.011958587472006867
+      },
+      "usd_per_line": {
+        "mean": 2.891199999999995e-05,
+        "min": 2.873866666666669e-05,
+        "max": 2.9015333333333357e-05,
+        "stdev": 1.233183174041765e-07
+      },
+      "rules_ms_max": {
+        "mean": 0.7357218613227209,
+        "min": 0.16504060477018356,
+        "max": 1.2360000982880592,
+        "stdev": 0.4400424207310494
+      },
+      "model_calls": {
+        "mean": 15,
+        "min": 15,
+        "max": 15,
+        "stdev": 0.0
+      }
+    }
+  }
+}

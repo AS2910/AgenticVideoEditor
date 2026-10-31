@@ -299,7 +299,7 @@
   .pill { font: inherit; font-size: 13px; font-weight: 500; height: 32px; padding: 0 12px; border-radius: 999px; border: 1.5px solid var(--line2); background: var(--card); color: var(--muted-foreground); cursor: pointer; transition: all .15s ease; }
   .pill:hover { border-color: var(--foreground); color: var(--foreground); }
   .pill:focus-visible { outline: 3px solid color-mix(in oklch, var(--ring) 50%, transparent); outline-offset: 2px; }
-  .pill.on, .pill[aria-pressed="true"] { border-color: var(--ink); background: var(--volt); color: var(--ink); }
+  .pill.on, .pill[aria-pressed="true"], .pill[role="tab"][data-state="active"] { border-color: var(--ink); background: var(--volt); color: var(--ink); }
   /* The black Voltage pane */
   .pane { background: var(--pane); color: var(--ptext); }
   /* 2026-10-20: the editor is exactly the window; html and body never scroll it on a desktop. */
