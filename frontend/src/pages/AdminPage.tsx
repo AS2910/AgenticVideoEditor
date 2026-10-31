@@ -10,6 +10,7 @@ import { FillBar } from './bits'
 import { said } from './fmt'
 import { PeopleSection } from './admin/PeopleSection'
 import { ADMIN_SECTIONS } from './admin/sections'
+import { openTrace } from './admin/traceApi'
 
 const pct = (n: number | null) => (n == null ? null : `${Math.round(n * 100)}%`)
 
@@ -139,7 +140,8 @@ export function AdminPage({ me }: { me: Me | null }) {
                   <div key={r.id} className="flex flex-col gap-0.5 border-t border-line py-2.5 text-[13px]" data-testid="abuse-row">
                     <span className="flex flex-wrap items-baseline gap-2"><span className="stamp need">{r.kind.replace('_', ' ')}</span><span className="tnum min-w-0 truncate">{r.location}</span></span>
                     {r.details && <span>{r.details}</span>}
-                    <span className="text-muted-foreground">{r.contact ? `Reply to ${r.contact}` : 'No contact given'}</span>
+                    <span className="flex flex-wrap items-baseline gap-3"><span className="text-muted-foreground">{r.contact ? `Reply to ${r.contact}` : 'No contact given'}</span>
+                      <button type="button" className="act" onClick={() => openTrace(String(r.id))} aria-label={`Trace abuse report ${r.id}`}>Trace</button></span>
                   </div>
                 ))}
               </section>

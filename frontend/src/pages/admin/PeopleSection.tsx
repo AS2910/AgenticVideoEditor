@@ -6,6 +6,7 @@ import { usd } from '../../lib/money'
 import { formatDate } from '../../lib/dates'
 import { said } from '../fmt'
 import { AuditList } from './AuditSection'
+import { CloningControls } from './CloningControls'
 import { field } from './ui'
 
 const credits = (n: number) => `${n.toFixed(2)} ${Math.abs(n) === 1 ? 'credit' : 'credits'}`
@@ -147,6 +148,7 @@ function UserView({ user, onChange, onFlags }: { user: AdminUser; onChange: (u: 
           ))}
         </Part>
       </div>
+      <CloningControls key={user.owner} owner={user.owner} />
       <div className="flex flex-col gap-3" data-testid="user-actions">
         <h4 className="tag m-0 text-faint">Act</h4>
         <ReasonForm verb="Grant credits" busyVerb="Granting…" onSubmit={async (r) => onChange(await grantAdminCredits(user.owner, Number(amount), r))}>

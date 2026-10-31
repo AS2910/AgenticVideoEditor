@@ -10,6 +10,7 @@ import threading
 import statistics
 from concurrent.futures import ThreadPoolExecutor
 import hashlib
+import secrets
 import os
 import uuid
 import contextvars
@@ -25,7 +26,7 @@ from urllib.parse import quote
 from types import SimpleNamespace
 
 from fastapi import Depends, FastAPI, HTTPException, File, Form, Request, Response, UploadFile
-from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, RedirectResponse, StreamingResponse
 from pydantic import BaseModel
 
 from typing import Any, Callable, Literal, Sequence
@@ -95,7 +96,7 @@ from app.notify import digest as digest_mod, email as email_mod
 from app import diskroom
 from starlette.concurrency import run_in_threadpool
 from app.notify import templates as email_templates
-from app.render import captions as captions_mod, deliver as deliver_mod
+from app.render import captions as captions_mod, deliver as deliver_mod, label as label_mod
 from app.jobs import exports as exports_mod
 from app.agent import project_check as pcheck
 from app.adapters import pronounce
@@ -10512,6 +10513,7 @@ def _caption_passages(video_id: str, record: ProjectRecord) -> list[captions_mod
 
 
 _export_names = threading.Lock()
+_export_names_held: dict[str, dict[int, str]] = {}
 
 
 def _deliver_one(record: dict, item: dict) -> dict:
@@ -10535,18 +10537,23 @@ def _deliver_one(record: dict, item: dict) -> dict:
                                    lang=lang, preset=preset["name"], version=out["version"])
     folder = _exports_dir(record["project_id"], record["export_id"])
     with _export_names:
-        # Two presets with one pattern and name would collide: the second gets -2.
+        # Two presets with one pattern and name would collide: the second gets -2. A name is held
+        # from the moment it is picked (step 7: two files made at once had both picked the same one).
+        held = _export_names_held.setdefault(record["export_id"], {})
         taken = {i["file"]["name"] for i in (export_engine.get(record["export_id"]) or {"items": []})["items"]
-                 if i.get("file") and i["index"] != item["index"]}
+                 if i.get("file") and i["index"] != item["index"]} | {v for k, v in held.items() if k != item["index"]}
         stem, n = name[:-4], 2
         while name in taken:
             name, n = f"{stem}-{n}.mp4", n + 1
+        held[item["index"]] = name
+    facts = voice_guard.export_facts(record["owner"], video_id)      # voice consent V1, step 7: the label and metadata
     with tempfile.TemporaryDirectory() as tmp:
         report = deliver_mod.deliver(src, Path(tmp) / "out.mp4", platform=preset["platform"], codec=preset["codec"],
-                                     loudness_lufs=preset["loudness"], cues=cues)
+                                     loudness_lufs=preset["loudness"], cues=cues, label=bool(facts and facts["label_on"]))
         folder.mkdir(parents=True, exist_ok=True)
         shutil.move(str(Path(tmp) / "out.mp4"), folder / name)
-    _stamp_export(folder / name, video_id, record["owner"], video.source.media.sha256)    # G6: mark + manifest
+    _stamp_export(folder / name, video_id, record["owner"], video.source.media.sha256,    # G6: mark + manifest
+                  export_id=record["export_id"], facts=facts, title=video.source.filename)
     render_log.info("export file video=%s preset=%s name=%s framing=%s lufs=%s", video_id, preset["name"], name,
                     report["framing"], report["loudness_lufs"])
     _exported(record["owner"], video_id, float(report.get("duration") or 0.0), preset["name"])
@@ -10832,6 +10839,9 @@ def _zip_stream(files: list[dict]):
 def _zip_response(files: list[dict], title: str) -> StreamingResponse:
     if not files:
         raise HTTPException(status_code=404, detail="No files are ready to download yet.")
+    # Voice consent V1, step 7: each file's description file goes with it (there is none with the flag off).
+    files = [x for f in files for x in [f] + ([{"name": Path(f["name"]).stem + ".txt", "path": label_mod.description_path(f["path"])}]
+                                              if label_mod.description_path(f["path"]).exists() else [])]
     name = (re.sub(r"[^A-Za-z0-9_-]+", "-", title).strip("-") or "export") + ".zip"
     return StreamingResponse(_zip_stream(files), media_type="application/zip",
                              headers={"Content-Disposition": f'attachment; filename="{name}"'})
@@ -11143,33 +11153,75 @@ def start_data_export(owner: str) -> dict:
 DATA_EXPORT_IN_BACKGROUND = True
 
 
-def _stamp_export(path: Path, video_id: str, owner: str, source_sha: str | None) -> dict | None:
+def _stamp_export(path: Path, video_id: str, owner: str, source_sha: str | None, export_id: str | None = None,
+                  facts: dict | None = None, title: str | None = None) -> dict | None:
     """G6: the invisible mark and the C2PA-style manifest on one exported file
-    (golive.g6); recorded so the mark can be traced. Never fails the export."""
-    if not flags.enabled("golive.g6", owner):
+    (golive.g6); recorded so the mark can be traced. Never fails the export.
+    Voice consent V1, step 7 (`facts`, voices.cloning_verified on): the permanent
+    metadata too (export id, Voltage, when, "contains AI-generated voice"), in the
+    container and the manifest, the export's description file beside it, and what
+    Trace needs on the mark's row."""
+    if not flags.enabled("golive.g6", owner) and facts is None:
         return None
     try:
+        export = None
+        if facts is not None:
+            export = {"export_id": export_id or f"ve_{secrets.token_hex(6)}", "ai_voice": facts["ai_voice"],
+                      "label_on": facts["label_on"], "created": _now()}
         made = provenance_mod.stamp(path, video_id=video_id, owner=owner, watermarker=watermarker, signer=c2pa_signer,
-                                    source_sha=source_sha)
+                                    source_sha=source_sha, export=export)
+        takes = _export_takes(video_id) if export is not None else []
         with database.tx() as c:
             c.execute("INSERT INTO provenance_marks (mark, owner, video_id, file, sha256, manifest, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
                       (made["mark"], owner, video_id, path.name, made["sha256"], Path(made["manifest"]).read_text(), _now()))
+            if export is not None:
+                c.execute("UPDATE provenance_marks SET export_id = ?, ai_voice = ?, label_on = ?, export_attestation_id = ?, "
+                          "voices = ?, takes = ? WHERE mark = ?",
+                          (export["export_id"], int(facts["ai_voice"]), int(facts["label_on"]), facts["export_attestation_id"],
+                           json.dumps(facts["voices"]), json.dumps(takes), made["mark"]))
             analytics.track_in(c, "export.provenance_stamped", owner, {"video_id": video_id})
+        if export is not None:
+            label_mod.description_path(path).write_text(label_mod.description(
+                title=title or path.name, export_id=export["export_id"], created=export["created"],
+                label_on=facts["label_on"], mark=made["mark"]), encoding="utf-8")
+            made = {**made, "export_id": export["export_id"], "ai_voice": facts["ai_voice"], "label_on": facts["label_on"]}
         return made
     except Exception:  # noqa: BLE001 - provenance never breaks an export; the log says why
         log.exception("could not stamp the export of %s", video_id)
         return None
 
 
+def _export_takes(video_id: str) -> list[str]:
+    """Voice consent V1, step 7: the takes the video's export plays (Trace reads their synthesis log rows)."""
+    edits, _ = _render_edits(video_id, False)
+    return [e.candidate_id for e in edits if getattr(e, "candidate_id", None)]
+
+
 def _provenance_export(record: ProjectRecord, out: dict) -> dict:
     """The Export page's file, marked and with its manifest (G6): a marked copy of
     the render as its own artifact, made once per render; the manifest sits
-    beside it and is served at /videos/{id}/artifacts/{sha}/c2pa."""
+    beside it and is served at /videos/{id}/artifacts/{sha}/c2pa. Voice consent
+    V1, step 7 (voices.cloning_verified): the "AI voice" label drawn into its first
+    seconds when the export has a cloned voice and the label is on, the permanent
+    metadata, and the description file (served at .../description)."""
     video_id, owner = record.source.project_id, record.owner
-    if not flags.enabled("golive.g6", owner):
+    facts = voice_guard.export_facts(owner, video_id)
+    if not flags.enabled("golive.g6", owner) and facts is None:
         return out
+    with _provenance_locks.setdefault(video_id, threading.Lock()):
+        # Step 7: the export job and the request that asks again both come here; the second waits
+        # and finds the first's file instead of marking (and labelling) a second copy.
+        return _provenance_export_locked(record, out, facts)
+
+
+_provenance_locks: dict[str, threading.Lock] = {}
+
+
+def _provenance_export_locked(record: ProjectRecord, out: dict, facts: dict | None) -> dict:
+    video_id, owner = record.source.project_id, record.owner
     src_sha = out["render"]["sha256"]
-    done = (repo.settings(video_id).get("provenance") or {}).get(src_sha)
+    key = src_sha if facts is None else f"{src_sha}:{'label' if facts['label_on'] else 'plain'}"
+    done = (repo.settings(video_id).get("provenance") or {}).get(key)
     if done and artifacts.find(video_id, done["sha256"]) is not None:
         return {**out, "render": {**out["render"], "sha256": done["sha256"]}, "provenance": done}
     src = artifacts.find(video_id, src_sha)
@@ -11177,17 +11229,29 @@ def _provenance_export(record: ProjectRecord, out: dict) -> dict:
         return out
     with tempfile.TemporaryDirectory() as tmp:
         work = Path(tmp) / f"{Path(record.source.filename).stem}-voltage.mp4"
-        shutil.copyfile(src, work)
-        made = _stamp_export(work, video_id, owner, record.source.media.sha256)
+        if facts is not None and facts["label_on"]:
+            try:
+                label_mod.burn(src, work)
+            except Exception:  # noqa: BLE001 - a label that cannot be drawn is said in the log; the export goes on marked
+                log.exception("could not draw the AI voice label on %s", video_id)
+                shutil.copyfile(src, work)
+                facts = {**facts, "label_on": False}
+        else:
+            shutil.copyfile(src, work)
+        made = _stamp_export(work, video_id, owner, record.source.media.sha256, facts=facts, title=record.source.filename)
         if made is None:
             return out
         art = artifacts.put_file(video_id, work, kind="video", container="mp4", duration=float(out["render"].get("duration") or 0.0))
         stored = artifacts.find(video_id, art.sha256)
         if stored is not None:
             shutil.copyfile(made["manifest"], provenance_mod.manifest_path(Path(stored)))
+            if facts is not None and label_mod.description_path(work).exists():
+                shutil.copyfile(label_mod.description_path(work), label_mod.description_path(Path(stored)))
     done = {"sha256": art.sha256, "mark": made["mark"], "source_sha256": src_sha}
+    if facts is not None:
+        done = {**done, "export_id": made["export_id"], "ai_voice": made["ai_voice"], "label_on": made["label_on"]}
     marks = dict(repo.settings(video_id).get("provenance") or {})
-    marks[src_sha] = done
+    marks[key] = done
     repo.set_settings(video_id, provenance=marks)
     return {**out, "render": {**out["render"], "sha256": art.sha256}, "provenance": done}
 
@@ -11201,6 +11265,17 @@ def get_c2pa(video_id: str, sha256: str, owner: str = Depends(media_owner)) -> d
     if manifest is None or not manifest.exists():
         raise HTTPException(status_code=404, detail="That file has no provenance manifest.")
     return json.loads(manifest.read_text())
+
+
+@app.get("/videos/{video_id}/artifacts/{sha256}/description", response_class=PlainTextResponse)
+def get_export_description(video_id: str, sha256: str, owner: str = Depends(media_owner)) -> str:
+    """Voice consent V1, step 7: the description file beside an exported file (its export id, and the label's line)."""
+    _owned(video_id, owner)
+    path = artifacts.find(video_id, sha256)
+    found = label_mod.description_path(Path(path)) if path else None
+    if found is None or not found.exists():
+        raise HTTPException(status_code=404, detail="That file has no description.")
+    return found.read_text(encoding="utf-8")
 
 
 # ── G8: errors nothing caught ────────────────────────────────────────────────

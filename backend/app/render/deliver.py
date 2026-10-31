@@ -33,6 +33,7 @@ import numpy as np
 
 from app.media import ffmpeg, loudness
 from app.render import captions as captions_mod
+from app.render import label as label_mod
 from app.render.compose import OUT_RATE, _write, decode
 
 PLATFORMS = {
@@ -195,8 +196,9 @@ def measure(path: str | Path) -> dict:
 
 
 def deliver(src: str | Path, dest: str | Path, *, platform: str, codec: str = "h264", loudness_lufs: float = -14.0,
-            cues: Sequence[captions_mod.Cue] | None = None) -> dict:
-    """Write `dest` from the render at `src`; the report says what was done."""
+            cues: Sequence[captions_mod.Cue] | None = None, label: bool = False) -> dict:
+    """Write `dest` from the render at `src`; the report says what was done. `label`
+    (voice consent V1, step 7): the "AI voice" tag in the first seconds (app/render/label.py)."""
     src, dest = Path(src), Path(dest)
     if platform not in PLATFORMS:
         raise DeliverError(f"Unknown platform {platform}.")
@@ -241,6 +243,10 @@ def deliver(src: str | Path, dest: str | Path, *, platform: str, codec: str = "h
                 inputs += ["-loop", "1", "-i", str(png)]
                 graph.append(f"[{last}][{k + 2}:v]overlay=0:{y}:enable='between(t,{cue.start:.3f},{cue.end:.3f})':shortest=1[v{k + 1}]")
                 last = f"v{k + 1}"
+        if label:
+            inputs += ["-i", str(label_mod.TAG)]
+            graph.append(label_mod.overlay(last, f"{inputs.count('-i') - 1}:v", "vl", frame))
+            last = "vl"
         out = tmpdir / "out.mp4"
         ffmpeg._run(ffmpeg.FFMPEG, [
             "-y", "-loglevel", "error", *inputs, "-filter_complex", ";".join(graph),
@@ -255,5 +261,5 @@ def deliver(src: str | Path, dest: str | Path, *, platform: str, codec: str = "h
         "framing": framing, "loudness_target": target, "true_peak_ceiling": ceiling,
         "loudness_lufs": measured["lufs"], "true_peak_db": measured["true_peak_db"], "loudness_code_lufs": code_lufs,
         "captions": len(cues or ()), "captions_renderer": renderer, "duration": round(ffmpeg.duration_of(dest), 3),
-        "size": dest.stat().st_size, **({"captions_note": note} if note else {}),
+        "size": dest.stat().st_size, **({"captions_note": note} if note else {}), **({"label": True} if label else {}),
     }

@@ -14,8 +14,15 @@ Everything but the admin routes needs `voices.cloning_verified` for the owner
                                                 (own_voice_check_required without one), kept in My voices
     POST /voices/{id}/withdraw                  withdrawn now, deleted at the vendor (queued if it fails)
     POST /admin/users/{owner}/suspend-cloning   {reason}: no new clones, every cloned voice disabled (audited)
-    POST /admin/users/{owner}/restore-cloning   {reason}: the voices the suspension disabled come back (audited)
+    POST /admin/users/{owner}/restore-cloning   {reason}: the voices the suspension disabled come back (audited;
+                                                step 7: the reason is required)
     POST /admin/users/{owner}/clone-limits      {day, month, reason}: raise a person's clone limits (audited)
+    GET  /admin/users/{owner}/cloning           step 7: suspended or not, the limits and use, cloned voices by status
+    GET  /admin/exports/{ref}/trace             step 7: Trace: the voices, attestations, export confirmation,
+                                                synthesis log and line checks behind an export, and the user;
+                                                `ref` is an export id, a provenance mark, the export reminder's
+                                                reference, or an abuse report's number. Audited (it reads
+                                                personal data), found or not
     GET  /admin/line-checks?verdict=review      step 4: the held lines (state waiting, oldest first; or decided)
     POST /admin/line-checks/{id}                {decision: approve | reject, reason}: never on your own line (audited;
                                                 the owner is told). A line nobody checks in 48 hours is rejected.
@@ -129,12 +136,17 @@ def suspend_cloning(owner: str, req: ReasonRequest, who: str = Depends(_admin)) 
 
 
 @router.post("/admin/users/{owner}/restore-cloning")
-def restore_cloning(owner: str, req: ReasonRequest | None = None, who: str = Depends(_admin)) -> dict:
+def restore_cloning(owner: str, req: ReasonRequest, who: str = Depends(_admin)) -> dict:
     api = _api()
+    reason = _reason(req.reason)
     restored = api.voice_guard.restore(owner, who)
-    admin.audit(api.database, who, "voice_restore", owner, admin.clean_reason(req.reason if req else "") or "",
-                {"voices_restored": restored})
+    admin.audit(api.database, who, "voice_restore", owner, reason, {"voices_restored": restored})
     return {"owner": owner, "suspended": False, "voices_restored": restored}
+
+
+@router.get("/admin/users/{owner}/cloning")
+def cloning_state(owner: str, who: str = Depends(_admin)) -> dict:
+    return _api().voice_guard.cloning_state(owner)
 
 
 class LimitsRequest(BaseModel):
@@ -150,6 +162,25 @@ def clone_limits(owner: str, req: LimitsRequest, who: str = Depends(_admin)) -> 
     day, month = api.voice_guard.set_limits(owner, req.day, req.month)
     admin.audit(api.database, who, "voice_clone_limits", owner, reason, {"day": day, "month": month})
     return {"owner": owner, "day": day, "month": month}
+
+
+# ── step 7: Trace ────────────────────────────────────────────────────────────
+
+@router.get("/admin/exports/{ref}/trace")
+def trace_export(ref: str, who: str = Depends(_admin)) -> dict:
+    api = _api()
+    ref = ref.strip()[:80]
+    if len(ref) < 1:
+        raise HTTPException(status_code=422, detail="Paste an export id, a mark or an abuse report number.")
+    found = api.voice_guard.trace(ref)
+    admin.audit(api.database, who, "voice_trace", ref, "", {
+        "found": found is not None, "owners": [u["owner"] for u in (found or {}).get("users", [])],
+        "marks": [e["mark"] for e in (found or {}).get("exports", [])]})
+    if found is None:
+        raise HTTPException(status_code=404, detail="Nothing matches that. Check the export id, mark or report number.")
+    for u in found["users"]:
+        u["emails"] = admin.emails_of(api.database, u["owner"])
+    return found
 
 
 # ── step 4: the held lines' queue ────────────────────────────────────────────

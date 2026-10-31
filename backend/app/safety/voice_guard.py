@@ -26,13 +26,16 @@ The seams later steps fill:
     NoGoCheck     step 5: the speaker embedding against `no_go_voices`
                   (`app.safety.no_go.VoiceListNoGo`, which also keeps the
                   built-in public-figure name list, `NameListNoGo`)
-    export_label  step 7: whether the export carries the "AI voice" label
+    export_label  step 7: whether the export carries the "AI voice" label;
+                  `export_facts` (what a file carries), `trace` (Admin: Trace),
+                  `cloning_state` (Admin: suspend cloning / restore)
 """
 from __future__ import annotations
 
 import hashlib
 import json
 import logging
+import re
 import secrets
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
@@ -75,6 +78,9 @@ CHOICES = ("my_voice", "have_permission")
 # The plan's open decision 2: 5 a day, 30 a month; an admin can raise them per person.
 DAY_LIMIT, MONTH_LIMIT = 5, 30
 STRIKES, STRIKE_HOURS = 3, 24
+# A vendor clone of a person's voice: from a speaker in a video, or (step 7) from a recording
+# uploaded to My voices. A suspension disables both.
+CLONE_KINDS = ("cloned", "recorded")
 
 # ── the codes and the words ──────────────────────────────────────────────────
 
@@ -540,7 +546,7 @@ class VoiceGuard:
             reason = "account_suspended" if rec["status_reason"] == "account" else "suspended"
             raise VoiceGuardError(VOICE_UNAVAILABLE, SUSPENDED if reason == "account_suspended" else VOICE_PAUSED, 403,
                                   reason=reason, voice_id=voice_id)
-        if rec["kind"] == "cloned" and self.suspended(rec["owner"]):
+        if rec["kind"] in CLONE_KINDS and self.suspended(rec["owner"]):
             raise VoiceGuardError(VOICE_UNAVAILABLE, SUSPENDED, 403, reason="account_suspended", voice_id=voice_id)
         if rec["owner"] != owner or (rec["scope"] == "video" and not self.in_family(rec["source_video_id"], video_id)):
             raise VoiceGuardError(VOICE_OUT_OF_SCOPE, OUT_OF_SCOPE, 403, voice_id=voice_id, video_id=video_id,
@@ -807,6 +813,126 @@ class VoiceGuard:
                 return bool(row["label_on"])
         return True
 
+    def export_facts(self, owner: str, video_id: str) -> dict | None:
+        """Step 7: what one exported file of this video carries. Flag off: None (the
+        export is as before). Else {ai_voice, label_on, export_attestation_id, voices}:
+        the label is on when the file has a cloned voice and the confirmation kept it on."""
+        if not self.enabled(owner):
+            return None
+        covers, voices = self._export_needs([video_id])
+        if not covers:
+            return {"ai_voice": False, "label_on": False, "export_attestation_id": None, "voices": []}
+        row = next((r for r in self._confirmed(owner) if covers[0] in json.loads(r["covers"])), None)
+        return {"ai_voice": True, "label_on": bool(row["label_on"]) if row else True,
+                "export_attestation_id": row["id"] if row else None, "voices": sorted({v["voice_id"] for v in voices})}
+
+    # ── step 7: Trace ──
+
+    def _rows(self, sql: str, args=()) -> list[dict]:
+        with self.database.tx() as c:
+            return [dict(r) for r in c.execute(sql, tuple(args))]
+
+    @staticmethod
+    def _in(values) -> str:
+        return ", ".join("?" for _ in values) or "NULL"
+
+    def trace(self, ref: str) -> dict | None:
+        """Everything behind an export, for an admin: found by its mark, its export id,
+        its confirmation (the export reminder's reference or id), or an abuse report's
+        number (the marks and export ids its words name). None when nothing matches."""
+        ref = (ref or "").strip()
+        report = None
+        found_by = None
+        refs = [ref]
+        if re.fullmatch(r"#?\d{1,12}", ref):
+            got = self._rows("SELECT * FROM abuse_reports WHERE id = ?", (int(ref.lstrip("#")),))
+            if not got:
+                return None
+            report = got[0]
+            words = f"{report['location']} {report['details']}"
+            refs = re.findall(r"\b(?:ve|ex)_[0-9a-z]+\b|\b[0-9a-f]{16}\b", words.lower())
+            found_by = "abuse_report"
+        marks: list[dict] = []
+        confirmations: list[dict] = []
+        for r in dict.fromkeys(refs):
+            if not r:
+                continue
+            by_mark = self._rows("SELECT * FROM provenance_marks WHERE mark = ? OR export_id = ? ORDER BY created_at", (r, r))
+            conf = self._rows("SELECT * FROM export_attestations WHERE export_id = ? OR id = ? ORDER BY created_at", (r, r))
+            how = "mark" if any(m["mark"] == r for m in by_mark) else "export" if by_mark else "confirmation"
+            if conf and not by_mark:
+                ids = [c["id"] for c in conf]
+                by_mark = self._rows(f"SELECT * FROM provenance_marks WHERE export_attestation_id IN ({self._in(ids)}) "
+                                     "ORDER BY created_at", ids)
+            if found_by is None and (by_mark or conf):
+                found_by = how
+            marks += [m for m in by_mark if m["mark"] not in {x["mark"] for x in marks}]
+            confirmations += [c for c in conf if c["id"] not in {x["id"] for x in confirmations}]
+        if not marks and not confirmations and report is None:
+            return None
+        # The confirmations the files name, and the voices they and the files list.
+        named = [m["export_attestation_id"] for m in marks if m.get("export_attestation_id")]
+        have = {c["id"] for c in confirmations}
+        missing = [i for i in dict.fromkeys(named) if i not in have]
+        if missing:
+            confirmations += self._rows(f"SELECT * FROM export_attestations WHERE id IN ({self._in(missing)})", missing)
+        voice_ids = sorted({v for m in marks for v in json.loads(m.get("voices") or "[]")}
+                           | {v for c in confirmations for v in json.loads(c["voices_used"] or "[]")})
+        owners = sorted({m["owner"] for m in marks} | {c["owner"] for c in confirmations})
+        # The takes the files play, through the synthesis log to their line checks.
+        synthesis: list[dict] = []
+        for m in marks:
+            takes = json.loads(m.get("takes") or "[]")
+            if takes:
+                synthesis += self._rows(f"SELECT * FROM synthesis_log WHERE video_id = ? AND take_id IN ({self._in(takes)}) "
+                                        "ORDER BY created_at", [m["video_id"], *takes])
+        synthesis = list({s["id"]: s for s in synthesis}.values())
+        check_ids = sorted({s["line_check_id"] for s in synthesis if s.get("line_check_id")})
+        line_checks = self._rows(f"SELECT * FROM line_checks WHERE id IN ({self._in(check_ids)}) ORDER BY created_at",
+                                 check_ids) if check_ids else []
+        for row in line_checks:
+            for key in ("categories", "rule_hits"):
+                row[key] = json.loads(row.get(key) or "[]")
+        records = {r["voice_id"]: r for r in self._rows(
+            f"SELECT * FROM voice_records WHERE voice_id IN ({self._in(voice_ids)})", voice_ids)} if voice_ids else {}
+        attest_ids = {s["attestation_id"] for s in synthesis if s.get("attestation_id")}
+        voices = []
+        for vid in voice_ids:
+            rec = records.get(vid) or {"voice_id": vid}
+            label, source = rec.get("speaker_label"), rec.get("source_video_id")
+            given = self._rows("SELECT * FROM voice_attestations WHERE voice_id = ? OR (owner = ? AND video_id = ? AND "
+                               "speaker_label = ? AND (voice_id IS NULL OR voice_id = '')) ORDER BY created_at",
+                               (vid, rec.get("owner") or "", source or "", label or ""))
+            given += [a for a in self._rows(f"SELECT * FROM voice_attestations WHERE id IN ({self._in(attest_ids)})",
+                                            sorted(attest_ids)) if a["voice_id"] == vid and a["id"] not in {g["id"] for g in given}] \
+                if attest_ids else []
+            voices.append({**rec, "attestations": given})
+        for c in confirmations:
+            c["voices_used"] = json.loads(c["voices_used"] or "[]")
+            c["covers"] = json.loads(c["covers"] or "[]")
+            c["label_on"] = bool(c["label_on"])
+        exports = [{k: m.get(k) for k in ("mark", "export_id", "owner", "video_id", "file", "sha256", "created_at",
+                                          "export_attestation_id")}
+                   | {"ai_voice": bool(m.get("ai_voice")), "label_on": bool(m.get("label_on")),
+                      "voices": json.loads(m.get("voices") or "[]"), "takes": json.loads(m.get("takes") or "[]")}
+                   for m in marks]
+        users = [{"owner": o, "suspended": self.suspended(o), "limits": dict(zip(("day", "month"), self.limits(o)))}
+                 for o in owners]
+        return {"ref": ref, "found_by": found_by or "abuse_report", "abuse_report": report, "exports": exports,
+                "export_attestations": confirmations, "voices": voices, "synthesis": synthesis,
+                "line_checks": line_checks, "users": users}
+
+    def cloning_state(self, owner: str) -> dict:
+        """Step 7, the admin's view of one person's cloning: suspended or not, the
+        limits and what they used, and their cloned voices by status."""
+        day, month = self.limits(owner)
+        counts = {r["status"]: int(r["n"]) for r in self._rows(
+            "SELECT status, COUNT(*) AS n FROM voice_records WHERE owner = ? AND kind IN ('cloned', 'recorded') GROUP BY status", (owner,))}
+        return {"owner": owner, "suspended": self.suspended(owner), "limits": {"day": day, "month": month},
+                "used": {"day": self._made_since(owner, self._since(24)), "month": self._made_since(owner, self._since(24 * 30))},
+                "voices": {s: counts.get(s, 0) for s in ("active", "suspended", "withdrawn")},
+                "enabled": self.enabled(owner)}
+
     # ── strikes, suspension ──
 
     def suspended(self, owner: str) -> dict | None:
@@ -832,7 +958,7 @@ class VoiceGuard:
             c.execute("INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value",
                       (f"voice_suspension:{owner}", json.dumps({"reason": reason, "by": by, "at": now})))
             return c.execute("UPDATE voice_records SET status = 'suspended', status_reason = 'account', status_by = ?, "
-                             "updated_at = ? WHERE owner = ? AND kind = 'cloned' AND status = 'active'",
+                             "updated_at = ? WHERE owner = ? AND kind IN ('cloned', 'recorded') AND status = 'active'",
                              (by, now, owner)).rowcount
 
     def restore(self, owner: str, by: str) -> int:
