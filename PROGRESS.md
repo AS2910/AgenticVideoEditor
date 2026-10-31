@@ -140,3 +140,13 @@ candidates 49, edits 41, jobs 11, messages 165, meta 10, plans 9, projects 2, tu
 - `up` on the copy ran 0001 to 0006, schema unchanged (column sets identical), every row identical.
 - `down 1` (0006) then `up`: every row identical.
 - `down 5` (0006 to 0002): counts equal, the later columns dropped (videos speakers/settings/project_id, messages kind/cost/data, usage folder_id/turn_id); `up` again restores the identical shape (values in those columns come back as their defaults, as a down must).
+
+---
+
+# Voice consent V1 (2026-10-31)
+
+Branch `overnight/voice-consent`, cut from `overnight/review-fixes` `3a3ccac`. Worktree `../AgenticVideoEditor-vc`. Plan: the owner's Voice Consent V1 plan; as built: `docs/superpowers/plans/2026-10-31-voice-consent-v1.md`. All behind `voices.cloning_verified` (off by default).
+
+| # | Item | Status | Commit | Notes |
+|---|---|---|---|---|
+| VC1 | Migration: voice scope and the five tables | done | (this commit) | Migration 0048: `voice_records` (one row per vendor voice: scope video or library, source video, speaker, the own-voice check that allowed library, status active, suspended or withdrawn, vendor state) beside the JSON lists, which are untouched; `voice_attestations`, `export_attestations`, `line_checks`, `synthesis_log`, `no_go_voices`. Existing voices migrated per the plan's table (`classify`). Dry run `python -m app.tools.voice_scope_dry_run --db <copy>` on the live copy: designed or stock 0, clone with a passed check 0, other clones 2 (one in the Bin), source deleted 0, uploaded recording 1; nothing lost, down restores. Tests: tests/store/test_m0048_voice_consent.py (4). |
