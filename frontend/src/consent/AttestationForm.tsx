@@ -3,6 +3,7 @@ import { attestVoice, ApiError } from '../api'
 import { said } from '../pages/fmt'
 import { cn } from '@/lib/utils'
 import { ATTEST, attestTitle, type AttestChoice } from './copy'
+import { LearnMore } from './LearnMore'
 import type { AttestationFacts } from './types'
 
 /** Where the form stands: the modal (a light sheet), the pane (black), a batch row. */
@@ -65,7 +66,7 @@ export function AttestationForm({ facts, tone = 'sheet', title, onDone, onCancel
         <input type="checkbox" className="mt-0.5 size-4 shrink-0 accent-volt" checked={confirmed} disabled={busy} onChange={(e) => setConfirmed(e.target.checked)} data-testid="attest-confirm" />
         <span className="min-w-0">{ATTEST.confirm}</span>
       </label>
-      <p className={cn('m-0 text-[13px]', t.muted)} data-testid="attest-warning">{ATTEST.warning}</p>
+      <p className={cn('m-0 text-[13px]', t.muted)}><span data-testid="attest-warning">{ATTEST.warning}</span> <LearnMore className={t.muted} /></p>
       {error && <p className={cn('m-0 text-[13px]', t.warn)} role="alert">{error}</p>}
       {/* The person's next action is the last thing: Cancel, then Use this voice. */}
       <div className="flex flex-wrap items-center justify-end gap-2">

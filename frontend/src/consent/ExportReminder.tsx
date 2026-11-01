@@ -4,6 +4,7 @@ import { confirmExport } from '../api'
 import { said } from '../pages/fmt'
 import { useReturnFocus } from '../components/useReturnFocus'
 import { EXPORT, exportTitle } from './copy'
+import { LearnMore } from './LearnMore'
 import type { ExportFacts } from './types'
 
 /** Voice consent V1 step 6: the export reminder, in the plan's words. The
@@ -45,6 +46,7 @@ export function ExportReminder({ facts, onDone, onBack }: { facts: ExportFacts; 
             <span>{EXPORT.confirm}</span>
           </label>
         </div>
+        <p className="m-0 text-[13px] text-muted-foreground"><LearnMore className="text-muted-foreground" /></p>
         {error && <p className="m-0 text-[13px] text-needs" role="alert">{error}</p>}
         <div className="flex flex-wrap items-center justify-end gap-2">
           <button type="button" className="btn sm" onClick={onBack} disabled={busy} data-testid="export-back">{EXPORT.back}</button>

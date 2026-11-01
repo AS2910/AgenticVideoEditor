@@ -256,6 +256,31 @@ def test_an_admin_takes_a_share_link_down(world):
     assert _trail(SAM)[0]["action"] == "share_revoke"
 
 
+def test_an_admin_takes_down_every_link_that_opens_a_video(world):
+    """Voice consent V1 step 8 (RUNBOOK.md, Abuse and takedown): one call turns off the video's own review
+    link and a project link that shows it; a link to another project stays on."""
+    sam, ada, video = world["sam"], world["ada"], world["video"]
+    review = sam.post(f"/videos/{video}/review-links", json={"name": "Client"}, headers=H)
+    assert review.status_code == 201, review.text
+    holding = sam.post("/projects", json={"name": "Holding it"}, headers=H).json()["project_id"]
+    other = sam.post("/projects", json={"name": "Not it"}, headers=H).json()["project_id"]
+    assert repo.set_folder(video, holding)
+    shown = sam.post(f"/projects/{holding}/shares", json={"scope": "project", "days": 7}, headers=H).json()
+    kept = sam.post(f"/projects/{other}/shares", json={"scope": "project", "days": 7}, headers=H).json()
+    assert world["bo"].post("/admin/links/revoke", json={"video_id": video, "reason": "Report 4"}, headers=H).status_code == 404
+    assert ada.post("/admin/links/revoke", json={"video_id": video}, headers=H).status_code == 422      # a reason is required
+    assert ada.post("/admin/links/revoke", json={"video_id": "p999", "reason": "Report 4"}, headers=H).status_code == 404
+    gone = ada.post("/admin/links/revoke", json={"video_id": video, "reason": "Report 4"}, headers=H)
+    assert gone.status_code == 200, gone.text
+    assert {r["share_id"] for r in gone.json()["revoked"]} == {review.json()["share_id"], shown["share_id"]}
+    for made in (review.json(), shown):
+        assert TestClient(app).get(f"/share/{made['url'].split('#s/')[1]}").status_code == 410
+    assert TestClient(app).get(f"/share/{kept['url'].split('#s/')[1]}").status_code == 200
+    assert [e["action"] for e in _trail(SAM)[:2]] == ["share_revoke", "share_revoke"]
+    again = ada.post("/admin/links/revoke", json={"video_id": video, "reason": "Report 4"}, headers=H)
+    assert again.json()["revoked"] == []                                                  # nothing left on
+
+
 def test_the_migration_goes_down_only_when_empty(tmp_path):
     from app.store import migrate
     from app.store.migrations import m0036_admin_tools as m36

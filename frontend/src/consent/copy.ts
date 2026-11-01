@@ -36,6 +36,10 @@ export const VOICES = {
   prove: "Prove it's your voice",
 } as const
 
+/** Step 8: the small "Learn more" beside the plan's words (the modal's warning, the export reminder),
+ *  opening the Help article in a new tab so the dialog and its choices stay where they are. */
+export const LEARN_MORE = { text: 'Learn more', slug: 'using-voices-responsibly' } as const
+
 /** The speaker as the copy names them: their name, else "Speaker 2" from the label, else "this speaker". */
 export function speakerName(facts: Pick<AttestationFacts, 'speaker_name' | 'speaker_label'>): string {
   if (facts.speaker_name?.trim()) return facts.speaker_name.trim()

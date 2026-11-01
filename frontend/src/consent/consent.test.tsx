@@ -3,7 +3,7 @@ import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import type { ReactNode } from 'react'
 import { ApiError, postTurn, setConsentAsker, startBatchExport } from '../api'
-import { ATTEST, EXPORT, LINE, VOICES, attestTitle, exportTitle, keptWhy, refusalKind, speakerName } from './copy'
+import { ATTEST, EXPORT, LEARN_MORE, LINE, VOICES, attestTitle, exportTitle, keptWhy, refusalKind, speakerName } from './copy'
 import { AttestationModal } from './AttestationModal'
 import { ExportReminder } from './ExportReminder'
 import { ConsentHost } from './ConsentHost'
@@ -345,6 +345,27 @@ describe('ProveVoice', () => {
     expect(calls.map((c) => c.key)).not.toContain('POST /voices/v-clone/promote')
     await userEvent.click(screen.getByRole('button', { name: 'Done' }))
     expect(onClose).toHaveBeenCalledWith({ saved: false, status: 'failed', reason: 'The voice did not match the speaker.' })
+  })
+})
+
+describe('Learn more (step 8)', () => {
+  it('the modal and the reminder link to Help\'s Using voices responsibly in a new tab, before the buttons', async () => {
+    const { readFileSync, existsSync } = await import('node:fs')
+    const { resolve } = await import('node:path')
+    const article = resolve(__dirname, `../../../help/articles/voices/${LEARN_MORE.slug}.md`)
+    expect(existsSync(article)).toBe(true)
+    expect(readFileSync(article, 'utf8')).toMatch(/^---\ntitle: Using voices responsibly\n/)
+    const { unmount } = render(<AttestationModal facts={FACTS} onDone={() => {}} onCancel={() => {}} />)
+    const inModal = screen.getByRole('link', { name: /Learn more about using voices responsibly/ })
+    expect(inModal).toHaveAttribute('href', `#help/${LEARN_MORE.slug}`)
+    expect(inModal).toHaveAttribute('target', '_blank')
+    expect(screen.getByTestId('attest-warning')).toHaveTextContent(ATTEST.warning)          // the plan's words, intact
+    expect(inModal.compareDocumentPosition(screen.getByRole('button', { name: 'Use this voice' })) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    unmount()
+    render(<ExportReminder facts={EXPORTING} onDone={() => {}} onBack={() => {}} />)
+    const link = screen.getByRole('link', { name: /Learn more about using voices responsibly/ })
+    expect(link).toHaveAttribute('href', `#help/${LEARN_MORE.slug}`)
+    expect(link.compareDocumentPosition(screen.getByRole('button', { name: 'Export' })) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   })
 })
 

@@ -29,7 +29,7 @@ from app.store import accounts as store, waitlist
 router = APIRouter(tags=["accounts"])
 
 # The version of the Terms a sign-up accepts (the pages are drafts until legal replaces them).
-TERMS_VERSION = os.environ.get("AVE_TERMS_VERSION") or "draft-2026-10-22"
+TERMS_VERSION = os.environ.get("AVE_TERMS_VERSION") or "draft-2026-10-31"  # voice consent V1 step 8: Terms draft v3
 SENT = "If that address can use Voltage, an email is on its way. It can take a minute."
 
 

@@ -68,7 +68,7 @@ export function LegalPage({ doc }: { doc: LegalDoc }) {
           <span className="stamp need self-start" data-testid="legal-draft">Draft, needs legal review</span>
           <h1 className="disp m-0 text-[40px] leading-tight font-bold">{d.title}</h1>
           <p className="m-0 text-lg">{d.summary}</p>
-          <p className="m-0 text-muted-foreground">This is a draft written to describe how Voltage works, for a lawyer to review. It is not legal advice and is not in force yet. Points marked "For counsel" are open questions for that review. Drafted 24 October 2026.</p>
+          <p className="m-0 text-muted-foreground">This is a draft written to describe how Voltage works, for a lawyer to review. It is not legal advice and is not in force yet. Points marked "For counsel" are open questions for that review. Drafted 24 October 2026; the sections on voices revised 31 October 2026.</p>
         </div>
         <nav aria-label="On this page" className="flex flex-col gap-2 rounded-lg border border-line2 bg-card px-4 py-3">
           <h2 className="tag m-0">On this page</h2>
@@ -81,6 +81,7 @@ export function LegalPage({ doc }: { doc: LegalDoc }) {
         {d.sections.map((s, i) => (
           <section key={s.h} className="flex flex-col gap-2" aria-labelledby={`${doc}-${i}`}>
             <h2 id={`${doc}-${i}`} tabIndex={-1} className="disp m-0 text-[22px] font-bold outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50">{s.h}</h2>
+            {s.draft && <span className="stamp need self-start" data-testid="legal-section-draft">New, pending legal review</span>}
             <Blocks blocks={s.blocks} />
           </section>
         ))}

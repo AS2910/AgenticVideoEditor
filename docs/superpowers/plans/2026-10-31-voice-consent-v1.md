@@ -206,3 +206,65 @@ Front end: `frontend/src/consent/` (`ConsentHost.tsx` mounted around the app in 
 | Using a video-scoped voice elsewhere | the picker says "This voice can only be used in the video it came from." when the voice's source is not this video, its master or what it is a variant of; the guard still refuses with the same sentence | |
 
 Tests: `frontend/src/consent/consent.test.tsx` (24: the copy and the server's copy, the modal, the reminder, the 409 retry and cancel and flag off, a batch asks once, the host, held lines clearing, blocked and suspended, the pane's card and refusal, the transcript's Edit the line, the picker's tag and sentence, Prove it's your voice pass and fail), `frontend/e2e/voice-consent.spec.ts` (9: clone, attest, voice, reminder, export against the same journey with the flag off; the agent's pause; a blocked line; at 1440x900, 1280x720, 1920x1080), backend `tests/safety/test_voice_enforcement.py` (the fast path route, Retry, language versions, the batch row card), `tests/safety/test_line_checks.py` (the step's refusal), `tests/golive/test_inbox.py` (the listed kinds).
+
+## Step 8: Terms, Acceptable Use, Help, RUNBOOK, statement versioning
+
+| Plan item | Code | Adaptation |
+| --- | --- | --- |
+| Terms: users warrant rights and consent for every voice and indemnify Voltage; cloned voices suspended or deleted on a credible complaint | `frontend/src/pages/legal/terms.ts` draft v3: Voices and consent (rewritten for the attestation, video scope, own-voice proof, the warranty), Suspending and deleting voices (new), Your responsibility to us (indemnity names the voice warranty), Using Voltage fairly | The v2 text said the speaker's read-aloud check was required for every clone; v3 describes V1 (attestation for a voice in its own video, the check for My voices). It describes the flagged flow, which stays off until review (counsel note) |
+| AI voice labels and metadata | Terms, What Voltage makes | Label on by default, switchable; metadata permanent; the user still discloses where the law or platform requires |
+| Retention (decision 6) | Terms, Records we keep about voices; Privacy, Voice confirmations and line checks (new) | 7 years attestations and export confirmations, 2 years line checks and synthesis log. Nothing enforces them yet (no purge of these rows): a launch blocker |
+| Acceptable Use bans impersonation, fraud, robocalls, political and election content, sexual content, harassment | `acceptableUse.ts` draft v3: Consent comes first, No impersonation, No deception, Elections and public life, No fraud, No harm to others (rewritten), Lines we check (new: the five block categories and the held ones in plain words, the strike rule), What we do (voice actions) | v2 allowed labelled political advertising; v3 bans political and election lines outright, as the line checks block them. Sexual content in a synthetic voice is banned outright for the same reason |
+| Grievance officer and contact on the site | `acceptableUse.ts` Grievance Officer (new; the Privacy policy already had one) | Placeholders only: `[Grievance Officer name]`, `[... email]`, `[... phone]`, `[Registered address]`, timelines in brackets. The owner fills them |
+| Draft marking | `Section.draft` (`legal/types.ts`), shown by `LegalPage` as a "New, pending legal review" stamp under the section's heading, plus a source comment and a counsel note opening "Draft v3 (31 October 2026), pending legal review." on each | Visible to readers: see DECISIONS.md |
+| Version and date | file comments draft v3 (2026-10-31); the page's line "Drafted 24 October 2026; the sections on voices revised 31 October 2026."; `AVE_TERMS_VERSION` default `draft-2026-10-31` (`accounts_api.py`, `.env.example`, the Terms counsel note) | As the pages did for v2 |
+| Help article "Using voices responsibly" | `help/articles/voices/using-voices-responsibly.md` (section Voices, order 406): whose voice, Use this voice?, This video only, Prove it's your voice, the export reminder and label, held and blocked lines, Report misuse | Served and searched like every article (`app/help`); no index file to edit. Its last line points flag-off readers to The speaker's own voice and consent |
+| Linked from the modal and the export reminder | `frontend/src/consent/LearnMore.tsx` ("Learn more", new tab, so the dialog keeps its choices); after the warning in `AttestationForm` (so in the modal, the pane's card and the batch row), and above the buttons in `ExportReminder` | The plan's sentences are unchanged and still each their own element; the buttons stay last |
+| RUNBOOK "Abuse and takedown" | `RUNBOOK.md` section 7: the plan's 5 steps on the real tools (Trace, the evidence rows and a backup, links, Suspend cloning, the reply, No-go voices from a mark or report, the audit trail), the 3-hour target for orders, what to preserve; plus Changing the consent wording, and Regions | |
+| Disable share and review links | New `POST /admin/links/revoke {video_id, reason}` (`app/admin_api.py`): every live link that opens the video (its own share and review links, a project link that lists it, a batch export link with a file of it), whoever made it; one `share_revoke` audit row per link | `POST /admin/shares/{id}/revoke` existed for one link by id; a takedown needs all of a video's |
+| Disable the voice | Suspend cloning (step 7) | No admin switch for one voice alone; Suspend cloning disables all the user's cloned voices, Restore brings them back, the owner's Withdraw deletes one at the vendor. A per-voice admin disable is a follow-up |
+| Statement versioning: one source | `STATEMENT`, `EXPORT_STATEMENT`, `STATEMENT_VERSION` in `app/safety/voice_guard.py` (step 2); `copy.ts` mirrors the words and its vitest reads them from `voice_guard.py` | Added `statement_hash()` (both statements, version left out) |
+| A wording change without a version bump fails | `backend/tests/safety/test_statement_version.py` `PINNED` (version to hash) | |
+| A bumped version forces re-confirmation | step 2 and 3 tests (attestation); `test_statement_version.py` adds the export confirmation and the confirm-again path | |
+| How to bump | RUNBOOK.md, Changing the consent wording | |
+
+**Regions (decision 5).** Cloning opens in India first. No country gate exists on an account or a deployment; today it is who an admin gives `voices.cloning_verified`. The cheap V2 gate: `can_clone` refuses with `clone_not_allowed` reason `region` when the account's billing country (`billing_accounts.country`, already set at checkout, self-declared) is set and not in a deployment list `AVE_CLONING_COUNTRIES` (default `IN`), with a sign-up country question for accounts that never paid. Not built.
+
+Tests: `backend/tests/safety/test_statement_version.py` (6), `backend/tests/launch/test_admin_tools.py::test_an_admin_takes_down_every_link_that_opens_a_video`, `frontend/src/consent/consent.test.tsx` (Learn more), `frontend/src/pages/LegalPage.test.tsx` (the draft stamps, the indemnity, retention, robocalls, the grievance placeholders), `backend/tests/test_help.py` (every article's front matter, unchanged).
+
+## Status against the plan
+
+**Tests that must pass**
+
+| Plan test | Status | Evidence |
+| --- | --- | --- |
+| Voicing with a cloned voice and no attestation returns `attestation_required`; after attesting, it works | done | `tests/safety/test_voice_enforcement.py` (no attestation then attested, the agent's pause, the fast path), `tests/safety/test_voice_guard.py`, `e2e/voice-consent.spec.ts` |
+| A video-scoped voice on another video returns `voice_out_of_scope`, including from the agent and batch | done | `test_voice_enforcement.py` (out of scope from another video, the agent, a batch child, a hand-picked speaker voice) |
+| Variants and language versions can use the source video's voice | done | `test_voice_enforcement.py::test_variants_and_language_versions_can_use_the_source_voice` |
+| Exporting with a cloned voice needs the confirmation; batch export asks once | done | `test_voice_guard.py::test_an_export_with_a_clone_asks_once_and_a_batch_once_for_all`, `test_voice_enforcement.py` (export, batch export, links), `consent.test.tsx` (a batch asks once) |
+| Exports carry the label (default on) and the metadata with the export id | done | `tests/safety/test_export_trace.py` (frame diff in the first 3 s, ffprobe, the manifest) |
+| Each block category is blocked by rules or model with the right copy; review lines wait for an admin | done | `tests/safety/test_line_checks.py` |
+| Three blocks in 24 hours suspend cloned-voice synthesis; admin restore works | done | `test_line_checks.py` (strikes and restore), `test_export_trace.py` (suspend and restore) |
+| A no-go voice above 0.92 cannot be cloned; 0.84 to 0.92 waits for review | done | `tests/safety/test_no_go.py` |
+| Save to My voices requires a passed own-voice check | done | `test_voice_enforcement.py` (Save to My voices), `consent.test.tsx` (Prove it's your voice) |
+| Withdraw deletes the vendor voice and blocks use | done | `test_voice_enforcement.py` (withdraw) |
+| Trace on an export lists voice, attestation, line checks and user | done | `test_export_trace.py` (by export id, mark, reminder reference, abuse report), `TraceSection.test.tsx` |
+| Changing the statement version forces re-confirmation | done | `test_voice_guard.py::test_a_new_statement_version_asks_again`, `test_voice_enforcement.py::test_a_new_statement_version_forces_reconfirmation`, `test_statement_version.py` (the pin, the export too) |
+| Migration on a copy: counts match, nothing lost, down restores | done | `tests/store/test_m0048_voice_consent.py`; the dry run on the live copy (step 1) |
+
+**Acceptance before turning it on for the public**
+
+| Item | Status | Evidence or what is left |
+| --- | --- | --- |
+| All tests green, plus the rehearsal journeys with a cloning step | partial | `make launch-check` green on each step; `e2e/voice-consent.spec.ts` is a clone, attest, voice, export journey. The rehearsal journeys (`e2e/rehearsal/*`, `scripts/rehearsal.sh`) have no cloning step yet |
+| 50-line test set across the block categories in English, Hindi and Hinglish: every block caught, under 5% false blocks on 100 ordinary lines | done | step 4 eval, 3 runs: 50/50 caught, 0 false blocks in 100 (`backend/evals/results/20261031T130736Z-line-checks-tuned.json`) |
+| A beta user can clone, attest, voice and export in under 30 s of extra time | partial | step 6 estimate from the Playwright journey: 5 extra clicks, about 0.75 s of waits, 12 to 22 s for a first-timer. Not measured with a beta user |
+| Lawyer has reviewed the copy, Terms and retention | not done | Every new section is marked "New, pending legal review" |
+
+**Launch blockers left**
+
+- Lawyer review of the attestation and export copy, Terms v3, Acceptable Use v3, the Privacy addition and the retention periods; then remove each `draft`, bump `AVE_TERMS_VERSION`, and bump `STATEMENT_VERSION` if the consent words change.
+- The owner fills in the Grievance Officer (name, email, phone, address) on the Acceptable use and Privacy pages, and the bracketed timelines.
+- A purge for `voice_attestations`, `export_attestations` (7 years), `line_checks`, `synthesis_log` (2 years): today nothing deletes them.
+- A cloning step in the rehearsal journeys, and a timed beta run.
+- `voices.cloning_verified` stays off for the public until all of the above; when it opens, India only (decision 5), by who gets the flag until a country gate exists.

@@ -1,7 +1,9 @@
 import type { LegalText } from './types'
 
-/** Terms of service, draft v2 (2026-10-24). Describes what the code does today; the For counsel
- *  notes are the points a lawyer has to decide or confirm before this is published. */
+/** Terms of service, draft v3 (2026-10-31; v2 2026-10-24). Describes what the code does today; the For counsel
+ *  notes are the points a lawyer has to decide or confirm before this is published. v3 (Voice consent V1
+ *  step 8) rewrites Voices and consent, What Voltage makes and Your responsibility to us, and adds
+ *  Suspending and deleting voices and Records we keep about voices: each is marked `draft`, pending legal review. */
 export const TERMS: LegalText = {
   title: 'Terms of service',
   summary: 'The agreement between you and us when you use Voltage: what you may do, what you pay, what we promise and what we do not.',
@@ -10,7 +12,7 @@ export const TERMS: LegalText = {
       h: 'Who we are',
       blocks: [
         'Voltage is run by [Company legal name], a company registered in India with Corporate Identification Number [CIN], whose registered office is at [Registered address]. In these terms "we" and "us" means that company, and "you" means the person or business using Voltage.',
-        'You can write to us at [Contact email]. Questions about your personal data go to our Grievance Officer, named in the Privacy policy.',
+        'You can write to us at [Contact email]. Questions about your personal data, and complaints about content made with Voltage, go to our Grievance Officer, named in the Privacy policy and the Acceptable use policy.',
         { counsel: 'Fill in the legal entity, CIN, registered address and contact address. Confirm whether the contracting entity differs for customers outside India.' },
       ],
     },
@@ -19,7 +21,7 @@ export const TERMS: LegalText = {
       blocks: [
         'By creating an account, or by continuing with Google, you agree to these terms, the Privacy policy and the Acceptable use policy. If you use Voltage for a business, you agree on its behalf and confirm you are allowed to.',
         'When you create an account we record which version of these terms you accepted and when.',
-        { counsel: 'The app records a version string at sign-up (AVE_TERMS_VERSION, now "draft-2026-10-22"). Decide how a new version is accepted by existing users: notice by email and continued use, or a fresh click to accept. Consider whether clickwrap at sign-up is enough under the Indian Contract Act and the IT Act for this service.' },
+        { counsel: 'The app records a version string at sign-up (AVE_TERMS_VERSION, now "draft-2026-10-31"). Decide how a new version is accepted by existing users: notice by email and continued use, or a fresh click to accept. Consider whether clickwrap at sign-up is enough under the Indian Contract Act and the IT Act for this service.' },
       ],
     },
     {
@@ -45,12 +47,43 @@ export const TERMS: LegalText = {
       ],
     },
     {
+      // Voice consent V1 step 8: draft pending legal review (DECISIONS.md). Rewritten for the attestation flow.
       h: 'Voices and consent',
+      draft: 'v3 2026-10-31, Voice consent V1',
       blocks: [
-        'You may only clone the voice of a person who has given their own consent. Your permission is not enough on its own: the speaker must agree, and before a voice is cloned they read a sentence shown on screen aloud, which we record and check. The Privacy policy says what is kept from that check and for how long.',
-        'We may refuse to clone a voice, for example when the check does not pass, when the voice seems to belong to a public figure, or when a person on our team reviewing a borderline case is not satisfied. We may delete a clone, and suspend an account, if we learn consent was not given.',
-        'A speaker, or you on their behalf, can withdraw consent at any time. When consent is withdrawn the clone is deleted at the voice service straight away and no new lines are made with it.',
-        { counsel: 'Voice cloning is closed to the public today and turned on per person by an admin, because the consent check runs in test mode (it keeps the recording but does not yet check the words or the voice). The speaker similarity check and admin review of borderline cases described here are planned for launch. Publish this wording only once they are live, or reword to match what ships. Consider whether the speaker should also accept a short consent statement of their own, separate from these terms.' },
+        'You may only use a person\'s voice in Voltage if it is your own voice, or that person has given you permission to change what they say. Owning, filming or editing the video is not the same as their permission.',
+        'Before Voltage makes new lines in a voice cloned from a speaker in a video, it asks you whose voice it is ("This is my voice", or "I have permission from this person to change what they say") and asks you to confirm that you have the rights and consent to use it, that you will not use it to deceive, impersonate or harm anyone, and that you are responsible for how it is used. We record your answer, the version of the wording you saw, the time, your IP address and your browser. If we change that wording, you confirm again the next time you use the voice.',
+        'A voice cloned from a speaker in a video can be used only in that video, its variants and its language versions. To keep your own voice in My voices and use it anywhere, you first prove it is yours: you read a short phrase aloud, and we check that the voice reading it matches the voice in the video.',
+        'Every time you clone, record, upload or use a voice, you warrant that you have every right and consent the law requires for that voice and for the way you use it, including where the speaker lives and where you publish, and that your use stays within what the person agreed to.',
+        'We may refuse to clone a voice, for example when it seems to belong to a public figure, when it is on our list of voices we do not clone, or when your account has reached its limit for the day or the month.',
+        { counsel: 'Draft v3 (31 October 2026), pending legal review. Voice consent V1 replaces the speaker\'s own read-aloud check, for voices used in the video they came from, with the account holder\'s logged attestation, the standard of dubbing tools; the read-aloud check stays for saving a voice to My voices. This describes the flow behind the voices.cloning_verified flag, which stays off until this review. Confirm the warranty is enforceable against consumers, whether permission must be in writing, and whether a speaker who is not our user needs their own way to object before V2 adds a speaker-consent link. Cloning opens in India first (open decision 5); EU biometric consent wording and Illinois (BIPA) are V2.' },
+      ],
+    },
+    {
+      // Voice consent V1 step 8: draft pending legal review.
+      h: 'Suspending and deleting voices',
+      draft: 'v3 2026-10-31, Voice consent V1',
+      blocks: [
+        'If we receive a credible complaint that a voice is being used without consent, or to deceive or harm anyone, we may suspend or delete that voice straight away, including at the voice service, without asking you first. We may also turn off links that share what was made with it, pause voice cloning on your account, and add the voice to our list of voices we do not clone.',
+        'We check every line before it is voiced, in any voice. A line that breaks the Acceptable use policy is not voiced, and some lines are held until a person on our team has checked them. Three blocked lines in 24 hours pause voicing with cloned voices on your account until our team has looked.',
+        'You can withdraw a voice at any time. It is then deleted at the voice service and can no longer be used.',
+        'We will tell you what we did and why, unless the law or someone\'s safety stops us, and you can write to us to ask us to look again.',
+        { counsel: 'Draft v3 (31 October 2026), pending legal review. Confirm that acting before notice is fair under consumer law, the appeal route, and the timelines for complaints and orders (RUNBOOK.md, Abuse and takedown, aims to act on a legal order within 3 hours). Held lines are decided the same business day and rejected after 48 hours (open decision 4).' },
+      ],
+    },
+    {
+      // Voice consent V1 step 8: retention per open decision 6; draft pending legal review.
+      h: 'Records we keep about voices',
+      draft: 'v3 2026-10-31, Voice consent V1',
+      blocks: [
+        'To show that voices were used with consent, and to look into misuse, we keep:',
+        [
+          'each confirmation you give about a voice, and each export confirmation, for 7 years;',
+          'the result of checking each line before it is voiced, and a log of every line voiced with which voice, for 2 years.',
+        ],
+        'We keep the words of a line only when it was blocked or held for a check. For every other line we keep a fingerprint that cannot be turned back into the words.',
+        'We keep these records even after you delete the voice, the video or your account, because they may be needed to answer a complaint or to meet the law. The Privacy policy says what else we keep.',
+        { counsel: 'Draft v3 (31 October 2026), pending legal review. The periods are the plan\'s proposal (open decision 6): 7 years for attestations, 2 years for line checks and the synthesis log. Today the code keeps these rows with no expiry; the purge that ends them is launch work once the periods are confirmed. Confirm them against the DPDP Act\'s purpose limitation and the limitation periods for claims, and mirror them in the Privacy policy\'s list of what is kept.' },
       ],
     },
     {
@@ -63,11 +96,14 @@ export const TERMS: LegalText = {
       ],
     },
     {
+      // Voice consent V1 step 8: the AI voice label and metadata added; draft pending legal review.
       h: 'What Voltage makes',
+      draft: 'v3 2026-10-31, Voice consent V1',
       blocks: [
-        'Lines in a synthetic voice are made by a machine. Every export carries a hidden watermark and a provenance record saying that the voice was made with Voltage. You must not remove or alter them, and you must not present a synthetic voice as a real recording where that would mislead people.',
+        'Lines in a synthetic voice are made by a machine. Every export carries permanent details (metadata) saying that it contains an AI-generated voice made with Voltage, with its export number and the time it was made, as well as a hidden watermark and a provenance record. You must not remove or alter any of them, or help anyone else to.',
+        'When an export contains a cloned voice, Voltage adds an "AI voice" label by default: a small tag in the corner of the picture for the first 3 seconds, and a line in the export\'s description file. You can switch the label off when you export. You are still responsible for telling viewers that a voice is synthetic wherever the law or the platform you publish on requires it, and you must not present a synthetic voice as a real recording where that would mislead people.',
         'Suggestions from Voltage can be wrong. You decide what goes into your video and you are responsible for what you publish.',
-        { counsel: 'The watermark and provenance signature run in test mode today (a metadata mark and a test signature). Consider labelling duties for synthetic media under the IT Rules and any advisories in force at launch, and in the markets where users publish.' },
+        { counsel: 'Draft v3 (31 October 2026), pending legal review. The label and the metadata are new (Voice consent V1); the label is on by default and the user may switch it off (open decision 1). Confirm whether switching it off should be allowed under the IT Rules on synthetically generated information and any advisories in force at launch. The watermark and the provenance signature still run in test mode (a metadata mark and a test signature); a watermark that survives re-encoding and real C2PA signing are V2.' },
       ],
     },
     {
@@ -104,8 +140,9 @@ export const TERMS: LegalText = {
     },
     {
       h: 'Using Voltage fairly',
+      draft: 'v3 2026-10-31, Voice consent V1',
       blocks: [
-        'You must follow the Acceptable use policy. In short: only real consent, no impersonation, no deception, no fraud, no election manipulation, and no harm to others.',
+        'You must follow the Acceptable use policy. In short: only voices you have the right and consent to use, no impersonation, no deception, no fraud or robocalls, no political or election content, no sexual content, no harassment, and no harm to others.',
         { before: 'Read the full', link: 'Acceptable use policy', href: '#acceptable-use' },
       ],
     },
@@ -134,10 +171,12 @@ export const TERMS: LegalText = {
       ],
     },
     {
+      // Voice consent V1 step 8: the indemnity covers the voice warranty; draft pending legal review.
       h: 'Your responsibility to us',
+      draft: 'v3 2026-10-31, Voice consent V1',
       blocks: [
-        'If someone makes a claim against us because of content you uploaded or made, a voice you cloned without real consent, or your breach of these terms, you agree to cover our reasonable losses and costs from that claim.',
-        { counsel: 'Confirm the scope of this indemnity, especially for consumers.' },
+        'If someone makes a claim against us because of content you uploaded or made, a voice you used without the rights and consent you warranted, or your breach of these terms or the Acceptable use policy, you agree to indemnify us: to cover our reasonable losses, costs and legal fees from that claim.',
+        { counsel: 'Draft v3 (31 October 2026), pending legal review. Confirm the scope of this indemnity, especially for consumers, and whether it can include legal fees.' },
       ],
     },
     {

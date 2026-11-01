@@ -1,7 +1,7 @@
 import type { LegalText } from './types'
 import { VENDORS } from './subprocessors'
 
-/** Privacy policy, draft v2 (2026-10-24), written against India's Digital Personal Data
+/** Privacy policy, draft v3 (2026-10-31; v2 2026-10-24; v3 adds Voice confirmations and line checks, marked `draft`), written against India's Digital Personal Data
  *  Protection Act 2023. What it says Voltage keeps, deletes and exports is read from the code:
  *  app/dataexport.py, app/purge.py, delete_account in app/api/main.py, app/safety_api.py. */
 export const PRIVACY: LegalText = {
@@ -55,6 +55,17 @@ export const PRIVACY: LegalText = {
       blocks: [
         'We keep a consent record for 7 years after the voice or video it covers is deleted, so we can show that a voice was cloned with permission if that is ever questioned. Then it is cleared.',
         { counsel: 'Proposed period: 7 years after deletion (AVE_CONSENT_RETENTION_YEARS, default 7). Please confirm against the limitation periods for claims about a voice (Limitation Act 1963, personality and privacy claims) and the DPDP Act\'s rule to erase data once its purpose is served. Also note two gaps for engineering: the consent recordings and check results are not cleared when the 7 years end (only the summary record is), and deleting an account keeps the consent recordings but not the consent time of the videos it removes.' },
+      ],
+    },
+    {
+      // Voice consent V1 step 8: what the attestation, export reminder and line checks keep; draft pending legal review.
+      h: 'Voice confirmations and line checks',
+      draft: 'v3 2026-10-31, Voice consent V1',
+      blocks: [
+        'When you tell Voltage whose voice it is and confirm you may use it, we keep your answer, the version of the wording you saw, the voice, the video and speaker it is for, the time, your IP address and your browser. When you confirm an export with a cloned voice, we keep the voices it covers, whether the AI voice label was on, the time and your IP address. We keep both for 7 years.',
+        'Before a line is voiced we check it, and keep the result: pass, held or blocked, the reasons, and which check decided. We keep the words only for held and blocked lines; for the rest we keep a fingerprint that cannot be turned back into the words. After a line is voiced we log which voice made it, the confirmation it relied on, and what it cost. We keep the checks and the log for 2 years.',
+        'We use these records to show that voices were used with consent, to stop misuse, and to answer complaints and the law.',
+        { counsel: 'Draft v3 (31 October 2026), pending legal review. Periods per open decision 6 (7 years, 2 years); the code keeps these rows with no expiry today, and the purge that ends them is launch work once confirmed. Map the purpose to a legitimate use under section 7 of the DPDP Act, and confirm that keeping the IP address and browser is proportionate.' },
       ],
     },
     {

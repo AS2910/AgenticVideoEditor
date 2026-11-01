@@ -120,6 +120,8 @@ the admin page under **Abuse reports**. Someone must watch these from day one.
 5. **Withdrawn consent** (a speaker says "that is my voice"): the owner can withdraw consent on the video (`POST /videos/<id>/consent/withdraw` deletes the speaker's clones at the vendor). If the owner does not act, suspend.
 6. Reply to the reporter if they left a contact. Note what you did in the audit reason.
 
+A report about a cloned voice (or a legal order about one) follows section 7 as well.
+
 ## 4. A deletion or data request
 
 - **"Send me my data"**: the person does it themselves in Settings > Your data (`POST /api/me/data-export`): a zip of JSON, one file per kind of record (their videos and everything made on them, projects, notifications, feedback, billing, consent records, analytics events, liveness attempts, data requests), plus `media.json` listing every stored file by content address. Media is not in the zip; it stays downloadable in the app while the account exists. If they cannot sign in (suspended or locked out), confirm who they are by email, then unsuspend long enough for them to export, or ask them to sign in and use Settings.
@@ -206,3 +208,126 @@ The nightly backup (OPS.md) makes `/data/backups/voltage-<UTC time>/` with
 7. Resume paid work. Anything made after the backup's time is gone; say so to the people who wrote in that window (`select owner, created_at from videos where created_at > '<backup time>'` on the damaged copy, if you kept it).
 
 Restore is tested: `backend/tests/launch/test_backup.py` backs up, restores into an empty directory and compares every table's row count and the media bytes.
+
+## 7. Abuse and takedown: cloned voices
+
+Voice consent V1 (behind `voices.cloning_verified`). For a report or a legal
+order about a voice made with Voltage: a cloned voice used without consent,
+a public figure's voice, a fraud or impersonation script, an election line.
+Section 3 still applies to the link itself; this is the voice side.
+
+Everything below is on the admin page (`#admin`); every action needs a reason
+and is written to the audit trail. Use the abuse report's number (`#N`) as the
+reason, so the trail reads as one story.
+
+### 1. The report arrives; the clock starts
+
+It comes from the public form (Admin > Abuse reports, a bell notice and an
+email to `AVE_TRUST_EMAIL`), from an email to the Grievance Officer, or as a
+legal order (a court, the police, a government notice under the IT Rules).
+Write down when it arrived. **Target: act on a legal order within 3 hours**
+of receiving it (disable the voice and the links, step 3), whatever the time
+of day; a reporter's complaint within 24 hours. Who is on call for this is
+the owner's to set before the flag goes public. If a report arrives by email,
+enter it in the form yourself (`#acceptable-use`, Report misuse) so it has a
+number and Trace can find it.
+
+### 2. Find it with Trace; preserve the logs
+
+Admin > Abuse reports > **Trace** on the report (or Admin > **Trace**, and
+paste the export id `ve_...`, the reminder reference `ex_...`, the
+provenance mark, or the report number). Trace lists the files, the voices
+(scope, status, source video and speaker), every attestation for them (who,
+which choice, the statement version, time, IP, browser), the export
+confirmation (label on or off), the synthesis log rows of the lines the
+export plays with their line checks, and the people. The call itself is
+audited (`voice_trace`). The route is `GET /api/admin/exports/{ref}/trace`.
+
+Preserve before you change anything:
+
+```sh
+docker compose exec app sh -c 'mkdir -p /data/evidence/report-<N>'
+# The rows behind it: attestations, the export confirmation, line checks, the synthesis log, the voice and the marks.
+for t in voice_records voice_attestations export_attestations line_checks synthesis_log; do
+  docker compose exec app sh -c "sqlite3 /data/ave.db '.mode json' \"select * from $t where owner = '<owner id>'\" > /data/evidence/report-<N>/$t.json"
+done
+docker compose exec app sh -c "sqlite3 /data/ave.db '.mode json' \"select * from provenance_marks where export_id = '<export id>' or mark = '<mark>'\" > /data/evidence/report-<N>/marks.json"
+```
+
+Then take a backup (section 6) so the media is kept even if the owner
+deletes it. Nothing in the takedown deletes these rows: attestations are
+kept 7 years, line checks and the synthesis log 2 years (Terms, Records we
+keep about voices). A line's words are stored only when it was blocked or
+held; for the rest the log has a hash, so save the export file itself too.
+
+### 3. Disable the voice and the links; suspend cloning if credible
+
+- **The links.** Every live link that opens the video, in one call:
+  `POST /api/admin/links/revoke {"video_id": "<video id from Trace>", "reason": "Abuse report #N"}`
+  turns off its share and review links, a project link that shows it, and a
+  batch export link with a file of it, whoever made them (one
+  `share_revoke` audit row per link). A single link: Admin > Audit trail >
+  **Take the link down** (`POST /api/admin/shares/{id}/revoke`). With sign-in
+  on, call the routes from the browser console of the admin page:
+  `fetch('/api/admin/links/revoke', {method: 'POST', headers: {'Content-Type': 'application/json', 'X-Requested-With': 'voltage'}, body: JSON.stringify({video_id: 'p12', reason: 'Abuse report #N'})}).then(r => r.json())`.
+- **The voice, and cloning for the user.** If the report is credible:
+  Admin > People > their card > Voice cloning > **Suspend cloning**, reason
+  `Abuse report #N` (`POST /api/admin/users/{owner}/suspend-cloning`). Every
+  cloned voice of theirs (from a speaker or an uploaded recording) stops at
+  once, and no new clone is made. There is no switch for one voice alone; a
+  suspension is the way to disable it, and **Restore cloning** brings the
+  others back once the voice in question is withdrawn. To delete it at the
+  voice service for good, the owner withdraws it (`POST /api/voices/{id}/withdraw`);
+  if they will not, keep cloning suspended.
+- **Everything else** (the account is the problem, not one voice): suspend
+  the account (section 3, step 4).
+
+### 4. Reply; add a public figure to the no-go list
+
+Reply to the reporter (if they left a contact) and to the user, saying what
+was done and why, unless the law or someone's safety stops you. For a legal
+order, reply to the issuer with the time you acted.
+
+If the voice is a public figure's (or anyone who asked not to be cloned):
+Admin > Voice safety > **No-go voices** > Add, from **Export mark or abuse
+report number** (paste the mark or `#N`) or from an uploaded clip, with the
+person's name and the reason (`POST /api/admin/no-go-voices`, audited
+`no_go_add`). Only the voice's vector is kept. From then on a clone of that
+voice is blocked at 0.92 similarity and held for review from 0.84.
+
+### 5. Record the outcome
+
+Every step above is already in the audit trail (`share_revoke`,
+`voice_suspend`, `no_go_add`, `voice_trace`). Add the outcome as the reason of
+the last action, or, if nothing was done, say why in the report's row and in
+your own records (the trail holds admin actions only). Note the time you
+acted against the time the report arrived.
+
+### Changing the consent wording
+
+The attestation and the export reminder's words, and their version, live in
+one place: `STATEMENT`, `EXPORT_STATEMENT` and `STATEMENT_VERSION` in
+`backend/app/safety/voice_guard.py`. The front end shows the same words from
+`frontend/src/consent/copy.ts`, and its test fails if a sentence there is not
+in `voice_guard.py`. A confirmation counts only for the version it was given
+under, so a new version asks everyone again the next time they use a cloned
+voice or export one.
+
+To change a word (for example after the lawyer's review):
+
+1. Edit the words in `voice_guard.py` and the same words in `copy.ts`.
+2. Set `STATEMENT_VERSION` to today's date (`YYYY-MM-DD`).
+3. `cd backend && .venv/bin/python -c "from app.safety import voice_guard as v; print(v.statement_hash())"`,
+   and add `"<version>": "<hash>"` to `PINNED` in
+   `backend/tests/safety/test_statement_version.py`. Never edit an old line.
+4. Run the gate. `test_statement_version.py` fails if the words changed and
+   the version did not.
+
+Bump `AVE_TERMS_VERSION` too when the Terms change (SETUP_NEEDED.md, item 8).
+
+### Regions
+
+Cloning opens in India first (open decision 5). Today that is enforced by
+who has the flag: an admin turns `voices.cloning_verified` on per person, for
+people in India. The EU and the US wait for V2 (biometric consent wording, a real
+watermark). A country gate is V2 work (as-built spec, step 8).

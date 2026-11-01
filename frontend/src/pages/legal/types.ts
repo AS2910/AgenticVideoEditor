@@ -19,7 +19,10 @@ export type Block =
   | { before: string; link: string; href: string }
   | { vendors: Vendor[] }
 
-export interface Section { h: string; blocks: Block[] }
+/** `draft`: a section new or rewritten since the last review, shown with a "New, pending legal review"
+ *  stamp so counsel can find it. Its value says what changed it (Voice consent V1 step 8: 'v3 2026-10-31').
+ *  Remove it once the lawyer has reviewed the section. */
+export interface Section { h: string; blocks: Block[]; draft?: string }
 
 export interface LegalText {
   title: string

@@ -15,6 +15,10 @@ were here. Every change is written to the audit trail (`app.admin.audit`).
                                                   running jobs cancelled, share and media links stop
     POST /admin/users/{owner}/unsuspend           {reason?}: everything back
     POST /admin/shares/{share_id}/revoke          {reason}: take a share link down (abuse)
+    POST /admin/links/revoke                      voice consent V1 step 8: {video_id, reason}: take down
+                                                  every live link that opens a video (its share and
+                                                  review links, a project link that shows it, a
+                                                  batch export link with a file of it)
     GET  /admin/audit?limit=&owner=               the audit trail, newest first
     GET  /admin/consent-reviews?status=           run 4 item 2: consent checks waiting for a person
                                                   (status review, or decided: passed | failed), with
@@ -254,6 +258,44 @@ def revoke_share(share_id: str, req: ReasonRequest, who: str = Depends(_admin)) 
     admin.audit(api.database, who, "share_revoke", share.owner, reason,
                 {"share_id": sid, "scope": share.scope, "target": share.target})
     return {"share_id": sid, "owner": share.owner, "state": done.state()}
+
+
+class RevokeLinksRequest(BaseModel):
+    video_id: str = Field(min_length=1, max_length=200)
+    reason: str = Field(default="", max_length=500)
+
+
+def _opens(api, share, video_id: str) -> bool:
+    """Whether a link shows this video: its own link, a project link listing it, or an export with a file of it."""
+    if share.scope == "video":
+        return share.target == video_id
+    if share.scope == "project":
+        return video_id in api._review_ids(share)
+    record = api.export_engine.get(share.target, share.project_id)
+    return bool(record) and any(item.get("video_id") == video_id for item in record.get("items", []))
+
+
+@router.post("/admin/links/revoke")
+def revoke_links(req: RevokeLinksRequest, who: str = Depends(_admin)) -> dict:
+    """Abuse and takedown (RUNBOOK.md): every live link that opens the video, whoever made it, turned off at once.
+    Trace on the export gives the video id. One audit row per link (share_revoke), like a single takedown."""
+    api = _api()
+    from app.store import shares as shares_store
+    reason = _need_reason(req.reason)
+    video_id = req.video_id.strip()
+    if api.repo.get(video_id) is None:
+        raise HTTPException(status_code=404, detail="No video with that id.")
+    with api.database.tx() as c:
+        rows = c.execute("SELECT id FROM share_tokens WHERE revoked_at IS NULL ORDER BY created_at, id").fetchall()
+    now = now_iso()
+    live = [s for s in (shares_store.get(api.database, r["id"]) for r in rows) if s is not None and s.state(now) == "live"]
+    done = []
+    for share in (s for s in live if _opens(api, s, video_id)):
+        shares_store.revoke(api.database, share.share_id, who)
+        admin.audit(api.database, who, "share_revoke", share.owner, reason,
+                    {"share_id": share.share_id, "scope": share.scope, "target": share.target, "video_id": video_id})
+        done.append({"share_id": share.share_id, "owner": share.owner, "scope": share.scope, "role": share.role})
+    return {"video_id": video_id, "revoked": done}
 
 
 @router.get("/admin/audit")

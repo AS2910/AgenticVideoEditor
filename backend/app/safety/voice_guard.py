@@ -51,7 +51,11 @@ log = logging.getLogger("voltage.voice_guard")
 
 FLAG = "voices.cloning_verified"
 
-# Bump whenever the attestation wording changes: everyone confirms again on next use.
+# The one source of the attestation and export reminder wording and its version (the front end's
+# consent/copy.ts mirrors the words; its test reads them from this file). Bump STATEMENT_VERSION
+# whenever any word of STATEMENT or EXPORT_STATEMENT changes, and pin the new wording's
+# `statement_hash()` in tests/safety/test_statement_version.py: everyone confirms again on next
+# use. RUNBOOK.md, "Changing the consent wording".
 STATEMENT_VERSION = "2026-10-31"
 STATEMENT = {
     "version": STATEMENT_VERSION,
@@ -74,6 +78,14 @@ EXPORT_STATEMENT = {
     "accept": "Export",
 }
 CHOICES = ("my_voice", "have_permission")
+
+
+def statement_hash() -> str:
+    """A fingerprint of the words a person confirms (both statements, the version left out),
+    pinned to its version by tests/safety/test_statement_version.py."""
+    words = {"attest": {k: v for k, v in STATEMENT.items() if k != "version"},
+             "export": {k: v for k, v in EXPORT_STATEMENT.items() if k != "version"}}
+    return hashlib.sha256(json.dumps(words, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
 
 # The plan's open decision 2: 5 a day, 30 a month; an admin can raise them per person.
 DAY_LIMIT, MONTH_LIMIT = 5, 30
