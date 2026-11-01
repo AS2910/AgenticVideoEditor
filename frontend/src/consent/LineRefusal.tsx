@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import { cn } from '@/lib/utils'
 import { AttestationForm } from './AttestationForm'
 import { useConsent } from './context'
@@ -62,12 +62,36 @@ export function RefusalNote({ refusal, videoId }: { refusal: LineRefusalFacts; v
 
 /** The turn paused on the attestation (a question of kind attestation_required): the
  *  modal's content inline in the pane. Use this voice posts the attestation and
- *  answers the card, so the turn goes on; Cancel answers Cancel. */
+ *  answers the card, so the turn goes on; Cancel answers Cancel.
+ *  When it appears in a scrolling thread, the thread shows it from its title when it is
+ *  taller than the thread (else whole, at the bottom), its action row stays in view at
+ *  the bottom, and focus moves to the first choice, in view above that row (unless you
+ *  are typing something). */
 export function AttestationCard({ facts, onAnswer, tone = 'pane' }: { facts: AttestationFacts; onAnswer?: (option: string) => void; tone?: 'pane' | 'sheet' }) {
+  const card = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const el = card.current
+    if (!el) return
+    // After the thread's own scroll-to-bottom (a layout effect) and the frame that paints it.
+    const frame = requestAnimationFrame(() => {
+      const thread = el.closest<HTMLElement>('[role="log"]')
+      if (thread) {
+        // Offsets ignore the card's rise animation (a transform); 24 px clears the thread's top fade.
+        const top = el.offsetParent === thread.offsetParent ? el.offsetTop - thread.offsetTop : el.getBoundingClientRect().top - thread.getBoundingClientRect().top + thread.scrollTop
+        const fits = el.offsetHeight + 24 <= thread.clientHeight
+        thread.scrollTop = fits ? thread.scrollHeight : Math.max(0, top - 24)
+      }
+      const typing = document.activeElement as HTMLInputElement | HTMLTextAreaElement | null
+      const busyTyping = !!typing && (typing.tagName === 'TEXTAREA' || (typing.tagName === 'INPUT' && typing.type === 'text')) && typing.value.trim() !== ''
+      // Brought into view if need be, clear of the action row (its scroll margin): focus is never hidden.
+      if (!busyTyping) el.querySelector<HTMLInputElement>('input[type="radio"]')?.focus()
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [])
   return (
-    <div className={cn('min-w-0', tone === 'pane' ? 'gate' : 'rounded-lg border-[1.5px] border-dashed border-ink bg-card p-3')} role="group" aria-label="Your answer is needed" data-testid="attestation-card">
+    <div ref={card} className={cn('min-w-0', tone === 'pane' ? 'gate' : 'rounded-lg border-[1.5px] border-dashed border-ink bg-card p-3')} role="group" aria-label="Your answer is needed" data-testid="attestation-card">
       <span className={cn('tag', tone === 'pane' ? 'text-volt' : 'text-muted-foreground')}>Your answer is needed</span>
-      <AttestationForm facts={facts} tone={tone === 'pane' ? 'pane' : 'sheet'} onDone={() => onAnswer?.('Use this voice')} onCancel={() => onAnswer?.('Cancel')} />
+      <AttestationForm facts={facts} tone={tone === 'pane' ? 'pane' : 'sheet'} stickyActions={tone === 'pane'} onDone={() => onAnswer?.('Use this voice')} onCancel={() => onAnswer?.('Cancel')} />
     </div>
   )
 }

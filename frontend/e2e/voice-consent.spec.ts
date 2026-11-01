@@ -223,6 +223,24 @@ for (const size of SIZES) {
     if (SHOTS) await page.waitForTimeout(1000).then(() => page.screenshot({ path: `${SHOTS}/card-${size[0]}.png` }))
     // The card is the newest item of the thread, and fits the pane (no sideways scroll).
     const pane = page.locator('.pane-thread')
+    // The person's next action is reachable as the card appears: Use this voice and Cancel sit inside
+    // the window and inside the thread's visible area, with no scrolling (the action row stays put).
+    const inView = async (name: string) => {
+      const b = await card.getByRole('button', { name }).boundingBox()
+      const p = await pane.boundingBox()
+      if (!b || !p) return false
+      return b.y >= 0 && b.x >= 0 && b.y + b.height <= size[1] && b.x + b.width <= size[0]
+        && b.y >= p.y && b.y + b.height <= p.y + p.height + 1 && b.x >= p.x && b.x + b.width <= p.x + p.width + 1
+    }
+    await expect.poll(() => inView('Use this voice'), { timeout: 5_000 }).toBe(true)
+    await expect.poll(() => inView('Cancel')).toBe(true)
+    // Focus is on the first choice, and the whole card stays in the accessibility tree.
+    const first = card.getByRole('radio', { name: 'This is my voice' })
+    await expect(first).toBeFocused()
+    // Never under the action row: the focused choice ends above it.
+    const fb = await first.boundingBox(), rb = await card.getByTestId('attest-actions').boundingBox()
+    expect(fb && rb && fb.y + fb.height <= rb.y).toBe(true)
+    await expect(card.getByTestId('attest-warning')).toBeVisible()
     expect(await pane.evaluate((el) => el.scrollWidth <= el.clientWidth + 1)).toBe(true)
     await card.getByRole('radio', { name: 'I have permission from this person to change what they say' }).click()
     await card.getByRole('checkbox').click()
