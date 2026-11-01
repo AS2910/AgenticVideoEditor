@@ -1,7 +1,14 @@
 # Good morning: Voice Consent V1
 
 Branch `overnight/voice-consent`, cut from run 5's `overnight/review-fixes` at `3a3ccac` (run 5 plus addenda 0a, 0b, 3.1, 3.2, 3.3, 3.5). Worktree `../AgenticVideoEditor-vc`.
-Not pushed; main and `overnight/review-fixes` untouched. Everything is behind `voices.cloning_verified`, which stays off.
+**Merged into main and pushed on 1 Nov 2026** (fast-forward from `b912fbc`, so run 5 and its addenda are on main too). Everything new here is behind `voices.cloning_verified`, which stays off.
+
+## 0. After the merge
+
+- Live database backed up first: `backend/var/ave.db.bak-20261101-pre-voice-consent` (sqlite `.backup`, at migration 42, integrity ok).
+- The next app start applies migrations 0043 to 0055 (run 5's 0043, 0044, 0047 and this run's 0048, 0050, 0053, 0055). The voice records backfill marks p66 and p65's clones video-scoped and the uploaded recording library. Nothing calls the voice vendor during the migration.
+- No app servers were running at the merge; start them as usual. Run 5's changes are live from then (section 9 of `git show 0ff88ae:MORNING.md`), including `launch.batch_public` ON.
+- Not merged: run 5 addendum a34 ("one state everywhere"), still uncommitted in `../AgenticVideoEditor-a34`, and `feature/one-edit-at-a-time` (its lock work came in through addendum 3.2).
 Run 5's summary: `git show 0ff88ae:MORNING.md`. The as-built spec, with every plan item mapped to code and a status table against the plan: `docs/superpowers/plans/2026-10-31-voice-consent-v1.md`.
 
 In one breath:
