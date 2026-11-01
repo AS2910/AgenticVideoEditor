@@ -37,7 +37,16 @@ def test_gstin_and_provider_by_country():
     assert RAZORPAY.test_mode and STRIPE.test_mode
 
 
-def test_trial_plan_credits_topups_and_invoices(db):
+class _Oct31(datetime):
+    @classmethod
+    def now(cls, tz=None):
+        return datetime(2026, 10, 31, 12, tzinfo=timezone.utc)
+
+
+def test_trial_plan_credits_topups_and_invoices(db, monkeypatch):
+    # The clock is 31 Oct 2026: credits() reads the time, and October's plan credits lapse on 1 Nov.
+    monkeypatch.setattr(billing, "datetime", _Oct31)
+    monkeypatch.setattr(billing, "now_iso", lambda: "2026-10-31T12:00:00.000Z")
     oct_ = datetime(2026, 10, 5, tzinfo=timezone.utc)
     acct = billing.account(db, "ana", oct_)
     assert acct["plan"] is None
